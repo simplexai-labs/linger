@@ -64,3 +64,43 @@ export async function writeGpuSharing(
     JSON.stringify(consent),
   );
 }
+
+/**
+ * Subscription runtimes signed in at setup besides the chosen one. The
+ * chosen runtime stays the default; these are configured on the Computer
+ * too, so either can run an Agent.
+ */
+export type LinkedRuntime = "codex" | "claude";
+export function validateLinkedRuntimes(
+  value: unknown,
+): asserts value is LinkedRuntime[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 2 ||
+    new Set(value).size !== value.length ||
+    value.some((entry) => entry !== "codex" && entry !== "claude")
+  )
+    throw new Error("Invalid linked runtimes");
+}
+export async function readLinkedRuntimes(
+  instance: Pick<Instance, "root">,
+): Promise<LinkedRuntime[]> {
+  const raw = await readPrivate(
+    path.join(instance.root, "linked-runtimes.json"),
+  );
+  if (raw === undefined) return [];
+  const value: unknown = JSON.parse(raw);
+  validateLinkedRuntimes(value);
+  return value;
+}
+/** Caller owns the instance lock; an empty list removes every link. */
+export async function writeLinkedRuntimes(
+  instance: Pick<Instance, "root">,
+  runtimes: LinkedRuntime[],
+): Promise<void> {
+  validateLinkedRuntimes(runtimes);
+  await atomicPrivate(
+    path.join(instance.root, "linked-runtimes.json"),
+    JSON.stringify(runtimes),
+  );
+}

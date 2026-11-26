@@ -54,6 +54,7 @@ import {
 } from "@linger/local-installation/source-checkout";
 import type { LegacyInstanceSkipped } from "@linger/local-installation/legacy-migration";
 import {
+  LIBRARY_MODEL_ID,
   type SetupChoice,
   type SetupMemory,
   setupChoices,
@@ -106,17 +107,25 @@ import type {
   WorkspaceGrantsModule,
 } from "./workspace-grants.js";
 import {
+  BackgroundModel,
+  SetupRuntimes,
+  type SetupCommandRunner,
+} from "./setup-sources.js";
+import {
   installerKeyChanges,
   savedProviderKeys,
   type ProviderKeyChanges,
 } from "./provider-keys.js";
 import type {
+  SetupBackgroundModel,
   SetupByokCheck,
   SetupByokConfig,
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
+  SetupOwnerAccount,
   SetupReason,
+  SetupRuntimeRow,
 } from "../shared/setup.js";
 
 // The pinned linger source this build installs, written by the release build:
@@ -147,6 +156,9 @@ export interface LocalModel {
   readonly downloadBytes: number | null;
   readonly diskBytes: number | null;
   readonly memoryBytes: number | null;
+  // The model as the model library names it (<id>:<quant>), which a
+  // background download fetches.
+  readonly library?: string;
 }
 
 // What the installer found on this computer, for the optional local model.
@@ -197,6 +209,22 @@ export interface LocalServerPlan {
   readonly byok?: SetupByokConfig;
   // Provider keys edited on the page, saved before the installer runs.
   readonly keys?: ProviderKeyChanges;
+  // Other subscription runtimes signed in here that the installation also
+  // configures beside the one it runs by default (codex or claude only).
+  readonly linkedRuntimes?: readonly ("codex" | "claude")[];
+}
+
+// What setup's Install asks for: a plan, or "subscription" for the runtimes
+// signed in on the page (Codex by default when both are, the other linked).
+// background: download the planned local model meanwhile; account: the
+// owner sign-in chosen on the page, written before the installer runs.
+export interface LocalServerRequest extends Omit<
+  LocalServerPlan,
+  "runtime" | "linkedRuntimes"
+> {
+  readonly runtime: LocalServerPlan["runtime"] | "subscription";
+  readonly background?: boolean;
+  readonly account?: SetupOwnerAccount;
 }
 
 export const QUICK_INSTALL: LocalServerPlan = {
@@ -370,6 +398,16 @@ export interface LocalServerStatus {
   readonly failure?: LocalServerFailure;
   // While ready after a degraded resume where local models could not be restored.
   readonly localModelsDegraded?: LocalModelsDegradedStatus;
+  // Setup's subscription runtimes, once first checked: each one's install
+  // and sign-in on this computer and what setup is doing with it.
+  readonly runtimes?: readonly SetupRuntimeRow[];
+  // The local model downloading while another source runs.
+  readonly backgroundModel?: SetupBackgroundModel;
+  // Whether the install location already holds an owner sign-in (an
+  // earlier or upgraded installation), which setup leaves as it is.
+  readonly ownerAccount: "new" | "existing";
+  // While an installation runs or after it failed: the source it installs.
+  readonly source?: "local" | "subscription" | "byok";
 }
 
 export interface LocalModelsDegradedStatus {
@@ -460,6 +498,9 @@ export interface LocalServerOptions {
   // WATCH_MS and UNREACHABLE_GRACE_MS by default.
   readonly watchMs?: number;
   readonly unreachableGraceMs?: number;
+  // Runs the installer's headless setup commands; spawns installer.js by
+  // default.
+  readonly setupCommand?: SetupCommandRunner;
 }
 
 // The starter Room the server makes for a new owner, with their Agents.
@@ -645,10 +686,28 @@ export class LocalServerModule implements Module {
     | { readonly at: number; readonly ok: Promise<boolean> }
     | undefined;
   #serverOk: boolean | undefined;
+  readonly #runtimes: SetupRuntimes;
+  readonly #background: BackgroundModel;
+  // The owner sign-in chosen on the page, until written to the location.
+  #account: SetupOwnerAccount | undefined;
+  // The running installation's own stop, and what it installs.
+  #installAbort: AbortController | undefined;
+  #source: LocalServerStatus["source"];
+  #installer: InstallerApi | undefined;
 
   constructor(options: LocalServerOptions) {
     this.#options = options;
     this.#home = options.home;
+    const changed = () => this.#ctx?.bus.emit("local-server.changed");
+    const run: SetupCommandRunner = (args, runOptions) =>
+      (options.setupCommand ?? this.#setupCommand)(args, runOptions);
+    this.#runtimes = new SetupRuntimes({
+      run,
+      changed,
+      ...(options.openExternal ? { openExternal: options.openExternal } : {}),
+      ...(options.platform ? { platform: options.platform } : {}),
+    });
+    this.#background = new BackgroundModel({ run, changed });
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -749,9 +808,12 @@ export class LocalServerModule implements Module {
     this.#offDaemonConnection?.();
     this.#offComputerChanged?.();
     // The installer manager keeps running a started installation; it exits
-    // by itself once idle.
+    // by itself once idle. Setup's own runtime installs and sign-ins stop,
+    // and so does a background model download (Settings › Models resumes it).
     this.#cancelPrestage("stopped");
     this.#cancelBifrostPrefetch("stopped");
+    this.#runtimes.stopAll();
+    this.#background.stop();
     this.#abort.abort();
     if (this.#busyCount > 0) {
       this.#busyCount = 0;
@@ -1051,6 +1113,8 @@ export class LocalServerModule implements Module {
       this.#location ?? this.#home,
       LOCAL_INSTANCE,
     );
+    const runtimes = this.#runtimes.rows();
+    const backgroundModel = this.#background.state();
     return {
       available,
       phase: this.#phase,
@@ -1091,6 +1155,22 @@ export class LocalServerModule implements Module {
       ...(this.#failure ? { failure: this.#failure } : {}),
       ...(this.#localModelsDegraded
         ? { localModelsDegraded: this.#localModelsDegraded }
+        : {}),
+      ...(runtimes ? { runtimes } : {}),
+      ...(backgroundModel ? { backgroundModel } : {}),
+      ownerAccount: existsSync(
+        path.join(
+          this.#location ?? this.#home,
+          "instances",
+          LOCAL_INSTANCE,
+          "local-account.json",
+        ),
+      )
+        ? "existing"
+        : "new",
+      ...(this.#source &&
+      (this.#phase === "installing" || this.#phase === "failed")
+        ? { source: this.#source }
         : {}),
     };
   }
@@ -1136,6 +1216,163 @@ export class LocalServerModule implements Module {
     } catch {
       return undefined;
     }
+  }
+
+  // Setup's Install: resolves a subscription to the runtimes signed in on
+  // the page, keeps the chosen owner sign-in until the installation writes
+  // it, and starts the local model's background download when asked.
+  beginSetup(request: LocalServerRequest): Promise<void> {
+    if (this.#running) return this.#running;
+    const { runtime, background, account, ...rest } = request;
+    let plan: LocalServerPlan;
+    if (runtime === "subscription") {
+      const signedIn = this.#runtimes.signedIn();
+      if (!signedIn[0])
+        return Promise.reject(
+          new Error("Sign in to Claude Code or Codex first."),
+        );
+      plan = {
+        ...rest,
+        runtime: signedIn[0],
+        ...(signedIn.length > 1 ? { linkedRuntimes: signedIn.slice(1) } : {}),
+      };
+    } else plan = { ...rest, runtime };
+    this.#account = account;
+    if (background && plan.runtime !== "local") this.#downloadInBackground();
+    return this.begin(plan);
+  }
+
+  // Setup's subscription runtimes: their install and sign-in.
+  setupRuntimes(): SetupRuntimes {
+    return this.#runtimes;
+  }
+
+  // The planned local model, downloading into the model library while
+  // another source installs; Settings › Models offers it once done.
+  #downloadInBackground(): void {
+    const library =
+      this.#check.state === "checked" ? this.#check.model?.library : undefined;
+    if (library) void this.#background.start(library);
+  }
+
+  // Leaves the local model's installation for another source, from its
+  // wait: the installer stops its job (the bytes downloaded so far stay),
+  // the model downloads on in the background, and setup is back at
+  // choosing, for the page to show the other source's settings.
+  async leaveLocalModel(): Promise<void> {
+    const running = this.#running;
+    if (!running || this.#source !== "local") return;
+    this.#installAbort?.abort();
+    await running.catch(() => undefined);
+    try {
+      await this.#installer?.cancelActive();
+    } catch (error) {
+      // The next Install names another choice, which replaces the job too.
+      this.#ctx?.log.warn("local_server.leave_local_cancel_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    this.#endSignIn();
+    this.#source = undefined;
+    this.#set("idle", "");
+    this.#downloadInBackground();
+  }
+
+  // Runs one of the installer's headless setup commands against the
+  // install location; each stdout line is one JSON value. Never logs its
+  // output: a sign-in prints the vendor's codes, and the owner sign-in
+  // goes in on stdin.
+  #setupCommand: SetupCommandRunner = async (args, options) => {
+    const home = this.#location ?? this.#home;
+    const node = options.pinnedNode
+      ? await this.#ensureNode(this.#abort.signal)
+      : process.execPath;
+    const env = options.inspect ? await this.#inspectEnv() : this.#daemonEnv();
+    const proxyEnv = await this.#systemProxyEnv();
+    const child = spawn(
+      node,
+      [
+        ...linuxNodeFdHygieneArgs(this.#options.platform),
+        this.#installerScript(),
+        "--home",
+        home,
+        ...args,
+      ],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        env: {
+          ...env,
+          ...proxyEnv,
+          ELECTRON_RUN_AS_NODE: "1",
+          LINGER_HOME: home,
+        },
+      },
+    );
+    child.stderr.resume();
+    child.stdin.on("error", () => undefined);
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      if (!line.trim()) return;
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (value && typeof value === "object" && !Array.isArray(value))
+        options.onLine(value as Record<string, unknown>);
+    });
+    const done = new Promise<number>((resolve) => {
+      child.once("error", (error) => {
+        this.#ctx?.log.warn("local_server.setup_command_failed", {
+          command: args[0],
+          error: error.message,
+        });
+        resolve(1);
+      });
+      child.once("close", (code) => resolve(code ?? 1));
+    });
+    if (options.input !== undefined) child.stdin.end(options.input);
+    return {
+      write: (line) => {
+        if (child.stdin.writable) child.stdin.write(`${line}\n`);
+      },
+      stop: () => {
+        if (child.exitCode === null) child.kill("SIGTERM");
+      },
+      done,
+    };
+  };
+
+  // Writes the owner sign-in chosen on the page into the install location
+  // before the installer creates the owner; a location that has one keeps
+  // it. The password goes on stdin and is dropped here once sent.
+  async #presetOwner(
+    account: SetupOwnerAccount,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let answer: Record<string, unknown> = {};
+    const child = await (this.#options.setupCommand ?? this.#setupCommand)(
+      ["--owner-account", "--instance", LOCAL_INSTANCE],
+      {
+        input: JSON.stringify(account),
+        onLine: (line) => {
+          answer = line;
+        },
+      },
+    );
+    const stop = () => child.stop();
+    signal.addEventListener("abort", stop, { once: true });
+    try {
+      await child.done;
+    } finally {
+      signal.removeEventListener("abort", stop);
+    }
+    if (signal.aborted) throw new Error("Cancelled");
+    if (typeof answer.error === "string" && answer.error)
+      throw new Error(answer.error);
+    if (typeof answer.written !== "boolean")
+      throw new Error("Could not save the sign-in chosen for Linger.");
   }
 
   // Installs into a folder the person picked, once it can hold Linger; null
@@ -1521,6 +1758,7 @@ export class LocalServerModule implements Module {
       localModels?: {
         eligible?: unknown;
         state?: unknown;
+        libraryModel?: unknown;
         memory?: Record<string, unknown>;
         reasons?: unknown;
         estimate?: {
@@ -1631,6 +1869,10 @@ export class LocalServerModule implements Module {
               downloadBytes: bytes(estimate?.downloadBytes),
               diskBytes: bytes(estimate?.diskBytes),
               memoryBytes: bytes(estimate?.memoryBytes),
+              ...(typeof report.localModels.libraryModel === "string" &&
+              LIBRARY_MODEL_ID.test(report.localModels.libraryModel)
+                ? { library: report.localModels.libraryModel }
+                : {}),
               ...(isInkling2MiniModelId(name)
                 ? { featuredInkling: true as const }
                 : {}),
@@ -2064,7 +2306,9 @@ export class LocalServerModule implements Module {
     const status = this.status();
     if (!status.available)
       throw new Error("Running Linger on this computer is not supported here");
-    const signal = this.#abort.signal;
+    const installAbort = new AbortController();
+    this.#installAbort = installAbort;
+    const signal = AbortSignal.any([this.#abort.signal, installAbort.signal]);
     const home = this.#location ?? this.#home;
     const resolvedHome = path.resolve(home);
     // In-flight inspection downloads the localmodels kit into the default
@@ -2083,6 +2327,15 @@ export class LocalServerModule implements Module {
       plan.runtime !== "recommended"
     )
       this.#cancelBifrostPrefetch("subscription_runtime");
+    const account = this.#account;
+    this.#account = undefined;
+    this.#source = plan.byok
+      ? "byok"
+      : plan.runtime === "local"
+        ? "local"
+        : plan.runtime === "codex" || plan.runtime === "claude"
+          ? "subscription"
+          : undefined;
     this.#attempt += 1;
     this.#acquireBusy();
     try {
@@ -2154,6 +2407,10 @@ export class LocalServerModule implements Module {
         });
       }
       const node = await this.#timed("node", () => this.#ensureNode(signal));
+      if (account)
+        await this.#timed("owner_account", () =>
+          this.#presetOwner(account, signal),
+        );
       const keysChanged = Object.keys(plan.keys ?? {}).length > 0;
       if (keysChanged)
         await this.#timed("keys", () =>
@@ -2174,6 +2431,7 @@ export class LocalServerModule implements Module {
       const installer = await this.#timed("installer_launch", () =>
         this.#launchInstaller(node, home, repo, signal),
       );
+      this.#installer = installer;
       let prewarmedOrigin: string | undefined;
       const prewarm = (origin: string): void => {
         if (prewarmedOrigin && sameOrigin(prewarmedOrigin, origin)) return;
@@ -2370,6 +2628,7 @@ export class LocalServerModule implements Module {
       );
       throw error;
     } finally {
+      if (this.#installAbort === installAbort) this.#installAbort = undefined;
       this.#releaseBusy();
     }
   }
@@ -5569,10 +5828,17 @@ export class InstallerApi {
                 () => "codex",
               )
             : plan.runtime;
+      const linkedRuntimes =
+        setupChoice === "codex" || setupChoice === "claude"
+          ? (plan.linkedRuntimes ?? []).filter(
+              (runtime) => runtime !== setupChoice,
+            )
+          : [];
       job = await this.#json<Job>("/api/jobs", {
         instance: LOCAL_INSTANCE,
         ...(setupChoice ? { setupChoice } : {}),
         ...(plan.byok ? { byok: plan.byok } : {}),
+        ...(linkedRuntimes.length ? { linkedRuntimes } : {}),
       });
     }
     // The person chose the local model after seeing what it needs, so its
@@ -5715,6 +5981,19 @@ export class InstallerApi {
         if (shown) onStep(shown[0], shown[1], "Reconnecting to the installer…");
       });
     }
+  }
+
+  // Stops the desktop installation's job still running or waiting, as
+  // when setup leaves the local model for another source.
+  async cancelActive(): Promise<void> {
+    const { items } = await this.#json<{ items: Job[] }>("/api/jobs");
+    for (const job of items)
+      if (
+        job.instance === LOCAL_INSTANCE &&
+        !job.preparation &&
+        ["queued", "running", "waiting_user"].includes(job.state)
+      )
+        await this.#json(`/api/jobs/${encodeURIComponent(job.id)}/cancel`, {});
   }
 
   // Reads the job again. The read is idempotent, so a dropped connection is

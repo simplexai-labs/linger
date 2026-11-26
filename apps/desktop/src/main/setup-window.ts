@@ -308,17 +308,73 @@ export class SetupWindowModule implements Module {
         return;
       case "local.start": {
         const local = ctx.get<LocalServerModule>("LocalServer");
-        const plan = {
+        const request = {
           runtime: command.byok
             ? command.byok.runtime
             : (command.runtime ?? "recommended"),
           ...(command.byok ? { byok: command.byok } : {}),
           ...(command.keys ? { keys: command.keys } : {}),
+          ...(command.background ? { background: true } : {}),
+          ...(command.account ? { account: command.account } : {}),
         } as const;
+        // Nothing signed in for a subscription: the page keeps Install off
+        // until one is, so this only answers a stale page.
+        if (
+          request.runtime === "subscription" &&
+          !local.setupRuntimes().signedIn().length
+        )
+          throw new Error("Sign in to Claude Code or Codex first.");
         // The page follows progress through state; a failure shows there too.
-        void local.begin(plan).catch(() => undefined);
+        void local.beginSetup(request).catch(() => undefined);
         return;
       }
+      case "local.runtimes.check":
+        await ctx.get<LocalServerModule>("LocalServer").setupRuntimes().check();
+        return;
+      case "local.runtime.install":
+        // Followed through state, like an installation.
+        void ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .install(command.runtime);
+        return;
+      case "local.runtime.signin":
+        void ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .signIn(command.runtime, command.device === true);
+        return;
+      case "local.runtime.code":
+        ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .code(command.runtime, command.code);
+        return;
+      case "local.runtime.cancel":
+        ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .cancel(command.runtime);
+        return;
+      case "local.runtime.open":
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .openPage(command.runtime);
+        return;
+      case "local.runtime.copy": {
+        // Copied from what the row shows, never from the page.
+        const text = ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .signInLink(command.runtime, command.what);
+        if (!text) throw new Error("Nothing to copy");
+        clipboard.writeText(text);
+        return;
+      }
+      case "local.leave-local":
+        await ctx.get<LocalServerModule>("LocalServer").leaveLocalModel();
+        return;
       case "local.byok.check":
         await ctx.get<LocalServerModule>("LocalServer").checkByok(command.byok);
         return;
@@ -378,7 +434,8 @@ export class SetupWindowModule implements Module {
         await this.#account?.show(command.on);
         return;
       case "local.account.copy":
-        await this.#account?.copy();
+        if (command.what === "email") await this.#account?.copyEmail();
+        else await this.#account?.copy();
         return;
       case "local.account.reveal":
         this.#account?.reveal();
@@ -616,6 +673,10 @@ const localServerState = (
     legacyBackup,
     refusal,
     failure,
+    runtimes,
+    backgroundModel,
+    ownerAccount,
+    source,
   } = local.status();
   const home = os.homedir();
   const shown = (folder: string) =>
@@ -649,5 +710,9 @@ const localServerState = (
     ...(refusal ? { refusal } : {}),
     ...(failure ? { failure } : {}),
     ...(account ? { account } : {}),
+    ...(runtimes ? { runtimes } : {}),
+    ...(backgroundModel ? { backgroundModel } : {}),
+    ownerAccount,
+    ...(source ? { source } : {}),
   };
 };

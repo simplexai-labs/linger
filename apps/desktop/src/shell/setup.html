@@ -65,10 +65,6 @@
         height: 190px;
         background: #f4f4f0 url("/welcome-scene.png") center / cover no-repeat;
         -webkit-app-region: drag;
-        transition: height 360ms var(--ease);
-      }
-      body[data-customizing="true"] .scene {
-        height: 76px;
       }
       .topbar {
         position: absolute;
@@ -103,10 +99,6 @@
         margin: 0 auto;
         padding: 20px 24px 16px;
         text-align: center;
-      }
-      body[data-customizing="true"] main {
-        padding-top: 14px;
-        padding-bottom: 12px;
       }
       section {
         display: none;
@@ -476,7 +468,8 @@
         background: #f4f4f5;
       }
 
-      /* Quick Install: one button, the options folded away behind it. */
+      /* The welcome view: check this computer, choose a source, then that
+         source's settings, all in one window size. */
       main {
         position: relative;
       }
@@ -488,10 +481,13 @@
         overflow-y: auto;
         padding-bottom: 40px;
       }
-      section[data-step="welcome"] {
-        padding-bottom: 0;
+      section[data-step="welcome"][data-local="true"] {
+        justify-content: flex-start;
+        /* Room for the focus rings of what sits at its edges. */
+        margin: -6px -6px -2px;
+        padding: 6px;
       }
-      section[data-step="welcome"] .eyebrow {
+      section[data-step="welcome"]:not([data-local="true"]) .eyebrow {
         margin-top: auto;
       }
       h1 {
@@ -501,6 +497,11 @@
         line-height: 34px;
         letter-spacing: -0.022em;
       }
+      section[data-step="welcome"][data-local="true"] h1 {
+        margin-bottom: 4px;
+        font-size: 23px;
+        line-height: 28px;
+      }
       .lead {
         font-size: 13.5px;
         letter-spacing: -0.003em;
@@ -508,57 +509,541 @@
       .lead.tight {
         margin-bottom: 0;
       }
-      /* Customizing makes room for the options. */
-      section[data-step="welcome"][data-customizing="true"] {
-        justify-content: safe center;
-        overflow: hidden;
-        padding-bottom: 0;
+      /* Back and More options sit beside the badge above the title. */
+      .stage-bar {
+        position: relative;
+        display: flex;
+        justify-content: center;
+        margin-bottom: 4px;
       }
-      section[data-step="welcome"][data-customizing="true"] > h1,
-      section[data-step="welcome"][data-customizing="true"] > .lead,
-      section[data-step="welcome"][data-customizing="true"] > .error {
-        flex: none;
+      .stage-bar .eyebrow {
+        margin-bottom: 0;
       }
-      section[data-customizing="true"] h1 {
-        margin-bottom: 2px;
-        font-size: 22px;
-        line-height: 28px;
-      }
-      section[data-customizing="true"] .lead {
-        font-size: 12.5px;
-      }
-      section[data-customizing="true"] .eyebrow,
-      section[data-customizing="true"] .plan-line .sep,
-      section[data-customizing="true"] #plan-summary,
-      section[data-customizing="true"] #plan-featured-badge,
-      section[data-customizing="true"] .spotlight-card {
+      /* Step 1 showed the badge; on step 2 Back and More options flank the
+         title, and the bar keeps a row only for the local model's progress. */
+      section[data-stage="settings"] #welcome-eyebrow {
         display: none;
       }
-      .welcome-scroll {
+      section[data-stage="settings"] .stage-bar:has(> #model-behind[hidden]) {
+        top: 14px;
+        height: 0;
+        margin-bottom: 0;
+      }
+      .stage-bar > .link {
+        position: absolute;
+        top: 50%;
+        right: 0;
+        transform: translateY(-50%);
+      }
+      .stage-bar > .back {
+        right: auto;
+        left: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        padding-left: 0;
+        text-decoration: none;
+      }
+      .stage-bar > .back svg {
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      section[data-step="welcome"] [hidden] {
+        display: none !important;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+      /* Focus lands on the title when a stage opens; it is not a control. */
+      #welcome-title:focus {
+        outline: none;
+      }
+      /* Forward comes in from the right, Back from the left, and the
+         choices rise in once the check ends. The button keeps its place. */
+      @keyframes stage-forward {
+        from {
+          opacity: 0;
+          transform: translateX(14px);
+        }
+      }
+      @keyframes stage-back {
+        from {
+          opacity: 0;
+          transform: translateX(-14px);
+        }
+      }
+      @keyframes stage-reveal {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+      @keyframes stage-fade {
+        from {
+          opacity: 0;
+        }
+      }
+      section[data-motion="forward"] .stage {
+        animation: stage-forward 200ms var(--ease) both;
+      }
+      section[data-motion="back"] .stage {
+        animation: stage-back 200ms var(--ease) both;
+      }
+      section[data-motion="reveal"] :is(.lead, .source-card, .plan-why) {
+        animation: stage-reveal 220ms var(--ease) both;
+      }
+      section[data-motion="reveal"] .source-card:nth-child(2) {
+        animation-delay: 40ms;
+      }
+      section[data-motion="reveal"] :is(.source-card:nth-child(3), .plan-why) {
+        animation-delay: 80ms;
+      }
+      section[data-motion] :is(.stage-bar > .link, .plan-line) {
+        animation: stage-fade 200ms ease both;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        section[data-motion] * {
+          animation: none !important;
+        }
+      }
+      /* Checking this computer: what is happening and what for, in the
+         room the cards take next. */
+      .checking {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        min-height: 216px;
+        padding-top: 98px;
+      }
+      .checking p {
+        margin: 0;
+      }
+      .checking-now {
+        color: var(--ink);
+        font-size: 13.5px;
+        font-weight: 550;
+        letter-spacing: -0.005em;
+      }
+      .checking-now .spinner {
+        color: #8a897f;
+      }
+      .checking-why {
+        max-width: 400px;
+        color: var(--muted);
+        font-size: 12.5px;
+        font-variant-numeric: tabular-nums;
+        text-wrap: pretty;
+      }
+      .checking .link {
+        margin-top: 8px;
+      }
+      /* The local model left downloading behind BYOK or a subscription. */
+      .eyebrow.behind {
+        gap: 8px;
+        padding: 3px 10px;
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+      .behind-bar {
+        position: relative;
+        width: 34px;
+        height: 4px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e7e7e2;
+      }
+      .behind-bar span {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: inherit;
+        background: var(--ink);
+        transition: width 900ms var(--ease);
+      }
+      .setup-card {
+        width: 100%;
+        margin: 12px auto 0;
+        text-align: left;
+      }
+      section[data-stage="choose"] .setup-card {
+        margin-top: 24px;
+      }
+      .source-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      /* Every card is the same height in every state. */
+      .source-card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+        min-width: 0;
+        height: 136px;
+        padding: 18px 14px 12px;
+        border: 1px solid #e6e6e1;
+        border-radius: 12px;
+        background: #fafaf8;
+        text-align: left;
+        transition:
+          border-color 150ms ease,
+          background-color 150ms ease,
+          box-shadow 150ms ease;
+      }
+      .source-card:hover:not(:disabled) {
+        border-color: #c8c8c0;
+        background: #fff;
+      }
+      /* A source this computer cannot use stays in its place, switched off. */
+      .source-card:disabled {
+        opacity: 1;
+      }
+      .source-card:disabled .source-top strong,
+      .source-card:disabled .source-about {
+        color: #a3a299;
+      }
+      .source-card[aria-checked="true"] {
+        border-color: var(--ink);
+        background: #fff;
+        box-shadow:
+          0 0 0 0.5px var(--ink),
+          0 6px 16px -12px rgba(20, 20, 16, 0.32);
+      }
+      .source-top strong {
+        color: var(--ink);
+        font-size: 14.5px;
+        font-weight: 580;
+        line-height: 20px;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      /* One badge on the card's top edge: Recommended marks what the check
+         advises; a card that cannot be picked says why instead. */
+      .source-rec,
+      .source-pill {
+        position: absolute;
+        top: -9px;
+        left: 11px;
+        padding: 0 7px;
+        border: 1px solid #cfe3d3;
+        border-radius: 999px;
+        background: #edf6ef;
+        color: #25693a;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 16px;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+      }
+      .source-pill {
+        border-color: #e3e3dc;
+        background: #f4f4ef;
+        color: #5f5e55;
+      }
+      .source-pill[data-warn="true"] {
+        border-color: #f3dccb;
+        background: #fdf3ec;
+        color: #9a4715;
+      }
+      .source-about {
+        width: 100%;
+        min-height: 34px;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 17px;
+        text-wrap: pretty;
+      }
+      .source-meta {
+        width: 100%;
+        margin-top: auto;
+        padding-top: 8px;
+        overflow: hidden;
+        border-top: 1px solid #ecece7;
+        color: #52524b;
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 16px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .source-card:disabled .source-meta {
+        color: #8a897f;
+      }
+      .source-panel {
+        padding: 4px 16px;
+        border: 1px solid rgba(20, 20, 16, 0.08);
+        border-radius: 14px;
+        background: #fff;
+        box-shadow:
+          0 1px 2px rgba(20, 20, 16, 0.03),
+          0 10px 26px -18px rgba(20, 20, 16, 0.2);
+      }
+      /* A row has a line above it only under a row that shows; the other
+         sources' rows are still there, hidden. */
+      .source-panel > :not([hidden]) ~ .choice {
+        border-top: 1px solid #f1f1ee;
+      }
+      .source-hint {
+        width: 100%;
+        margin: 0;
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+      .choice.local .sub {
+        white-space: normal;
+      }
+      .facts {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        padding: 8px 10px;
+        border-radius: 9px;
+        background: #f8f8f5;
+      }
+      .facts small {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+      }
+      /* Subscription: one row per runtime with the one thing left to do on
+         the right. Every state keeps the row's height. */
+      .runtimes .choice.runtime + .choice.runtime {
+        border-top: 1px solid #f1f1ee;
+      }
+      .choice.runtime {
+        flex-wrap: wrap;
+        min-height: 42px;
+        padding: 3px 0;
+      }
+      .choice.runtime strong {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .runtime-rec {
+        padding: 0 6px;
+        border: 1px solid #cfe3d3;
+        border-radius: 999px;
+        background: #edf6ef;
+        color: #25693a;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 15px;
+        letter-spacing: 0.01em;
+      }
+      .choice.runtime .sub {
+        font-variant-numeric: tabular-nums;
+      }
+      .choice.runtime .sub[data-warn="true"] {
+        color: var(--error);
+      }
+      .runtime-act {
+        display: flex;
         flex: none;
-        overflow: visible;
-        padding: 0;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        min-width: 150px;
       }
-      section[data-customizing="true"] .welcome-scroll {
-        flex: 0 1 auto;
-        min-height: 0;
-        overflow-y: auto;
-        padding: 6px 0 12px;
+      .runtime-progress {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 150px;
       }
-      section[data-customizing="true"] .start {
-        flex: none;
-        padding-top: 10px;
-        border-top: 1px solid transparent;
-        transition: border-color 160ms ease;
+      .runtime-progress .track {
+        flex: 1;
+        margin-top: 0;
       }
-      section[data-customizing="true"] .start[data-scrollable="true"] {
-        border-top-color: var(--line);
+      .runtime-progress .pct {
+        min-width: 32px;
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 500;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
       }
-      section[data-customizing="true"] .primary.large {
-        min-height: 40px;
+      .runtime-wait {
+        display: inline-flex;
+        align-items: center;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
       }
-      section[data-customizing="true"] .plan-line {
-        margin-top: 6px;
+      .runtime-wait .spinner {
+        width: 11px;
+        height: 11px;
+        color: #8a897f;
+      }
+      /* While signing in: the link and code, for when no browser opens. */
+      .runtime-extra {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px 6px;
+        width: 100%;
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+      .runtime-extra .link {
+        padding: 0 2px;
+        font-size: 11.5px;
+      }
+      .runtime-code strong {
+        color: var(--ink);
+        font:
+          600 12.5px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        letter-spacing: 0.06em;
+        user-select: all;
+        -webkit-user-select: all;
+      }
+      .runtime-paste {
+        display: flex;
+        gap: 6px;
+        width: 100%;
+      }
+      .runtime-paste input {
+        flex: 1;
+        min-width: 0;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid #e6e6e1;
+        border-radius: 7px;
+        font: inherit;
+        font-size: 12px;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      /* Also download the local model, under BYOK or a subscription. */
+      .also {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 0 10px;
+        padding: 4px 0;
+        border-top: 1px solid #f1f1ee;
+      }
+      .also input {
+        width: 15px;
+        height: 15px;
+        margin: 0;
+        accent-color: var(--ink);
+        cursor: pointer;
+      }
+      .also input:focus-visible {
+        outline: 2px solid var(--ink);
+        outline-offset: 2px;
+      }
+      .also label {
+        color: var(--ink);
+        font-size: 12.5px;
+        font-weight: 550;
+        letter-spacing: -0.005em;
+        cursor: pointer;
+      }
+      .also .sub {
+        grid-column: 2;
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+      }
+      #local-options {
+        padding: 2px 16px;
+      }
+      /* The sign-in email and password a new installation creates. */
+      .credentials label {
+        display: block;
+        margin: 10px 0 4px;
+        color: #5f5e55;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .credentials input {
+        width: 100%;
+        min-width: 0;
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid #e6e6e1;
+        border-radius: 8px;
+        outline: none;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-size: 12.5px;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .credentials input:focus {
+        border-color: var(--ink);
+      }
+      .credentials input[aria-invalid="true"] {
+        border-color: var(--error);
+      }
+      .credentials-line {
+        display: flex;
+        gap: 6px;
+      }
+      .signin-modal .credentials .problem {
+        min-height: 18px;
+        margin: 10px 0 0;
+        color: var(--error);
+      }
+      /* Done keeps clear of the last field, with or without a problem. */
+      .credentials .actions {
+        margin-top: 16px;
+      }
+      /* Switching to BYOK or a subscription while the local model
+         downloads: a quiet box above the progress. */
+      .leave {
+        width: 380px;
+        margin: 16px auto 0;
+        padding: 11px 14px 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fafaf8;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        text-align: left;
+      }
+      .leave[hidden] {
+        display: none;
+      }
+      .leave p {
+        margin: 0 0 9px;
+        text-wrap: pretty;
+      }
+      .leave .error:empty {
+        display: none;
+      }
+      .leave-row {
+        display: flex;
+        gap: 8px;
+      }
+      .leave + .panel {
+        margin-top: 12px;
       }
       .eyebrow {
         display: inline-flex;
@@ -636,16 +1121,25 @@
       .primary.large[data-busy="true"] svg {
         display: none;
       }
-      /* What Quick Install does, and the way to change it. */
+      /* What the button does, in words. Always two lines high, so a long
+         plan never moves the button above it. */
       .plan-line {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 4px 6px;
-        margin-top: 11px;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        width: 100%;
+        height: 34px;
+        margin: 10px 0 0;
+        overflow: hidden;
         color: var(--faint);
-        font-size: 11.5px;
+        font-size: 12px;
+        line-height: 17px;
+        font-variant-numeric: tabular-nums;
+        text-wrap: balance;
+      }
+      section[data-step="welcome"][data-local="true"] .start {
+        margin-top: auto;
+        padding-top: 12px;
       }
       .featured-pill {
         display: inline-flex;
@@ -670,17 +1164,13 @@
         background: #d9822b;
       }
       .spotlight-card {
-        width: min(100%, 440px);
-        order: 1;
+        width: min(100%, 468px);
         margin: 12px auto 0;
         padding: 8px 12px;
         border: 1px solid #e8e5dc;
         border-radius: 12px;
         background: linear-gradient(180deg, #fcfcfa 0%, #f7f5ef 100%);
         text-align: left;
-      }
-      #welcome-start:has(.install-location[data-warn="true"]) .spotlight-card {
-        margin-top: 8px;
       }
       .spotlight-card[data-recommended="true"] {
         border-color: #e6d2b5;
@@ -756,118 +1246,6 @@
         gap: 6px;
         margin-top: 8px;
       }
-      /* Flat 440px install-location bar aligned with .choices and .spotlight-card;
-         jumps above the spotlight as a warm-red alert on disk-space or path warnings. */
-      .install-location {
-        width: min(100%, 440px);
-        order: 2;
-        margin: 10px auto 0;
-        padding: 5px 10px 5px 11px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fafaf8;
-        text-align: left;
-        transition:
-          background-color 160ms ease,
-          border-color 160ms ease;
-      }
-      #featured-spotlight:not([hidden]) + .install-location[data-warn="false"] {
-        margin-top: 8px;
-      }
-      section[data-customizing="true"] .install-location {
-        margin-top: 8px;
-      }
-      .install-location .loc-row {
-        display: flex;
-        align-items: center;
-        justify-content: flex-start;
-        gap: 6px;
-        min-width: 0;
-        font-size: 11.5px;
-        line-height: 1.4;
-        color: var(--muted);
-      }
-      .install-location .loc-icon {
-        width: 13px;
-        height: 13px;
-        flex: none;
-        color: var(--faint);
-      }
-      .install-location .loc-label {
-        flex: none;
-        color: var(--muted);
-      }
-      .install-location .loc-path {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: var(--mono);
-        font-size: 11px;
-        color: #52524b;
-      }
-      .install-location .loc-actions {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        flex: none;
-      }
-      .install-location .loc-btn {
-        height: 22px;
-        padding: 0 8px;
-        border: 1px solid #e4e4de;
-        border-radius: 6px;
-        background: #fff;
-        color: #52524b;
-        font-size: 11.5px;
-        font-weight: 500;
-        text-decoration: none;
-        white-space: nowrap;
-        transition:
-          color 140ms ease,
-          border-color 140ms ease,
-          background-color 140ms ease;
-      }
-      .install-location .loc-btn:hover:not(:disabled) {
-        border-color: #c4c4bc;
-        background: #fafaf8;
-        color: var(--ink);
-      }
-      .install-location[data-warn="true"] {
-        order: 0;
-        margin-top: 10px;
-        padding: 8px 12px;
-        border-color: #f3dfd6;
-        background: #fdf6f3;
-      }
-      .install-location[data-warn="true"] .loc-icon {
-        color: var(--error);
-      }
-      .install-location[data-warn="true"] .loc-label {
-        color: var(--ink);
-        font-weight: 550;
-      }
-      .install-location[data-warn="true"] .loc-btn {
-        height: 24px;
-        padding: 0 9px;
-        border-color: #e6d1c8;
-        color: var(--ink);
-      }
-      .install-location[data-warn="true"] .loc-btn:hover:not(:disabled) {
-        border-color: #d4b6a9;
-        background: #fffaf8;
-      }
-      .install-location .loc-warn {
-        margin: 5px 0 0;
-        color: var(--error);
-        font-size: 11.5px;
-        line-height: 1.45;
-        white-space: normal;
-        overflow-wrap: anywhere;
-        user-select: text;
-        -webkit-user-select: text;
-      }
       /* What downloads now, or what a long step waits on, under the
          installing bar. */
       .transfer {
@@ -886,12 +1264,6 @@
         color: var(--ink);
         font-weight: 500;
       }
-      .plan-line .sep {
-        width: 3px;
-        height: 3px;
-        border-radius: 50%;
-        background: #d4d4cd;
-      }
       .link.quiet {
         padding: 2px 4px;
         color: #52524b;
@@ -906,88 +1278,15 @@
         color: var(--ink);
         text-decoration-color: var(--ink);
       }
-      .fold {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: 0fr;
-        width: min(100%, 448px);
-        margin: 0 auto;
-        opacity: 0;
-        transition:
-          grid-template-rows 420ms var(--ease),
-          opacity 280ms ease,
-          margin 420ms var(--ease);
-      }
-      .fold[data-open="true"] {
-        grid-template-rows: 1fr;
-        margin: 8px auto 0;
-        opacity: 1;
-      }
-      .fold > div {
-        min-width: 0;
-        min-height: 0;
-        overflow: hidden;
-        padding: 0 4px 4px;
-      }
-      .fold[data-open="true"] > div {
-        overflow: visible;
-      }
       .choice[hidden],
       .byok-box[hidden],
       .signin-byok[hidden] {
         display: none !important;
       }
-      .byok-tip-btn {
-        position: relative;
-      }
-      .seg button.byok-tip-btn:hover,
-      .seg button.byok-tip-btn:focus-visible {
-        z-index: 30;
-      }
-      .byok-tooltip {
-        position: absolute;
-        top: calc(100% + 8px);
-        bottom: auto;
-        right: 0;
-        z-index: 30;
-        width: 248px;
-        padding: 8px 10px;
-        border-radius: 9px;
-        background: #1f1f1d;
-        color: #f7f7f4;
-        font-size: 11.5px;
-        font-weight: 450;
-        line-height: 1.4;
-        text-align: left;
-        white-space: normal;
-        box-shadow: 0 10px 24px -8px rgba(20, 20, 16, 0.45);
-        opacity: 0;
-        pointer-events: none;
-        transform: translateY(-3px);
-        transition:
-          opacity 150ms ease,
-          transform 150ms ease;
-      }
-      .byok-tip-btn:hover .byok-tooltip,
-      .byok-tip-btn:focus-visible .byok-tooltip {
-        opacity: 1;
-        transform: translateY(0);
-      }
       .choice.byok-box {
         flex-direction: column;
         align-items: stretch;
         gap: 10px;
-      }
-      .byok-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-      }
-      .byok-row label {
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 500;
       }
       /* BYOK fields, built once by byokFields() for the setup form and the
          sign-in dialog: the base URL and two optional comboboxes (path and
@@ -995,7 +1294,7 @@
          Test beside it, and one status line. */
       .byok-fields {
         display: grid;
-        gap: 7px;
+        gap: 6px;
         font-size: 12px;
         text-align: left;
       }
@@ -1250,16 +1549,6 @@
         background: inherit;
         transform: rotate(45deg);
       }
-      .byok-toast[data-above="true"]::before {
-        top: auto;
-        bottom: -4px;
-      }
-      #welcome-scroll .cb-menu,
-      #welcome-scroll .byok-toast,
-      #welcome-scroll .byok-tooltip {
-        position: fixed;
-        z-index: 40;
-      }
       .byok-toast[data-leaving="true"] {
         animation: toast-out 200ms ease forwards;
       }
@@ -1389,90 +1678,10 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .seg {
-        position: relative;
-        display: flex;
-        flex: none;
-        padding: 2px;
-        border-radius: 9px;
-        background: #f1f1ee;
-        box-shadow: inset 0 0 0 1px rgba(20, 20, 16, 0.04);
-      }
-      .seg button {
-        position: relative;
-        z-index: 1;
-        min-width: 56px;
-        height: 26px;
-        padding: 0 10px;
-        border: 0;
-        border-radius: 7px;
-        background: none;
-        color: #6b6a60;
-        font-size: 12px;
-        font-weight: 500;
-        transition: color 160ms ease;
-      }
-      .seg button:hover:not(:disabled) {
-        color: var(--ink);
-      }
-      /* The localmodels tool's pick for this computer. */
-      .seg button[data-recommended="true"]::after {
-        content: "";
-        position: absolute;
-        top: 4px;
-        right: 4px;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: #d9822b;
-      }
-      .seg button[aria-checked="true"] {
-        color: var(--ink);
-        cursor: default;
-      }
-      .seg .knob {
-        position: absolute;
-        z-index: 0;
-        top: 2px;
-        left: 0;
-        height: 26px;
-        border-radius: 7px;
-        background: #fff;
-        box-shadow:
-          0 1px 2px rgba(20, 20, 16, 0.12),
-          0 0 0 0.5px rgba(20, 20, 16, 0.08);
-        transition:
-          transform 320ms var(--ease),
-          width 320ms var(--ease);
-      }
       /* The local model: one card naming it and what it needs. */
       .choice.local {
         flex-wrap: wrap;
         row-gap: 6px;
-      }
-      .pick {
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1px;
-        min-width: 0;
-        padding: 6px 10px;
-        border: 1px solid #e6e6e1;
-        border-radius: 9px;
-        background: #fff;
-        text-align: left;
-        transition:
-          border-color 140ms ease,
-          background-color 140ms ease;
-      }
-      .pick:hover:not(:disabled):not([aria-disabled="true"]) {
-        border-color: #c4c4bc;
-      }
-      .pick[aria-checked="true"] {
-        border-color: var(--ink);
-        background: #fafaf8;
-        box-shadow: inset 0 0 0 0.5px var(--ink);
       }
       .pick-head {
         display: flex;
@@ -1485,11 +1694,6 @@
         color: var(--ink);
         font-size: 12px;
         font-weight: 550;
-      }
-      .pick small {
-        color: var(--muted);
-        font-size: 11px;
-        white-space: nowrap;
       }
       .local-spotlight {
         width: 100%;
@@ -1589,6 +1793,29 @@
         padding: 2px 4px;
         color: var(--muted);
         text-decoration-color: #d4d4cd;
+      }
+      /* The button sits at the same place on both steps: under it step 2's
+         plan takes two lines, step 1's plan one line and the team link the
+         other. */
+      section[data-stage="choose"] .plan-line {
+        height: 17px;
+        -webkit-line-clamp: 1;
+      }
+      section[data-step="welcome"][data-local="true"] .team {
+        margin-top: 0;
+        padding-top: 0;
+        line-height: 17px;
+      }
+      section[data-step="welcome"][data-local="true"] .team .link {
+        padding-block: 0;
+      }
+      /* A long BYOK error scrolls the settings instead of moving the button;
+         the padding keeps the card's shadow in view. */
+      section[data-stage="settings"] .stage {
+        min-height: 0;
+        margin: 0 -8px -12px;
+        padding: 0 8px 12px;
+        overflow-y: auto;
       }
 
       /* Installing: one panel with the bar and a short stepper. */
@@ -2113,7 +2340,7 @@
         -webkit-user-select: text;
       }
       .account dd.email {
-        grid-column: 2 / -1;
+        grid-column: 2 / 4;
       }
       .account dd.secret {
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2177,186 +2404,468 @@
 
     <main>
       <section data-step="welcome" aria-labelledby="welcome-title">
-        <span class="eyebrow" id="welcome-eyebrow"
-          ><svg viewBox="0 0 24 24">
-            <rect x="5" y="11" width="14" height="9" rx="2" />
-            <path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg
-          ><span data-t="welcomeEyebrow"></span
-        ></span>
-        <h1 id="welcome-title" data-t="welcomeTitle"></h1>
-        <p class="lead tight" id="welcome-lead"></p>
-        <div class="welcome-scroll" id="welcome-scroll">
-          <div class="fold" id="local-options" data-open="false">
-            <div>
-              <div class="choices">
-                <div class="choice">
-                  <div class="text">
-                    <strong data-t="modelSource"></strong
+        <div class="stage-bar" id="stage-bar">
+          <button class="link back" id="source-back" type="button" hidden>
+            <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg
+            ><span data-t="back"></span>
+          </button>
+          <span class="eyebrow" id="welcome-eyebrow"
+            ><svg viewBox="0 0 24 24">
+              <rect x="5" y="11" width="14" height="9" rx="2" />
+              <path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg
+            ><span data-t="welcomeEyebrow"></span
+          ></span>
+          <span class="eyebrow behind" id="model-behind" hidden
+            ><span class="behind-bar"><span id="model-behind-fill"></span></span
+            ><span id="model-behind-text"></span
+          ></span>
+          <button
+            class="link quiet"
+            id="local-customize"
+            type="button"
+            aria-expanded="false"
+            aria-controls="local-options"
+            hidden
+            data-t="moreOptions"
+          ></button>
+        </div>
+        <div class="stage">
+          <h1 id="welcome-title" tabindex="-1" data-t="welcomeTitle"></h1>
+          <p class="lead tight" id="welcome-lead"></p>
+          <div class="checking" id="welcome-checking" hidden>
+            <p class="checking-now" id="checking-now"></p>
+            <p class="checking-why" id="checking-why"></p>
+            <button
+              class="link quiet"
+              id="checking-skip"
+              type="button"
+              hidden
+              data-t="chooseWithoutWaiting"
+            ></button>
+          </div>
+          <div class="setup-card" id="local-setup" hidden>
+            <div
+              class="source-grid"
+              id="source-grid"
+              role="radiogroup"
+              data-t-aria-label="modelSource"
+            >
+              <button
+                type="button"
+                class="source-card"
+                role="radio"
+                data-value="local"
+              >
+                <span class="source-rec" data-t="recommended" hidden></span
+                ><span class="source-pill" id="source-local-pill" hidden></span
+                ><span class="source-top"
+                  ><strong data-t="localModel"></strong></span
+                ><span class="source-about" data-t="sourceLocalAbout"></span
+                ><span class="source-meta" id="source-local-meta"></span>
+              </button>
+              <button
+                type="button"
+                class="source-card"
+                role="radio"
+                data-value="byok"
+              >
+                <span class="source-rec" data-t="recommended" hidden></span
+                ><span class="source-top"><strong>BYOK</strong></span
+                ><span class="source-about" data-t="sourceByokAbout"></span
+                ><span class="source-meta" data-t="runsOnPi"></span>
+              </button>
+              <button
+                type="button"
+                class="source-card"
+                role="radio"
+                data-value="subscription"
+              >
+                <span class="source-rec" data-t="recommended" hidden></span
+                ><span class="source-top"
+                  ><strong data-t="subscription"></strong></span
+                ><span class="source-about" data-t="sourceSubAbout"></span
+                ><span class="source-meta" id="source-sub-meta"></span>
+              </button>
+            </div>
+            <p class="plan-why" id="plan-why" hidden></p>
+            <p class="plan-why" id="local-driver-status" hidden></p>
+            <div class="plan-actions" id="local-plan-actions" hidden>
+              <button
+                class="secondary"
+                id="local-driver-install"
+                type="button"
+                hidden
+                data-t="installDriverUpdate"
+              ></button>
+              <button
+                class="secondary"
+                id="local-driver-action"
+                type="button"
+                hidden
+              ></button>
+              <button
+                class="link quiet"
+                id="local-driver-guide"
+                type="button"
+                hidden
+                data-t="driverUpdateGuide"
+              ></button>
+              <button
+                class="link quiet"
+                id="local-recheck"
+                type="button"
+                hidden
+                data-t="checkAgain"
+              ></button>
+            </div>
+            <aside
+              class="spotlight-card"
+              id="featured-spotlight"
+              data-t-aria-label="featuredModelAriaLabel"
+              hidden
+            >
+              <div class="spotlight-head">
+                <span class="spotlight-title"
+                  ><strong data-t="featuredModelName"></strong
+                  ><span
+                    class="featured-pill"
+                    data-t="featuredPartnerBadge"
+                  ></span
+                ></span>
+                <button
+                  type="button"
+                  class="spotlight-link"
+                  id="featured-spotlight-link"
+                  data-t-title="openAnnouncement"
+                ></button>
+              </div>
+              <p class="spotlight-specs" data-t="featuredModelSpecs"></p>
+              <p class="spotlight-note" id="featured-spotlight-note"></p>
+            </aside>
+            <div class="source-panel" id="source-panel" hidden>
+              <div class="choice local" id="local-row" hidden>
+                <div class="facts" id="local-facts">
+                  <span class="pick-head"
+                    ><span class="pick-name" id="local-model-name"></span
                     ><span
-                      class="sub"
-                      id="source-sub"
-                      data-t="modelSourceHint"
-                    ></span>
-                  </div>
-                  <div
-                    class="seg"
-                    role="radiogroup"
-                    data-t-aria-label="modelSource"
-                    data-plan="source"
-                  >
-                    <span class="knob"></span>
-                    <button
-                      type="button"
-                      role="radio"
-                      data-value="local"
-                      data-t="localModel"
-                    ></button>
-                    <button
-                      type="button"
-                      role="radio"
-                      data-value="subscription"
-                      data-t="subscription"
-                    ></button>
-                    <button
-                      type="button"
-                      role="radio"
-                      data-value="byok"
-                      class="byok-tip-btn"
-                      aria-describedby="byok-tip-text"
-                    >
-                      BYOK
-                      <span
-                        class="byok-tooltip"
-                        id="byok-tip-text"
-                        role="tooltip"
-                        data-t="byokTooltip"
-                      ></span>
-                    </button>
-                  </div>
+                      class="featured-pill"
+                      id="local-model-featured"
+                      hidden
+                      data-t="featuredPartnerBadge"
+                    ></span></span
+                  ><small id="local-model-needs"></small>
                 </div>
-                <div class="choice local" id="local-row" hidden>
-                  <div class="text">
-                    <strong data-t="localModel"></strong
-                    ><span class="sub" id="local-sub"></span>
-                  </div>
+                <p class="source-hint" id="local-wait"></p>
+                <div class="local-spotlight" id="local-spotlight" hidden>
+                  <span id="local-spotlight-text"></span>
                   <button
                     type="button"
-                    class="pick"
-                    id="local-model"
-                    role="checkbox"
-                    data-t-aria-label="localModelToggle"
-                    hidden
-                  >
-                    <span class="pick-head"
-                      ><span class="pick-name" id="local-model-name"></span
-                      ><span
-                        class="featured-pill"
-                        id="local-model-featured"
+                    class="spotlight-link"
+                    id="local-spotlight-link"
+                    data-t-title="openAnnouncement"
+                  ></button>
+                </div>
+              </div>
+              <div
+                class="runtimes"
+                id="subscription-row"
+                role="list"
+                data-t-aria-label="runtimesLabel"
+                hidden
+              >
+                <div
+                  class="choice runtime"
+                  data-runtime="claude"
+                  role="listitem"
+                >
+                  <div class="text">
+                    <strong
+                      >Claude Code<span
+                        class="runtime-rec"
                         hidden
-                        data-t="featuredPartnerBadge"
-                      ></span></span
-                    ><small id="local-model-needs"></small>
-                  </button>
-                  <div class="local-spotlight" id="local-spotlight">
-                    <span id="local-spotlight-text"></span>
+                        data-t="recommended"
+                      ></span></strong
+                    ><span class="sub" data-runtime-sub></span>
+                  </div>
+                  <div class="runtime-act">
                     <button
                       type="button"
-                      class="spotlight-link"
-                      id="local-spotlight-link"
-                      data-t-title="openAnnouncement"
+                      class="change"
+                      data-runtime-install
+                      data-t="install"
                     ></button>
-                  </div>
-                </div>
-                <div class="choice" id="subscription-row" hidden>
-                  <div class="text">
-                    <strong data-t="aiRuntime"></strong
-                    ><span
-                      class="sub"
-                      id="runtime-sub"
-                      data-t="runtimeHint"
+                    <button
+                      type="button"
+                      class="change"
+                      data-runtime-signin
+                      data-t="signIn"
+                    ></button>
+                    <div
+                      class="runtime-progress"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      hidden
+                    >
+                      <div class="track"><div class="fill"></div></div>
+                      <span class="pct"></span>
+                    </div>
+                    <span class="runtime-wait" hidden
+                      ><span class="spinner"></span
+                      ><span data-t="inYourBrowser"></span></span
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-cancel
+                      hidden
+                      data-t="cancel"
+                    ></button>
+                    <span
+                      class="badge"
+                      data-ok="true"
+                      data-runtime-done
+                      hidden
                     ></span>
                   </div>
-                  <div
-                    class="seg"
-                    role="radiogroup"
-                    data-t-aria-label="aiRuntime"
-                    data-plan="runtime"
-                  >
-                    <span class="knob"></span>
-                    <button
+                  <div class="runtime-extra" data-runtime-extra hidden>
+                    <span class="runtime-code" data-runtime-code hidden
+                      ><span data-t="enterCode"></span>
+                      <strong data-runtime-code-value></strong></span
+                    ><button
                       type="button"
-                      role="radio"
-                      data-value="recommended"
-                      data-t="auto"
+                      class="link quiet"
+                      data-runtime-open
+                      data-t="openInBrowser"
+                    ></button
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-copy="url"
+                      data-t="copyLink"
                     ></button>
-                    <button type="button" role="radio" data-value="codex">
-                      Codex
-                    </button>
-                    <button type="button" role="radio" data-value="claude">
-                      Claude Code
-                    </button>
+                    <form class="runtime-paste" data-runtime-paste hidden>
+                      <input
+                        data-runtime-input
+                        autocomplete="off"
+                        spellcheck="false"
+                        data-t-placeholder="pasteCode"
+                        data-t-aria-label="pasteCode"
+                      />
+                      <button
+                        type="submit"
+                        class="change"
+                        data-t="continue"
+                      ></button>
+                    </form>
                   </div>
                 </div>
-                <div class="choice byok-box" id="byok-row" hidden>
-                  <div class="byok-row">
-                    <label id="byok-runtime-label" data-t="aiRuntime"></label>
-                    <div
-                      class="seg"
-                      role="radiogroup"
-                      aria-labelledby="byok-runtime-label"
-                      data-byok="runtime"
-                    >
-                      <span class="knob"></span>
-                      <button type="button" role="radio" data-value="claude">
-                        Claude Code
-                      </button>
-                      <button type="button" role="radio" data-value="codex">
-                        Codex
-                      </button>
-                      <button type="button" role="radio" data-value="pi">
-                        Pi
-                      </button>
-                    </div>
-                  </div>
-                  <div class="byok-fields" id="byok-fields"></div>
-                </div>
-                <details class="choice optional-keys" id="optional-keys">
-                  <summary data-t="appIntegrations"></summary>
+                <div
+                  class="choice runtime"
+                  data-runtime="codex"
+                  role="listitem"
+                >
                   <div class="text">
-                    <span class="sub" data-t="appIntegrationsHint"></span>
+                    <strong
+                      >Codex<span
+                        class="runtime-rec"
+                        hidden
+                        data-t="recommended"
+                      ></span></strong
+                    ><span class="sub" data-runtime-sub></span>
                   </div>
-                  <div class="keys">
-                    <label for="key-composio">Composio</label>
-                    <input
-                      id="key-composio"
-                      type="password"
-                      data-key="composio"
-                      autocomplete="off"
-                      spellcheck="false"
-                      data-t-aria-label="composioKey"
-                    />
+                  <div class="runtime-act">
                     <button
                       type="button"
                       class="change"
-                      data-reveal="composio"
-                      data-t="show"
+                      data-runtime-install
+                      data-t="install"
                     ></button>
                     <button
                       type="button"
                       class="change"
-                      data-remove="composio"
-                      data-t="remove"
+                      data-runtime-signin
+                      data-t="signIn"
+                    ></button>
+                    <div
+                      class="runtime-progress"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      hidden
+                    >
+                      <div class="track"><div class="fill"></div></div>
+                      <span class="pct"></span>
+                    </div>
+                    <span class="runtime-wait" hidden
+                      ><span class="spinner"></span
+                      ><span data-t="inYourBrowser"></span></span
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-cancel
+                      hidden
+                      data-t="cancel"
+                    ></button>
+                    <span
+                      class="badge"
+                      data-ok="true"
+                      data-runtime-done
+                      hidden
+                    ></span>
+                  </div>
+                  <div class="runtime-extra" data-runtime-extra hidden>
+                    <span class="runtime-code" data-runtime-code hidden
+                      ><span data-t="enterCode"></span>
+                      <strong data-runtime-code-value></strong></span
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-open
+                      data-t="openInBrowser"
+                    ></button
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-copy="url"
+                      data-t="copyLink"
+                    ></button
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-copy="code"
+                      hidden
+                      data-t="copyCode"
+                    ></button
+                    ><button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-device
+                      data-t="useDeviceCode"
                     ></button>
                   </div>
-                  <p class="keys-note" id="keys-note"></p>
-                </details>
+                </div>
+                <div class="choice runtime" data-runtime="pi" role="listitem">
+                  <div class="text">
+                    <strong>Pi</strong
+                    ><span class="sub" data-runtime-sub></span>
+                  </div>
+                  <div class="runtime-act">
+                    <button
+                      type="button"
+                      class="change"
+                      data-runtime-install
+                      data-t="install"
+                    ></button>
+                    <div
+                      class="runtime-progress"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      hidden
+                    >
+                      <div class="track"><div class="fill"></div></div>
+                      <span class="pct"></span>
+                    </div>
+                    <button
+                      type="button"
+                      class="link quiet"
+                      data-runtime-cancel
+                      hidden
+                      data-t="cancel"
+                    ></button>
+                    <span
+                      class="badge"
+                      data-ok="true"
+                      data-runtime-done
+                      hidden
+                    ></span>
+                  </div>
+                </div>
+              </div>
+              <div class="choice byok-box" id="byok-row" hidden>
+                <div class="byok-fields" id="byok-fields"></div>
+              </div>
+              <div class="also" id="background-row" hidden>
+                <input type="checkbox" id="background-model" /><label
+                  for="background-model"
+                  data-t="alsoDownload"
+                ></label
+                ><span class="sub" id="background-model-detail"></span>
+              </div>
+              <div class="choice" id="credentials-row" hidden>
+                <div class="text">
+                  <strong data-t="signInAccount"></strong
+                  ><span class="sub" id="credentials-sub"></span>
+                </div>
+                <button
+                  type="button"
+                  class="change"
+                  id="credentials-edit"
+                  aria-haspopup="dialog"
+                  data-t="edit"
+                ></button>
+              </div>
+            </div>
+            <div class="choices" id="local-options" hidden>
+              <details class="choice optional-keys" id="optional-keys">
+                <summary data-t="appIntegrations"></summary>
+                <div class="text">
+                  <span class="sub" data-t="appIntegrationsHint"></span>
+                </div>
+                <div class="keys">
+                  <label for="key-composio">Composio</label>
+                  <input
+                    id="key-composio"
+                    type="password"
+                    data-key="composio"
+                    autocomplete="off"
+                    spellcheck="false"
+                    data-t-aria-label="composioKey"
+                  />
+                  <button
+                    type="button"
+                    class="change"
+                    data-reveal="composio"
+                    data-t="show"
+                  ></button>
+                  <button
+                    type="button"
+                    class="change"
+                    data-remove="composio"
+                    data-t="remove"
+                  ></button>
+                </div>
+                <p class="keys-note" id="keys-note"></p>
+              </details>
+              <div class="choice">
+                <div class="text">
+                  <strong data-t="installLocation"></strong
+                  ><span class="sub" id="location-sub"></span>
+                </div>
+                <button
+                  type="button"
+                  class="change"
+                  id="location-reset"
+                  data-t="useDefaults"
+                  hidden
+                ></button>
+                <button
+                  type="button"
+                  class="change"
+                  id="location-change"
+                  data-t="changeLocation"
+                ></button>
               </div>
             </div>
           </div>
         </div>
-        <div class="start" id="welcome-start">
+        <div class="start">
+          <button class="primary large" id="source-continue" type="button">
+            <span data-t="continue"></span
+            ><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
+          </button>
           <button class="primary large" id="local-install" type="button">
-            <span id="local-install-label" data-t="quickInstall"></span
+            <span id="local-install-label" data-t="install"></span
             ><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
           </button>
           <button
@@ -2366,111 +2875,7 @@
             type="button"
             data-t="getStarted"
           ></button>
-          <p class="plan-line" id="plan-line">
-            <span id="plan-summary"></span
-            ><span
-              class="featured-pill"
-              id="plan-featured-badge"
-              hidden
-              data-t="featuredPartnerBadge"
-            ></span
-            ><span class="sep"></span
-            ><button
-              class="link quiet"
-              id="local-customize"
-              type="button"
-              aria-expanded="false"
-              aria-controls="local-options"
-              data-t="customize"
-            ></button>
-          </p>
-          <p class="plan-why" id="plan-why" hidden></p>
-          <p class="plan-why" id="local-driver-status" hidden></p>
-          <div class="plan-actions" id="local-plan-actions" hidden>
-            <button
-              class="secondary"
-              id="local-driver-install"
-              type="button"
-              hidden
-              data-t="installDriverUpdate"
-            ></button>
-            <button
-              class="secondary"
-              id="local-driver-action"
-              type="button"
-              hidden
-            ></button>
-            <button
-              class="link quiet"
-              id="local-driver-guide"
-              type="button"
-              hidden
-              data-t="driverUpdateGuide"
-            ></button>
-            <button
-              class="link quiet"
-              id="local-recheck"
-              type="button"
-              hidden
-              data-t="checkAgain"
-            ></button>
-          </div>
-          <aside
-            class="spotlight-card"
-            id="featured-spotlight"
-            data-t-aria-label="featuredModelAriaLabel"
-            hidden
-          >
-            <div class="spotlight-head">
-              <span class="spotlight-title"
-                ><strong data-t="featuredModelName"></strong
-                ><span
-                  class="featured-pill"
-                  data-t="featuredPartnerBadge"
-                ></span
-              ></span>
-              <button
-                type="button"
-                class="spotlight-link"
-                id="featured-spotlight-link"
-                data-t-title="openAnnouncement"
-              ></button>
-            </div>
-            <p class="spotlight-specs" data-t="featuredModelSpecs"></p>
-            <p class="spotlight-note" id="featured-spotlight-note"></p>
-          </aside>
-          <div
-            class="install-location"
-            id="install-location"
-            hidden
-            data-warn="false"
-          >
-            <div class="loc-row">
-              <svg class="loc-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-                />
-              </svg>
-              <span class="loc-label" data-t="installLocation"></span>
-              <span class="loc-path" id="location-path"></span>
-              <span class="loc-actions">
-                <button
-                  type="button"
-                  class="loc-btn"
-                  id="location-change"
-                  data-t="changeLocation"
-                ></button>
-                <button
-                  type="button"
-                  class="loc-btn"
-                  id="location-reset"
-                  data-t="resetLocation"
-                  hidden
-                ></button>
-              </span>
-            </div>
-            <p class="loc-warn" id="location-sub" role="alert" hidden></p>
-          </div>
+          <p class="plan-line" id="plan-line"></p>
         </div>
         <p class="error" id="local-error" role="alert"></p>
         <p class="team" id="team">
@@ -2482,11 +2887,35 @@
             data-t="connectInstead"
           ></button>
         </p>
+        <p
+          class="sr-only"
+          id="welcome-live"
+          role="status"
+          aria-live="polite"
+        ></p>
       </section>
 
       <section data-step="installing" aria-labelledby="installing-title">
         <h1 id="installing-title" data-t="installingTitle"></h1>
         <p class="lead tight" id="installing-plan"></p>
+        <div class="leave" id="local-model-leave" hidden>
+          <p data-t="leaveLead"></p>
+          <div class="leave-row">
+            <button
+              class="secondary"
+              type="button"
+              data-leave="subscription"
+              data-t="useSubscription"
+            ></button>
+            <button
+              class="secondary"
+              type="button"
+              data-leave="byok"
+              data-t="useByok"
+            ></button>
+          </div>
+          <p class="error" id="leave-error" role="alert"></p>
+        </div>
         <div
           class="panel"
           role="progressbar"
@@ -2735,6 +3164,12 @@
           <dl id="account-fields">
             <dt data-t="email"></dt>
             <dd class="email" id="account-email"></dd>
+            <button
+              class="change"
+              id="account-copy-email"
+              type="button"
+              data-t="copy"
+            ></button>
             <dt data-t="password"></dt>
             <dd class="secret" id="account-password"></dd>
             <button
@@ -3008,6 +3443,67 @@
           ></button>
         </footer>
       </section>
+      <div
+        class="signin-modal"
+        id="credentials-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="credentials-title"
+        hidden
+      >
+        <form class="sheet credentials" id="credentials-form" novalidate>
+          <h2 id="credentials-title" data-t="credentialsTitle"></h2>
+          <p data-t="credentialsLead"></p>
+          <label for="credentials-email" data-t="email"></label>
+          <input
+            id="credentials-email"
+            type="email"
+            autocomplete="off"
+            spellcheck="false"
+            autocapitalize="off"
+          />
+          <label for="credentials-password" data-t="password"></label>
+          <div class="credentials-line">
+            <input
+              id="credentials-password"
+              type="password"
+              autocomplete="new-password"
+              spellcheck="false"
+              autocapitalize="off"
+            />
+            <button
+              type="button"
+              class="change"
+              id="credentials-show"
+              data-t="show"
+            ></button>
+            <button
+              type="button"
+              class="change"
+              id="credentials-generate"
+              data-t="generate"
+            ></button>
+          </div>
+          <label for="credentials-confirm" data-t="confirmPassword"></label>
+          <input
+            id="credentials-confirm"
+            type="password"
+            autocomplete="new-password"
+            spellcheck="false"
+            autocapitalize="off"
+          />
+          <p class="problem" id="credentials-error" role="alert"></p>
+          <div class="actions">
+            <button class="primary" type="submit" data-t="done"></button>
+            <button
+              class="link quiet"
+              id="credentials-cancel"
+              type="button"
+              data-t="cancel"
+            ></button>
+          </div>
+        </form>
+      </div>
     </main>
 
     <script>
@@ -3031,7 +3527,7 @@
         automation: { about: "automationAbout", missing: "automationMissing" },
       };
 
-      // What Install sets up; Quick Install keeps the defaults.
+      // The runtimes setup names.
       const RUNTIMES = {
         recommended: "",
         codex: "Codex",
@@ -3106,28 +3602,124 @@
           : local.failure === "runtime_lookup_unreachable"
             ? t("runtimeLookupUnreachable")
             : local.message;
-      // Quick Install installs what the localmodels tool recommends for this
-      // computer once it has checked; until then (or when it cannot check)
-      // the installer picks. The tool's local-models pick runs through Pi,
-      // so it implies Pi.
+      // What step 2 offers first: the local model when the localmodels tool
+      // picked it for this computer and no subscription runtime is signed
+      // in already; else the subscription. BYOK is never the advice.
       const defaults = () => {
-        const models = state.localServer.localModels;
-        const pick = models.state === "checked" && models.recommendation;
-        if (pick === "local-models" && models.eligible && models.model)
-          return { source: "local", runtime: "pi", localModel: true };
-        if (pick === "codex" || pick === "claude")
-          return { source: "subscription", runtime: pick, localModel: false };
-        return {
-          source: "subscription",
-          runtime: "recommended",
-          localModel: false,
-        };
+        const local = state.localServer;
+        const models = local.localModels;
+        const signedIn = (local.runtimes ?? []).some(
+          (row) => row.runtime !== "pi" && row.signedIn,
+        );
+        return models.state === "checked" &&
+          models.recommendation === "local-models" &&
+          models.eligible &&
+          models.model &&
+          !signedIn &&
+          !modelBehind(local)
+          ? "local"
+          : "subscription";
       };
-      let plan;
-      // Whether the person changed the plan; until then it follows defaults().
+      // The source picked on step 1: local, subscription or byok.
+      let source;
+      // Whether the person picked it; until then it follows defaults().
       let picked = false;
-      let pickedAutoBeforeCheck = false;
-      let customizing = false;
+      // Where the welcome is: checking this computer, choosing a source, or
+      // the chosen source's settings.
+      let stage;
+      let slowCheck = false;
+      let slowTimer = 0;
+      let motionTimer = 0;
+      let runtimesAsked = false;
+      // More options: the install location and app keys.
+      let options = false;
+      // Also download the local model in the background.
+      let background = false;
+      // The sign-in a new installation creates, and the sheet's draft of it.
+      let credentials = null;
+      let editing = null;
+      // What a runtime row just copied: { runtime, what }.
+      let runtimeCopied;
+      const enterStage = (next, motion) => {
+        const section = document.querySelector('[data-step="welcome"]');
+        stage = next;
+        section.dataset.stage = next;
+        clearTimeout(motionTimer);
+        if (motion) {
+          section.dataset.motion = motion;
+          motionTimer = setTimeout(() => delete section.dataset.motion, 320);
+        } else delete section.dataset.motion;
+        clearTimeout(slowTimer);
+        slowCheck = false;
+        // A check that runs long offers a way on without it.
+        if (next === "checking")
+          slowTimer = setTimeout(() => {
+            slowCheck = true;
+            render();
+          }, 8000);
+      };
+      // Moves between the welcome's stages and says where it went.
+      const setStage = (next, motion) => {
+        enterStage(next, motion);
+        render();
+        $("welcome-title").focus({ preventScroll: true });
+        $("welcome-live").textContent = $("welcome-title").textContent;
+      };
+      // The local model still downloading after the person left its wait.
+      const modelBehind = (local) =>
+        local.backgroundModel?.state === "downloading" &&
+        local.phase === "idle";
+      const modelPercent = (model) =>
+        model?.total
+          ? Math.min(99, Math.floor((model.completed / model.total) * 100))
+          : 0;
+      const runtimeRows = (local) =>
+        Object.fromEntries(
+          (local.runtimes ?? []).map((row) => [row.runtime, row]),
+        );
+      // A generated password: four groups of five characters that cannot
+      // be mistaken for one another, drawn without bias.
+      const PASSWORD_ALPHABET =
+        "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const generatePassword = () => {
+        const chars = [];
+        const limit = 256 - (256 % PASSWORD_ALPHABET.length);
+        while (chars.length < 20) {
+          for (const byte of crypto.getRandomValues(new Uint8Array(32))) {
+            if (byte >= limit || chars.length === 20) continue;
+            chars.push(PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length]);
+          }
+        }
+        return [0, 5, 10, 15]
+          .map((at) => chars.slice(at, at + 5).join(""))
+          .join("-");
+      };
+      const freshCredentials = () => ({
+        email: "owner@linger.local",
+        password: generatePassword(),
+        generated: true,
+      });
+      // The server's rules for an owner sign-in
+      // (packages/local-installation/src/account.ts).
+      const OWNER_EMAIL =
+        /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+      const EMAIL_PROBLEMS = new Set(["emailInvalid", "emailTooLong"]);
+      const PASSWORD_PROBLEMS = new Set([
+        "passwordTooShort",
+        "passwordTooLong",
+        "passwordControl",
+      ]);
+      const credentialsProblem = (draft) => {
+        const email = draft.email.trim().toLowerCase();
+        if (email.length > 320 || email.indexOf("@") > 100)
+          return "emailTooLong";
+        if (!OWNER_EMAIL.test(email)) return "emailInvalid";
+        if (draft.password.length < 8) return "passwordTooShort";
+        if (draft.password.length > 256) return "passwordTooLong";
+        if (/\p{Cc}/u.test(draft.password)) return "passwordControl";
+        if (draft.password !== draft.confirm) return "passwordMismatch";
+        return "";
+      };
       // BYOK. Requests go to the base URL + path + endpoint, used verbatim;
       // path and endpoint are optional, and a grey value is the default that
       // is sent. The wire format follows the end of that address, else the
@@ -3705,17 +4297,15 @@
         render();
         open.input.focus();
       });
-      // The setup form's runtime; the sign-in dialog's endpoint serves the
-      // runtime signing in.
-      let byokRuntime = "claude";
+      // The setup form's BYOK always runs on Pi; the sign-in dialog's
+      // endpoint serves the runtime signing in.
+      const byokRuntime = "pi";
       let signInByokOpen = false;
       const mainByok = byokFields(
         $("byok-fields"),
         "byok",
         () => byokRuntime,
-        () => {
-          picked = true;
-        },
+        () => {},
       );
       const signInByok = byokFields(
         $("signin-byok-fields"),
@@ -3726,10 +4316,6 @@
       // Provider keys typed or removed here ("" removes the saved one); kept
       // only in the inputs and sent once with Install.
       let keys = {};
-      const isDefaultPlan = (local) =>
-        JSON.stringify(plan) === JSON.stringify(defaults()) &&
-        !local.location.custom &&
-        !Object.keys(keys).length;
 
       const host = (url) => {
         try {
@@ -3812,131 +4398,11 @@
         requestAnimationFrame(frame);
       };
 
-      const syncCustomizingBody = () => {
-        document.body.dataset.customizing = String(
-          step === "welcome" &&
-            customizing &&
-            Boolean(state?.localServer.available),
-        );
-      };
-
-      const syncWelcomeScroll = () => {
-        const scroller = $("welcome-scroll");
-        const footer = $("welcome-start");
-        if (!scroller || !footer) return;
-        const overflowing =
-          step === "welcome" &&
-          customizing &&
-          Boolean(state?.localServer.available) &&
-          scroller.clientHeight > 0 &&
-          scroller.scrollHeight > scroller.clientHeight + 1;
-        footer.dataset.scrollable = String(overflowing);
-      };
-
-      const placeWelcomeTooltip = () => {
-        const tip = $("byok-tip-text");
-        const btn = tip?.closest(".byok-tip-btn");
-        if (!tip || !btn) return;
-        const rect = btn.getBoundingClientRect();
-        if (!rect.width && !rect.height) return;
-        tip.style.left = "auto";
-        tip.style.right =
-          Math.max(12, Math.round(innerWidth - rect.right)) + "px";
-        if (rect.top >= 100) {
-          tip.style.bottom = Math.round(innerHeight - rect.top + 8) + "px";
-          tip.style.top = "auto";
-        } else {
-          tip.style.top = Math.round(rect.bottom + 8) + "px";
-          tip.style.bottom = "auto";
-        }
-      };
-
-      // Floats popups inside #welcome-scroll with viewport-fixed coordinates so
-      // overflow-y: auto never clips them or inflates scrollHeight.
-      const placeWelcomePopups = () => {
-        const scroller = $("welcome-scroll");
-        if (!scroller) return;
-        const scrollerRect = scroller.getBoundingClientRect();
-        const hasScrollerBox =
-          scrollerRect.width > 0 || scrollerRect.height > 0;
-        let closedCombo = false;
-        for (const combo of combos) {
-          if (!combo.open || !scroller.contains(combo.root)) continue;
-          const menu = combo.root.querySelector(".cb-menu");
-          if (!menu || menu.hidden) continue;
-          const rect = combo.root.getBoundingClientRect();
-          if (!rect.width && !rect.height) continue;
-          if (
-            hasScrollerBox &&
-            (rect.bottom < scrollerRect.top || rect.top > scrollerRect.bottom)
-          ) {
-            combo.open = false;
-            closedCombo = true;
-            continue;
-          }
-          const below = innerHeight - rect.bottom - 17;
-          const above = rect.top - 17;
-          const flipUp = below < 140 && above > below;
-          const maxH = Math.max(
-            88,
-            Math.min(252, Math.floor(flipUp ? above : below)),
-          );
-          menu.style.minWidth = rect.width + 2 + "px";
-          menu.style.maxHeight = maxH + "px";
-          if (combo.root.matches(".ep > .cb")) {
-            menu.style.right =
-              Math.max(12, Math.round(innerWidth - rect.right - 1)) + "px";
-            menu.style.left = "auto";
-          } else {
-            menu.style.left = Math.max(12, Math.round(rect.left - 1)) + "px";
-            menu.style.right = "auto";
-          }
-          if (flipUp) {
-            menu.style.bottom = Math.round(innerHeight - rect.top + 5) + "px";
-            menu.style.top = "auto";
-          } else {
-            menu.style.top = Math.round(rect.bottom + 5) + "px";
-            menu.style.bottom = "auto";
-          }
-        }
-        if (closedCombo) {
-          for (const combo of combos) {
-            if (scroller.contains(combo.root)) combo.sync();
-          }
-        }
-        const toast = $("byok-toast");
-        if (toast && !toast.hidden && scroller.contains(toast)) {
-          const row = toast.closest(".model-row");
-          const rect = row?.getBoundingClientRect();
-          if (rect && (rect.width || rect.height)) {
-            toast.style.width = Math.min(330, Math.round(rect.width)) + "px";
-            toast.style.left = "auto";
-            toast.style.right =
-              Math.max(12, Math.round(innerWidth - rect.right)) + "px";
-            const flipUp =
-              rect.bottom + 9 + toast.offsetHeight > innerHeight - 12 &&
-              rect.top > innerHeight - rect.bottom;
-            if (flipUp) {
-              toast.style.bottom =
-                Math.round(innerHeight - rect.top + 9) + "px";
-              toast.style.top = "auto";
-              toast.dataset.above = "true";
-            } else {
-              toast.style.top = Math.round(rect.bottom + 9) + "px";
-              toast.style.bottom = "auto";
-              delete toast.dataset.above;
-            }
-          }
-        }
-        placeWelcomeTooltip();
-      };
-
       const show = (next) => {
         // Leaving the sign-in step stops waiting for it.
         if (pending === "signin.open") pending = null;
         if (next === "ready" && step !== "ready") setTimeout(celebrate, 320);
         step = next;
-        syncCustomizingBody();
         for (const el of document.querySelectorAll("section"))
           el.classList.toggle("active", el.dataset.step === step);
         if (step === "server") {
@@ -3944,19 +4410,6 @@
           setTimeout(() => $("server").focus(), 30);
         }
         render();
-      };
-
-      // Slides each segmented control's knob under its choice.
-      const placeKnobs = () => {
-        for (const seg of document.querySelectorAll(".seg")) {
-          const on = seg.querySelector('[aria-checked="true"]');
-          const knob = seg.querySelector(".knob");
-          // No option is on while the local model runs tasks.
-          knob.style.opacity = on ? "" : "0";
-          if (!on || !on.offsetWidth) continue;
-          knob.style.width = on.offsetWidth + "px";
-          knob.style.transform = "translateX(" + on.offsetLeft + "px)";
-        }
       };
 
       // The bar eases toward the end of the current step between updates,
@@ -4116,7 +4569,6 @@
         );
         // Claude Code's page shows a code to paste back.
         $("runtime-signin-trouble").hidden = !link || !sign.acceptsCode;
-        requestAnimationFrame(placeKnobs);
       };
 
       // The page's own words for each localmodels reason code, with the
@@ -4280,153 +4732,257 @@
         return memoryHeld(models) ? t("heldClose") : t("heldResolve");
       };
 
-      const renderLocal = (busy) => {
-        const local = state.localServer;
-        const recommended = defaults();
-        // Auto, picked before the check named a pick, means that pick; once
-        // it is known Auto no longer shows.
-        if (pickedAutoBeforeCheck && recommended.runtime !== "recommended") {
-          picked = false;
-          pickedAutoBeforeCheck = false;
-        }
-        if (!picked) plan = recommended;
-        // The local model is offered only once this computer is known to
-        // serve it; until then its row does not show.
+      // The welcome view: a short check of this computer, the three
+      // sources, then the chosen source's settings with Install.
+      const renderWelcome = (local, busy) => {
+        const section = document.querySelector('[data-step="welcome"]');
+        const available = local.available;
+        section.dataset.local = String(available);
         const models = local.localModels;
+        const checking = models.state === "checking";
+        if (available && step === "welcome") {
+          if (stage === undefined) enterStage(checking ? "checking" : "choose");
+          else if (stage === "checking" && !checking)
+            enterStage("choose", "reveal");
+          if (!runtimesAsked) {
+            runtimesAsked = true;
+            // The rows come through onState; the reply may be older than
+            // a state pushed meanwhile, so it is not applied.
+            setup.run({ op: "local.runtimes.check" }).catch(() => {});
+          }
+        }
+        // The account a new installation creates; an installation that has
+        // one keeps it, and the page forgets what it held.
+        if (local.ownerAccount !== "new" || local.phase === "ready")
+          credentials = null;
+        else if (available) credentials ??= freshCredentials();
+        if (!picked) source = defaults();
+        const recommended = defaults();
+        const known =
+          models.state === "checked" || models.state === "unavailable";
         const model =
           models.state === "checked" && models.eligible && models.model;
-        // The computer is temporarily blocked from running a local model now
-        // (for example memory in use, outdated NVIDIA driver, gateway port in
-        // use, or harness unavailable): shown on hold until a new check clears
-        // it.
         const held = models.state === "checked" && !!models.blockedNow;
         const heldModel = held && models.model;
-        plan.localModel = plan.source === "local" && !!model;
-        const custom = !isDefaultPlan(local);
-        // Quick Install waits for the check, so it installs what it shows.
-        // BYOK uses the user's own endpoint and does not depend on local-model
-        // inspection, so its Install button unblocks once the fields are valid.
-        const checking = models.state === "checking";
-        const waitingForCheck = checking && plan.source !== "byok";
-        const known =
-          recommended.source === "local" ||
-          recommended.runtime !== "recommended";
-        const following = JSON.stringify(plan) === JSON.stringify(recommended);
-        const named = (choice) =>
-          choice.source === "local"
-            ? t("localModelPi")
-            : choice.source === "byok"
-              ? ["BYOK", RUNTIMES[byokRuntime], mainByok.modelId()]
-                  .filter(Boolean)
-                  .join(" · ")
-              : RUNTIMES[choice.runtime];
-        $("welcome-lead").textContent = t(
-          local.available ? "welcomeLeadLocal" : "welcomeLeadTeam",
+        const behind = modelBehind(local);
+        const localUsable = Boolean(model) && !behind;
+        const rows = runtimeRows(local);
+        const signedIn = ["codex", "claude"].filter(
+          (runtime) => rows[runtime]?.signedIn,
         );
-        $("local-install").hidden = !local.available;
-        $("team").hidden = !local.available || customizing;
-        $("get-started").hidden = local.available;
-        $("local-options").dataset.open = String(
-          customizing && local.available,
+        const working = Object.values(rows).find(
+          (row) => row.state === "installing" || row.state === "signing_in",
         );
-        $("local-customize").setAttribute("aria-expanded", String(customizing));
+        const settings = available && stage === "settings";
+        const choosing = available && stage === "choose";
+        const checkingStage = available && stage === "checking";
+
+        // The bar above the title: Back, the badge or the local model's
+        // progress, and More options.
+        $("stage-bar").hidden = !available;
+        $("source-back").hidden = !settings;
+        $("model-behind").hidden = !behind;
+        $("welcome-eyebrow").hidden = behind;
+        if (behind) {
+          const percent = modelPercent(local.backgroundModel);
+          $("model-behind-fill").style.width = percent + "%";
+          $("model-behind-text").textContent = t("modelBehind", { percent });
+        }
+        $("local-customize").hidden = !settings;
+        $("local-customize").setAttribute("aria-expanded", String(options));
         $("local-customize").textContent = t(
-          customizing ? "useDefaults" : "customize",
+          options ? "fewerOptions" : "moreOptions",
         );
-        // Until the check ends the button says what it waits for: the first
-        // run downloads the localmodels tool, then the check runs. The label
-        // changes only when it differs, so the spinner keeps turning.
+
+        const NAMES = {
+          local: t("localModel"),
+          byok: "BYOK",
+          subscription: t("subscription"),
+        };
+        $("welcome-title").textContent = settings
+          ? NAMES[source]
+          : t("welcomeTitle");
+        $("welcome-lead").textContent = !available
+          ? t("welcomeLeadTeam")
+          : !settings
+            ? t("welcomeLeadLocal")
+            : source === "local"
+              ? models.gpu
+                ? t("leadLocalGpu", { gpu: models.gpu })
+                : t("leadLocal")
+              : source === "byok"
+                ? t("leadByok")
+                : t("leadSubscription");
+
+        // Checking: what runs now, and a way on when it runs long.
+        $("welcome-checking").hidden = !checkingStage;
         const fetching = checking ? models.download : undefined;
-        const label = waitingForCheck
-          ? '<span class="spinner"></span>' +
-            esc(t(fetching ? "downloadingTools" : "checkingComputer"))
-          : esc(t(custom ? "install" : "quickInstall"));
-        if ($("local-install-label").innerHTML !== label)
-          $("local-install-label").innerHTML = label;
-        document.querySelector('[data-step="welcome"]').dataset.customizing =
-          String(customizing && local.available);
-        syncCustomizingBody();
-        const byokIncomplete = plan.source === "byok" && !mainByok.complete();
-        const localUnavailable = plan.source === "local" && !model;
-        const location = local.location;
-        const GiB = 1024 ** 3;
-        const baseNeededBytes = location.minFreeBytes ?? 0;
-        const modelDiskBytes =
-          plan.source === "local" && model?.diskBytes != null
-            ? model.diskBytes
-            : 0;
-        const neededBytes = baseNeededBytes + modelDiskBytes;
-        const spaceLow =
-          !location.error &&
-          location.freeBytes != null &&
-          neededBytes > 0 &&
-          location.freeBytes < neededBytes;
-        const locationWarning = location.error
-          ? location.error
-          : spaceLow
-            ? t("locationSpaceLow", {
-                needed: String(Math.ceil(neededBytes / GiB)),
-                free: String(Math.floor(location.freeBytes / GiB)),
-              })
-            : "";
-        $("local-install").disabled ||=
-          waitingForCheck ||
-          byokIncomplete ||
-          localUnavailable ||
-          !!locationWarning;
-        $("local-install").dataset.busy = String(waitingForCheck);
-        $("local-install").setAttribute("aria-busy", String(waitingForCheck));
-        $("plan-summary").textContent = checking
-          ? t("findingSetup")
-          : following && known
-            ? t("recommendedPlan", { plan: named(plan) })
-            : named(plan) || t("bestRuntime");
-        // Why: the localmodels tool's facts, and its reason codes in the
-        // page's words.
-        const unavailableText =
-          models.state === "checked"
-            ? reasonsText(models, false)
-            : t("cannotCheck");
-        $("plan-why").textContent = fetching
-          ? transferParts(fetching).join(" · ")
-          : !following || checking
-            ? ""
-            : plan.localModel
+        const now =
+          '<span class="spinner"></span>' +
+          esc(t(fetching ? "downloadingTools" : "checkingComputer"));
+        if ($("checking-now").innerHTML !== now)
+          $("checking-now").innerHTML = now;
+        $("checking-why").textContent = slowCheck
+          ? t("checkingSlow")
+          : fetching
+            ? transferParts(fetching).join(" · ")
+            : t("checkingWhy");
+        $("checking-skip").hidden = !slowCheck;
+
+        $("local-setup").hidden = !choosing && !settings;
+        $("source-grid").hidden = !choosing;
+        $("source-panel").hidden = !settings || options;
+        $("local-options").hidden = !settings || !options;
+
+        // The cards. Recommended marks the advice once the check gave it;
+        // a card that cannot be picked says why in its place.
+        const localCard = document.querySelector(
+          '.source-card[data-value="local"]',
+        );
+        const pill = behind
+          ? ["pillDownloading", false]
+          : checking
+            ? ["pillChecking", false]
+            : held
+              ? ["pillOnHold", true]
+              : !model
+                ? ["pillUnavailable", false]
+                : undefined;
+        $("source-local-pill").hidden = !pill;
+        if (pill) {
+          $("source-local-pill").textContent = t(pill[0]);
+          $("source-local-pill").dataset.warn = String(pill[1]);
+        }
+        $("source-local-meta").textContent = behind
+          ? t("localMetaBehind", {
+              percent: modelPercent(local.backgroundModel),
+            })
+          : checking
+            ? t("checkingComputer")
+            : model
               ? [
                   model.name,
-                  models.gpu
-                    ? t("fitsGpu", { gpu: models.gpu })
-                    : t("fitsComputer"),
-                  t("memoryAmount", { size: gigabytes(models.memoryBytes) }),
-                  model.downloadBytes != null &&
-                    t("downloadAmount", {
-                      size: gigabytes(model.downloadBytes),
-                    }),
+                  model.downloadBytes != null && size(model.downloadBytes),
                 ]
                   .filter(Boolean)
                   .join(" · ")
               : held
-                ? t("heldWhy", { reasons: reasonsText(models, true) })
-                : (models.state === "checked" && !models.eligible) ||
-                    models.state === "unavailable"
-                  ? unavailableText
-                  : "";
-        $("plan-why").hidden =
-          !local.available || customizing || !$("plan-why").textContent;
-        $("plan-line").hidden = !local.available;
-        $("welcome-eyebrow").hidden = !local.available;
-        const shownLocationPath =
-          location.error && location.rejectedPath
-            ? location.rejectedPath
-            : location.path;
-        $("install-location").hidden = !local.available;
-        $("install-location").dataset.warn = String(!!locationWarning);
-        $("location-path").textContent = shortPath(shownLocationPath);
-        $("location-path").title = shownLocationPath;
-        $("location-sub").textContent = locationWarning;
-        $("location-sub").title = locationWarning;
-        $("location-sub").hidden = !locationWarning;
-        $("location-sub").dataset.warn = String(!!locationWarning);
+                ? heldLine(models)
+                : t("localNotAvailable");
+        $("source-sub-meta").textContent = signedIn.length
+          ? t("subMetaSignedIn", {
+              runtimes: signedIn.map((runtime) => RUNTIMES[runtime]).join(", "),
+            })
+          : t("subMetaNone");
+        for (const card of document.querySelectorAll(".source-card")) {
+          const value = card.dataset.value;
+          const off = value === "local" && !localUsable;
+          card.disabled = busy || off;
+          card.setAttribute("aria-checked", String(source === value));
+          // One card takes Tab; the arrows move between them.
+          card.tabIndex = source === value ? 0 : -1;
+          card.querySelector(".source-rec").hidden =
+            !known || off || value !== recommended;
+        }
+        if (localCard.disabled && source === "local" && !busy)
+          localCard.tabIndex = 0;
+
+        // Why the local model cannot be picked, under the cards.
+        const unavailableText = known
+          ? models.state === "checked"
+            ? reasonsText(models, false)
+            : t("cannotCheck")
+          : "";
+        $("plan-why").textContent = !choosing
+          ? ""
+          : behind || model
+            ? ""
+            : held
+              ? t("heldWhy", { reasons: reasonsText(models, true) })
+              : unavailableText;
+        $("plan-why").hidden = !$("plan-why").textContent;
+        renderDriver(local, models, busy, choosing && !behind);
+
+        // The featured model, on the first step when it is the one this
+        // computer would run, and with the local model's settings.
+        const shown = model || heldModel;
+        const featured = Boolean(shown?.featuredInkling);
+        const featuredPick = Boolean(model?.featuredInkling) && !behind;
+        $("featured-spotlight").hidden =
+          !choosing || !featuredPick || recommended !== "local";
+        $("featured-spotlight").dataset.recommended = "true";
+        $("featured-spotlight-note").textContent = t("featuredModelSelected");
+        $("featured-spotlight-link").textContent = t("learnMoreLink");
+
+        // Step 2: the chosen source.
+        $("local-row").hidden = source !== "local";
+        $("subscription-row").hidden = source !== "subscription";
+        $("byok-row").hidden = source !== "byok";
+        if (shown) {
+          $("local-model-name").textContent = shown.name;
+          $("local-model-needs").textContent = [
+            shown.downloadBytes != null &&
+              t("downloadAmount", { size: gigabytes(shown.downloadBytes) }),
+            shown.diskBytes != null &&
+              t("diskAmount", { size: gigabytes(shown.diskBytes) }),
+            // The whole stack's memory, so more than the model's own on
+            // the Local models page.
+            shown.memoryBytes != null &&
+              t("memoryWithServices", { size: gigabytes(shown.memoryBytes) }),
+          ]
+            .filter(Boolean)
+            .join(" · ");
+        } else {
+          $("local-model-name").textContent = t(
+            held ? "localOnHold" : "localNotAvailable",
+          );
+          $("local-model-needs").textContent = held
+            ? reasonsText(models, true)
+            : unavailableText;
+        }
+        $("local-wait").textContent = held ? heldLine(models) : t("localWait");
+        $("local-model-featured").hidden = !featured;
+        $("local-spotlight").hidden = !shown;
+        $("local-spotlight").dataset.recommended = String(featured);
+        $("local-spotlight-text").textContent = t(
+          featured ? "featuredModelSpecs" : "featuredModelCustomizeNote",
+        );
+        $("local-spotlight-link").textContent = t(
+          featured ? "learnMoreLink" : "thinkingMachinesLink",
+        );
+        renderRuntimes(rows, busy, signedIn);
+        mainByok.sync(busy);
+        // The local model can come along in the background, off unless
+        // chosen, on a computer that runs it.
+        const offerBackground =
+          source !== "local" && Boolean(model) && !held && !behind;
+        if (!offerBackground) background = false;
+        $("background-row").hidden = !offerBackground;
+        $("background-model").checked = background;
+        $("background-model").disabled = busy;
+        $("background-model-detail").textContent = model
+          ? t("backgroundDetail", {
+              model: model.name,
+              size: size(model.downloadBytes ?? 0),
+            })
+          : "";
+        $("credentials-row").hidden = !credentials;
+        if (credentials)
+          $("credentials-sub").textContent = t(
+            credentials.generated
+              ? "credentialsGenerated"
+              : "credentialsCustom",
+            { email: credentials.email },
+          );
+        $("credentials-edit").disabled = busy;
+        renderCredentials();
+
+        // Location and app keys, behind More options.
+        const location = local.location;
+        $("location-sub").textContent =
+          location.error || shortPath(location.path);
+        $("location-sub").title = location.error || location.path;
+        $("location-sub").dataset.warn = String(!!location.error);
         $("location-reset").hidden = !location.custom && !location.error;
         for (const input of document.querySelectorAll("[data-key]")) {
           const provider = input.dataset.key;
@@ -4442,46 +4998,69 @@
           remove.textContent = t(removing ? "keep" : "remove");
         }
         $("keys-note").textContent = t("keysNote");
-        const shown = model || heldModel;
-        const inklingRecommended = Boolean(
-          recommended.localModel && model?.featuredInkling,
+
+        // The button and what it does. Continue opens the settings; Install
+        // waits for what the source needs.
+        $("source-continue").hidden = !choosing;
+        $("source-continue").disabled =
+          busy || (source === "local" && !localUsable);
+        $("local-install").hidden = !settings;
+        $("get-started").hidden = available;
+        const ready =
+          source === "local"
+            ? localUsable && !held
+            : source === "byok"
+              ? mainByok.complete()
+              : signedIn.length > 0;
+        $("local-install").disabled =
+          busy || !ready || Boolean(working) || Boolean(location.error);
+        const label = esc(t(behind ? "continueSetup" : "install"));
+        if ($("local-install-label").innerHTML !== label)
+          $("local-install-label").innerHTML = label;
+        const also =
+          background && model
+            ? t("planAlsoModel", { model: model.name })
+            : behind
+              ? t("planModelKeeps")
+              : "";
+        const order = ["codex", "claude"].filter((runtime) =>
+          signedIn.includes(runtime),
         );
-        const shownIsInkling = Boolean(shown?.featuredInkling);
-        $("plan-featured-badge").hidden =
-          !local.available ||
-          customizing ||
-          checking ||
-          !following ||
-          !inklingRecommended;
-        $("featured-spotlight").hidden =
-          !local.available || customizing || !inklingRecommended;
-        $("featured-spotlight").dataset.recommended =
-          String(inklingRecommended);
-        $("featured-spotlight-note").textContent = t("featuredModelSelected");
-        $("featured-spotlight-link").textContent = t("learnMoreLink");
-        $("local-model-featured").hidden = !shownIsInkling;
-        $("local-spotlight").dataset.recommended = String(shownIsInkling);
-        $("local-spotlight-text").textContent = t(
-          shownIsInkling ? "featuredModelSpecs" : "featuredModelCustomizeNote",
-        );
-        $("local-spotlight-link").textContent = t(
-          shownIsInkling ? "learnMoreLink" : "thinkingMachinesLink",
-        );
-        $("source-sub").textContent =
-          recommended.source === "local"
-            ? t("recommendedLocal")
-            : known
-              ? t("recommendedSubscription", {
-                  runtime: RUNTIMES[recommended.runtime],
-                })
-              : t("chooseSource");
-        $("local-row").hidden = plan.source !== "local";
-        $("subscription-row").hidden = plan.source !== "subscription";
-        $("byok-row").hidden = plan.source !== "byok";
-        // Once checked, the card always shows: the model, or why there is
-        // none, disabled.
-        const settled =
-          models.state === "checked" || models.state === "unavailable";
+        $("plan-line").hidden = !available || checkingStage;
+        $("plan-line").textContent = !settings
+          ? t("planNothingYet")
+          : [
+              source === "local"
+                ? model
+                  ? t("planLocal", {
+                      model: model.name,
+                      size: size(model.downloadBytes ?? 0),
+                    })
+                  : ""
+                : source === "byok"
+                  ? t("planByok")
+                  : working
+                    ? t("planWaitRuntime", {
+                        runtime: RUNTIMES[working.runtime],
+                      })
+                    : order.length === 2
+                      ? t("planBoth", {
+                          first: RUNTIMES[order[0]],
+                          second: RUNTIMES[order[1]],
+                        })
+                      : order.length
+                        ? t("planRuntime", { runtime: RUNTIMES[order[0]] })
+                        : t("planSignInFirst"),
+              source !== "local" && also,
+            ]
+              .filter(Boolean)
+              .join(" ");
+        $("team").hidden = !available || settings || checkingStage;
+      };
+
+      // NVIDIA driver help for a local model held by the driver.
+      const renderDriver = (local, models, busy, visible) => {
+        const held = models.state === "checked" && !!models.blockedNow;
         const canRecheck =
           held ||
           (models.state === "checked" &&
@@ -4490,10 +5069,10 @@
               RECHECKABLE_REASONS.has(reason.code),
             ));
         const showDriverActions =
+          visible &&
           models.state === "checked" &&
           !models.eligible &&
-          cudaDriverHeld(models) &&
-          local.available;
+          cudaDriverHeld(models);
         const nvidiaApp =
           state.platform === "win32"
             ? (state.driverUpdate?.nvidiaApp ?? "none")
@@ -4545,7 +5124,6 @@
                   : "driverInstallFailed",
           );
         }
-        $("local-model").hidden = !shown && !settled;
         $("local-driver-status").hidden =
           !showDriverActions || !driverStatusText;
         $("local-driver-status").textContent = driverStatusText;
@@ -4563,94 +5141,168 @@
         );
         $("local-driver-guide").hidden = !showDriverActions;
         $("local-driver-guide").disabled = busy;
-        $("local-recheck").hidden = !canRecheck || !local.available;
+        $("local-recheck").hidden = !visible || !canRecheck;
         $("local-recheck").disabled = busy || driverInstalling;
         $("local-plan-actions").hidden =
           $("local-recheck").hidden && !showDriverActions;
-        if (shown) {
-          $("local-sub").textContent = held
-            ? heldLine(models)
-            : [
-                t(recommended.localModel ? "localRecommended" : "localRuns"),
-                models.gpu,
-              ]
-                .filter(Boolean)
-                .join(" · ");
-          $("local-model-name").textContent = shown.name;
-          $("local-model-needs").textContent = [
-            shown.downloadBytes != null &&
-              t("downloadAmount", { size: gigabytes(shown.downloadBytes) }),
-            shown.diskBytes != null &&
-              t("diskAmount", { size: gigabytes(shown.diskBytes) }),
-            // The whole stack's memory, so more than the model's own on
-            // the Local models page.
-            shown.memoryBytes != null &&
-              t("memoryWithServices", { size: gigabytes(shown.memoryBytes) }),
-          ]
-            .filter(Boolean)
-            .join(" · ");
-          $("local-model").setAttribute("aria-checked", String(!!model));
-          $("local-model").disabled = busy || !model;
-        } else if (held) {
-          $("local-sub").textContent = heldLine(models);
-          $("local-model-name").textContent = t("localOnHold");
-          $("local-model-needs").textContent = reasonsText(models, true);
-          $("local-model").setAttribute("aria-checked", "false");
-          $("local-model").disabled = true;
-        } else if (settled) {
-          $("local-sub").textContent = t("localRuns");
-          $("local-model-name").textContent = t("localNotAvailable");
-          $("local-model-needs").textContent = unavailableText;
-          $("local-model").setAttribute("aria-checked", "false");
-          $("local-model").disabled = true;
-        } else {
-          $("local-sub").textContent = t("checkingComputer");
-        }
-        const subKnown =
-          recommended.source === "subscription" &&
-          recommended.runtime !== "recommended";
-        $("runtime-sub").textContent = subKnown
-          ? t("recommendedRuntime", { runtime: RUNTIMES[recommended.runtime] })
-          : t("subscriptionHint");
-        for (const seg of document.querySelectorAll("[data-plan]"))
-          for (const option of seg.querySelectorAll("button")) {
-            const field = seg.dataset.plan;
-            const value = option.dataset.value;
-            if (field === "source") {
-              option.setAttribute(
-                "aria-checked",
-                String(plan.source === value),
-              );
-              option.dataset.recommended = String(
-                known && value === recommended.source,
-              );
-              option.disabled = busy;
-            } else {
-              const subPick =
-                plan.runtime === "pi"
-                  ? subKnown
-                    ? recommended.runtime
-                    : "recommended"
-                  : plan.runtime;
-              option.setAttribute("aria-checked", String(subPick === value));
-              option.hidden = subKnown && value === "recommended";
-              option.dataset.recommended = String(
-                subKnown && value === recommended.runtime,
-              );
-              option.disabled = busy;
-            }
-          }
-        for (const option of document.querySelectorAll(
-          '[data-byok="runtime"] button',
-        )) {
-          option.setAttribute(
-            "aria-checked",
-            String(byokRuntime === option.dataset.value),
+      };
+
+      // Each runtime row: what it is on this computer, and the one thing
+      // left to do on the right.
+      const PLAN_OF = { claude: "planClaude", codex: "planCodex" };
+      const renderRuntimes = (rows, busy, signedIn) => {
+        // With both signed in, Codex is the default; with one, that one.
+        const primary = signedIn.includes("codex") ? "codex" : signedIn[0];
+        for (const el of document.querySelectorAll(".choice.runtime")) {
+          const runtime = el.dataset.runtime;
+          const pi = runtime === "pi";
+          const row = rows[runtime] ?? {
+            runtime,
+            installed: false,
+            signedIn: false,
+            state: "checking",
+          };
+          const plan = pi ? "" : t(PLAN_OF[runtime]);
+          const idle = row.state === "idle";
+          const installing = row.state === "installing";
+          const signing = row.state === "signing_in";
+          const done = pi ? row.installed : row.signedIn;
+          const version = row.version ? " · " + row.version : "";
+          const sub = el.querySelector("[data-runtime-sub]");
+          sub.dataset.warn = String(Boolean(row.failed) && idle);
+          sub.textContent =
+            row.state === "checking"
+              ? t("rtChecking")
+              : installing
+                ? t("rtInstalling")
+                : signing
+                  ? t("rtSigningIn", { plan })
+                  : row.failed === "install"
+                    ? row.message || t("rtInstallFailed")
+                    : row.failed === "signin"
+                      ? row.message || t("signInFailed")
+                      : pi
+                        ? row.installed
+                          ? t("rtPiInstalled") + version
+                          : t("rtPiNotInstalled")
+                        : row.signedIn
+                          ? t("rtSignedInWith", { plan }) + version
+                          : row.installed
+                            ? t("rtSignInWith", { plan }) + version
+                            : t("rtNotInstalled", { plan });
+          sub.title = sub.textContent;
+          const rec = el.querySelector(".runtime-rec");
+          if (rec) rec.hidden = runtime !== primary || signedIn.length < 2;
+          const install = el.querySelector("[data-runtime-install]");
+          install.hidden = !idle || row.installed;
+          install.textContent = t(
+            row.failed === "install" ? "tryAgain" : "install",
           );
-          option.disabled = busy;
+          install.disabled = busy;
+          const signin = el.querySelector("[data-runtime-signin]");
+          if (signin) {
+            signin.hidden = !idle || !row.installed || row.signedIn;
+            signin.textContent = t(
+              row.failed === "signin" ? "tryAgain" : "signIn",
+            );
+            signin.disabled = busy;
+          }
+          const progress = el.querySelector(".runtime-progress");
+          progress.hidden = !installing;
+          if (installing) {
+            const { completed = 0, total } = row.install ?? {};
+            const percent = total
+              ? Math.min(100, Math.round((completed / total) * 100))
+              : undefined;
+            progress.setAttribute(
+              "aria-label",
+              t("installingRuntime", { runtime: RUNTIMES[runtime] }),
+            );
+            if (percent === undefined)
+              progress.removeAttribute("aria-valuenow");
+            else progress.setAttribute("aria-valuenow", String(percent));
+            progress.querySelector(".fill").style.width =
+              Math.max(4, percent ?? 30) + "%";
+            progress.querySelector(".pct").textContent =
+              percent === undefined ? size(completed) : percent + "%";
+          }
+          el.querySelector(".runtime-wait")?.toggleAttribute(
+            "hidden",
+            !signing,
+          );
+          const cancel = el.querySelector("[data-runtime-cancel]");
+          cancel.hidden = !installing && !signing;
+          cancel.disabled = busy;
+          const badge = el.querySelector("[data-runtime-done]");
+          badge.hidden = !idle || !done;
+          const badgeHtml = check + esc(t(pi ? "installedBadge" : "signedIn"));
+          if (badge.innerHTML !== badgeHtml) badge.innerHTML = badgeHtml;
+          // The link and code for a browser that did not open, and a
+          // pasted code for Claude Code's page.
+          const extra = el.querySelector("[data-runtime-extra]");
+          if (!extra) continue;
+          const signIn = signing ? (row.signIn ?? {}) : {};
+          extra.hidden = !signing || !signIn.url;
+          extra.querySelector("[data-runtime-code]").hidden =
+            !signIn.deviceCode;
+          extra.querySelector("[data-runtime-code-value]").textContent =
+            signIn.deviceCode ?? "";
+          const copiedHere = runtimeCopied?.runtime === runtime;
+          for (const copy of extra.querySelectorAll("[data-runtime-copy]")) {
+            const what = copy.dataset.runtimeCopy;
+            if (what === "code") copy.hidden = !signIn.deviceCode;
+            copy.textContent = t(
+              copiedHere && runtimeCopied.what === what
+                ? "copied"
+                : what === "url"
+                  ? "copyLink"
+                  : "copyCode",
+            );
+          }
+          const paste = extra.querySelector("[data-runtime-paste]");
+          if (paste) paste.hidden = !signIn.acceptsCode;
+          const device = extra.querySelector("[data-runtime-device]");
+          if (device) device.hidden = Boolean(signIn.deviceCode);
         }
-        mainByok.sync(busy);
-        requestAnimationFrame(placeKnobs);
+      };
+
+      // The sign-in email and password: shown in a sheet over step 2, where
+      // they can be changed; checked the way the server checks them.
+      const renderCredentials = () => {
+        const sheet = $("credentials-sheet");
+        sheet.hidden = !editing;
+        if (!editing) return;
+        const problem = credentialsProblem(editing);
+        const shownProblem = editing.tried ? problem : "";
+        $("credentials-error").textContent = shownProblem
+          ? t(shownProblem)
+          : "";
+        $("credentials-email").setAttribute(
+          "aria-invalid",
+          String(editing.tried && EMAIL_PROBLEMS.has(problem)),
+        );
+        $("credentials-password").setAttribute(
+          "aria-invalid",
+          String(editing.tried && PASSWORD_PROBLEMS.has(problem)),
+        );
+        $("credentials-confirm").setAttribute(
+          "aria-invalid",
+          String(editing.tried && problem === "passwordMismatch"),
+        );
+        $("credentials-password").type = editing.visible ? "text" : "password";
+        $("credentials-confirm").type = editing.visible ? "text" : "password";
+        $("credentials-show").textContent = t(
+          editing.visible ? "hide" : "show",
+        );
+        $("credentials-show").setAttribute(
+          "aria-label",
+          t(editing.visible ? "hidePassword" : "showPassword"),
+        );
+      };
+
+      const renderLocal = (busy) => {
+        const local = state.localServer;
+        renderWelcome(local, busy);
 
         // Installing. A restart after a reboot shows here as starting.
         const failed = local.phase === "failed";
@@ -4662,9 +5314,17 @@
               ? "startingLinger"
               : "installingTitle",
         );
+        const modelOn = local.backgroundModel?.state === "downloading";
         $("installing-plan").textContent = failed
           ? t("dataKept")
-          : t("takesMinutes");
+          : t(modelOn ? "takesMinutesModel" : "takesMinutes");
+        // The local model's wait offers another source meanwhile; the model
+        // keeps downloading.
+        $("local-model-leave").hidden = !(
+          local.source === "local" &&
+          local.phase === "installing" &&
+          local.transfer
+        );
         const section = document.querySelector('[data-step="installing"]');
         const steps = ALL_STEPS.filter(([id]) => local.steps.includes(id));
         section.dataset.failed = String(failed);
@@ -4770,7 +5430,11 @@
             $("installing-actions").scrollIntoView({ block: "nearest" }),
           );
         }
-        $("ready-lead").textContent = t("readyLead");
+        $("ready-lead").textContent = t(
+          local.backgroundModel?.state === "downloading"
+            ? "readyLeadModel"
+            : "readyLead",
+        );
         renderAccount(local.account);
         $("legacy-note").hidden = !local.legacyBackup;
         $("legacy-note").textContent = local.legacyBackup
@@ -4778,8 +5442,9 @@
           : "";
       };
 
-      // The password stays masked until Show; the main process copies it.
-      let copied = false;
+      // The password stays masked until Show; the main process copies it
+      // and the email.
+      let copied;
       const renderAccount = (account) => {
         $("account").hidden = !account;
         if (!account) return;
@@ -4797,8 +5462,14 @@
           "aria-label",
           t(account.password ? "hidePassword" : "showPassword"),
         );
-        $("account-copy").textContent = t(copied ? "copied" : "copy");
+        $("account-copy").textContent = t(
+          copied === "password" ? "copied" : "copy",
+        );
         $("account-copy").setAttribute("aria-label", t("copyPassword"));
+        $("account-copy-email").textContent = t(
+          copied === "email" ? "copied" : "copy",
+        );
+        $("account-copy-email").setAttribute("aria-label", t("copyEmail"));
       };
 
       const render = () => {
@@ -4810,9 +5481,6 @@
             el.dataset.tray +
               (state.platform === "darwin" ? "MenuBar" : "Tray"),
           );
-        const at = ORDER.indexOf(step);
-        $("step-label").textContent =
-          at >= 0 ? t("stepOf", { step: at + 1, total: ORDER.length }) : "";
         const busy = pending !== null;
         for (const el of document.querySelectorAll("main button"))
           el.disabled = busy && el.dataset.go === undefined;
@@ -4820,6 +5488,17 @@
         if (pending === "signin.open") $("signin").disabled = false;
 
         renderLocal(busy);
+        const at = ORDER.indexOf(step);
+        // Setting up this computer takes two steps: a source, then its
+        // settings.
+        $("step-label").textContent =
+          at >= 0
+            ? t("stepOf", { step: at + 1, total: ORDER.length })
+            : step === "welcome" &&
+                state.localServer.available &&
+                (stage === "choose" || stage === "settings")
+              ? t("stepOf", { step: stage === "choose" ? 1 : 2, total: 2 })
+              : "";
 
         $("signin-host").textContent = host(state.serverUrl);
         $("signin-badge").dataset.ok = String(state.signedIn);
@@ -4869,12 +5548,6 @@
             return chip;
           }),
         );
-        syncWelcomeScroll();
-        placeWelcomePopups();
-        requestAnimationFrame(() => {
-          syncWelcomeScroll();
-          placeWelcomePopups();
-        });
       };
 
       // Send Diagnostics, while a diagnostics server is set up.
@@ -4992,23 +5665,34 @@
       });
       // The install runs on its own; this window follows its progress.
       const install = async () => {
-        const byokPayload =
-          plan.source === "byok" ? mainByok.config() : undefined;
-        const runtime =
-          plan.source === "local"
-            ? "local"
-            : plan.source === "byok"
-              ? byokRuntime
-              : plan.runtime === "pi"
-                ? "recommended"
-                : plan.runtime;
+        const local = state.localServer;
+        // Try Again installs what failed, even after the window reopened.
+        const chosen =
+          local.phase === "failed" && local.source ? local.source : source;
+        const byokPayload = chosen === "byok" ? mainByok.config() : undefined;
         const ok = await run(
           {
             op: "local.start",
-            // The installer sets up Pi with the local model for "local".
-            runtime,
+            // "local" sets up Pi with the local model; "subscription" the
+            // runtimes signed in above; BYOK always runs on Pi.
+            runtime:
+              chosen === "local"
+                ? "local"
+                : chosen === "byok"
+                  ? "pi"
+                  : "subscription",
             ...(byokPayload ? { byok: byokPayload } : {}),
-            ...(customizing && Object.keys(keys).length ? { keys } : {}),
+            ...(Object.keys(keys).length ? { keys } : {}),
+            ...(background && chosen !== "local" ? { background: true } : {}),
+            // Sent again on Try Again until the installation has it.
+            ...(credentials && local.ownerAccount === "new"
+              ? {
+                  account: {
+                    email: credentials.email,
+                    password: credentials.password,
+                  },
+                }
+              : {}),
           },
           "local-error",
         );
@@ -5177,59 +5861,223 @@
           render();
         });
       $("local-customize").addEventListener("click", () => {
-        customizing = !customizing;
-        if (!customizing) {
-          picked = false;
-          pickedAutoBeforeCheck = false;
-          byokRuntime = "claude";
-          mainByok.reset();
-          clearKeys();
-        }
+        options = !options;
         render();
       });
-      for (const seg of document.querySelectorAll("[data-plan]"))
-        for (const option of seg.querySelectorAll("button"))
-          option.addEventListener("click", () => {
-            picked = true;
-            const field = seg.dataset.plan;
-            const value = option.dataset.value;
-            pickedAutoBeforeCheck =
-              field === "runtime" &&
-              value === "recommended" &&
-              state.localServer.localModels.state === "checking";
-            if (field === "source") {
-              const rec = defaults();
-              plan = {
-                ...plan,
-                source: value,
-                runtime:
-                  value === "local"
-                    ? "pi"
-                    : plan.runtime === "pi"
-                      ? rec.source === "subscription"
-                        ? rec.runtime
-                        : "recommended"
-                      : plan.runtime,
-                localModel: value === "local",
-              };
-            } else {
-              plan = {
-                ...plan,
-                source: "subscription",
-                runtime: value,
-                localModel: false,
-              };
-            }
-            render();
+      // The source cards: a click picks, a double click or Enter goes on,
+      // and the arrows move between them.
+      const cards = [...document.querySelectorAll(".source-card")];
+      const pick = (value) => {
+        picked = true;
+        source = value;
+        render();
+      };
+      for (const card of cards) {
+        card.addEventListener("click", () => {
+          if (!card.disabled) pick(card.dataset.value);
+        });
+        card.addEventListener("dblclick", () => {
+          if (!card.disabled && !$("source-continue").disabled)
+            setStage("settings", "forward");
+        });
+        card.addEventListener("keydown", (event) => {
+          const forward =
+            event.key === "ArrowRight" || event.key === "ArrowDown";
+          const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (!card.disabled) pick(card.dataset.value);
+            if (!$("source-continue").disabled) setStage("settings", "forward");
+            return;
+          }
+          if (!forward && !backward) return;
+          event.preventDefault();
+          const open = cards.filter((other) => !other.disabled);
+          const at = open.indexOf(card);
+          const next =
+            open[(at + (forward ? 1 : -1) + open.length) % open.length];
+          if (!next) return;
+          pick(next.dataset.value);
+          next.focus();
+        });
+      }
+      $("source-continue").addEventListener("click", () =>
+        setStage("settings", "forward"),
+      );
+      $("source-back").addEventListener("click", () => {
+        options = false;
+        setStage("choose", "back");
+      });
+      $("checking-skip").addEventListener("click", () =>
+        setStage("choose", "reveal"),
+      );
+      document.addEventListener("keydown", (event) => {
+        if (
+          event.key !== "Escape" ||
+          step !== "welcome" ||
+          stage !== "settings" ||
+          editing ||
+          combos.some((combo) => combo.open)
+        )
+          return;
+        options = false;
+        setStage("choose", "back");
+      });
+      $("background-model").addEventListener("change", () => {
+        background = $("background-model").checked;
+        render();
+      });
+
+      // The runtime rows. Each command returns at once; the row follows
+      // the install or sign-in through onState.
+      const runtimeRun = (command) => run(command, "local-error");
+      for (const row of document.querySelectorAll(".choice.runtime")) {
+        const runtime = row.dataset.runtime;
+        row
+          .querySelector("[data-runtime-install]")
+          .addEventListener("click", () =>
+            runtimeRun({ op: "local.runtime.install", runtime }),
+          );
+        row
+          .querySelector("[data-runtime-signin]")
+          ?.addEventListener("click", () =>
+            runtimeRun({ op: "local.runtime.signin", runtime }),
+          );
+        row
+          .querySelector("[data-runtime-cancel]")
+          .addEventListener("click", () =>
+            runtimeRun({ op: "local.runtime.cancel", runtime }),
+          );
+        row
+          .querySelector("[data-runtime-open]")
+          ?.addEventListener("click", () => {
+            // On Linux opening waits for xdg-open, so it skips run(); a
+            // browser that fails to open comes back as browserFailed.
+            setup.run({ op: "local.runtime.open", runtime }).catch((error) => {
+              $("local-error").textContent = ipcMessage(error);
+            });
           });
-      for (const option of document.querySelectorAll(
-        '[data-byok="runtime"] button',
-      ))
-        option.addEventListener("click", () => {
-          picked = true;
-          byokRuntime = option.dataset.value;
-          mainByok.runtimeChanged();
+        for (const copy of row.querySelectorAll("[data-runtime-copy]"))
+          copy.addEventListener("click", async () => {
+            const what = copy.dataset.runtimeCopy;
+            if (
+              !(await runtimeRun({ op: "local.runtime.copy", runtime, what }))
+            )
+              return;
+            runtimeCopied = { runtime, what };
+            render();
+            setTimeout(() => {
+              if (
+                runtimeCopied?.runtime !== runtime ||
+                runtimeCopied.what !== what
+              )
+                return;
+              runtimeCopied = undefined;
+              render();
+            }, 1500);
+          });
+        row
+          .querySelector("[data-runtime-device]")
+          ?.addEventListener("click", () =>
+            runtimeRun({ op: "local.runtime.signin", runtime, device: true }),
+          );
+        row
+          .querySelector("[data-runtime-paste]")
+          ?.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const input = row.querySelector("[data-runtime-input]");
+            const code = input.value.trim();
+            if (!code) return;
+            input.value = "";
+            runtimeRun({ op: "local.runtime.code", runtime, code });
+          });
+      }
+
+      // The sign-in sheet edits a draft; Done keeps it, Cancel drops it.
+      const closeCredentials = () => {
+        editing = null;
+        render();
+        $("credentials-edit").focus();
+      };
+      $("credentials-edit").addEventListener("click", () => {
+        if (!credentials) return;
+        editing = {
+          email: credentials.email,
+          password: credentials.password,
+          confirm: credentials.password,
+          visible: false,
+          tried: false,
+        };
+        $("credentials-email").value = editing.email;
+        $("credentials-password").value = editing.password;
+        $("credentials-confirm").value = editing.confirm;
+        render();
+        $("credentials-email").focus();
+      });
+      for (const [id, field] of [
+        ["credentials-email", "email"],
+        ["credentials-password", "password"],
+        ["credentials-confirm", "confirm"],
+      ])
+        $(id).addEventListener("input", () => {
+          if (!editing) return;
+          editing = { ...editing, [field]: $(id).value };
           render();
+        });
+      $("credentials-show").addEventListener("click", () => {
+        editing = { ...editing, visible: !editing.visible };
+        render();
+      });
+      $("credentials-generate").addEventListener("click", () => {
+        const password = generatePassword();
+        editing = {
+          ...editing,
+          password,
+          confirm: password,
+          visible: true,
+          generated: password,
+        };
+        $("credentials-password").value = password;
+        $("credentials-confirm").value = password;
+        render();
+      });
+      $("credentials-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!editing) return;
+        if (credentialsProblem(editing)) {
+          editing = { ...editing, tried: true };
+          render();
+          return;
+        }
+        const email = editing.email.trim().toLowerCase();
+        // Generated while editing, or the generated one kept as it was.
+        credentials = {
+          email,
+          password: editing.password,
+          generated:
+            editing.password === editing.generated ||
+            (credentials.generated &&
+              editing.password === credentials.password),
+        };
+        closeCredentials();
+      });
+      $("credentials-cancel").addEventListener("click", closeCredentials);
+      $("credentials-sheet").addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        closeCredentials();
+      });
+
+      // From the local model's wait: install another source instead while
+      // the model downloads on.
+      for (const leave of document.querySelectorAll("[data-leave]"))
+        leave.addEventListener("click", async () => {
+          if (!(await run({ op: "local.leave-local" }, "leave-error"))) return;
+          picked = true;
+          source = leave.dataset.leave;
+          options = false;
+          show("welcome");
+          setStage("settings", "forward");
         });
       $("location-change").addEventListener("click", () =>
         run({ op: "local.location.pick" }),
@@ -5302,12 +6150,6 @@
         "click",
         openFeaturedAnnouncement,
       );
-      $("local-model").addEventListener("click", () => {
-        if ($("local-model").disabled) return;
-        picked = true;
-        plan = { ...plan, source: "local", runtime: "pi", localModel: true };
-        render();
-      });
       $("open").addEventListener("click", () => run({ op: "finish" }));
       $("account-show").addEventListener("click", () =>
         run({
@@ -5315,15 +6157,20 @@
           on: !state.localServer.account?.password,
         }),
       );
-      $("account-copy").addEventListener("click", async () => {
-        if (!(await run({ op: "local.account.copy" }))) return;
-        copied = true;
-        render();
-        setTimeout(() => {
-          copied = false;
+      for (const [id, what] of [
+        ["account-copy", "password"],
+        ["account-copy-email", "email"],
+      ])
+        $(id).addEventListener("click", async () => {
+          if (!(await run({ op: "local.account.copy", what }))) return;
+          copied = what;
           render();
-        }, 1500);
-      });
+          setTimeout(() => {
+            if (copied !== what) return;
+            copied = undefined;
+            render();
+          }, 1500);
+        });
       $("account-reveal").addEventListener("click", () =>
         run({ op: "local.account.reveal" }),
       );
@@ -5397,38 +6244,6 @@
                 ? "connect"
                 : "welcome",
         );
-      });
-      $("byok-tip-text")
-        ?.closest(".byok-tip-btn")
-        ?.addEventListener("mouseenter", placeWelcomeTooltip);
-      $("byok-tip-text")
-        ?.closest(".byok-tip-btn")
-        ?.addEventListener("focus", placeWelcomeTooltip);
-      $("welcome-scroll").addEventListener("scroll", placeWelcomePopups, {
-        passive: true,
-      });
-      $("optional-keys").addEventListener("toggle", () => {
-        syncWelcomeScroll();
-        placeWelcomePopups();
-        requestAnimationFrame(() => {
-          syncWelcomeScroll();
-          placeWelcomePopups();
-        });
-      });
-      $("local-options").addEventListener("transitionend", () => {
-        syncWelcomeScroll();
-        placeWelcomePopups();
-      });
-      document
-        .querySelector(".scene")
-        ?.addEventListener("transitionend", () => {
-          syncWelcomeScroll();
-          placeWelcomePopups();
-        });
-      addEventListener("resize", () => {
-        placeKnobs();
-        syncWelcomeScroll();
-        placeWelcomePopups();
       });
     </script>
   </body>

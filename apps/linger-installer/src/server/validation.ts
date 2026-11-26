@@ -78,6 +78,7 @@ export function validateInput(value: unknown): Input {
     "localModelsApproval",
     "localModelsReplan",
     "setupChoice",
+    "linkedRuntimes",
     "shareGpu",
     "instance",
     "port",
@@ -99,6 +100,18 @@ export function validateInput(value: unknown): Input {
     )
   )
     throw new Error("Invalid setup choice");
+  if (input.linkedRuntimes !== undefined) {
+    const linked = input.linkedRuntimes;
+    if (
+      !Array.isArray(linked) ||
+      linked.length > 2 ||
+      new Set(linked).size !== linked.length ||
+      linked.some((entry) => entry !== "codex" && entry !== "claude")
+    )
+      throw new Error("Invalid linked runtimes");
+    if (input.setupChoice !== "codex" && input.setupChoice !== "claude")
+      throw new Error("Linked runtimes need a codex or claude setup choice");
+  }
   if (
     input.setupChoice &&
     input.setupChoice !== "local-models" &&

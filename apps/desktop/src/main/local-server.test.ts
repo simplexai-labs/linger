@@ -68,6 +68,7 @@ import {
   type LocalServerIdentity,
   type LocalServerOptions,
 } from "./local-server.js";
+import type { SetupCommandRunner } from "./setup-sources.js";
 import { localIdentityProof } from "@linger/local-installation/account";
 import * as fsRetry from "@linger/local-installation/fs-retry";
 import { ensureLocalmodelsTool } from "@linger/local-installation/localmodels-tool";
@@ -288,7 +289,10 @@ if (args.includes("--prefetch-bifrost")) {
     ...(lowMemory ? { basis: "capacity", memory: { ramAvailableBytes: 2899102924, ramRequiredBytes: 13689304433 } } : {}),
   };
   const finalEstimate = oldDriver || portBlocked ? { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null } : estimate;
-  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate }, recommendation }) + "\n");
+  // The model library's name for the plan, when a test asks for one.
+  const libraryFile = path.join(target, "library-model");
+  const libraryModel = fs.existsSync(libraryFile) ? fs.readFileSync(libraryFile, "utf8").trim() : undefined;
+  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate, ...(libraryModel ? { libraryModel } : {}) }, recommendation }) + "\n");
   process.exit(0);
 } else {
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
@@ -9827,5 +9831,250 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
     } finally {
       await fSignIn.host.stop("quit");
     }
+  });
+});
+
+// The installer's headless setup commands, answered from `answers` by their
+// first argument; each call is kept with the input it was sent.
+const setupCommands = (
+  answers: Record<string, Record<string, unknown>[]> = {},
+  onCall: (args: readonly string[]) => void = () => undefined,
+) => {
+  const calls: { args: string[]; input?: string }[] = [];
+  const run: SetupCommandRunner = async (args, options) => {
+    calls.push({
+      args: [...args],
+      ...(options.input !== undefined ? { input: options.input } : {}),
+    });
+    onCall(args);
+    for (const line of answers[args[0]!] ?? []) options.onLine(line);
+    return {
+      write: () => undefined,
+      stop: () => undefined,
+      done: Promise.resolve(0),
+    };
+  };
+  return { run, calls };
+};
+
+const SIGNED_IN_BOTH = {
+  "--runtime-status": [
+    {
+      runtimes: [
+        { runtime: "codex", installed: true, signedIn: true },
+        { runtime: "claude", installed: true, signedIn: true },
+        { runtime: "pi", installed: false, signedIn: false },
+      ],
+    },
+  ],
+  "--owner-account": [{ written: true }],
+};
+
+describe("LocalServerModule setup sources", () => {
+  it("installs a subscription with Codex by default, links Claude Code, and writes the chosen sign-in first", async () => {
+    let home = "";
+    let launchedBeforeAccount: boolean | undefined;
+    const commands = setupCommands(SIGNED_IN_BOTH, (args) => {
+      if (args[0] === "--owner-account")
+        launchedBeforeAccount = existsSync(
+          path.join(home, "installer", "args.json"),
+        );
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "codex",
+      origin: "http://localhost:3000",
+    });
+    api.runtime.setupChoice = "codex";
+    api.runtime.environment = { LINGER_CODEX_PATH: "/opt/codex/codex" };
+    const f = fixture(
+      (fixtureHome) => {
+        home = fixtureHome;
+        return { ...withCheckout(fixtureHome), setupCommand: commands.run };
+      },
+      {},
+      checkout,
+      api,
+    );
+    await f.host.start();
+    expect(f.module.status()).toMatchObject({ ownerAccount: "new" });
+    expect(f.module.status().runtimes).toBeUndefined();
+    await f.module.setupRuntimes().check();
+    expect(f.module.status().runtimes?.map((row) => row.signedIn)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    const account = { email: "me@example.com", password: "my own pass 1" };
+    await f.module.beginSetup({ runtime: "subscription", account });
+    expect(f.api.created).toEqual([
+      {
+        instance: LOCAL_INSTANCE,
+        setupChoice: "codex",
+        linkedRuntimes: ["claude"],
+      },
+    ]);
+    const preset = commands.calls.find(
+      (call) => call.args[0] === "--owner-account",
+    );
+    expect(preset).toEqual({
+      args: ["--owner-account", "--instance", LOCAL_INSTANCE],
+      input: JSON.stringify(account),
+    });
+    // Written before the installer starts, so it creates the owner with it.
+    expect(launchedBeforeAccount).toBe(false);
+    // Never on the command line.
+    expect(JSON.stringify(installerArgs(f.home))).not.toContain(
+      account.password,
+    );
+    expect(f.module.status().phase).toBe("ready");
+    expect(f.host.ctx.config.get().preferredRuntime).toBe("codex");
+    await f.host.stop("quit");
+  });
+
+  it("refuses a subscription with nothing signed in, and leaves an existing sign-in alone", async () => {
+    const commands = setupCommands({
+      "--runtime-status": [
+        {
+          runtimes: [
+            { runtime: "codex", installed: false, signedIn: false },
+            { runtime: "claude", installed: true, signedIn: false },
+            { runtime: "pi", installed: true, signedIn: false },
+          ],
+        },
+      ],
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      (home) => {
+        checkout(home);
+        mkdirSync(path.join(home, "instances", LOCAL_INSTANCE), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(home, "instances", LOCAL_INSTANCE, "local-account.json"),
+          "{}",
+        );
+      },
+    );
+    await f.host.start();
+    expect(f.module.status().ownerAccount).toBe("existing");
+    await f.module.setupRuntimes().check();
+    await expect(
+      f.module.beginSetup({ runtime: "subscription" }),
+    ).rejects.toThrow("Sign in to Claude Code or Codex first.");
+    expect(f.api.created).toEqual([]);
+    await f.host.stop("quit");
+  });
+
+  it("installs BYOK on Pi while the planned local model downloads in the background", async () => {
+    const commands = setupCommands({
+      "--download-local-model": [
+        { event: "progress", phase: "download", completed: 3, total: 9 },
+        { outcome: { state: "done" } },
+      ],
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      (home) => {
+        checkout(home);
+        writeFileSync(path.join(home, "library-model"), "qwen3-8b:Q4_K_M");
+      },
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        model: { name: "qwen3-8b", library: "qwen3-8b:Q4_K_M" },
+      }),
+    );
+    const byok = {
+      baseUrl: "https://byok.example",
+      path: "/v1",
+      endpoint: "/chat/completions",
+      protocol: "openai-chat" as const,
+      modelId: "m",
+      runtime: "pi" as const,
+    };
+    await f.module.beginSetup({ runtime: "pi", byok, background: true });
+    expect(
+      commands.calls.filter(
+        (call) => call.args[0] === "--download-local-model",
+      ),
+    ).toEqual([{ args: ["--download-local-model", "qwen3-8b:Q4_K_M"] }]);
+    expect(f.module.status().backgroundModel).toEqual({
+      model: "qwen3-8b:Q4_K_M",
+      state: "done",
+      completed: 9,
+      total: 9,
+    });
+    expect(f.api.created).toEqual([
+      expect.objectContaining({ setupChoice: "pi", byok }),
+    ]);
+    await f.host.stop("quit");
+  });
+
+  it("leaves the local model's install for another source and keeps downloading it", async () => {
+    const commands = setupCommands({
+      "--download-local-model": [
+        { event: "progress", phase: "download", completed: 4, total: 10 },
+      ],
+    });
+    // The local model's job, still downloading.
+    const api = installerApi(
+      [
+        {
+          id: "job",
+          instance: LOCAL_INSTANCE,
+          setupChoice: "local-models",
+          state: "running",
+          stage: "runtime",
+          createdAt: "2026-11-03T00:00:00Z",
+          stages: [],
+        },
+      ],
+      DONE,
+      undefined,
+      Array.from({ length: 10_000 }, () => ({
+        state: "running",
+        stage: "runtime",
+      })),
+    );
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      (home) => {
+        checkout(home);
+        writeFileSync(path.join(home, "library-model"), "qwen3-8b:Q4_K_M");
+      },
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({ state: "checked" }),
+    );
+    const install = f.module.beginSetup({ runtime: "local" });
+    await waitForInstaller(() =>
+      expect(f.module.status()).toMatchObject({
+        phase: "installing",
+        step: "services",
+        source: "local",
+      }),
+    );
+    await f.module.leaveLocalModel();
+    await install;
+    expect(f.api.canceled).toEqual(["job"]);
+    expect(f.module.status()).toMatchObject({ phase: "idle" });
+    expect(f.module.status().source).toBeUndefined();
+    expect(f.module.status().backgroundModel).toMatchObject({
+      model: "qwen3-8b:Q4_K_M",
+      completed: 4,
+      total: 10,
+    });
+    await f.host.stop("quit");
   });
 });

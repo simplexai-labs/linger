@@ -494,6 +494,8 @@ export interface components {
       /** @description Explicit consent to share currently free GPU memory with existing tasks; defaults to false and never stops other processes. */
       shareGpu?: boolean;
       setupChoice?: components["schemas"]["SetupChoice"];
+      /** @description Subscription runtimes signed in during setup that the Computer also configures beside setupChoice, which stays the default runtime. Requires setupChoice codex or claude. */
+      linkedRuntimes?: ("codex" | "claude")[];
       /** @description Approve only this saved plan. Must not be combined with localModelsReplan. */
       localModelsApproval?: string;
       /** @description Explicitly review an updated plan on the previously selected GPU; approval requires a separate request. */

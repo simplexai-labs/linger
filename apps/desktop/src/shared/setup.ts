@@ -83,6 +83,24 @@ export interface SetupLocalServer {
   // runtime did not finish in time, or the installer stopped answering
   // while it ran.
   readonly failure?: "runtime_lookup_timed_out" | "runtime_lookup_unreachable";
+  // Step 2's subscription runtimes, once first checked.
+  readonly runtimes?: readonly SetupRuntimeRow[];
+  // The local model downloading in the background while another source
+  // runs.
+  readonly backgroundModel?: SetupBackgroundModel;
+  // existing: the install location already has an owner sign-in (an
+  // earlier or upgraded installation), which setup leaves as it is.
+  readonly ownerAccount: "new" | "existing";
+  // While installing or failed: the source being installed.
+  readonly source?: "local" | "subscription" | "byok";
+}
+
+// The owner sign-in chosen during setup. Checked like the server checks it:
+// a lowercase email and an 8-256 character password without control
+// characters.
+export interface SetupOwnerAccount {
+  readonly email: string;
+  readonly password: string;
 }
 
 export type SetupByokProtocol =
@@ -196,6 +214,44 @@ export interface SetupReason {
   readonly driverVersion?: string;
 }
 
+// The model sources step 2 of setup offers before anything is installed.
+export type SetupRuntimeName = "codex" | "claude" | "pi";
+
+// One runtime row. installed/signedIn are what the computer has now;
+// state is what setup is doing with it.
+export interface SetupRuntimeRow {
+  readonly runtime: SetupRuntimeName;
+  readonly installed: boolean;
+  // Pi has no sign-in of its own and is never signed in.
+  readonly signedIn: boolean;
+  readonly version?: string;
+  readonly state: "checking" | "idle" | "installing" | "signing_in";
+  // While installing: the bytes so far and in all.
+  readonly install?: { readonly completed: number; readonly total?: number };
+  // While signing in: the vendor's page and what it asks for.
+  readonly signIn?: {
+    readonly url?: string;
+    readonly deviceCode?: string;
+    readonly acceptsCode?: boolean;
+    readonly browserFailed?: boolean;
+  };
+  // The last install or sign-in that failed, and the installer's words.
+  readonly failed?: "install" | "signin";
+  readonly message?: string;
+}
+
+export interface SetupBackgroundModel {
+  readonly model: string;
+  readonly state: "downloading" | "done" | "failed";
+  readonly phase?: "download" | "verify";
+  readonly completed: number;
+  readonly total?: number;
+  readonly bytesPerSecond?: number;
+  // A failure's code from the model library, and its words.
+  readonly code?: string;
+  readonly message?: string;
+}
+
 export type SetupLocalModelsCheck =
   | { readonly state: "unchecked" | "unavailable" }
   // While the check first downloads the localmodels tool: its bytes.
@@ -220,6 +276,8 @@ export type SetupLocalModelsCheck =
         readonly downloadBytes: number | null;
         readonly diskBytes: number | null;
         readonly memoryBytes: number | null;
+        // The model library's name for it (<id>:<quant>).
+        readonly library?: string;
         readonly featuredInkling?: true;
       };
       // The localmodels tool's code for why not, or, when eligible, for
@@ -238,7 +296,10 @@ export type SetupLocalRuntime =
   | "codex"
   | "claude"
   | "pi"
-  | "local";
+  | "local"
+  // The subscription runtimes signed in on the page: Codex by default when
+  // both are, Claude Code also configured.
+  | "subscription";
 
 // Provider keys typed on the page: a key replaces the saved one, ""
 // removes it and an absent provider keeps it.
@@ -328,7 +389,37 @@ export type SetupCommand =
       readonly runtime?: SetupLocalRuntime;
       readonly byok?: SetupByokConfig;
       readonly keys?: SetupProviderKeys;
+      // Also download the planned local model in the background.
+      readonly background?: boolean;
+      // The owner sign-in chosen on the page, for a new installation.
+      readonly account?: SetupOwnerAccount;
     }
+  // Step 2's subscription runtimes: read them again, install one, start its
+  // sign-in (device: Codex's device-code login), give Claude Code the code
+  // its page showed, stop an install or sign-in, open its page again or
+  // copy its link or code.
+  | { readonly op: "local.runtimes.check" }
+  | { readonly op: "local.runtime.install"; readonly runtime: SetupRuntimeName }
+  | {
+      readonly op: "local.runtime.signin";
+      readonly runtime: "codex" | "claude";
+      readonly device?: true;
+    }
+  | {
+      readonly op: "local.runtime.code";
+      readonly runtime: "codex" | "claude";
+      readonly code: string;
+    }
+  | { readonly op: "local.runtime.cancel"; readonly runtime: SetupRuntimeName }
+  | { readonly op: "local.runtime.open"; readonly runtime: "codex" | "claude" }
+  | {
+      readonly op: "local.runtime.copy";
+      readonly runtime: "codex" | "claude";
+      readonly what: "url" | "code";
+    }
+  // From the local model's wait: stop that installation for another source;
+  // the model downloads on in the background.
+  | { readonly op: "local.leave-local" }
   // Tests the BYOK endpoint with one request, or lists its models.
   | {
       readonly op: "local.byok.check";
@@ -367,7 +458,7 @@ export type SetupCommand =
   // The finished install's account: show or hide the password, copy it to
   // the clipboard, or show its file in the file manager.
   | { readonly op: "local.account.show"; readonly on: boolean }
-  | { readonly op: "local.account.copy" }
+  | { readonly op: "local.account.copy"; readonly what?: "email" | "password" }
   | { readonly op: "local.account.reveal" }
   | { readonly op: "signin.open" }
   | { readonly op: "computer.connect" }

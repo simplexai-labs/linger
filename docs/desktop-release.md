@@ -196,8 +196,8 @@ free disk, default Defender, and access from Windows to the configured external
 model endpoint. Pre-stage the Setup; do not build on the test laptop. Codex CLI
 and CC Switch are not prerequisites.
 
-1. Install through the actual Setup UI and complete Quick Install in Pi mode
-   with the configured external model. Record signing/SmartScreen and setup
+1. Install through the actual Setup UI and complete setup with the BYOK source
+   (Pi) on the configured external model. Record signing/SmartScreen and setup
    independently. Confirm the Computer is online and its Pi catalog and
    workspace grant are ready.
 2. Run one unique Room journey using
@@ -519,7 +519,7 @@ file and build. For one release:
    (`LINGER_SOURCE_ARCHIVE_FILE`, or the URL and SHA256, plus the target's
    `LINGER_SOURCE_DEPENDENCIES_URL` and SHA256) set, then package (`packaging/mac/package.py
 --arch arm64` for macOS, `packaging/linux/package.py` for Linux).
-5. Check the package on a clean computer: Quick Install with the default
+5. Check the package on a clean computer: Install with the recommended
    source ends on "Linger is ready" and Open Linger shows the local server,
    signed in, with this computer connected.
 

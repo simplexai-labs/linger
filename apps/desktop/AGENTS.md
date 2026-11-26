@@ -82,7 +82,7 @@ Gateway and runs Agents. The daemon exits with the app.
   ComputerDaemon, Status, PowerGuard, WindowManager, Tray, DesktopIpc). `status.ts`, `tray-menu.ts` and `tray-icon.ts` hold the pure
   status summary, tray menu and tray icons, drawn from the logo PNGs in
   `resources/tray/` with a status badge.
-- `src/main/local-server.ts`: LocalServer, the setup page's Quick Install
+- `src/main/local-server.ts`: LocalServer, the setup page's install
   path. On Windows, install preflight checks both the install home and the
   Computer daemon directory (`<userData>/computer`) non-destructively via
   `windowsPrivateLocation` before fetching Node or unpacking, so private-path
@@ -93,14 +93,16 @@ Gateway and runs Agents. The daemon exits with the app.
   SHA-256 verified into `<home>/desktop/node/v<version>/`, falling back to
   legacy bundled manifests or downloading in the download region's order,
   `scripts/installs/README.md`) and unpacks the linger source package
-  into the install location (the default home, or a folder picked on the
-  welcome screen). The selected folder's disk must have enough room for the
-  services (`LOCATION_FREE_BYTES`) plus any local model shown in the install
-  plan: `freeDiskBytes` performs a read-only `statfs` pre-check (refreshed
-  when opening Setup, picking or resetting a folder, rechecking, or refocusing
-  Setup) so the welcome screen warns dynamically by plan, and `checkLocation`
-  enforces write access and free space on all platforms before unpacking.
-  Windows also validates private access when a folder is picked. Tar runs inside the target with relative paths, falling back to
+  into the install location (the default home, or a folder picked in
+  setup, which shows the location only when the default one has a problem
+  or too little free space). The selected folder's disk must have enough
+  room for the services (`LOCATION_FREE_BYTES`) plus any local model shown
+  in the install plan: `freeDiskBytes` performs a read-only `statfs`
+  pre-check (refreshed when opening Setup, picking or resetting a folder,
+  rechecking, or refocusing Setup) so the setup page warns by plan, and
+  `checkLocation` enforces write access and free space on all platforms
+  before unpacking. Windows also validates private access when a folder is
+  picked. Tar runs inside the target with relative paths, falling back to
   the pure-Node extractor when `tar.exe` is missing with `ENOENT` on stripped
   Windows images. The
   finished folder is moved into place with `renameRetrying`, which waits out
@@ -132,7 +134,7 @@ Gateway and runs Agents. The daemon exits with the app.
   (`DELETE /api/runtime-login`); the
   dialog also offers installing another runtime instead (a new job with
   that `setupChoice`). No sign-in secret passes through the page. The
-  dialog also offers BYOK, with the same form as Customize's BYOK
+  dialog also offers BYOK, with the same form as the BYOK source's
   (`byokFields` in `setup.html`): a base URL used verbatim, an optional path
   (default `/v1`) and endpoint (default the runtime's own), key and model.
   Its refresh button and Test run the installer headless
@@ -209,7 +211,48 @@ Gateway and runs Agents. The daemon exits with the app.
   Software Update, then try again."; see
   [Packaging Details](../../docs/desktop-release.md#packaging-details) for
   where the minimum comes from.
-  Quick Install installs the `recommendation` of the localmodels setup
+  The welcome has two steps in one window of fixed size, with the main
+  button in a fixed place (`data-stage` on the section: `checking`,
+  `choose`, `settings`). Step 1 waits for a short check of this computer
+  (after 8 s "Choose without waiting" offers the cards while the check runs
+  on), then offers three source cards: Local model, BYOK and Subscription.
+  The card picked first is the recommendation: the Local model when the
+  localmodels report recommends `local-models` with a model that runs now
+  and no subscription runtime is signed in, else Subscription; BYOK is never
+  recommended. A local model that cannot run, or is held, shows its card
+  disabled with the reason and Check again. Step 2 shows the chosen source's
+  settings, Back (or Escape) and Install; the install location and app keys
+  sit behind More options. The Local model installs Pi with the planned
+  model (`runtime: "local"`) and says setup waits for the download. BYOK
+  has no runtime picker: it always runs on Pi (`runtime: "pi"`). Subscription
+  lists Claude Code, Codex and Pi, each read from this computer through the
+  installer's headless commands (`setup-sources.ts`: `--runtime-status`,
+  `--prepare-runtime`, `--runtime-login`); Claude Code and Codex offer
+  Install with a progress bar and then Sign in (with the link, a code to
+  paste or a device code, and Cancel), Pi only Install. Install is enabled
+  only while Claude Code or Codex is signed in and nothing installs or
+  signs in. With both signed in, Codex is the default runtime and Claude Code
+  is configured too (`linkedRuntimes`, `linked-runtimes.json` in the
+  instance). BYOK and Subscription offer "Also download the local model in
+  the background" (off by default), which downloads the planned model into
+  the model library (`--download-local-model`) for Settings › Models. While
+  the Local model's installation downloads, its wait offers Use Subscription
+  and Use BYOK (`local.leave-local`): the installer's job is cancelled, the
+  model keeps downloading in the background and step 2 of the other source
+  shows "Local model NN% · ready when done". A new installation's owner
+  sign-in is chosen on step 2 (`ownerAccount: "new"`, from whether the
+  install location has `local-account.json`): `owner@linger.local` and a
+  generated password, editable in a sheet with Show, Confirm, Generate and
+  the server's rules (lower-case `OWNER_EMAIL`, local part at most 100 and
+  320 in all; password 8 to 256 UTF-16 units without control characters).
+  Install sends it as `account`; LocalServer writes it before the installer
+  runs (`installer.js --owner-account`, the sign-in on stdin, into the
+  owner-only `local-account.json`, never over an existing one) and drops it
+  once written. It is never logged, and Try Again sends it again until the
+  location has an account. An existing or upgraded installation keeps its
+  sign-in and shows no such row. The ready screen copies the email or the
+  password (`local.account.copy` with `what`).
+  The recommendation follows the localmodels setup
   report (`installer.js --inspect`, run for the selected install location
   as the setup window opens and again when that location changes, including
   after a failed install). Checks keep their tool cache in the default home,
@@ -221,9 +264,9 @@ Gateway and runs Agents. The daemon exits with the app.
   counts or numeric versions it carries (`gpuIndex`, `freeBytes`,
   `requiredBytes`, `detectedCudaVersion`, `requiredCudaVersion`,
   `driverVersion`); the tool's message goes only to the main process log
-  (`local_server.inspected`), never to the page. Under Customize the Local
-  model card stays visible once the check ends: disabled, "Not available on
-  this computer", with that reason. For `cuda-driver-update-required` and
+  (`local_server.inspected`), never to the page. The Local model card stays
+  visible once the check ends: disabled, "Not available on this computer",
+  with that reason. For `cuda-driver-update-required` and
   `cuda-driver-version-unknown`, the page explains the NVIDIA graphics driver
   requirement (with required driver branch via `@linger/service-kit/nvidia-driver`),
   offers one-click verified Windows GeForce RTX driver installation
@@ -235,10 +278,6 @@ Gateway and runs Agents. The daemon exits with the app.
   when installation completes or the setup window regains focus after a driver
   action.
   Off macOS the page names the system tray, not the menu bar.
-  Under Customize the local model runs only behind Pi: with another runtime
-  it is greyed (`aria-disabled`, still focusable), does not toggle, and says
-  "Local models are only available with the Pi runtime."; choosing another
-  runtime clears it, and choosing Pi offers it again.
   When the tool reports local models blocked now (`stack.state:
 "blocked-now"`: the model fits the hardware, but other programs hold the
   memory it needs now; a tool before that field marks it by `basis:
@@ -248,19 +287,16 @@ Gateway and runs Agents. The daemon exits with the app.
   its free against needed memory and says to close programs that use the
   GPU; `free-memory-required` gives the RAM counts (from the reason, or the
   tool's `stack.memory` when the reason has none). The page still words
-  `gpu-ownership-unknown`, which localmodels 0.1.0.dev39 reports. Quick Install installs the
-  runtime the installer recommends instead, and Check again
+  `gpu-ownership-unknown`, which localmodels 0.1.0.dev39 reports. Step 1 picks
+  Subscription instead, and Check again
   (`local.recheck`) runs the check again. A tool before `stack.state` still
   recommends `local-models` there, so the installer's setup adapter
   (`packages/local-installation/src/setup-plan.ts`) replaces that pick with
   an installed runtime (signed-in first), else Codex; that override and the
   fallbacks go once the pinned tool reports `state`. The page adds no host rule of its own; while
-  the check runs the button waits with a spinner and says what it waits for
-  (the first run downloads the localmodels tool, counted by `download`
-  event lines before the report), except when the user picks BYOK under
-  Customize, which unblocks Install as soon as the BYOK fields are valid while
-  keeping late check results from overwriting the choice; Customize marks the
-  recommended runtime and model. While installing, a step that downloads
+  the check runs step 1 shows only a quiet loader (the first run also
+  downloads the localmodels tool, counted by `download` event lines before
+  the report). While installing, a step that downloads
   shows its bytes, what remains and the rate from the installer's byte
   counter (`localmodels.stack-progress/v1` for the local model and
   engine); a counter of one file (`partial`) shows only that file. When
@@ -349,7 +385,7 @@ Gateway and runs Agents. The daemon exits with the app.
   plan cannot be re-applied without replanning (`STACK_REPLAN_FAILED`,
   `STACK_PLAN_CHANGED`, `STACK_APPROVAL_MISMATCH`, `STACK_PLAN_INVALID`), and
   Try Again or Set Up Again for transient `LOCAL_MODELS_RECOVERY_REQUIRED`
-  failures (the resume applies the approved plan again). During Quick Install,
+  failures (the resume applies the approved plan again). During an install,
   `LOCAL_MODELS_RECOVERY_REQUIRED` with `binding-unavailable` in
   `errorReasons` skips blind replanning and surfaces the structured reason copy;
   transient apply failures (`STACK_COMPONENT_FAILED`, `STACK_APPLY_INTERRUPTED`)
@@ -361,7 +397,7 @@ Gateway and runs Agents. The daemon exits with the app.
   `DISK_INSUFFICIENT`, `GPU_CONFLICT`, `STACK_PLAN_FAILED`, or memory when
   `MEMORY_INSUFFICIENT`/absent). While installing or resuming, `LocalServer`
   emits `local-server.busy` so `PowerGuard` keeps the system from suspending
-  mid-download without toggling the saved `preventSleep` preference. A Quick Install that stopped
+  mid-download without toggling the saved `preventSleep` preference. An install that stopped
   before the computer enrolled is not resumed: setup shows again and Install
   finishes it, reusing a finished job only while its origin answers (a stopped
   server gets a new job, which starts the services again). It follows a
@@ -405,7 +441,7 @@ Gateway and runs Agents. The daemon exits with the app.
   `local-computers` and says what is missing (offline computer, no writable
   folder, or no signed-in runtime with each runtime's reported state) and logs
   `local_server.another_me_missing` or
-  `local_server.computer_offline_after_agents`. Customize → API keys takes the
+  `local_server.computer_offline_after_agents`. More options → API keys takes the
   Composio key only (`provider-keys.ts`); voice keys are saved in the app,
   and a `SONIOX_API_KEY` or `XAI_API_KEY` written into `user.env` by hand
   still reaches the services and overrides the app's. Install saves the edits
@@ -846,7 +882,7 @@ building a package.
   library snapshot and Pi model catalog.
 - `LINGER_LOCALMODELS_DEV_PYTHON`, `LINGER_LOCALMODELS_DEV_MODULE_DIR`:
   absolute Python and module directory for running a local `localmodels`
-  checkout in Quick Install and the Desktop Computer without fetching the
+  checkout in setup and the Desktop Computer without fetching the
   published kit. `LOCALMODELS_DEBUG` (`simulate` or `tiny`) or
   `~/.config/localmodels/debug.json` enables fast local-model testing in both
   source and packaged builds.

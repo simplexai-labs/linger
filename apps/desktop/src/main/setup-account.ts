@@ -53,6 +53,12 @@ export class SetupAccount {
     this.#shown = undefined;
   }
 
+  // The email is not secret and stays on the clipboard.
+  async copyEmail(): Promise<void> {
+    const email = (await this.#read())?.email;
+    if (email !== undefined) await this.#options.clipboard.writeText(email);
+  }
+
   async copy(): Promise<void> {
     const password = (await this.#read())?.password;
     if (password === undefined) return;

@@ -3,7 +3,11 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { readLocalIdentityKey, type Instance } from "./instance.js";
-import { atomicPrivate, readPrivate } from "./private-files.js";
+import {
+  atomicPrivate,
+  privateDirectory,
+  readPrivate,
+} from "./private-files.js";
 
 export function validateLocalCredentials(options: {
   email?: string;
@@ -23,6 +27,48 @@ export function validateLocalCredentials(options: {
     throw new Error(
       "Login passwords must contain 8–256 characters without control characters.",
     );
+}
+/**
+ * The owner email TeamHub accepts as it is: lower case, a plain
+ * `local@domain.tld` address (Go's mail.ParseAddress round trip) with a local
+ * part of at most 100 characters and at most 320 in all.
+ */
+export const OWNER_EMAIL =
+  /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+export function validOwnerEmail(email: string): boolean {
+  return (
+    email.length <= 320 && email.indexOf("@") <= 100 && OWNER_EMAIL.test(email)
+  );
+}
+/**
+ * Sets the sign-in a new installation's owner account is created with,
+ * before the installation creates it. An instance that already has a local
+ * account keeps it: nothing is overwritten. The password is written only to
+ * the private local-account.json, where a generated one would be.
+ */
+export async function presetLocalAccount(
+  root: string,
+  credentials: { email: string; password: string },
+): Promise<{ written: boolean }> {
+  const { email, password } = credentials;
+  if (typeof email !== "string" || !validOwnerEmail(email))
+    throw new Error("Enter a valid login email.");
+  if (typeof password !== "string") throw new Error("Enter a login password.");
+  validateLocalCredentials({ email, password });
+  const file = path.join(root, "local-account.json");
+  try {
+    await lstat(file);
+    return { written: false };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await privateDirectory(root);
+  await privateDirectory(path.dirname(root));
+  await atomicPrivate(
+    file,
+    JSON.stringify({ email, password, provisioned: false }, null, 2) + "\n",
+  );
+  return { written: true };
 }
 export async function readLocalLogin(
   instance: Pick<Instance, "root">,

@@ -339,6 +339,20 @@ earlier release left stopped, which the new kit cannot bring back as saved,
 never locks the person out. On cold resume, a saved `local`
 source preserves local mode and prepares its runtime instead of letting an older
 `setup-choice.json` overwrite `model-source.json` back to `subscription`.
+`linked-runtimes.json` (`setup-selection.ts`) lists the subscription
+runtimes (`codex`, `claude`) a setup signed in beside its `codex` or `claude`
+choice; a job that names a choice rewrites it (none leaves only the choice),
+and `inspectRuntimeDescriptors` reports those that are installed after the
+chosen one, so the Computer runs either while the choice stays the default.
+`presetLocalAccount` (`account.ts`) writes the owner sign-in chosen at setup
+to a new instance's private `local-account.json` with `provisioned: false`
+before the owner is created; it checks the email the way TeamHub accepts it
+(`validOwnerEmail`: lower case, local part at most 100 characters, 320 in
+all) and the password with `validateLocalCredentials`, and leaves an
+existing file as it is, so an upgrade keeps its sign-in. A plan whose model
+names a quantization carries `libraryModel` (`<id>:<quant>`,
+`LIBRARY_MODEL_ID`), which setup downloads in the background while another
+source runs.
 Deployments, that check and the quit-time stop share one lock per home
 (`withLocalModelsLock`); the check waits up to 180 s for it, past the stop's
 150 s hard exit, then reports `LOCAL_MODELS_RECOVERY_REQUIRED` (or

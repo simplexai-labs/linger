@@ -333,4 +333,44 @@ describe("parseSetupCommand", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts the setup sources' commands and a chosen sign-in the server would", () => {
+    const account = { email: "me@example.com", password: "my own pass 1" };
+    expect(
+      parseSetupCommand({
+        op: "local.start",
+        runtime: "subscription",
+        background: true,
+        account,
+      }),
+    ).toEqual({
+      op: "local.start",
+      runtime: "subscription",
+      background: true,
+      account,
+    });
+    for (const command of [
+      { op: "local.runtimes.check" },
+      { op: "local.runtime.install", runtime: "pi" },
+      { op: "local.runtime.signin", runtime: "codex", device: true },
+      { op: "local.runtime.code", runtime: "claude", code: "abc#def" },
+      { op: "local.runtime.cancel", runtime: "claude" },
+      { op: "local.runtime.open", runtime: "codex" },
+      { op: "local.runtime.copy", runtime: "codex", what: "code" },
+      { op: "local.leave-local" },
+    ])
+      expect(parseSetupCommand(command)).toEqual(command);
+    for (const command of [
+      { op: "local.runtime.install", runtime: "bash" },
+      // Pi has no sign-in of its own.
+      { op: "local.runtime.signin", runtime: "pi" },
+      { op: "local.runtime.code", runtime: "claude", code: " " },
+      { op: "local.start", account: { ...account, email: "Me@Example.com" } },
+      { op: "local.start", account: { ...account, email: "me@localhost" } },
+      { op: "local.start", account: { ...account, password: "short" } },
+      { op: "local.start", account: { ...account, password: "tab\there!" } },
+      { op: "local.start", account: { ...account, extra: true } },
+    ])
+      expect(() => parseSetupCommand(command)).toThrow();
+  });
 });

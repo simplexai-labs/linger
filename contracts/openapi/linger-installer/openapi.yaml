@@ -860,6 +860,14 @@ components:
           description: Explicit consent to share currently free GPU memory with existing tasks; defaults to false and never stops other processes.
         setupChoice:
           $ref: "#/components/schemas/SetupChoice"
+        linkedRuntimes:
+          type: array
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [codex, claude]
+          description: Subscription runtimes signed in during setup that the Computer also configures beside setupChoice, which stays the default runtime. Requires setupChoice codex or claude.
         localModelsApproval:
           type: string
           pattern: ^[a-f0-9]{64}$

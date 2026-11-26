@@ -155,6 +155,23 @@ still be running. The full `--stop` command reports the same failure. Windows
 uninstall aborts on that failure; replacement setup reports it and proceeds.
 A missing pinned kit has nothing to stop.
 
+The desktop setup page's headless commands run before anything is installed
+(`src/server/setup-commands.ts`), each answering in JSON lines on stdout:
+`--runtime-status` reads whether Claude Code, Codex and Pi are installed and
+signed in; `--prepare-runtime <runtime>` installs one into the home's managed
+runtimes with progress lines; `--runtime-login <codex|claude>` (with
+`--device-login` for Codex's device code) runs its sign-in against the
+runtime's own managed profile, taking a pasted code on stdin and stopping on
+SIGTERM; `--download-local-model <id:quant>` downloads the planned model into
+the model library with progress; and `--owner-account --instance <name>`
+takes a new installation's owner sign-in on stdin and writes it to that
+instance's owner-only `local-account.json` before the instance exists, never
+over an existing one, answering only `{ written }` or `{ error }`. No
+secret, sign-in code or password is printed or logged. A job's optional
+`linkedRuntimes` (`codex`/`claude`, with a `codex` or `claude`
+`setupChoice`) names the subscription runtimes signed in at setup that the
+Computer also configures beside the default runtime.
+
 `--inspect` checks without migrating installations. Its optional
 `--inspect-target` selects the home whose disk and runtimes are checked;
 `--home` still owns the inspection tool cache and state. When `--home` fails

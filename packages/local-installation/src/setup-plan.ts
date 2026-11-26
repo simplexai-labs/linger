@@ -125,6 +125,12 @@ export interface SetupReport {
     selectedGpuIndex: number | null;
     estimate: SetupEstimate & { model: string };
     /**
+     * The planned model as a model library id (`<catalog id>:<quant>`), when
+     * the plan names its quantization. Setup downloads it in the background
+     * with `library download` while another model source runs.
+     */
+    libraryModel?: string;
+    /**
      * Upstream `stack.upgrade`, when freeing memory unlocks a stronger local
      * model than the currently selected plan.
      */
@@ -155,7 +161,10 @@ export interface SetupOptions {
   onEvent?: (event: InstallerEvent) => void;
 }
 interface UpstreamPlan {
-  llm: { model: { id: string }; placement: { gpus: { index: number }[] } };
+  llm: {
+    model: { id: string; quant?: unknown };
+    placement: { gpus: { index: number }[] };
+  };
   budget: {
     download_bytes: number;
     disk_needed_bytes: number;
@@ -220,6 +229,16 @@ interface UpstreamReport {
     }[];
   };
   recommendation?: SetupChoice;
+}
+/** The id `localmodels library` uses for a model: `<catalog id>:<quant>`. */
+export const LIBRARY_MODEL_ID = /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/;
+function planLibraryModel(plan: UpstreamPlan): string | undefined {
+  const { id, quant } = plan.llm.model;
+  if (typeof id !== "string" || typeof quant !== "string") return undefined;
+  const value = `${id.trim()}:${quant.trim()}`;
+  return value.length <= 200 && LIBRARY_MODEL_ID.test(value)
+    ? value
+    : undefined;
 }
 export const setupChoices: readonly SetupChoice[] = [
   "local-models",
@@ -488,6 +507,7 @@ export async function inspectSetup(
       };
     };
     const upgrade = parseUpgrade(value.stack.upgrade);
+    const libraryModel = plan ? planLibraryModel(plan) : undefined;
     const memory = value.stack.memory ? counts(value.stack.memory) : undefined;
     const upstreamRuntimes = value.harness?.runtimes ?? [];
     const upstreamEstimates = new Map(
@@ -584,6 +604,7 @@ export async function inspectSetup(
           ),
           model: plan?.llm.model.id ?? "",
         },
+        ...(libraryModel ? { libraryModel } : {}),
         ...(upgrade ? { upgrade } : {}),
       },
       runtimes: reportedRuntimes,

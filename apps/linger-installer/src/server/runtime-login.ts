@@ -10,12 +10,13 @@ import type { components } from "@linger/wire-contracts/linger-installer/types";
 type Snapshot = components["schemas"]["RuntimeLogin"];
 /** Codex's two logins: the one that calls back to this computer, or a device code. */
 export type LoginMethod = "browser" | "device";
-interface Input {
+export interface RuntimeLoginInput {
   instance: string;
   home: string;
   root: string;
   runtime: NativeRuntime;
 }
+type Input = RuntimeLoginInput;
 interface Session {
   runtime: NativeRuntime;
   method: LoginMethod | undefined;
@@ -52,11 +53,16 @@ export class RuntimeLoginManager {
     private inspect: typeof inspectRuntime = inspectRuntime,
     private platform: NodeJS.Platform = process.platform,
     private timeoutMs = 15 * 60_000,
+    // The runtime's managed profile. An installed instance names its chosen
+    // runtime; setup, before any instance, asks for one runtime's own.
+    private environment: (input: Input) => Promise<NodeJS.ProcessEnv> = (
+      input,
+    ) => managedRuntimeEnvironment(input.home, input.root),
   ) {}
   private async probe(input: Input, signal?: AbortSignal) {
     const env = {
       ...process.env,
-      ...(await managedRuntimeEnvironment(input.home, input.root)),
+      ...(await this.environment(input)),
     };
     signal?.throwIfAborted();
     const state = await this.inspect(input.runtime, {

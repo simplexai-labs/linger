@@ -62,6 +62,15 @@ describe("SetupAccount", () => {
     expect(read).toHaveBeenCalledTimes(3);
   });
 
+  it("copies the email as it is, with no clearing timer", async () => {
+    vi.useFakeTimers();
+    const { account, clipboard } = setupAccount();
+    await account.copyEmail();
+    expect(clipboard.writeText).toHaveBeenCalledWith(ACCOUNT.email);
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_MS);
+    expect(clipboard.clear).not.toHaveBeenCalled();
+  });
+
   it("hides the password again when the setup window closes", async () => {
     const { account } = setupAccount();
     await account.refresh();
