@@ -53,28 +53,30 @@ describe("Room creation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses the authored compact form without a secondary cancel action", async () => {
+  it("shows Cancel alongside Create Room and keeps the compact form focused", async () => {
     const runtime = createTestTeamHubRuntime();
     acceptRoomCreation(runtime);
     acceptRoomMembers(runtime);
+    const onClose = vi.fn();
 
     render(
       <QueryClientProvider client={new QueryClient()}>
         <TeamHubRuntimeProvider runtime={runtime}>
           <MemoryRouter>
-            <RoomCreateDialog onClose={vi.fn()} tenantId="tenant-northstar" />
+            <RoomCreateDialog onClose={onClose} tenantId="tenant-northstar" />
           </MemoryRouter>
         </TeamHubRuntimeProvider>
       </QueryClientProvider>,
     );
 
     expect(screen.getByLabelText("Room name")).toHaveClass("ui-field-control");
-    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     expect(screen.queryByLabelText(/Description/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Add members" })).toBeNull();
     expect(
       screen.getByRole("button", { name: /^Create Room$/ }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("retries the same Room creation after an ambiguous failure", async () => {
@@ -272,7 +274,7 @@ describe("Room creation", () => {
     expect((await getRoom(runtime, room.id)).name).toBe("Skip confirmation");
   });
 
-  it("allows skipping members without removing the created Room", async () => {
+  it("shows Skip for now directly and dismisses on Close or Escape without deadlock", async () => {
     const runtime = createTestTeamHubRuntime();
     acceptRoomCreation(runtime);
     acceptRoomMembers(runtime);
@@ -292,18 +294,56 @@ describe("Room creation", () => {
         </TeamHubRuntimeProvider>
       </QueryClientProvider>,
     );
-    // Closing with nothing queued confirms first, so the Room owner sees where
-    // members can be added later.
+    // "Skip for now" is immediately available in the default footer when nothing is queued.
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // Clicking Close also dismisses directly without toggling a confirmation loop.
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Skip for now" }),
-    );
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledTimes(2);
     expect(
       runtime.server.requestsTo("PUT", "/v0/rooms/{roomId}/members/{actorId}"),
     ).toHaveLength(0);
     expect((await getRoom(runtime, room.id)).name).toBe("Skip members");
+  });
+
+  it("hides empty Human or Agent headings in the member picker", async () => {
+    const runtime = createTestTeamHubRuntime();
+    acceptRoomCreation(runtime);
+    acceptRoomMembers(runtime);
+    // Return only the owner as human so there are 0 selectable human candidates.
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/actors", () => ({
+      items: [
+        runtime.seed.identity.actors.find(
+          (actor) => actor.tenant_id === "tenant-northstar",
+        )!,
+      ],
+      page: { has_more: false },
+    }));
+
+    const room = await createRoom(runtime, "Agents only");
+    render(
+      <QueryClientProvider client={createAppQueryClient()}>
+        <TeamHubRuntimeProvider runtime={runtime}>
+          <MemoryRouter>
+            <RoomAddMembersDialog
+              onClose={vi.fn()}
+              roomId={room.id}
+              tenantId="tenant-northstar"
+            />
+          </MemoryRouter>
+        </TeamHubRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose existing members" }),
+    );
+    const picker = screen.getByRole("dialog", { name: "Choose members" });
+    await within(picker).findByRole("button", { name: /Codex/ });
+    expect(within(picker).queryByRole("heading", { name: "Human" })).toBeNull();
+    expect(
+      within(picker).getByRole("heading", { name: "Agent" }),
+    ).toBeVisible();
   });
 
   it("attempts Room creation when the browser connectivity hint is offline", async () => {

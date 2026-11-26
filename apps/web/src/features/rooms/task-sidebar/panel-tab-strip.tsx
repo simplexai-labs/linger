@@ -11,6 +11,7 @@ import {
   Message01Icon,
   PlusSignIcon,
   RoboticIcon,
+  RotateClockwiseIcon,
   Settings01Icon,
   SidebarRightIcon,
 } from "@hugeicons/core-free-icons";
@@ -43,6 +44,7 @@ export type { PanelCreateChoice };
 
 export function PanelTabStrip({
   activeTabId,
+  canRestoreClosed = false,
   launcherOpen,
   includeAgentInfo = false,
   maximized = false,
@@ -51,11 +53,13 @@ export function PanelTabStrip({
   onReorder,
   onCollapse,
   onCreate,
+  onRestoreClosed,
   onToggleMaximize,
   statusByTabId = {},
   tabs,
 }: {
   activeTabId: string | null;
+  canRestoreClosed?: boolean;
   launcherOpen: boolean;
   includeAgentInfo?: boolean;
   maximized?: boolean;
@@ -64,6 +68,7 @@ export function PanelTabStrip({
   onReorder?: (tabId: string, targetId: string) => void;
   onCollapse: () => void;
   onCreate: (choice: PanelCreateChoice) => void;
+  onRestoreClosed?: () => void;
   onToggleMaximize: () => void;
   statusByTabId?: Record<
     string,
@@ -77,15 +82,23 @@ export function PanelTabStrip({
   const resizeLabel = t(maximized ? m.restoreSidebar : m.maximizeSidebar);
   const hideLabel = t(roomSurfaceMessages.hideSidebar);
   const resizeIcon = maximized ? ArrowShrink01Icon : ArrowExpand01Icon;
-  const createItems: ActionMenuItem[] = panelCreateItems(includeAgentInfo).map(
-    (item) => {
-      return {
-        icon: <Icon icon={kindIcons[item.kind] ?? File01Icon} size={14} />,
-        label: t(item.label),
-        onSelect: () => onCreate(item.kind),
-      };
-    },
-  );
+  const createItems: ActionMenuItem[] = [
+    ...panelCreateItems(includeAgentInfo).map((item) => ({
+      icon: <Icon icon={kindIcons[item.kind] ?? File01Icon} size={14} />,
+      label: t(item.label),
+      onSelect: () => onCreate(item.kind),
+    })),
+    ...(onRestoreClosed && canRestoreClosed
+      ? [
+          {
+            icon: <Icon icon={RotateClockwiseIcon} size={14} />,
+            label: t(m.reopenClosedTab),
+            onSelect: onRestoreClosed,
+            separatorBefore: true,
+          },
+        ]
+      : []),
+  ];
 
   if (launcherOpen) {
     return (

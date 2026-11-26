@@ -110,8 +110,18 @@ export function QuickCreateLocalAgentDialog({
   const desktopComputer = selectableComputers.find(
     (computer) => computer.computer_id === desktopComputerId,
   );
-  // In the desktop app the computer it runs on is chosen by default.
-  const selectedComputerId = computerId || desktopComputer?.computer_id || "";
+  const soleOnlineComputer =
+    selectableComputers.length === 1 &&
+    selectableComputers[0]?.status === "online"
+      ? selectableComputers[0]
+      : undefined;
+  // In the desktop app the computer it runs on is chosen by default; on web,
+  // auto-select the sole online computer so users skip a redundant pick.
+  const selectedComputerId =
+    computerId ||
+    desktopComputer?.computer_id ||
+    soleOnlineComputer?.computer_id ||
+    "";
   const selectedComputer = selectableComputers.find(
     (computer) => computer.computer_id === selectedComputerId,
   );

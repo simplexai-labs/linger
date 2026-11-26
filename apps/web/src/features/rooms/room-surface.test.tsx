@@ -450,6 +450,42 @@ describe("RoomSurface command availability", () => {
     );
   });
 
+  it("switches to Agent info instead of closing the sidebar when another panel tab is active", async () => {
+    await renderRoomSurface("room-dm-codex");
+    const avatar = await screen.findByRole("button", {
+      name: "Open Codex settings from avatar",
+    });
+    fireEvent.click(avatar);
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Panel sidebar",
+    });
+    fireEvent.click(
+      within(sidebar).getByRole("button", { name: "Add panel view" }),
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Documents" }));
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("tab", { name: /^(Documents|Files)$/ }),
+      ).toHaveAttribute("aria-selected", "true"),
+    );
+
+    // Clicking the header chip while Documents is active switches back to Agent info
+    // instead of closing the sidebar.
+    fireEvent.click(avatar);
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("tab", { name: "Agent · Codex" }),
+      ).toHaveAttribute("aria-selected", "true"),
+    );
+    expect(avatar).toHaveAttribute("aria-expanded", "true");
+
+    // Clicking the chip again while ALREADY on Agent info closes the sidebar.
+    fireEvent.click(avatar);
+    await waitFor(() =>
+      expect(avatar).toHaveAttribute("aria-expanded", "false"),
+    );
+  });
+
   it("defaults the Agent DM sidebar to Agent info and offers it beside Documents", async () => {
     await renderRoomSurface("room-dm-codex");
     fireEvent.click(

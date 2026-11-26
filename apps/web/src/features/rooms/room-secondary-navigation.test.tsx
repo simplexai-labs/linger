@@ -538,11 +538,16 @@ describe("Room navigation working indicator", () => {
       </MemoryRouter>
     );
     const { rerender } = render(renderNavigation([], [group.id]));
-    expect(
-      within(screen.getByRole("link", { name: group.name })).getByRole("img", {
-        name: "Last run failed",
-      }),
-    ).toBeVisible();
+    const failedIcon = within(
+      screen.getByRole("link", { name: group.name }),
+    ).getByRole("img", {
+      name: "Last run failed",
+    });
+    expect(failedIcon).toBeVisible();
+    expect(failedIcon).toHaveAttribute("title", "Last run failed");
+    // Failure badge stays outside `.row-reveal-hide` so hovering to read the
+    // failure tooltip never hides the icon.
+    expect(failedIcon.closest(".row-reveal-hide")).toBeNull();
     expect(
       within(screen.getByRole("link", { name: "room-idle" })).queryByRole(
         "img",

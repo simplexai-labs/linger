@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { TeamHubActor } from "@/features/teamhub/teamhub-types";
-import { RichMessage, useT } from "@/i18n/use-translation";
+import { useT } from "@/i18n/use-translation";
 import { chatMessages } from "../chat/chat.messages";
 import {
   roomMembersQueryOptions,
@@ -14,7 +14,6 @@ import {
 } from "../room-queries";
 import { roomSettingsMessages as m } from "../room-settings.messages";
 import { RoomCreateMembers } from "./room-create-members";
-import { RoomMemberAvatars } from "./room-member-avatars";
 
 export function RoomAddMembersDialog({
   onClose,
@@ -29,10 +28,6 @@ export function RoomAddMembersDialog({
   const t = useT();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<TeamHubActor[]>([]);
-  // Closing without adding anyone confirms first, so the Room owner learns where
-  // members can be added later instead of losing the step silently.
-  const [confirmSkip, setConfirmSkip] = useState(false);
-  const members = useQuery(roomMembersQueryOptions(client, tenantId, roomId));
   const submit = useMutation({
     // Each member is independent: whatever succeeds stays applied and only the
     // failures remain queued for a retry.
@@ -71,24 +66,17 @@ export function RoomAddMembersDialog({
   return (
     <ModalDialog
       onClose={() => {
-        if (submit.isPending) return;
-        if (nothingQueued) setConfirmSkip((current) => !current);
-        else onClose();
+        if (!submit.isPending) onClose();
       }}
       size="md"
       title={t(m.addRoomMembers)}
       footer={
-        confirmSkip ? (
-          <>
-            {/* eslint-disable-next-line jsx-a11y/no-autofocus -- the field is focused on purpose because the user just opened this dialog or inline editor */}
-            <Button autoFocus onClick={() => setConfirmSkip(false)}>
-              {t(m.goBack)}
-            </Button>
-            <Button tone="primary" onClick={onClose}>
+        <>
+          {nothingQueued ? (
+            <Button disabled={submit.isPending} onClick={onClose}>
               {t(m.skipForNow)}
             </Button>
-          </>
-        ) : (
+          ) : null}
           <Button
             tone="primary"
             onClick={() => submit.mutate()}
@@ -97,63 +85,29 @@ export function RoomAddMembersDialog({
           >
             {t(m.addMembers)}
           </Button>
-        )
+        </>
       }
     >
-      <div className="px-5 py-4">
-        <div
-          inert={confirmSkip || undefined}
-          className={`space-y-4 ${confirmSkip ? "opacity-40" : ""}`}
-        >
-          <RoomCreateMembers
-            disabled={submit.isPending}
-            selected={selected}
-            onChange={setSelected}
-            tenantId={tenantId}
-          />
-          {submit.data?.failedActors.length ? (
-            <p role="alert" className="text-sm text-app-danger">
-              {t(m.addFailed, {
-                names: submit.data.failedActors
-                  .map((actor) => actor.display_name)
-                  .join(t(chatMessages.listSeparator)),
-              })}
-            </p>
-          ) : null}
-          {submit.error ? (
-            <p role="alert" className="text-sm text-app-danger">
-              {submit.error.message}
-            </p>
-          ) : null}
-        </div>
-        {confirmSkip ? (
-          <section
-            aria-label={t(m.skipAdding)}
-            aria-live="polite"
-            className="mt-4 border-t border-border pt-4"
-          >
-            <p className="text-sm leading-6 text-app-body">
-              <RichMessage
-                message={m.skipPrompt}
-                tags={{
-                  strong: (text) => <strong>{text}</strong>,
-                  avatars: (label) => (
-                    <span
-                      aria-label={label}
-                      className="room-members-trigger mx-1 inline-flex items-center rounded-full border border-border p-1 align-middle"
-                    >
-                      <RoomMemberAvatars
-                        actors={
-                          members.data?.items.map((member) => member.actor) ??
-                          []
-                        }
-                      />
-                    </span>
-                  ),
-                }}
-              />
-            </p>
-          </section>
+      <div className="space-y-4 px-5 py-4">
+        <RoomCreateMembers
+          disabled={submit.isPending}
+          selected={selected}
+          onChange={setSelected}
+          tenantId={tenantId}
+        />
+        {submit.data?.failedActors.length ? (
+          <p role="alert" className="text-sm text-app-danger">
+            {t(m.addFailed, {
+              names: submit.data.failedActors
+                .map((actor) => actor.display_name)
+                .join(t(chatMessages.listSeparator)),
+            })}
+          </p>
+        ) : null}
+        {submit.error ? (
+          <p role="alert" className="text-sm text-app-danger">
+            {submit.error.message}
+          </p>
         ) : null}
       </div>
     </ModalDialog>

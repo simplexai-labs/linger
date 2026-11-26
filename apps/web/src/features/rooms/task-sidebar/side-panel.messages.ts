@@ -13,6 +13,7 @@ export const sidePanelMessages = defineMessages("sidePanel", {
   addPanelView: "Add panel view",
   maximizeSidebar: "Maximize sidebar",
   restoreSidebar: "Restore sidebar",
+  reopenClosedTab: "Reopen closed tab",
   closeTab: "Close {title}",
   // Tab titles. A tab is saved with a name only; these word it on screen.
   agentTab: "Agent · {name}",

@@ -1374,19 +1374,7 @@ describe("TaskSidebar", () => {
     expect(screen.getByTestId("panel-tab-file-library")).toBeVisible();
   });
 
-  it("collapses the panel on Escape when no tabs remain", () => {
-    const onCollapse = vi.fn();
-    renderSidebar({
-      activeTabId: null,
-      onCollapse,
-      tabs: [],
-    });
-
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(onCollapse).toHaveBeenCalled();
-  });
-
-  it("closes the active tab on Escape without collapsing when tabs remain", () => {
+  it("collapses the panel on Escape only when non-editable focus is inside the sidebar and never closes active tabs", () => {
     const onCollapse = vi.fn();
     const onCloseTab = vi.fn();
     renderSidebar({
@@ -1399,11 +1387,42 @@ describe("TaskSidebar", () => {
       ],
     });
 
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(onCloseTab).toHaveBeenCalledWith(
-      panelTabKey("thread", { anchorMessageId: "msg-a" }),
-    );
+    // Global Escape while focus is outside the sidebar is ignored.
+    const externalButton = document.createElement("button");
+    document.body.appendChild(externalButton);
+    externalButton.focus();
+    fireEvent.keyDown(externalButton, { key: "Escape" });
     expect(onCollapse).not.toHaveBeenCalled();
+    expect(onCloseTab).not.toHaveBeenCalled();
+    externalButton.remove();
+
+    // Escape while typing in an external editable field (e.g. main chat composer) is ignored.
+    const externalComposer = document.createElement("textarea");
+    document.body.appendChild(externalComposer);
+    externalComposer.focus();
+    fireEvent.keyDown(externalComposer, { key: "Escape" });
+    expect(onCollapse).not.toHaveBeenCalled();
+    expect(onCloseTab).not.toHaveBeenCalled();
+    externalComposer.remove();
+
+    // Escape while focused on an editable input inside the sidebar is ignored.
+    const sidebar = screen.getByRole("complementary", {
+      name: "Panel sidebar",
+    });
+    const innerInput = document.createElement("input");
+    sidebar.appendChild(innerInput);
+    innerInput.focus();
+    fireEvent.keyDown(innerInput, { key: "Escape" });
+    expect(onCollapse).not.toHaveBeenCalled();
+    expect(onCloseTab).not.toHaveBeenCalled();
+    innerInput.remove();
+
+    // Escape on a non-editable control inside the sidebar collapses without destroying the tab.
+    const tabButton = screen.getByRole("tab", { name: "Alpha task" });
+    tabButton.focus();
+    fireEvent.keyDown(tabButton, { key: "Escape" });
+    expect(onCollapse).toHaveBeenCalledTimes(1);
+    expect(onCloseTab).not.toHaveBeenCalled();
   });
 
   it("moves the active tab on Cmd+Alt+ArrowRight", () => {
@@ -1428,11 +1447,12 @@ describe("TaskSidebar", () => {
     );
   });
 
-  it("restores the last closed tab on Cmd+Shift+T", () => {
+  it("does not hijack browser Cmd/Ctrl+Shift+T and recovers closed tabs from the panel menu or sidebar chord", async () => {
     const onRestoreClosed = vi.fn();
     const onCloseTab = vi.fn();
     renderSidebar({
       activeTabId: panelTabKey("thread", { anchorMessageId: "msg-b" }),
+      canRestoreClosed: true,
       onCloseTab,
       onRestoreClosed,
       tabs: [
@@ -1445,8 +1465,36 @@ describe("TaskSidebar", () => {
     expect(onCloseTab).toHaveBeenCalledWith(
       panelTabKey("thread", { anchorMessageId: "msg-b" }),
     );
-    fireEvent.keyDown(window, { key: "t", metaKey: true, shiftKey: true });
-    expect(onRestoreClosed).toHaveBeenCalled();
+
+    // Browser-reserved Cmd/Ctrl+Shift+T must NOT be intercepted.
+    const browserChord = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "t",
+      metaKey: true,
+      shiftKey: true,
+    });
+    window.dispatchEvent(browserChord);
+    expect(browserChord.defaultPrevented).toBe(false);
+    expect(onRestoreClosed).not.toHaveBeenCalled();
+
+    // Sidebar-scoped non-reserved chord (Cmd+Alt+Shift+T) restores when focus is inside the sidebar.
+    const tabButton = screen.getByRole("tab", { name: "Alpha task" });
+    tabButton.focus();
+    fireEvent.keyDown(tabButton, {
+      altKey: true,
+      key: "t",
+      metaKey: true,
+      shiftKey: true,
+    });
+    expect(onRestoreClosed).toHaveBeenCalledTimes(1);
+
+    // Explicit UI recovery action is available in the Add panel view menu.
+    fireEvent.click(screen.getByRole("button", { name: "Add panel view" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Reopen closed tab" }),
+    );
+    expect(onRestoreClosed).toHaveBeenCalledTimes(2);
   });
 
   it("lets the user drag the left edge to resize the sidebar width", () => {
@@ -1586,6 +1634,7 @@ describe("TaskSidebar", () => {
 
 function renderSidebar({
   activeTabId,
+  canRestoreClosed = false,
   documents = [],
   lastActivatedAt,
   onActiveChange = vi.fn(),
@@ -1608,6 +1657,7 @@ function renderSidebar({
   tenantId = "tenant-1",
 }: {
   activeTabId: string | null;
+  canRestoreClosed?: boolean;
   documents?: TeamHubDocument[];
   lastActivatedAt?: Record<string, number>;
   onActiveChange?: (id: string) => void;
@@ -1660,6 +1710,7 @@ function renderSidebar({
       onExitAnimationEnd={onExitAnimationEnd}
       onOpenDocument={onOpenDocument}
       onOpenRoomSettings={onOpenRoomSettings}
+      canRestoreClosed={canRestoreClosed}
       onRestoreClosed={onRestoreClosed}
       open={open}
       roomId={roomId}

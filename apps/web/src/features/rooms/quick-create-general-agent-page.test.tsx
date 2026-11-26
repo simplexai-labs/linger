@@ -581,6 +581,26 @@ describe("quick Local Agent creation", () => {
     });
   });
 
+  it("auto-selects the sole online Local Computer so Create is immediately enabled", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const ready = {
+      ...inventory.items[0]!,
+      status: "online" as const,
+    };
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [ready],
+    });
+    renderCreation(runtime, "local");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create" })).toBeEnabled(),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Local Computer" }),
+    ).toHaveTextContent(ready.display_name);
+  });
+
   it("hides setup for a connected computer and waits for its runtime to become ready", async () => {
     const runtime = await testRuntime();
     const inventory =
