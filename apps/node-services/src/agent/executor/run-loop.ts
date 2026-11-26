@@ -1956,7 +1956,10 @@ export class RunLoop {
    * it. Because activity classification inspects shell text for display and can
    * miss compound scripts or decision cards, TeamHub confirms whether a visible
    * reply landed before failing the Run unless the Stop hook already confirmed
-   * delivery. Task Runs report through their final response and keep it.
+   * delivery. After the Stop hook blocked once without confirming a reply, a
+   * delivered write may still be only a --continuing acknowledgement, so
+   * TeamHub is asked too; only its definite answer fails the Run then. Task
+   * Runs report through their final response and keep it.
    */
   async #completedTerminal(
     runId: string,
@@ -1969,13 +1972,22 @@ export class RunLoop {
       roomRun && !stopHook.replyConfirmed && replyDelivery.replyUndelivered;
     const suspectedNotSent =
       roomRun && !stopHook.replyConfirmed && replyDelivery.replyNotSent;
+    const blockedUnconfirmed =
+      roomRun &&
+      stopHook.blocked &&
+      !stopHook.replyConfirmed &&
+      replyDelivery.awaitingHuman &&
+      !suspectedUndelivered &&
+      !suspectedNotSent;
     let confirmedReplied = false;
-    if (suspectedUndelivered || suspectedNotSent) {
+    let checkedNotReplied = false;
+    if (suspectedUndelivered || suspectedNotSent || blockedUnconfirmed) {
       try {
         confirmedReplied = await this.#state.hasLocalRunReplied(
           runId,
           this.#terminalRecoveryStop.signal,
         );
+        checkedNotReplied = !confirmedReplied;
       } catch (error) {
         this.#logger.log("warn", "local_run.reply_check_failed", {
           runId,
@@ -1987,7 +1999,8 @@ export class RunLoop {
       stopHook.blocked &&
       (stopHook.replyConfirmed ||
         confirmedReplied ||
-        replyDelivery.counts().deliveredMessageWrites > 0)
+        replyDelivery.counts().deliveredMessageWrites > 0) &&
+      !checkedNotReplied
     ) {
       this.#logger.log("info", "local_run.stop_hook_recovered", { runId });
     }
@@ -2007,7 +2020,10 @@ export class RunLoop {
         failure: runFailure("reply_undelivered", this.#runtimeType),
       };
     }
-    if (suspectedNotSent && !confirmedReplied) {
+    if (
+      (suspectedNotSent && !confirmedReplied) ||
+      (blockedUnconfirmed && checkedNotReplied)
+    ) {
       this.#logger.log("warn", "local_run.reply_not_sent", {
         runId,
         ...replyDelivery.counts(),

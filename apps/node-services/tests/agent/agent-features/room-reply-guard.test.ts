@@ -9,6 +9,7 @@ import {
   createRoomReplyGuardFeature,
   ROOM_REPLY_GUARD_FEATURE_ID,
   ROOM_REPLY_REMINDER,
+  TASK_REPORT_REMINDER,
 } from "../../../src/agent/agent-features/room-reply-guard/index.js";
 import type { Message } from "../../../src/agent/executor/types.js";
 
@@ -270,6 +271,35 @@ describe("room-reply-guard feature", () => {
       decision: { action: "allow" },
       replyConfirmed: true,
     });
+  });
+
+  it("blocks once with the Task report reminder when a Task report produced no visible message", async () => {
+    const readReplyStatus = vi.fn(async () => ({ replied: false }));
+    const composed = composeContextFeatures({
+      context: makeContext("meta"),
+      features: [createRoomReplyGuardFeature({ readReplyStatus })],
+    });
+    const input = {
+      runId: "run-task",
+      attempt: 0,
+      stopHookActive: false,
+      inputs: [
+        makeRoomMessage({ mentioned: false, inboxId: "taskmeta:task-9" }),
+      ],
+    };
+
+    expect(
+      await composed.evaluateRunBeforeStop(input, new AbortController().signal),
+    ).toEqual({
+      decision: { action: "block", reason: TASK_REPORT_REMINDER },
+      blockedBy: ROOM_REPLY_GUARD_FEATURE_ID,
+    });
+    expect(
+      await composed.evaluateRunBeforeStop(
+        { ...input, attempt: 1 },
+        new AbortController().signal,
+      ),
+    ).toEqual({ decision: { action: "allow" } });
   });
 
   it("allows immediately when stopHookActive is already true", async () => {

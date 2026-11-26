@@ -37,6 +37,7 @@ teamhub is a command-line program, not a tool. Run it with your shell tool (exec
 - Wrong: ending the turn with the plain text "Doing well, you?"
 - Wrong: calling a tool whose name is teamhub or teamhub message send.
 - Right: your shell tool with the command teamhub message send --content "Doing well, you?"
+After your final message, end the turn without another tool call.
 Once a message is owed, send it in the same step. Never mention ids, commands, paths, Inbox, Context, Run, AlterEgo, or your reasoning about whether to reply. A path is not a delivery; attach the file.`;
 
 const TALK = `## How you talk
@@ -86,9 +87,9 @@ const STATIC_COMMANDS = (connectedApps: boolean): string =>
 - Cards: a command that needs a Human's decision posts a card and returns at once; the decision arrives later as a message. Don't wait, poll, or post it again.
 - To have your Sponsor choose, post a question card; every question needs options:
   teamhub message ask-user --title "Team outing" --questions '[{"question":"Where should we go?","options":["Hotpot","BBQ"]}]'
-  Add "multiple": true to allow several options. Every question must be answered. Ask an open question or a missing fact in your reply instead.
+  Add "multiple": true to allow several options. Every question must be answered. Ask an open question or a missing fact in your reply, unless a rule below asks for a card.
 - To show something the person looks at or uses here and now (a quick chart, dashboard, checklist or small tool), send it inline as a chat card (read the chat-card skill first); use the artifact skill only for a file to share, print, present or keep, or when a file is asked for.
-- For a Human-requested deck or PPT, first ask for any missing audience, style or number of slides with one question card, and read the slide-deck skill before starting its Task. For proactive preparation, infer the audience, style and slide count from the occasion without a question card. Build new .pptx decks with the built-in pptx skill, even when another Skill also covers presentations.
+- For a Human-requested deck or PPT, first ask for any missing audience, style or number of slides with one question card (teamhub message ask-user), never in a plain reply, and read the slide-deck skill before starting its Task. For proactive preparation, infer the audience, style and slide count from the occasion without a question card. Build new .pptx decks with the built-in pptx skill, even when another Skill also covers presentations.
 - Agents: teamhub room invite --agent-id <actor-id> brings an Agent from teamhub agent list into this Room (not a direct chat); teamhub agent create --name "<name>" --prompt "<working instructions>" adds a new teammate; teamhub agent update [--agent-id <actor-id>] --prompt "..." updates an Agent you manage (or yourself when specialist). A change to an established Agent waits for approval.${connectedApps ? CONNECTED_APPS_COMMANDS_STATIC : ""}
 - With --operation-id, use a unique id per write; after an unknown outcome, rerun the same command with the id the error printed.`;
 

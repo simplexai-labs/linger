@@ -757,6 +757,7 @@ SELECT (
         FROM messages message
         WHERE message.local_run_id=target_run.run_id
           AND message.message_kind='conversation'
+          AND NOT message.continues
     )
     OR EXISTS (
         SELECT 1
@@ -772,6 +773,7 @@ SELECT (
             WHERE message.tenant_id=target_run.tenant_id
               AND message.author_actor_id=target_run.agent_actor_id
               AND message.message_kind='conversation'
+              AND NOT message.continues
               AND message.local_run_id IS NULL
               AND message.created_at>=target_run.started_at
               AND (target_run.finished_at IS NULL OR message.created_at<=target_run.finished_at)
@@ -818,7 +820,8 @@ type GetAgentLocalRunReplyDeliveredParams struct {
 // conversation Message or decision card attributed to the Run, a queued
 // presentation sequence attributed to the Run, or an unattributed conversation
 // Message, presentation sequence, or emoji Reaction written by the Agent in
-// the Room or its Threads during the Run. Excluding rows attributed to another
+// the Room or its Threads during the Run. A Message the Agent sent with
+// --continuing is an acknowledgement, not the reply. Excluding rows attributed to another
 // Run prevents delayed bubbles from an earlier sequence from satisfying this
 // Run. The unattributed sequence and reaction branches have no (room_id,
 // created_at) index; this query runs only on the suspected-missing-reply path
@@ -2228,6 +2231,7 @@ reply_room AS (
     FROM target_run
     JOIN messages message ON message.local_run_id=target_run.run_id
     WHERE message.message_kind='conversation'
+      AND NOT message.continues
     UNION
     SELECT sequence.room_id
     FROM target_run
@@ -2240,6 +2244,7 @@ reply_room AS (
      AND message.author_actor_id=target_run.agent_actor_id
     WHERE target_run.started_at IS NOT NULL
       AND message.message_kind='conversation'
+      AND NOT message.continues
       AND message.local_run_id IS NULL
       AND message.created_at>=target_run.started_at
       AND (target_run.finished_at IS NULL OR message.created_at<=target_run.finished_at)

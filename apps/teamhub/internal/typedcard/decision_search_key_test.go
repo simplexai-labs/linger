@@ -86,10 +86,12 @@ func TestSearchKeyNoticesCarryTheConfiguredBackend(t *testing.T) {
 		{"vowel name", "answered", view("exa"), []byte(`{}`), `{"decision":"configured","backend":"exa"}`, "", pgtype.Text{},
 			"The user added an Exa API key. Run the command again.\n"},
 		{"declined", "denied", view("tavily"), tavilySearch, `{"decision":"deny"}`, "", pgtype.Text{},
-			"Human interaction decision_1 resolved: The user declined to add a web search key. Don't retry; tell the user web search needs a key in Connectors.\n" +
+			"Human interaction decision_1 resolved: The user declined to add a Tavily API key. Don't ask for it again; other backends are unaffected, and teamhub web list shows the ready ones.\n" +
 				`payload={"decision":"deny"}`},
 		{"declined task", "denied", view("tavily"), tavilySearch, `{"decision":"deny"}`, "", task,
-			"The Sponsor declined to add a web search key. Don't retry; say in your final reply"},
+			"The Sponsor declined to add a Tavily API key. Don't ask for it again"},
+		{"declined keyless search", "denied", view(""), []byte(`{"command":"search","query":"rust 2026"}`), `{"decision":"deny"}`, "", pgtype.Text{},
+			"The user declined to add a web search key. Don't retry; tell the user web search needs a key in Connectors."},
 		{"replayed search", "answered", view("tavily"), tavilySearch, `{"decision":"configured","backend":"brave"}`,
 			`{"outcome":"","data":{"results":[{"title":"T","url":"https://t.example","snippet":"s"}]}}`, pgtype.Text{},
 			`The user added a Brave Search API key instead of Tavily. Results of your search for "rust 2026" are in the payload below; don't run it again.` + "\n" +

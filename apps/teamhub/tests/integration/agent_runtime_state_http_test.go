@@ -411,6 +411,12 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 		}
 	}
 	assertReplied(run1, false)
+	// An acknowledgement sent with --continuing is not the reply.
+	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run1-ack", run1, "On it")
+	if _, err := pool.Exec(t.Context(), `UPDATE messages SET continues=true WHERE id='msg-run1-ack'`); err != nil {
+		t.Fatalf("mark continuing message: %v", err)
+	}
+	assertReplied(run1, false)
 	insertRuntimeRunMessageFixture(t, pool, roomID, "msg-run1-reply", run1, "Direct reply")
 	assertReplied(run1, true, "room:"+roomID)
 	finishRun(run1)
@@ -439,6 +445,14 @@ func TestAgentLocalRunReplyStatus(t *testing.T) {
 
 	// Run 4: unattributed conversation message written during the Run counts.
 	run4 := startRun("reply-run-4")
+	assertReplied(run4, false)
+	// An unattributed acknowledgement sent with --continuing is not the reply either.
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO messages(id,tenant_id,room_id,author_actor_id,body,segments,message_kind,local_run_id,continues,created_at)
+		VALUES('msg-run4-ack','tenant_acme',$1,'actor_acme_official','On it',
+		       '[{"type":"text","content":"On it"}]'::jsonb,'conversation',NULL,true,clock_timestamp())`, roomID); err != nil {
+		t.Fatalf("insert unattributed continuing message: %v", err)
+	}
 	assertReplied(run4, false)
 	if _, err := pool.Exec(t.Context(), `
 		INSERT INTO messages(id,tenant_id,room_id,author_actor_id,body,segments,message_kind,local_run_id,created_at)

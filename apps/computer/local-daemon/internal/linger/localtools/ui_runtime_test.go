@@ -143,6 +143,19 @@ func TestUnifiedUIStateImagesAndPrivateCapabilities(t *testing.T) {
 	if strings.Contains(string(got), `"isError":true`) || !strings.Contains(string(got), `"value":2`) {
 		t.Fatalf("state did not persist: %s", got)
 	}
+	got = f.execute(t, `return "line one\nsays \"hi\""`)
+	if !strings.Contains(string(got), `{"text":"line one\nsays \"hi\"","type":"text"}`) || !strings.Contains(string(got), `\"value\":\"returned text shown above\"`) {
+		t.Fatalf("returned text was not shown verbatim: %s", got)
+	}
+	if got = f.execute(t, `return null`); strings.Contains(string(got), `{"text":"","type":"text"}`) {
+		t.Fatalf("a null value added an empty text part: %s", got)
+	}
+	if got = f.execute(t, `null.x`); !strings.Contains(string(got), `"hint"`) {
+		t.Fatalf("a script error has no hint: %s", got)
+	}
+	if got = f.execute(t, `await ui.browser.no_such_method({})`); strings.Contains(string(got), `"hint"`) {
+		t.Fatalf("a driver error got the script hint: %s", got)
+	}
 	reset := f.rpc(t, t.Context(), "tools/call", map[string]any{"name": "ui_reset", "arguments": map[string]any{}})
 	if !strings.Contains(string(reset), `"reset":true`) {
 		t.Fatal(string(reset))

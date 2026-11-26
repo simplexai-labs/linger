@@ -103,6 +103,45 @@ function permissionLines(computerID: unknown, value: unknown): string[] {
   ];
 }
 
+const subjectUses: Readonly<Record<Subject, string>> = {
+  linger: "shell commands such as screencapture and osascript",
+  computer_use: "ui.window and ui.computer in ui_exec",
+};
+const forBySubject: Readonly<Record<Subject, string>> = {
+  linger: "shell",
+  computer_use: "computer-use",
+};
+
+// The status alone leaves a small model guessing what a missing permission
+// blocks and how to ask for it, so the output names both.
+function permissionNextSteps(value: unknown): string[] {
+  const subjects = asRecord(value).subjects;
+  if (!Array.isArray(subjects) || !subjects.length) return [];
+  const lines = subjects.flatMap((item) => {
+    const subject = asRecord(item);
+    const id = subject.subject as Subject;
+    if (!(id in subjectUses)) return [];
+    const missing = (
+      Array.isArray(subject.permissions) ? subject.permissions : []
+    )
+      .map(asRecord)
+      .filter(
+        (entry) =>
+          entry.state !== "granted" &&
+          permissionIds.includes(entry.id as PermissionId),
+      )
+      .map((entry) => entry.id as PermissionId);
+    if (!missing.length) return [];
+    return [
+      `${subjectLabels[id]} permissions are needed only for ${subjectUses[id]}. If the task needs them, run: teamhub computer permissions request --for ${forBySubject[id]} --permissions ${missing.join(",")}`,
+    ];
+  });
+  return [
+    ...lines,
+    "The managed browser (ui.page and ui.browser) needs none of these permissions.",
+  ];
+}
+
 function allGranted(
   status: PermissionStatus,
   subject: Subject,
@@ -153,7 +192,10 @@ const computerPermissionsStatus: CommandDefinition = {
     ...(await readStatus(context.client)),
   }),
   render: (result) =>
-    permissionLines(result.computer_id, result.permissions).join("\n"),
+    [
+      ...permissionLines(result.computer_id, result.permissions),
+      ...permissionNextSteps(result.permissions),
+    ].join("\n"),
 };
 
 function parsePermissions(value: string | undefined): PermissionId[] {

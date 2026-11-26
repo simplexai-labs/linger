@@ -712,14 +712,16 @@ its image until `ui_reset`, so a completed action never reports an error.
 
 Use `await ui.page(url)` for a managed browser and `ui.window(pid, window_id)`
 for a macOS window. Use `ui.computer.list_windows({app: appName})` to discover
-a named window and check its title. `await target.observe()` returns the visible
-text and actions. Call `view.click(role, name)` on that observation and use its
+a named window and check its title. `await ui.page(url)` navigates and returns
+the observation itself; `await ui.window(pid, window_id).observe()` and
+`await view.observe()` return the visible text and actions. Call `view.click(role, name)` on that observation and use its
 returned view for the next step. A newer driver call in the same namespace
 expires the previous observation. In a browser, `view.fill(fields)` resolves
 all named fields against one observation before sending the driver call. If an
 action has no browser snapshot, the helper obtains one. Use `ui.help("browser")`
 or `ui.help("computer")` for the underlying methods. `ui.emit(result)` selects
 text or native images for the model; the script receives opaque image handles.
+`console.log` lines join the same output.
 
 The public tool allows ten minutes. The default script budget is 165 seconds,
 with up to nine minutes per call. Nested calls reserve time to return their
