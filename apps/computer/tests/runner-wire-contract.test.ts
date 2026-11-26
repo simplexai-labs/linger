@@ -156,6 +156,16 @@ const agentFrames = [
   },
   {
     type: "execute",
+    kind: "local_models_custom",
+    ...localCapability,
+    action: "probe",
+    probe: {
+      target: "bartowski/Qwen2.5-7B-Instruct-GGUF",
+      hub: "huggingface",
+    },
+  },
+  {
+    type: "execute",
     kind: "model_source",
     ...localCapability,
     action: "test",

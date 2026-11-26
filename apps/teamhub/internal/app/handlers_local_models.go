@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
+	"github.com/simplexai-labs/linger/contracts-go/nodeservicesinternal"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
@@ -24,6 +27,7 @@ const localModelActionLifetime = 30 * time.Second
 
 var (
 	localModelIDPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$`)
+	localModelPoolIDPattern    = regexp.MustCompile(`^(gpu:(0|[1-9][0-9]{0,2})|system|unified)$`)
 	localModelSourceURLPattern = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$`)
 )
 
@@ -42,12 +46,21 @@ var localModelRefusalCodes = map[string]httpapi.LocalModelsErrorCode{
 	"GPU_UNSUPPORTED":            httpapi.LocalModelsErrorCodeLOCALMODELGPUUNSUPPORTED,
 	"DRIVER_UPDATE_REQUIRED":     httpapi.LocalModelsErrorCodeLOCALMODELDRIVERUPDATEREQUIRED,
 	"RUNTIME_DEPENDENCY_MISSING": httpapi.LocalModelsErrorCodeLOCALMODELRUNTIMEDEPENDENCYMISSING,
+	"HUB_AUTH_REQUIRED":          httpapi.LocalModelsErrorCodeLOCALMODELHUBAUTHREQUIRED,
+	"HUB_FORBIDDEN":              httpapi.LocalModelsErrorCodeLOCALMODELHUBFORBIDDEN,
+	"HUB_REPO_NOT_FOUND":         httpapi.LocalModelsErrorCodeLOCALMODELHUBREPONOTFOUND,
+	"HUB_FORMAT_UNSUPPORTED":     httpapi.LocalModelsErrorCodeLOCALMODELHUBFORMATUNSUPPORTED,
+	"HUB_UNREACHABLE":            httpapi.LocalModelsErrorCodeLOCALMODELHUBUNREACHABLE,
+	"NETWORK_UNAVAILABLE":        httpapi.LocalModelsErrorCodeLOCALMODELHUBUNREACHABLE,
+	"UNSUPPORTED_ARCHITECTURE":   httpapi.LocalModelsErrorCodeLOCALMODELUNSUPPORTEDARCHITECTURE,
+	"CORRUPT_WEIGHTS":            httpapi.LocalModelsErrorCodeLOCALMODELCORRUPTWEIGHTS,
 }
 
 var localModelsErrorMessages = map[httpapi.LocalModelsErrorCode]string{
 	httpapi.LocalModelsErrorCodeLOCALCOMPUTEROFFLINE:               "Local Computer is offline",
 	httpapi.LocalModelsErrorCodeLOCALMODELACTIONFORBIDDEN:          "Only the Computer's owner can change its models",
 	httpapi.LocalModelsErrorCodeLOCALMODELSUNAVAILABLE:             "The Computer has no usable model library",
+	httpapi.LocalModelsErrorCodeLOCALMODELSCUSTOMUNSUPPORTED:       "Update Linger on this Computer to install custom hub models",
 	httpapi.LocalModelsErrorCodeLOCALMODELUNKNOWN:                  "The Computer does not know this model",
 	httpapi.LocalModelsErrorCodeLOCALMODELINVALIDSTATE:             "The model cannot do that in its current state",
 	httpapi.LocalModelsErrorCodeLOCALMODELJOBRUNNING:               "The Computer is already working on this model",
@@ -58,6 +71,13 @@ var localModelsErrorMessages = map[httpapi.LocalModelsErrorCode]string{
 	httpapi.LocalModelsErrorCodeLOCALMODELGPUUNSUPPORTED:           "This Computer's GPU is not supported for local models",
 	httpapi.LocalModelsErrorCodeLOCALMODELDRIVERUPDATEREQUIRED:     "Update the NVIDIA driver on this Computer to run local models",
 	httpapi.LocalModelsErrorCodeLOCALMODELRUNTIMEDEPENDENCYMISSING: "This Computer is missing required system runtime libraries for local models",
+	httpapi.LocalModelsErrorCodeLOCALMODELHUBAUTHREQUIRED:          "The model hub requires an access token for this repository",
+	httpapi.LocalModelsErrorCodeLOCALMODELHUBFORBIDDEN:             "Access to this hub repository was denied",
+	httpapi.LocalModelsErrorCodeLOCALMODELHUBREPONOTFOUND:          "The requested repository was not found on the model hub",
+	httpapi.LocalModelsErrorCodeLOCALMODELHUBFORMATUNSUPPORTED:     "This repository format is not supported on this Computer",
+	httpapi.LocalModelsErrorCodeLOCALMODELHUBUNREACHABLE:           "The Computer could not reach the model hub",
+	httpapi.LocalModelsErrorCodeLOCALMODELUNSUPPORTEDARCHITECTURE:  "This model architecture is not supported by the installed inference engine",
+	httpapi.LocalModelsErrorCodeLOCALMODELCORRUPTWEIGHTS:           "The downloaded model weights appear corrupted",
 	httpapi.LocalModelsErrorCodeLOCALMODELACTIONFAILED:             "The Computer could not start this action",
 	httpapi.LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED:        "The Computer did not confirm the action in time",
 	httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE:      "Local models are unavailable",
@@ -66,6 +86,7 @@ var localModelsErrorMessages = map[httpapi.LocalModelsErrorCode]string{
 var localModelsErrorStatuses = map[httpapi.LocalModelsErrorCode]int{
 	httpapi.LocalModelsErrorCodeLOCALCOMPUTEROFFLINE:          http.StatusServiceUnavailable,
 	httpapi.LocalModelsErrorCodeLOCALMODELACTIONFORBIDDEN:     http.StatusForbidden,
+	httpapi.LocalModelsErrorCodeLOCALMODELHUBUNREACHABLE:      http.StatusBadGateway,
 	httpapi.LocalModelsErrorCodeLOCALMODELACTIONFAILED:        http.StatusBadGateway,
 	httpapi.LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED:   http.StatusGatewayTimeout,
 	httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE: http.StatusServiceUnavailable,
@@ -162,9 +183,20 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 				}
 			}
 		}
-		// A cause's path is a folder on the owner's machine; only they can act on it.
-		if model.Error != nil && !view.ViewerIsOwner {
-			model.Error.Path = nil
+		// Host paths and smoke-test diagnostic logs belong only to the owner.
+		if !view.ViewerIsOwner {
+			if model.Error != nil {
+				errCopy := *model.Error
+				errCopy.Path = nil
+				model.Error = &errCopy
+			}
+			if model.Verification != nil && model.Verification.Failure != nil && model.Verification.Failure.DiagnosticLog != nil {
+				verCopy := *model.Verification
+				failCopy := *model.Verification.Failure
+				failCopy.DiagnosticLog = nil
+				verCopy.Failure = &failCopy
+				model.Verification = &verCopy
+			}
 		}
 		view.Models = append(view.Models, httpapi.LocalModelView{Model: model, UsedBy: users})
 	}
@@ -191,7 +223,7 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 	if request.UnloadFirst != nil {
 		unloadFirst = *request.UnloadFirst
 	}
-	a.forwardLocalModelAction(c, string(request.Action), modelID, unloadFirst, func(computerID string) {
+	a.forwardLocalModelAction(c, string(request.Action), modelID, unloadFirst, request.Force, request.ContextTokens, func(computerID string) {
 		c.JSON(http.StatusAccepted, httpapi.LocalModelActionAccepted{
 			ComputerId: computerID, ModelId: modelID, Action: httpapi.LocalModelActionAcceptedAction(request.Action),
 		})
@@ -201,57 +233,199 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 // refreshLocalComputerModels asks an owned connected Computer to recheck
 // free memory and models and report a fresh library snapshot.
 func (a *App) refreshLocalComputerModels(c *gin.Context) {
-	a.forwardLocalModelAction(c, "refresh", "", nil, func(computerID string) {
+	a.forwardLocalModelAction(c, "refresh", "", nil, nil, nil, func(computerID string) {
 		c.JSON(http.StatusAccepted, httpapi.LocalModelsRefreshAccepted{
 			ComputerId: computerID, Action: httpapi.LocalModelsRefreshAcceptedRefresh,
 		})
 	})
 }
 
-func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID string, unloadFirst []string, onAccepted func(computerID string)) {
+func (a *App) ownedOnlineLocalModelsComputer(c *gin.Context) (agentruntimestate.LocalComputer, string, bool) {
 	tenantID, computerID := c.Param("tenantId"), c.Param("computerId")
 	viewerID, ok := a.spaceHuman(c, tenantID)
 	if !ok {
-		return
+		return agentruntimestate.LocalComputer{}, "", false
 	}
 	if a.agentRuntimeState == nil || a.localComputers == nil {
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
-		return
+		return agentruntimestate.LocalComputer{}, "", false
 	}
 	computer, err := a.agentRuntimeState.GetLocalComputer(c.Request.Context(), computerID)
 	switch {
 	case errors.Is(err, agentruntimestate.ErrNotFound), errors.Is(err, agentruntimestate.ErrInvalid),
 		err == nil && computer.Owner.TenantID != tenantID:
 		a.writeError(c, http.StatusNotFound, "LOCAL_COMPUTER_NOT_FOUND", "Local Computer was not found")
-		return
+		return agentruntimestate.LocalComputer{}, "", false
 	case err != nil:
 		a.internalError(c, "read Local Computer for a model action", err)
-		return
+		return agentruntimestate.LocalComputer{}, "", false
 	}
 	if computer.Owner.OwnerActorID != viewerID {
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELACTIONFORBIDDEN)
-		return
+		return agentruntimestate.LocalComputer{}, "", false
 	}
 	if !localComputerOnline(computer.Status, computer.LastSeenAt, time.Now()) {
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALCOMPUTEROFFLINE)
+		return agentruntimestate.LocalComputer{}, "", false
+	}
+	return computer, viewerID, true
+}
+
+// searchLocalComputerCustomModels searches Hugging Face or ModelScope via the
+// owner's connected Computer.
+func (a *App) searchLocalComputerCustomModels(c *gin.Context) {
+	var request httpapi.LocalModelCustomSearchRequest
+	if err := decodeJSON(c, &request); err != nil || !validCustomSearchRequest(request) {
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Custom model search request is invalid")
+		return
+	}
+	computer, _, ok := a.ownedOnlineLocalModelsComputer(c)
+	if !ok {
+		return
+	}
+	customMgmt, ok := a.localComputers.(roomagent.LocalModelsCustomManagement)
+	if !ok {
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
+		return
+	}
+	internalReq, err := reencodeJSON[nodeservicesinternal.LocalModelCustomSearchRequest](request)
+	if err != nil {
+		a.internalError(c, "encode custom model search", err)
+		return
+	}
+	result, err := customMgmt.SearchLocalComputerCustomModels(c.Request.Context(), modelSourceTarget(computer), internalReq)
+	if err != nil {
+		a.writeLocalModelsCustomFailure(c, computer.ComputerID, "search", err)
+		return
+	}
+	public, err := reencodeJSON[httpapi.LocalModelCustomSearchResponse](result)
+	if err != nil {
+		a.internalError(c, "project custom model search", err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, public)
+}
+
+// probeLocalComputerCustomModel probes a Hugging Face or ModelScope repository
+// from the owner's connected Computer. Classified outcomes including gated
+// (hub_http_status 401/403) always answer HTTP 200 so browser sessions never
+// confuse hub auth with session expiry.
+func (a *App) probeLocalComputerCustomModel(c *gin.Context) {
+	var request httpapi.LocalModelCustomProbeRequest
+	if err := decodeJSON(c, &request); err != nil || !validCustomProbeRequest(request) {
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Custom model probe request is invalid")
+		return
+	}
+	computer, _, ok := a.ownedOnlineLocalModelsComputer(c)
+	if !ok {
+		return
+	}
+	customMgmt, ok := a.localComputers.(roomagent.LocalModelsCustomManagement)
+	if !ok {
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
+		return
+	}
+	internalReq, err := reencodeJSON[nodeservicesinternal.LocalModelCustomProbeRequest](request)
+	if err != nil {
+		a.internalError(c, "encode custom model probe", err)
+		return
+	}
+	result, err := customMgmt.ProbeLocalComputerCustomModel(c.Request.Context(), modelSourceTarget(computer), internalReq)
+	if err != nil {
+		a.writeLocalModelsCustomFailure(c, computer.ComputerID, "probe", err)
+		return
+	}
+	public, err := reencodeJSON[httpapi.LocalModelCustomProbeResponse](result)
+	if err != nil {
+		a.internalError(c, "project custom model probe", err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, public)
+}
+
+// downloadLocalComputerCustomModel starts a Standby-First custom model download
+// on the owner's connected Computer.
+func (a *App) downloadLocalComputerCustomModel(c *gin.Context) {
+	var request httpapi.LocalModelCustomDownloadInput
+	if err := decodeJSON(c, &request); err != nil || !validCustomDownloadInput(request) {
+		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Custom model download request is invalid")
+		return
+	}
+	computer, viewerID, ok := a.ownedOnlineLocalModelsComputer(c)
+	if !ok {
+		return
+	}
+	customMgmt, ok := a.localComputers.(roomagent.LocalModelsCustomManagement)
+	if !ok {
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
+		return
+	}
+	internalInput, err := reencodeJSON[nodeservicesinternal.LocalModelCustomDownloadInput](request)
+	if err != nil {
+		a.internalError(c, "encode custom model download", err)
+		return
+	}
+	command := roomagent.LocalModelCustomDownloadCommand{
+		TenantID:       computer.Owner.TenantID,
+		OwnerActorID:   viewerID,
+		ComputerID:     computer.ComputerID,
+		RequestID:      ids.New("local_model_action"),
+		CustomDownload: internalInput,
+		ExpiresAt:      time.Now().UTC().Add(localModelActionLifetime),
+	}
+	modelID, refusal, err := customMgmt.DownloadLocalComputerCustomModel(c.Request.Context(), command)
+	switch {
+	case err == nil && refusal == nil:
+		accepted := httpapi.LocalModelCustomDownloadAccepted{
+			ComputerId: computer.ComputerID,
+			Action:     httpapi.LocalModelCustomDownloadAcceptedCustomDownload,
+		}
+		if modelID != "" && localModelIDPattern.MatchString(modelID) {
+			accepted.ModelId = &modelID
+		}
+		c.JSON(http.StatusAccepted, accepted)
+	case err == nil:
+		a.writeMappedLocalModelRefusal(c, computer.ComputerID, "custom_download", refusal)
+	default:
+		a.writeLocalModelsActionTransportError(c, computer.ComputerID, "custom_download", err)
+	}
+}
+
+func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID string, unloadFirst []string, force *bool, contextTokens *int64, onAccepted func(computerID string)) {
+	computer, viewerID, ok := a.ownedOnlineLocalModelsComputer(c)
+	if !ok {
 		return
 	}
 	command := roomagent.LocalModelActionCommand{
-		TenantID: tenantID, OwnerActorID: viewerID, ComputerID: computerID,
+		TenantID: computer.Owner.TenantID, OwnerActorID: viewerID, ComputerID: computer.ComputerID,
 		RequestID: ids.New("local_model_action"), Action: action, ModelID: modelID,
-		UnloadFirst: unloadFirst, ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
+		UnloadFirst: unloadFirst, Force: force, ContextTokens: contextTokens,
+		ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
 	}
 	refusal, err := a.localComputers.ActOnLocalModels(c.Request.Context(), command)
 	switch {
 	case err == nil && refusal == nil:
-		onAccepted(computerID)
+		onAccepted(computer.ComputerID)
 	case err == nil:
-		code, known := localModelRefusalCodes[refusal.Code]
-		if !known {
-			a.logger.Warn("local_models.action_refused", "computer_id", computerID, "action", command.Action, "refusal_code", refusal.Code)
-			code = httpapi.LocalModelsErrorCodeLOCALMODELACTIONFAILED
-		}
-		a.writeLocalModelsError(c, code)
+		a.writeMappedLocalModelRefusal(c, computer.ComputerID, command.Action, refusal)
+	default:
+		a.writeLocalModelsActionTransportError(c, computer.ComputerID, command.Action, err)
+	}
+}
+
+func (a *App) writeMappedLocalModelRefusal(c *gin.Context, computerID, action string, refusal *roomagent.LocalModelActionRefusal) {
+	code, known := localModelRefusalCodes[refusal.Code]
+	if !known {
+		a.logger.Warn("local_models.action_refused", "computer_id", computerID, "action", action, "refusal_code", refusal.Code)
+		code = httpapi.LocalModelsErrorCodeLOCALMODELACTIONFAILED
+	}
+	a.writeLocalModelsRefusal(c, code, refusal)
+}
+
+func (a *App) writeLocalModelsActionTransportError(c *gin.Context, computerID, action string, err error) {
+	switch {
 	case errors.Is(err, roomagent.ErrLocalComputerNotFound):
 		a.writeError(c, http.StatusNotFound, "LOCAL_COMPUTER_NOT_FOUND", "Local Computer was not found")
 	case errors.Is(err, roomagent.ErrLocalComputerOffline):
@@ -259,17 +433,132 @@ func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID str
 	case errors.Is(err, roomagent.ErrLocalModelsTimeout):
 		// The Computer is connected but had not decided; it may still act.
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED)
+	case errors.Is(err, roomagent.ErrLocalModelsCustomUnsupported):
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSCUSTOMUNSUPPORTED)
 	case errors.Is(err, roomagent.ErrLocalModelsUnsupported):
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSUNAVAILABLE)
 	default:
-		a.logger.Error("local_models.action_failed", "computer_id", computerID, "action", command.Action, "error", err)
+		a.logger.Error("local_models.action_failed", "computer_id", computerID, "action", action, "error", err)
 		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
 	}
+}
+
+func (a *App) writeLocalModelsCustomFailure(c *gin.Context, computerID, action string, err error) {
+	var customErr *roomagent.LocalModelsCustomError
+	switch {
+	case errors.Is(err, roomagent.ErrLocalComputerNotFound):
+		a.writeError(c, http.StatusNotFound, "LOCAL_COMPUTER_NOT_FOUND", "Local Computer was not found")
+	case errors.Is(err, roomagent.ErrLocalComputerOffline):
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALCOMPUTEROFFLINE)
+	case errors.Is(err, roomagent.ErrLocalModelsTimeout), errors.Is(err, context.DeadlineExceeded):
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED)
+	case errors.Is(err, roomagent.ErrLocalModelsCustomUnsupported):
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSCUSTOMUNSUPPORTED)
+	case errors.Is(err, roomagent.ErrLocalModelsUnsupported):
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSUNAVAILABLE)
+	case errors.As(err, &customErr):
+		if customErr.Code == "INVALID_REPO_SPEC" {
+			a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Custom repository specification is invalid")
+			return
+		}
+		code, known := localModelRefusalCodes[customErr.Code]
+		if !known {
+			a.logger.Warn("local_models_custom.failed", "computer_id", computerID, "action", action, "refusal_code", customErr.Code)
+			code = httpapi.LocalModelsErrorCodeLOCALMODELACTIONFAILED
+		}
+		a.writeLocalModelsError(c, code)
+	default:
+		a.logger.Error("local_models_custom.failed", "computer_id", computerID, "action", action, "error", err)
+		a.writeLocalModelsError(c, httpapi.LocalModelsErrorCodeLOCALMODELSSERVICEUNAVAILABLE)
+	}
+}
+
+func validCustomSearchRequest(request httpapi.LocalModelCustomSearchRequest) bool {
+	if request.Hub != nil && !request.Hub.Valid() {
+		return false
+	}
+	if request.Format != nil && !request.Format.Valid() {
+		return false
+	}
+	if request.Query != nil && len(*request.Query) > 256 {
+		return false
+	}
+	if request.Limit != nil && (*request.Limit < 1 || *request.Limit > 50) {
+		return false
+	}
+	if request.Token != nil && len(*request.Token) > 4096 {
+		return false
+	}
+	return true
+}
+
+func validCustomProbeRequest(request httpapi.LocalModelCustomProbeRequest) bool {
+	if strings.TrimSpace(request.Target) == "" || len(request.Target) > 2048 {
+		return false
+	}
+	if request.Hub != nil && !request.Hub.Valid() {
+		return false
+	}
+	if request.Revision != nil && (strings.TrimSpace(*request.Revision) == "" || len(*request.Revision) > 128) {
+		return false
+	}
+	if request.FileName != nil && (strings.TrimSpace(*request.FileName) == "" || len(*request.FileName) > 512) {
+		return false
+	}
+	if request.Token != nil && len(*request.Token) > 4096 {
+		return false
+	}
+	return true
+}
+
+func validCustomDownloadInput(request httpapi.LocalModelCustomDownloadInput) bool {
+	if !request.Hub.Valid() || strings.TrimSpace(request.RepoId) == "" || len(request.RepoId) > 256 ||
+		strings.TrimSpace(request.VariantId) == "" || len(request.VariantId) > 128 {
+		return false
+	}
+	if request.Revision != nil && (strings.TrimSpace(*request.Revision) == "" || len(*request.Revision) > 128) {
+		return false
+	}
+	if request.Files != nil {
+		if len(*request.Files) > 256 {
+			return false
+		}
+		for _, f := range *request.Files {
+			if strings.TrimSpace(f) == "" || len(f) > 512 {
+				return false
+			}
+		}
+	}
+	if request.Mmproj != nil && (strings.TrimSpace(*request.Mmproj) == "" || len(*request.Mmproj) > 512) {
+		return false
+	}
+	if request.Token != nil && len(*request.Token) > 4096 {
+		return false
+	}
+	return true
 }
 
 func validLocalModelAction(modelID string, request httpapi.LocalModelActionRequest) bool {
 	if !localModelIDPattern.MatchString(modelID) || !request.Action.Valid() {
 		return false
+	}
+	if request.Force != nil && request.Action != httpapi.LocalModelActionRequestLoad {
+		return false
+	}
+	if request.ContextTokens != nil {
+		ctxTokens := *request.ContextTokens
+		switch request.Action {
+		case httpapi.LocalModelActionRequestSmokeTest:
+			if ctxTokens != 2048 && ctxTokens != 4096 {
+				return false
+			}
+		case httpapi.LocalModelActionRequestLoad:
+			if ctxTokens < 512 || ctxTokens > 1_048_576 {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 	if request.UnloadFirst == nil {
 		return true
@@ -287,11 +576,36 @@ func validLocalModelAction(modelID string, request httpapi.LocalModelActionReque
 }
 
 func (a *App) writeLocalModelsError(c *gin.Context, code httpapi.LocalModelsErrorCode) {
+	a.writeLocalModelsRefusal(c, code, nil)
+}
+
+func (a *App) writeLocalModelsRefusal(c *gin.Context, code httpapi.LocalModelsErrorCode, refusal *roomagent.LocalModelActionRefusal) {
 	status, found := localModelsErrorStatuses[code]
 	if !found {
 		status = http.StatusConflict
 	}
-	a.writeError(c, status, string(code), localModelsErrorMessages[code])
+	requestID, _ := c.Get("request_id")
+	reqIDStr, _ := requestID.(string)
+	body := httpapi.LocalModelsError{
+		Code:      code,
+		Message:   localModelsErrorMessages[code],
+		RequestId: reqIDStr,
+	}
+	if refusal != nil && status == http.StatusConflict {
+		if refusal.NeedBytes != nil && *refusal.NeedBytes >= 0 {
+			need := *refusal.NeedBytes
+			body.NeedBytes = &need
+		}
+		if refusal.FreeBytes != nil && *refusal.FreeBytes >= 0 {
+			free := *refusal.FreeBytes
+			body.FreeBytes = &free
+		}
+		if refusal.Pool != "" && localModelPoolIDPattern.MatchString(refusal.Pool) {
+			pool := refusal.Pool
+			body.Pool = &pool
+		}
+	}
+	c.JSON(status, httpapi.LocalModelsErrorResponse{Error: body})
 }
 
 // recordAgentRuntimeLocalModels stores a Computer's latest model library as
@@ -331,6 +645,22 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 	if snapshot.Debug != nil && (!snapshot.Debug.Mode.Valid() || !snapshot.Debug.Source.Valid()) {
 		snapshot.Debug = nil
 	}
+	if snapshot.Host != nil && snapshot.Host.SupportedFormats != nil {
+		filtered := make([]teamhubinternal.LocalModelFormat, 0, min(len(*snapshot.Host.SupportedFormats), 8))
+		for _, f := range *snapshot.Host.SupportedFormats {
+			if f.Valid() && !slices.Contains(filtered, f) {
+				filtered = append(filtered, f)
+				if len(filtered) == 8 {
+					break
+				}
+			}
+		}
+		if len(filtered) > 0 {
+			snapshot.Host.SupportedFormats = &filtered
+		} else {
+			snapshot.Host.SupportedFormats = nil
+		}
+	}
 	for i := range snapshot.Models {
 		model := &snapshot.Models[i]
 		if model.Family != nil && !model.Family.Valid() {
@@ -354,6 +684,63 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 		}
 		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
 			model.HostRamBytes = nil
+		}
+		if model.Download != nil {
+			if model.Download.ShardIndex != nil && *model.Download.ShardIndex < 1 {
+				model.Download.ShardIndex = nil
+			}
+			if model.Download.ShardCount != nil && *model.Download.ShardCount < 1 {
+				model.Download.ShardCount = nil
+			}
+		}
+		if model.Origin != nil && !model.Origin.Valid() {
+			model.Origin = nil
+		}
+		if model.Custom != nil {
+			custom := model.Custom
+			if !custom.Hub.Valid() || !custom.Format.Valid() ||
+				strings.TrimSpace(custom.RepoId) == "" || len(custom.RepoId) > 256 ||
+				strings.TrimSpace(custom.VariantId) == "" || len(custom.VariantId) > 128 {
+				model.Custom = nil
+			} else {
+				if custom.ShardCount < 1 {
+					custom.ShardCount = 1
+				} else if custom.ShardCount > 256 {
+					custom.ShardCount = 256
+				}
+				if custom.Url != nil && (len(*custom.Url) > 2048 || !localModelSourceURLPattern.MatchString(*custom.Url)) {
+					custom.Url = nil
+				}
+				if custom.MmprojBytes != nil && *custom.MmprojBytes < 0 {
+					custom.MmprojBytes = nil
+				}
+			}
+		}
+		if model.Verification != nil {
+			ver := model.Verification
+			if !ver.Status.Valid() {
+				model.Verification = nil
+			} else {
+				if ver.ContextTokens != nil && *ver.ContextTokens < 1 {
+					ver.ContextTokens = nil
+				}
+				if ver.Failure != nil {
+					fail := ver.Failure
+					if !fail.Kind.Valid() {
+						fail.Kind = teamhubinternal.LocalModelVerificationFailureKindUnknown
+					}
+					if !fail.Code.Valid() {
+						fail.Code = teamhubinternal.UNKNOWNERROR
+					}
+					if fail.ContextTokens < 1 {
+						fail.ContextTokens = 4096
+					}
+					if fail.DiagnosticLog != nil {
+						scrubbed := safeDiagnosticLog(*fail.DiagnosticLog)
+						fail.DiagnosticLog = &scrubbed
+					}
+				}
+			}
 		}
 		if model.Capabilities != nil {
 			filtered := make([]teamhubinternal.LocalModelCapability, 0, len(*model.Capabilities))
@@ -448,7 +835,36 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 		if model.Error != nil && model.Error.Cause != nil && !model.Error.Cause.Valid() {
 			return false
 		}
+		if model.Origin != nil && !model.Origin.Valid() {
+			return false
+		}
+		if model.Custom != nil && (!model.Custom.Hub.Valid() || !model.Custom.Format.Valid() ||
+			strings.TrimSpace(model.Custom.RepoId) == "" || strings.TrimSpace(model.Custom.VariantId) == "" ||
+			model.Custom.ShardCount < 1 || model.Custom.ShardCount > 256) {
+			return false
+		}
+		if model.Verification != nil {
+			if !model.Verification.Status.Valid() {
+				return false
+			}
+			if model.Verification.Failure != nil && (!model.Verification.Failure.Kind.Valid() || !model.Verification.Failure.Code.Valid() || model.Verification.Failure.ContextTokens < 1) {
+				return false
+			}
+		}
 		seen[model.Id] = true
 	}
 	return true
+}
+
+func safeDiagnosticLog(raw string) string {
+	scrubbed := computerMessageURLQueryPattern.ReplaceAllString(raw, "${1}?[REDACTED]")
+	scrubbed = computerMessageURLUserinfoPattern.ReplaceAllString(scrubbed, "${1}[REDACTED]@")
+	scrubbed = computerMessageBearerPattern.ReplaceAllString(scrubbed, "${1} [REDACTED]")
+	scrubbed = computerMessageSecretAssignPattern.ReplaceAllString(scrubbed, "${1}${2}[REDACTED]")
+	scrubbed = computerMessageTokenPattern.ReplaceAllString(scrubbed, "[REDACTED]")
+	runes := []rune(scrubbed)
+	if len(runes) > 4000 {
+		return string(runes[:4000])
+	}
+	return scrubbed
 }

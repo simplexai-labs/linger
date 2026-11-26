@@ -56,6 +56,7 @@ const (
 	KindBrowserConnect     = "browser_connect"
 	KindComputerPermission = "computer_permission"
 	KindLocalModels        = "local_models"
+	KindLocalModelsCustom  = "local_models_custom"
 	KindModelSource        = "model_source"
 	TargetOperation        = "operation"
 	TargetProvider         = "provider"
@@ -95,6 +96,7 @@ var AgentToDaemonMessages = []Message{
 	{Name: "CapabilityBrowserConnect", Type: "execute", Match: map[string]string{"kind": "browser_connect"}},
 	{Name: "CapabilityComputerPermission", Type: "execute", Match: map[string]string{"kind": "computer_permission"}},
 	{Name: "CapabilityLocalModelsExecute", Type: "execute", Match: map[string]string{"kind": "local_models"}},
+	{Name: "CapabilityLocalModelsCustom", Type: "execute", Match: map[string]string{"kind": "local_models_custom"}},
 	{Name: "CapabilityModelSource", Type: "execute", Match: map[string]string{"kind": "model_source"}},
 	{Name: "OperationPrepare", Type: "prepare", Match: map[string]string{"target": "operation"}},
 	{Name: "ProviderPrepare", Type: "prepare", Match: map[string]string{"target": "provider"}},
@@ -129,6 +131,8 @@ var DaemonToAgentMessages = []Message{
 	{Name: "CapabilityComputerPermissionFailed", Type: "executed", Match: map[string]string{"kind": "computer_permission", "outcome": "failed"}},
 	{Name: "CapabilityLocalModelsAccepted", Type: "executed", Match: map[string]string{"kind": "local_models", "outcome": "accepted"}},
 	{Name: "CapabilityLocalModelsRefused", Type: "executed", Match: map[string]string{"kind": "local_models", "outcome": "refused"}},
+	{Name: "CapabilityLocalModelsCustomSucceeded", Type: "executed", Match: map[string]string{"kind": "local_models_custom", "outcome": "succeeded"}},
+	{Name: "CapabilityLocalModelsCustomFailed", Type: "executed", Match: map[string]string{"kind": "local_models_custom", "outcome": "failed"}},
 	{Name: "CapabilityModelSourceSucceeded", Type: "executed", Match: map[string]string{"kind": "model_source", "outcome": "succeeded"}},
 	{Name: "CapabilityModelSourceFailed", Type: "executed", Match: map[string]string{"kind": "model_source", "outcome": "failed"}},
 	{Name: "OperationPrepared", Type: "prepared", Match: map[string]string{"target": "operation"}},
@@ -1217,13 +1221,14 @@ func (LocalModelGpu) RequiredFields() []string {
 
 // LocalModelHost mirrors the LocalModelHost schema shape.
 type LocalModelHost struct {
-	Platform      string          `json:"platform"`
-	Arch          string          `json:"arch"`
-	OsLabel       string          `json:"os_label"`
-	EngineLabel   string          `json:"engine_label"`
-	RamTotalBytes uint64          `json:"ram_total_bytes"`
-	DiskFreeBytes uint64          `json:"disk_free_bytes"`
-	Gpus          []LocalModelGpu `json:"gpus"`
+	Platform         string          `json:"platform"`
+	Arch             string          `json:"arch"`
+	OsLabel          string          `json:"os_label"`
+	EngineLabel      string          `json:"engine_label"`
+	RamTotalBytes    uint64          `json:"ram_total_bytes"`
+	DiskFreeBytes    uint64          `json:"disk_free_bytes"`
+	Gpus             []LocalModelGpu `json:"gpus"`
+	SupportedFormats []string        `json:"supported_formats,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelHost.
@@ -1233,6 +1238,61 @@ func (LocalModelHost) FixedFields() map[string]string { return nil }
 func (LocalModelHost) RequiredFields() []string {
 	return []string{"platform", "arch", "os_label", "engine_label", "ram_total_bytes", "disk_free_bytes", "gpus"}
 }
+
+// LocalModelCustomInfo mirrors the LocalModelCustomInfo schema shape.
+type LocalModelCustomInfo struct {
+	Hub              string  `json:"hub"`
+	RepoID           string  `json:"repo_id"`
+	Revision         string  `json:"revision,omitempty"`
+	URL              string  `json:"url,omitempty"`
+	Format           string  `json:"format"`
+	VariantID        string  `json:"variant_id"`
+	ShardCount       uint64  `json:"shard_count"`
+	MmprojFile       string  `json:"mmproj_file,omitempty"`
+	MmprojBytes      *uint64 `json:"mmproj_bytes,omitempty"`
+	AcceptedRisk     *bool   `json:"accepted_risk,omitempty"`
+	StandbyOnRestart bool    `json:"standby_on_restart"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomInfo.
+func (LocalModelCustomInfo) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomInfo must carry.
+func (LocalModelCustomInfo) RequiredFields() []string {
+	return []string{"hub", "repo_id", "format", "variant_id", "shard_count", "standby_on_restart"}
+}
+
+// LocalModelVerificationFailure mirrors the LocalModelVerificationFailure schema shape.
+type LocalModelVerificationFailure struct {
+	Kind             string `json:"kind"`
+	Code             string `json:"code"`
+	ContextTokens    uint64 `json:"context_tokens"`
+	CanRetryLowerCtx bool   `json:"can_retry_lower_ctx"`
+	CanRedownload    bool   `json:"can_redownload"`
+	DiagnosticLog    string `json:"diagnostic_log,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelVerificationFailure.
+func (LocalModelVerificationFailure) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelVerificationFailure must carry.
+func (LocalModelVerificationFailure) RequiredFields() []string {
+	return []string{"kind", "code", "context_tokens", "can_retry_lower_ctx", "can_redownload"}
+}
+
+// LocalModelVerification mirrors the LocalModelVerification schema shape.
+type LocalModelVerification struct {
+	Status        string                         `json:"status"`
+	ContextTokens *uint64                        `json:"context_tokens,omitempty"`
+	TestedAt      string                         `json:"tested_at,omitempty"`
+	Failure       *LocalModelVerificationFailure `json:"failure,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelVerification.
+func (LocalModelVerification) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelVerification must carry.
+func (LocalModelVerification) RequiredFields() []string { return []string{"status"} }
 
 // LocalModelPoolHolder mirrors the LocalModelPoolHolder schema shape.
 type LocalModelPoolHolder struct {
@@ -1331,6 +1391,8 @@ type LocalModelDownloadProgress struct {
 	DoneBytes      uint64  `json:"done_bytes"`
 	TotalBytes     uint64  `json:"total_bytes"`
 	BytesPerSecond *uint64 `json:"bytes_per_second,omitempty"`
+	ShardIndex     *uint64 `json:"shard_index,omitempty"`
+	ShardCount     *uint64 `json:"shard_count,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelDownloadProgress.
@@ -1412,6 +1474,9 @@ type LocalModel struct {
 	Concurrency           *uint64                     `json:"concurrency,omitempty"`
 	ConcurrencyProbing    *bool                       `json:"concurrency_probing,omitempty"`
 	HostRamBytes          *uint64                     `json:"host_ram_bytes,omitempty"`
+	Origin                string                      `json:"origin,omitempty"`
+	Custom                *LocalModelCustomInfo       `json:"custom,omitempty"`
+	Verification          *LocalModelVerification     `json:"verification,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.
@@ -1454,20 +1519,361 @@ func (LocalModelsSnapshot) RequiredFields() []string {
 	return []string{"available", "observed_at", "pools", "models"}
 }
 
+// LocalModelCustomDownloadInput mirrors the LocalModelCustomDownloadInput schema shape.
+type LocalModelCustomDownloadInput struct {
+	Hub         string   `json:"hub"`
+	RepoID      string   `json:"repo_id"`
+	Revision    string   `json:"revision,omitempty"`
+	VariantID   string   `json:"variant_id"`
+	Files       []string `json:"files,omitempty"`
+	Mmproj      string   `json:"mmproj,omitempty"`
+	ForceMemory *bool    `json:"force_memory,omitempty"`
+	Replace     *bool    `json:"replace,omitempty"`
+	Token       string   `json:"token,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomDownloadInput.
+func (LocalModelCustomDownloadInput) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomDownloadInput must carry.
+func (LocalModelCustomDownloadInput) RequiredFields() []string {
+	return []string{"hub", "repo_id", "variant_id"}
+}
+
+// LocalModelCustomSearchInput mirrors the LocalModelCustomSearchInput schema shape.
+type LocalModelCustomSearchInput struct {
+	Hub    string  `json:"hub,omitempty"`
+	Query  string  `json:"query,omitempty"`
+	Format string  `json:"format,omitempty"`
+	Limit  *uint64 `json:"limit,omitempty"`
+	Token  string  `json:"token,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomSearchInput.
+func (LocalModelCustomSearchInput) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomSearchInput must carry.
+func (LocalModelCustomSearchInput) RequiredFields() []string { return nil }
+
+// LocalModelCustomDefaultQuant mirrors the LocalModelCustomDefaultQuant schema shape.
+type LocalModelCustomDefaultQuant struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	SizeBytes uint64 `json:"size_bytes"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomDefaultQuant.
+func (LocalModelCustomDefaultQuant) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomDefaultQuant must carry.
+func (LocalModelCustomDefaultQuant) RequiredFields() []string {
+	return []string{"id", "label", "size_bytes"}
+}
+
+// LocalModelCustomSearchResultItem mirrors the LocalModelCustomSearchResultItem schema shape.
+type LocalModelCustomSearchResultItem struct {
+	Hub                 string                        `json:"hub"`
+	RepoID              string                        `json:"repo_id"`
+	URL                 string                        `json:"url"`
+	Title               string                        `json:"title"`
+	Owner               string                        `json:"owner"`
+	Format              string                        `json:"format"`
+	Family              string                        `json:"family,omitempty"`
+	Architecture        string                        `json:"architecture,omitempty"`
+	ParameterBillions   *float64                      `json:"parameter_billions,omitempty"`
+	ContextTokens       *uint64                       `json:"context_tokens,omitempty"`
+	Downloads           uint64                        `json:"downloads"`
+	Likes               uint64                        `json:"likes"`
+	UpdatedAt           string                        `json:"updated_at,omitempty"`
+	Description         string                        `json:"description,omitempty"`
+	License             string                        `json:"license,omitempty"`
+	Gated               bool                          `json:"gated"`
+	Compatible          bool                          `json:"compatible"`
+	IncompatibilityCode string                        `json:"incompatibility_code,omitempty"`
+	QuantCount          *uint64                       `json:"quant_count,omitempty"`
+	DefaultQuant        *LocalModelCustomDefaultQuant `json:"default_quant,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomSearchResultItem.
+func (LocalModelCustomSearchResultItem) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomSearchResultItem must carry.
+func (LocalModelCustomSearchResultItem) RequiredFields() []string {
+	return []string{"hub", "repo_id", "url", "title", "owner", "format", "downloads", "likes", "gated", "compatible"}
+}
+
+// LocalModelCustomSearchResult mirrors the LocalModelCustomSearchResult schema shape.
+type LocalModelCustomSearchResult struct {
+	Query            string                             `json:"query"`
+	Hub              string                             `json:"hub"`
+	Format           string                             `json:"format"`
+	Platform         string                             `json:"platform"`
+	Arch             string                             `json:"arch"`
+	SupportedFormats []string                           `json:"supported_formats"`
+	Results          []LocalModelCustomSearchResultItem `json:"results"`
+	Warnings         []string                           `json:"warnings"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomSearchResult.
+func (LocalModelCustomSearchResult) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomSearchResult must carry.
+func (LocalModelCustomSearchResult) RequiredFields() []string {
+	return []string{"query", "hub", "format", "platform", "arch", "supported_formats", "results", "warnings"}
+}
+
+// LocalModelCustomProbeInput mirrors the LocalModelCustomProbeInput schema shape.
+type LocalModelCustomProbeInput struct {
+	Target   string `json:"target"`
+	Hub      string `json:"hub,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	FileName string `json:"file_name,omitempty"`
+	Token    string `json:"token,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomProbeInput.
+func (LocalModelCustomProbeInput) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomProbeInput must carry.
+func (LocalModelCustomProbeInput) RequiredFields() []string { return []string{"target"} }
+
+// LocalModelCustomProbeRepo mirrors the LocalModelCustomProbeRepo schema shape.
+type LocalModelCustomProbeRepo struct {
+	Hub      string `json:"hub"`
+	RepoID   string `json:"repo_id"`
+	Revision string `json:"revision,omitempty"`
+	URL      string `json:"url"`
+	Title    string `json:"title,omitempty"`
+	Owner    string `json:"owner,omitempty"`
+	Format   string `json:"format,omitempty"`
+	Family   string `json:"family,omitempty"`
+	License  string `json:"license,omitempty"`
+	Gated    *bool  `json:"gated,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomProbeRepo.
+func (LocalModelCustomProbeRepo) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomProbeRepo must carry.
+func (LocalModelCustomProbeRepo) RequiredFields() []string { return []string{"hub", "repo_id", "url"} }
+
+// LocalModelCustomGgufMeta mirrors the LocalModelCustomGgufMeta schema shape.
+type LocalModelCustomGgufMeta struct {
+	Architecture    string  `json:"architecture,omitempty"`
+	NCtxTrain       *uint64 `json:"n_ctx_train,omitempty"`
+	NLayer          *uint64 `json:"n_layer,omitempty"`
+	Moe             *bool   `json:"moe,omitempty"`
+	HasChatTemplate *bool   `json:"has_chat_template,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomGgufMeta.
+func (LocalModelCustomGgufMeta) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomGgufMeta must carry.
+func (LocalModelCustomGgufMeta) RequiredFields() []string { return nil }
+
+// LocalModelCustomProbeHost mirrors the LocalModelCustomProbeHost schema shape.
+type LocalModelCustomProbeHost struct {
+	Platform             string   `json:"platform"`
+	Arch                 string   `json:"arch"`
+	SupportedFormats     []string `json:"supported_formats"`
+	DiskFreeBytes        uint64   `json:"disk_free_bytes"`
+	TargetPool           string   `json:"target_pool,omitempty"`
+	PoolTotalBytes       *uint64  `json:"pool_total_bytes,omitempty"`
+	PoolSoftBudgetBytes  *uint64  `json:"pool_soft_budget_bytes,omitempty"`
+	PoolHardCeilingBytes *uint64  `json:"pool_hard_ceiling_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomProbeHost.
+func (LocalModelCustomProbeHost) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomProbeHost must carry.
+func (LocalModelCustomProbeHost) RequiredFields() []string {
+	return []string{"platform", "arch", "supported_formats", "disk_free_bytes"}
+}
+
+// LocalModelCustomMmprojCandidate mirrors the LocalModelCustomMmprojCandidate schema shape.
+type LocalModelCustomMmprojCandidate struct {
+	Path        string `json:"path"`
+	SizeBytes   uint64 `json:"size_bytes"`
+	SHA256      string `json:"sha256,omitempty"`
+	Recommended bool   `json:"recommended"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomMmprojCandidate.
+func (LocalModelCustomMmprojCandidate) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomMmprojCandidate must carry.
+func (LocalModelCustomMmprojCandidate) RequiredFields() []string {
+	return []string{"path", "size_bytes", "recommended"}
+}
+
+// LocalModelCustomQuantFile mirrors the LocalModelCustomQuantFile schema shape.
+type LocalModelCustomQuantFile struct {
+	Path      string `json:"path"`
+	SizeBytes uint64 `json:"size_bytes"`
+	SHA256    string `json:"sha256,omitempty"`
+	Revision  string `json:"revision,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomQuantFile.
+func (LocalModelCustomQuantFile) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomQuantFile must carry.
+func (LocalModelCustomQuantFile) RequiredFields() []string { return []string{"path", "size_bytes"} }
+
+// LocalModelCustomQuantVariant mirrors the LocalModelCustomQuantVariant schema shape.
+type LocalModelCustomQuantVariant struct {
+	ID                   string                      `json:"id"`
+	CustomModelID        string                      `json:"custom_model_id"`
+	Label                string                      `json:"label"`
+	Quant                string                      `json:"quant"`
+	BitsPerWeight        *float64                    `json:"bits_per_weight,omitempty"`
+	Sharded              bool                        `json:"sharded"`
+	ShardCount           uint64                      `json:"shard_count"`
+	Files                []LocalModelCustomQuantFile `json:"files"`
+	WeightsBytes         uint64                      `json:"weights_bytes"`
+	MmprojFile           string                      `json:"mmproj_file,omitempty"`
+	MmprojBytes          uint64                      `json:"mmproj_bytes"`
+	TotalDownloadBytes   uint64                      `json:"total_download_bytes"`
+	DiskRequiredBytes    uint64                      `json:"disk_required_bytes"`
+	DiskOk               bool                        `json:"disk_ok"`
+	EstimatedMemoryBytes uint64                      `json:"estimated_memory_bytes"`
+	MemoryEstimateBasis  string                      `json:"memory_estimate_basis"`
+	MemoryStatus         string                      `json:"memory_status"`
+	AlreadyInstalled     bool                        `json:"already_installed"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomQuantVariant.
+func (LocalModelCustomQuantVariant) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomQuantVariant must carry.
+func (LocalModelCustomQuantVariant) RequiredFields() []string {
+	return []string{"id", "custom_model_id", "label", "quant", "sharded", "shard_count", "files", "weights_bytes", "mmproj_bytes", "total_download_bytes", "disk_required_bytes", "disk_ok", "estimated_memory_bytes", "memory_estimate_basis", "memory_status", "already_installed"}
+}
+
+// LocalModelCustomProbeResult mirrors the LocalModelCustomProbeResult schema shape.
+type LocalModelCustomProbeResult struct {
+	Outcome              string                            `json:"outcome"`
+	Repo                 *LocalModelCustomProbeRepo        `json:"repo,omitempty"`
+	MetadataComplete     *bool                             `json:"metadata_complete,omitempty"`
+	MetadataNote         string                            `json:"metadata_note,omitempty"`
+	GgufMeta             *LocalModelCustomGgufMeta         `json:"gguf_meta,omitempty"`
+	Host                 *LocalModelCustomProbeHost        `json:"host,omitempty"`
+	MmprojCandidates     []LocalModelCustomMmprojCandidate `json:"mmproj_candidates,omitempty"`
+	RecommendedVariantID string                            `json:"recommended_variant_id,omitempty"`
+	SelectedQuantID      string                            `json:"selected_quant_id,omitempty"`
+	QuantVariants        []LocalModelCustomQuantVariant    `json:"quant_variants,omitempty"`
+	HubHTTPStatus        *uint64                           `json:"hub_http_status,omitempty"`
+	TokenProvided        *bool                             `json:"token_provided,omitempty"`
+	Reason               string                            `json:"reason,omitempty"`
+	SuggestedSearchQuery string                            `json:"suggested_search_query,omitempty"`
+	Hub                  string                            `json:"hub,omitempty"`
+	RepoID               string                            `json:"repo_id,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelCustomProbeResult.
+func (LocalModelCustomProbeResult) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelCustomProbeResult must carry.
+func (LocalModelCustomProbeResult) RequiredFields() []string { return []string{"outcome"} }
+
+// CapabilityLocalModelsCustom mirrors the CapabilityLocalModelsCustom schema shape.
+type CapabilityLocalModelsCustom struct {
+	ProtocolVersion string                       `json:"protocol_version"`
+	CommandID       string                       `json:"command_id"`
+	RunnerID        string                       `json:"runner_id"`
+	TenantID        string                       `json:"tenant_id"`
+	OwnerActorID    string                       `json:"owner_actor_id"`
+	ConnectionEpoch uint64                       `json:"connection_epoch"`
+	ExpiresAt       string                       `json:"expires_at"`
+	Type            string                       `json:"type"`
+	Kind            string                       `json:"kind"`
+	Action          string                       `json:"action"`
+	Search          *LocalModelCustomSearchInput `json:"search,omitempty"`
+	Probe           *LocalModelCustomProbeInput  `json:"probe,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsCustom.
+func (CapabilityLocalModelsCustom) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "execute", "kind": "local_models_custom"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalModelsCustom must carry.
+func (CapabilityLocalModelsCustom) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action"}
+}
+
+// CapabilityLocalModelsCustomSucceeded mirrors the CapabilityLocalModelsCustomSucceeded schema shape.
+type CapabilityLocalModelsCustomSucceeded struct {
+	ProtocolVersion string                        `json:"protocol_version"`
+	CommandID       string                        `json:"command_id"`
+	RunnerID        string                        `json:"runner_id"`
+	TenantID        string                        `json:"tenant_id"`
+	OwnerActorID    string                        `json:"owner_actor_id"`
+	ConnectionEpoch uint64                        `json:"connection_epoch"`
+	ExpiresAt       string                        `json:"expires_at"`
+	Type            string                        `json:"type"`
+	Kind            string                        `json:"kind"`
+	Action          string                        `json:"action"`
+	Outcome         string                        `json:"outcome"`
+	SearchResult    *LocalModelCustomSearchResult `json:"search_result,omitempty"`
+	ProbeResult     *LocalModelCustomProbeResult  `json:"probe_result,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsCustomSucceeded.
+func (CapabilityLocalModelsCustomSucceeded) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_models_custom", "outcome": "succeeded"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalModelsCustomSucceeded must carry.
+func (CapabilityLocalModelsCustomSucceeded) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action", "outcome"}
+}
+
+// CapabilityLocalModelsCustomFailed mirrors the CapabilityLocalModelsCustomFailed schema shape.
+type CapabilityLocalModelsCustomFailed struct {
+	ProtocolVersion string           `json:"protocol_version"`
+	CommandID       string           `json:"command_id"`
+	RunnerID        string           `json:"runner_id"`
+	TenantID        string           `json:"tenant_id"`
+	OwnerActorID    string           `json:"owner_actor_id"`
+	ConnectionEpoch uint64           `json:"connection_epoch"`
+	ExpiresAt       string           `json:"expires_at"`
+	Type            string           `json:"type"`
+	Kind            string           `json:"kind"`
+	Action          string           `json:"action"`
+	Error           AgentRunnerError `json:"error"`
+	Outcome         string           `json:"outcome"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsCustomFailed.
+func (CapabilityLocalModelsCustomFailed) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_models_custom", "outcome": "failed"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalModelsCustomFailed must carry.
+func (CapabilityLocalModelsCustomFailed) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action", "error", "outcome"}
+}
+
 // CapabilityLocalModelsExecute mirrors the CapabilityLocalModelsExecute schema shape.
 type CapabilityLocalModelsExecute struct {
-	ProtocolVersion string   `json:"protocol_version"`
-	CommandID       string   `json:"command_id"`
-	RunnerID        string   `json:"runner_id"`
-	TenantID        string   `json:"tenant_id"`
-	OwnerActorID    string   `json:"owner_actor_id"`
-	ConnectionEpoch uint64   `json:"connection_epoch"`
-	ExpiresAt       string   `json:"expires_at"`
-	Type            string   `json:"type"`
-	Kind            string   `json:"kind"`
-	Action          string   `json:"action"`
-	ModelID         string   `json:"model_id,omitempty"`
-	UnloadFirst     []string `json:"unload_first,omitempty"`
+	ProtocolVersion string                         `json:"protocol_version"`
+	CommandID       string                         `json:"command_id"`
+	RunnerID        string                         `json:"runner_id"`
+	TenantID        string                         `json:"tenant_id"`
+	OwnerActorID    string                         `json:"owner_actor_id"`
+	ConnectionEpoch uint64                         `json:"connection_epoch"`
+	ExpiresAt       string                         `json:"expires_at"`
+	Type            string                         `json:"type"`
+	Kind            string                         `json:"kind"`
+	Action          string                         `json:"action"`
+	ModelID         string                         `json:"model_id,omitempty"`
+	UnloadFirst     []string                       `json:"unload_first,omitempty"`
+	Force           *bool                          `json:"force,omitempty"`
+	ContextTokens   *uint64                        `json:"context_tokens,omitempty"`
+	CustomDownload  *LocalModelCustomDownloadInput `json:"custom_download,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsExecute.

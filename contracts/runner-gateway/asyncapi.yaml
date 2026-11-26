@@ -21,7 +21,7 @@ info:
     prepared (target operation or provider), cancel (target operation or
     model_invoke), execute and executed (kind session_compact, model_invoke,
     computer_tool, skills_scan, browser_connect, computer_permission,
-    local_models, model_source, debug_history or
+    local_models, local_models_custom, model_source, debug_history or
     cli_credential), agent_runner.state (state ready, removed or failed) and
     operation.input_result (outcome accepted, rejected or closed); the
     Operation family carries operation.start, operation.input, operation.ack,
@@ -90,6 +90,11 @@ info:
     (runtime_type "antigravity") is sent only to Computer 0.66.0 and later,
     because older Computers reject those runtime_type values and close the
     connection.
+    Custom hub models (execute kind local_models_custom for search and probe,
+    custom_download and smoke_test actions on local_models, and custom/
+    verification/shard/mlx/supported_formats snapshot fields) travel only after
+    a runner.welcome whose service_features names local_models_custom,
+    advertised to Computer 0.67.0 and later.
     execute with kind model_source reads or switches the Computer's model
     source. A BYOK input names its address as base_url, path and endpoint
     with an explicit protocol, and the Computer sends one request there; the

@@ -427,10 +427,16 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   decided within the action's 30 seconds answers 504
   `LOCAL_MODEL_ACTION_UNCONFIRMED`: it may still act, and the snapshots show
   the outcome. The Computer's refusal codes map to `LocalModelsErrorCode` in
-  `internal/app/handlers_local_models.go` (and `LOAD_NO_ROOM` / `MEMORY_INSUFFICIENT`
+  `internal/app/handlers_local_models.go` (preserving structured `need_bytes`,
+  `free_bytes`, and `pool` on `409` refusals; and `LOAD_NO_ROOM` / `MEMORY_INSUFFICIENT`
   map to `LOCAL_MODEL_NO_ROOM` and `BYOK_GATEWAY_FAILED` maps to HTTP 502
   `BYOK_GATEWAY_FAILED` with the Computer's diagnostic message and a `gateway`
-  detail entry in `internal/app/handlers_model_source.go`).
+  detail entry in `internal/app/handlers_model_source.go`). Custom hub
+  endpoints (`POST .../local-models/custom/{search,probe,download}`) require
+  the same owner/online gate, never echo or persist transient hub tokens, and
+  answer HTTP `200` for classified `probe` outcomes (including `gated` with
+  `hub_http_status: 401 | 403`) rather than HTTP `401`; non-owner viewers have
+  host paths and `verification.failure.diagnostic_log` stripped.
 - A Computer's model source lives on the Computer
   (`internal/app/handlers_model_source.go`); TeamHub never stores a BYOK key.
   A switch checks for running work, runs `apply` on the Computer, then moves

@@ -118,7 +118,7 @@ func TestRunnerWireContractFixtures(t *testing.T) {
 		for _, kind := range []string{protocol.CommandRunnerWelcome, protocol.CommandRunnerReconciled, protocol.CommandRegistrationSnapshot,
 			protocol.CommandAgentRunnerEnsure, protocol.CommandAgentRunnerRemove, protocol.CommandAgentCLICredentialPut,
 			protocol.CommandDebugInspect, protocol.CommandCapabilitySkillsScan, protocol.CommandCapabilityBrowserConnect,
-			protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels, protocol.CommandCapabilityModelSource, protocol.CommandOperationPrepare, protocol.CommandOperationStart, protocol.CommandOperationInput,
+			protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels, protocol.CommandCapabilityLocalModelsCustom, protocol.CommandCapabilityModelSource, protocol.CommandOperationPrepare, protocol.CommandOperationStart, protocol.CommandOperationInput,
 			protocol.CommandOperationCancel, protocol.CommandOperationAck, protocol.CommandProviderPrepare,
 			protocol.CommandSessionCompact, protocol.CommandModelInvoke, protocol.CommandModelInvokeCancel,
 			protocol.CommandComputerToolCall} {
@@ -236,6 +236,8 @@ func runnerWireDaemonEvents(t *testing.T) []protocol.Event {
 	capability(protocol.EventCapabilityComputerPermissionFailed, "computer_permission", "failed", map[string]any{"action": "relaunch", "error": failure})
 	capability(protocol.EventCapabilityLocalModelsAccepted, "local_models", "accepted", map[string]any{"action": "download", "model_id": "qwen3-4b:Q4_K_M"})
 	capability(protocol.EventCapabilityLocalModelsRefused, "local_models", "refused", map[string]any{"action": "refresh", "refusal": map[string]any{"code": "TOOL_NOT_INSTALLED"}})
+	capability(protocol.EventCapabilityLocalModelsCustomSucceeded, "local_models_custom", "succeeded", map[string]any{"action": "probe", "probe_result": map[string]any{"outcome": "gated", "hub_http_status": 401, "token_provided": false, "repo": map[string]any{"hub": "huggingface", "repo_id": "meta-llama/Llama-3.1-8B-GGUF", "url": "https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}})
+	capability(protocol.EventCapabilityLocalModelsCustomFailed, "local_models_custom", "failed", map[string]any{"action": "search", "error": failure})
 	capability(protocol.EventCapabilityModelSourceSucceeded, "model_source", "succeeded", map[string]any{"action": "test", "test_result": map[string]any{"ok": true, "protocol": "anthropic", "url": "https://api.example.com/v1/messages", "model_id": "vendor/model", "context_window": 200000}})
 	capability(protocol.EventCapabilityModelSourceFailed, "model_source", "failed", map[string]any{"action": "apply", "error": failure})
 	appendEvent(protocol.EventLocalModels, map[string]any{"type": "runner.local_models", "protocol_version": "2", "runner_id": "computer-1", "sent_at": "2026-10-28T00:00:00Z", "revision": 1, "local_models": map[string]any{"available": false, "reason": map[string]any{"code": "TOOL_NOT_INSTALLED"}, "observed_at": "2026-10-28T00:00:00Z", "pools": []any{}, "models": []any{}}})

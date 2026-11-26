@@ -2443,3 +2443,55 @@ test("extracts degraded local model details with valid reason codes only", () =>
     message: "Invalid upstream local model binding.",
   });
 });
+
+test("restoreLocalModels never auto-loads idle or custom-origin models on desktop resume", async () => {
+  const f = await stoppedLocalSetup("local");
+  Object.assign(f.binding, f.ready);
+  const customId = "custom.hf.bartowski--qwen2.5-7b-instruct-gguf:Q4_K_M";
+  const customPiModel = `localmodels-library/${customId}`;
+  await writeFile(
+    path.join(f.home, "runtime/localmodels/state/model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: customPiModel,
+      model_label: "Qwen2.5 7B",
+      gateway_url: "http://127.0.0.1:47711",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            {
+              id: customId,
+              origin: "custom",
+              state: "idle",
+              pi_model: customPiModel,
+            },
+            {
+              id: "Qwen3-4B:Q4_K_M",
+              origin: "curated",
+              state: "idle",
+              pi_model: "localmodels-library/Qwen3-4B:Q4_K_M",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return original(...a);
+  });
+  const outcome = await restoreLocalModels(f.instance, f.options, {
+    localmodels: f.call,
+  });
+  expect(outcome).toBeUndefined();
+  expect(commands(f)).toEqual(["setup binding", "library status"]);
+});

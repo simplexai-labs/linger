@@ -34,6 +34,7 @@ import {
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
   FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
   FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
+  FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
   type LocalPlacementRequirement,
@@ -57,7 +58,10 @@ import {
   type RunnerGatewayPrincipal,
 } from "./runner-gateway-principal.js";
 import { isLocalSkillOutcome } from "./runner-local-capabilities.js";
-import { isLocalModelsOutcome } from "./runner-local-models.js";
+import {
+  isLocalModelsCustomOutcome,
+  isLocalModelsOutcome,
+} from "./runner-local-models.js";
 import {
   RunnerGatewayError,
   RunnerGatewayProtocolError,
@@ -498,6 +502,12 @@ export class RunnerConnections {
               )
                 ? (["local_models_concurrency_probe"] as const)
                 : []),
+              ...(isComputerVersionAtLeast(
+                connection.hello.daemon_version,
+                FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
+              )
+                ? (["local_models_custom"] as const)
+                : []),
               // A Computer ignores a feature it does not know, so these
               // need no release gate.
               "local_model_unavailable",
@@ -783,6 +793,10 @@ export class RunnerConnections {
     }
     if (isLocalModelsOutcome(envelope)) {
       this.owners.localModels().receiveOutcome(connection, envelope);
+      return;
+    }
+    if (isLocalModelsCustomOutcome(envelope)) {
+      this.owners.localModels().receiveCustomOutcome(connection, envelope);
       return;
     }
     if (envelope.type === "prepared" && envelope.target === "provider") {

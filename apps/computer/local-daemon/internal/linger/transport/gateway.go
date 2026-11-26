@@ -188,6 +188,7 @@ var agentShapes = map[string]func() wire.Shape{
 	"CapabilityBrowserConnect":     func() wire.Shape { return &wire.CapabilityBrowserConnect{} },
 	"CapabilityComputerPermission": func() wire.Shape { return &wire.CapabilityComputerPermission{} },
 	"CapabilityLocalModelsExecute": func() wire.Shape { return &wire.CapabilityLocalModelsExecute{} },
+	"CapabilityLocalModelsCustom":  func() wire.Shape { return &wire.CapabilityLocalModelsCustom{} },
 	"CapabilityModelSource":        func() wire.Shape { return &wire.CapabilityModelSource{} },
 	"OperationPrepare":             func() wire.Shape { return &wire.OperationPrepare{} },
 	"ProviderPrepare":              func() wire.Shape { return &wire.ProviderPrepare{} },
@@ -323,7 +324,7 @@ func decodeGatewayCommand(encoded []byte) (protocol.Command, error) {
 		protocol.CommandDebugInspect, protocol.CommandAgentCLICredentialPut,
 		protocol.CommandCapabilitySkillsScan, protocol.CommandCapabilityBrowserConnect,
 		protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels,
-		protocol.CommandCapabilityModelSource:
+		protocol.CommandCapabilityLocalModelsCustom, protocol.CommandCapabilityModelSource:
 		// Their handlers decode the generated shape from the frame itself.
 		command.Payload = append(json.RawMessage(nil), encoded...)
 	}
@@ -497,6 +498,7 @@ func (s *gatewayStream) Send(ctx context.Context, event protocol.Event) error {
 		event.Type == protocol.EventCapabilityBrowserConnected || event.Type == protocol.EventCapabilityBrowserFailed ||
 		event.Type == protocol.EventCapabilityComputerPermissionSucceeded || event.Type == protocol.EventCapabilityComputerPermissionFailed ||
 		event.Type == protocol.EventCapabilityLocalModelsAccepted || event.Type == protocol.EventCapabilityLocalModelsRefused ||
+		event.Type == protocol.EventCapabilityLocalModelsCustomSucceeded || event.Type == protocol.EventCapabilityLocalModelsCustomFailed ||
 		event.Type == protocol.EventCapabilityModelSourceSucceeded || event.Type == protocol.EventCapabilityModelSourceFailed ||
 		event.Type == protocol.EventLocalModels ||
 		event.Type == protocol.EventProviderPrepared || event.Type == protocol.EventSessionCompacted ||

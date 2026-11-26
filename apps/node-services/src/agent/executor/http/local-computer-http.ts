@@ -1,6 +1,11 @@
 import { type Context, Hono } from "hono";
 import * as AgentManagementRoutes from "@linger/wire-contracts/node-services-internal/server";
-import type { ByokConfigInput } from "@linger/wire-contracts/runner-gateway/types";
+import type {
+  ByokConfigInput,
+  LocalModelCustomDownloadInput,
+  LocalModelCustomProbeInput,
+  LocalModelCustomSearchInput,
+} from "@linger/wire-contracts/runner-gateway/types";
 import {
   LocalComputerBusyError,
   LocalComputerHasAgentsError,
@@ -18,6 +23,8 @@ import {
 } from "../../runner-gateway/local-computer-management.js";
 import {
   LocalModelsActionTimeoutError,
+  LocalModelsCustomError,
+  LocalModelsCustomUnsupportedError,
   type LocalModelActionCommand,
 } from "../../runner-gateway/runner-local-models.js";
 import { isRecord } from "@linger/service-kit";
@@ -54,6 +61,13 @@ export interface LocalComputerRouteHandlers {
   getLocalComputerPermissions(context: Context): Promise<Response> | Response;
   actOnLocalComputerPermission(context: Context): Promise<Response> | Response;
   actOnLocalComputerModels(context: Context): Promise<Response> | Response;
+  searchLocalComputerCustomModels(
+    context: Context,
+  ): Promise<Response> | Response;
+  probeLocalComputerCustomModel(context: Context): Promise<Response> | Response;
+  downloadLocalComputerCustomModel(
+    context: Context,
+  ): Promise<Response> | Response;
   getLocalComputerModelSource(context: Context): Promise<Response> | Response;
   applyLocalComputerModelSource(context: Context): Promise<Response> | Response;
   testLocalComputerByok(context: Context): Promise<Response> | Response;
@@ -216,12 +230,108 @@ export const createLocalComputerRouteHandlers = (options: {
         ...(body.unload_first === undefined
           ? {}
           : { unloadFirst: body.unload_first }),
+        ...(body.force === undefined ? {} : { force: body.force }),
+        ...(body.context_tokens === undefined
+          ? {}
+          : { contextTokens: body.context_tokens }),
+        ...(body.custom_download === undefined
+          ? {}
+          : { customDownload: body.custom_download }),
         expiresAt: body.expires_at,
         signal: context.req.raw.signal,
       });
       return writeJson(context, 200, {
         request_id: body.request_id,
-        ...ack,
+        outcome: ack.outcome,
+        ...(ack.outcome === "accepted" && ack.modelId !== undefined
+          ? { model_id: ack.modelId }
+          : {}),
+        ...(ack.outcome === "refused" ? { refusal: ack.refusal } : {}),
+      });
+    } catch (error) {
+      throw localModelsRequestError(error);
+    }
+  },
+  searchLocalComputerCustomModels: async (context) => {
+    const management = requireLocalComputerManagement(
+      options.localComputerManagement,
+    );
+    if (!management.searchCustomLocalModels) {
+      throw new LocalComputerHttpError(
+        503,
+        "LOCAL_MODELS_UNAVAILABLE",
+        "Custom local models are unavailable",
+      );
+    }
+    const input = parseCustomSearchRequest(await options.readJsonBody(context));
+    try {
+      const result = await management.searchCustomLocalModels({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        input,
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, result);
+    } catch (error) {
+      throw localModelsRequestError(error);
+    }
+  },
+  probeLocalComputerCustomModel: async (context) => {
+    const management = requireLocalComputerManagement(
+      options.localComputerManagement,
+    );
+    if (!management.probeCustomLocalModel) {
+      throw new LocalComputerHttpError(
+        503,
+        "LOCAL_MODELS_UNAVAILABLE",
+        "Custom local models are unavailable",
+      );
+    }
+    const input = parseCustomProbeRequest(await options.readJsonBody(context));
+    try {
+      const result = await management.probeCustomLocalModel({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        input,
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, result);
+    } catch (error) {
+      throw localModelsRequestError(error);
+    }
+  },
+  downloadLocalComputerCustomModel: async (context) => {
+    const management = requireLocalComputerManagement(
+      options.localComputerManagement,
+    );
+    if (!management.downloadCustomLocalModel) {
+      throw new LocalComputerHttpError(
+        503,
+        "LOCAL_MODELS_UNAVAILABLE",
+        "Custom local models are unavailable",
+      );
+    }
+    const body = parseCustomDownloadCommand(
+      await options.readJsonBody(context),
+    );
+    try {
+      const ack = await management.downloadCustomLocalModel({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        customDownload: body.custom_download,
+        expiresAt: body.expires_at,
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, {
+        request_id: body.request_id,
+        outcome: ack.outcome,
+        ...(ack.outcome === "accepted" && ack.modelId !== undefined
+          ? { model_id: ack.modelId }
+          : {}),
+        ...(ack.outcome === "refused" ? { refusal: ack.refusal } : {}),
       });
     } catch (error) {
       throw localModelsRequestError(error);
@@ -636,17 +746,33 @@ export const registerLocalComputerPermissionRoutes = (
 };
 
 /**
- * Mounts the local-models action route next to the generated Agent
- * management routes, which do not own this path yet.
+ * Mounts the local-models action and custom hub routes next to the generated
+ * Agent management routes, which do not own these paths yet.
  */
 export const registerLocalComputerModelRoutes = (
   app: Hono,
-  handlers: Pick<LocalComputerRouteHandlers, "actOnLocalComputerModels">,
+  handlers: Pick<
+    LocalComputerRouteHandlers,
+    | "actOnLocalComputerModels"
+    | "searchLocalComputerCustomModels"
+    | "probeLocalComputerCustomModel"
+    | "downloadLocalComputerCustomModel"
+  >,
 ): void => {
-  const path =
-    "/v1/tenants/:tenantId/owners/:ownerActorId/local-computers/:computerId/local-model-actions";
-  app.post(path, handlers.actOnLocalComputerModels);
-  app.all(path, (context) => methodNotAllowed(context, "POST"));
+  const basePath =
+    "/v1/tenants/:tenantId/owners/:ownerActorId/local-computers/:computerId";
+  const actionPath = `${basePath}/local-model-actions`;
+  const searchPath = `${basePath}/local-models/custom/search`;
+  const probePath = `${basePath}/local-models/custom/probe`;
+  const downloadPath = `${basePath}/local-models/custom/download`;
+  app.post(actionPath, handlers.actOnLocalComputerModels);
+  app.all(actionPath, (context) => methodNotAllowed(context, "POST"));
+  app.post(searchPath, handlers.searchLocalComputerCustomModels);
+  app.all(searchPath, (context) => methodNotAllowed(context, "POST"));
+  app.post(probePath, handlers.probeLocalComputerCustomModel);
+  app.all(probePath, (context) => methodNotAllowed(context, "POST"));
+  app.post(downloadPath, handlers.downloadLocalComputerCustomModel);
+  app.all(downloadPath, (context) => methodNotAllowed(context, "POST"));
 };
 
 const LOCAL_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
@@ -657,10 +783,199 @@ const LOCAL_MODEL_ACTIONS: ReadonlySet<unknown> = new Set([
   "unload",
   "remove",
   "refresh",
+  "smoke_test",
+  "custom_download",
 ]);
 
 const isLocalModelId = (value: unknown): value is string =>
   typeof value === "string" && LOCAL_MODEL_ID_PATTERN.test(value);
+
+const isCustomHub = (value: unknown): value is "huggingface" | "modelscope" =>
+  value === "huggingface" || value === "modelscope";
+
+// Never include the request body in validation errors; custom payloads may carry a hub token.
+const parseCustomDownloadInput = (
+  value: unknown,
+): LocalModelCustomDownloadInput => {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "hub",
+          "repo_id",
+          "revision",
+          "variant_id",
+          "files",
+          "mmproj",
+          "force_memory",
+          "replace",
+          "token",
+        ].includes(key),
+    ) ||
+    !isCustomHub(value.hub) ||
+    typeof value.repo_id !== "string" ||
+    value.repo_id.trim().length === 0 ||
+    value.repo_id.length > 256 ||
+    typeof value.variant_id !== "string" ||
+    value.variant_id.trim().length === 0 ||
+    value.variant_id.length > 128 ||
+    (value.revision !== undefined &&
+      (typeof value.revision !== "string" ||
+        value.revision.trim().length === 0 ||
+        value.revision.length > 128)) ||
+    (value.files !== undefined &&
+      (!Array.isArray(value.files) ||
+        value.files.length > 256 ||
+        !value.files.every(
+          (item) =>
+            typeof item === "string" &&
+            item.trim().length > 0 &&
+            item.length <= 512,
+        ))) ||
+    (value.mmproj !== undefined &&
+      (typeof value.mmproj !== "string" ||
+        value.mmproj.trim().length === 0 ||
+        value.mmproj.length > 512)) ||
+    (value.force_memory !== undefined &&
+      typeof value.force_memory !== "boolean") ||
+    (value.replace !== undefined && typeof value.replace !== "boolean") ||
+    (value.token !== undefined &&
+      (typeof value.token !== "string" || value.token.length > 4096))
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_LOCAL_MODEL_ACTION",
+      "Custom model download input is invalid",
+    );
+  }
+  return {
+    hub: value.hub,
+    repo_id: value.repo_id.trim(),
+    variant_id: value.variant_id.trim(),
+    ...(value.revision !== undefined
+      ? { revision: value.revision.trim() }
+      : {}),
+    ...(value.files !== undefined ? { files: value.files as string[] } : {}),
+    ...(value.mmproj !== undefined ? { mmproj: value.mmproj.trim() } : {}),
+    ...(value.force_memory !== undefined
+      ? { force_memory: value.force_memory }
+      : {}),
+    ...(value.replace !== undefined ? { replace: value.replace } : {}),
+    ...(value.token !== undefined ? { token: value.token } : {}),
+  };
+};
+
+// Never include the request body in validation errors; it may carry a hub token.
+const parseCustomSearchRequest = (
+  value: unknown,
+): LocalModelCustomSearchInput => {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) => !["hub", "query", "format", "limit", "token"].includes(key),
+    ) ||
+    (value.hub !== undefined &&
+      value.hub !== "all" &&
+      value.hub !== "huggingface" &&
+      value.hub !== "modelscope") ||
+    (value.query !== undefined &&
+      (typeof value.query !== "string" || value.query.length > 256)) ||
+    (value.format !== undefined &&
+      value.format !== "compatible" &&
+      value.format !== "gguf" &&
+      value.format !== "mlx" &&
+      value.format !== "all") ||
+    (value.limit !== undefined &&
+      (!Number.isSafeInteger(value.limit) ||
+        Number(value.limit) < 1 ||
+        Number(value.limit) > 50)) ||
+    (value.token !== undefined &&
+      (typeof value.token !== "string" || value.token.length > 4096))
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_REPO_SPEC",
+      "Custom model search request is invalid",
+    );
+  }
+  return {
+    ...(value.hub !== undefined ? { hub: value.hub } : {}),
+    ...(value.query !== undefined ? { query: value.query } : {}),
+    ...(value.format !== undefined ? { format: value.format } : {}),
+    ...(value.limit !== undefined ? { limit: Number(value.limit) } : {}),
+    ...(value.token !== undefined ? { token: value.token } : {}),
+  };
+};
+
+// Never include the request body in validation errors; it may carry a hub token.
+const parseCustomProbeRequest = (
+  value: unknown,
+): LocalModelCustomProbeInput => {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) =>
+        !["target", "hub", "revision", "file_name", "token"].includes(key),
+    ) ||
+    typeof value.target !== "string" ||
+    value.target.trim().length === 0 ||
+    value.target.length > 2048 ||
+    (value.hub !== undefined &&
+      value.hub !== "auto" &&
+      value.hub !== "huggingface" &&
+      value.hub !== "modelscope") ||
+    (value.revision !== undefined &&
+      (typeof value.revision !== "string" ||
+        value.revision.trim().length === 0 ||
+        value.revision.length > 128)) ||
+    (value.file_name !== undefined &&
+      (typeof value.file_name !== "string" ||
+        value.file_name.trim().length === 0 ||
+        value.file_name.length > 512)) ||
+    (value.token !== undefined &&
+      (typeof value.token !== "string" || value.token.length > 4096))
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_REPO_SPEC",
+      "Custom model probe request is invalid",
+    );
+  }
+  return {
+    target: value.target.trim(),
+    ...(value.hub !== undefined ? { hub: value.hub } : {}),
+    ...(value.revision !== undefined
+      ? { revision: value.revision.trim() }
+      : {}),
+    ...(value.file_name !== undefined
+      ? { file_name: value.file_name.trim() }
+      : {}),
+    ...(value.token !== undefined ? { token: value.token } : {}),
+  };
+};
+
+const parseCustomDownloadCommand = (value: unknown) => {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) => !["request_id", "expires_at", "custom_download"].includes(key),
+    ) ||
+    !isProtocolId(value.request_id) ||
+    !isTimestamp(value.expires_at)
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_LOCAL_MODEL_ACTION",
+      "Custom model download command is invalid",
+    );
+  }
+  return {
+    request_id: value.request_id,
+    expires_at: value.expires_at,
+    custom_download: parseCustomDownloadInput(value.custom_download),
+  };
+};
 
 const parseLocalModelActionCommand = (value: unknown) => {
   const unloadFirst = isRecord(value) ? value.unload_first : undefined;
@@ -673,21 +988,15 @@ const parseLocalModelActionCommand = (value: unknown) => {
           "action",
           "model_id",
           "unload_first",
+          "force",
+          "context_tokens",
+          "custom_download",
           "expires_at",
         ].includes(key),
     ) ||
     !isProtocolId(value.request_id) ||
     !LOCAL_MODEL_ACTIONS.has(value.action) ||
-    !isTimestamp(value.expires_at) ||
-    // refresh names no model; every other action names one.
-    (value.action === "refresh") !== (value.model_id === undefined) ||
-    (value.model_id !== undefined && !isLocalModelId(value.model_id)) ||
-    (unloadFirst !== undefined &&
-      (value.action !== "load" ||
-        !Array.isArray(unloadFirst) ||
-        unloadFirst.length > 64 ||
-        !unloadFirst.every(isLocalModelId) ||
-        new Set(unloadFirst).size !== unloadFirst.length))
+    !isTimestamp(value.expires_at)
   ) {
     throw new LocalComputerHttpError(
       400,
@@ -695,12 +1004,49 @@ const parseLocalModelActionCommand = (value: unknown) => {
       "Local model action is invalid",
     );
   }
-  return value as {
-    readonly request_id: string;
-    readonly action: LocalModelActionCommand["action"];
-    readonly model_id?: string;
-    readonly unload_first?: readonly string[];
-    readonly expires_at: string;
+  const action = value.action as LocalModelActionCommand["action"];
+  const needsNoModelId = action === "refresh" || action === "custom_download";
+  if (
+    needsNoModelId !== (value.model_id === undefined) ||
+    (value.model_id !== undefined && !isLocalModelId(value.model_id)) ||
+    (unloadFirst !== undefined &&
+      (action !== "load" ||
+        !Array.isArray(unloadFirst) ||
+        unloadFirst.length > 64 ||
+        !unloadFirst.every(isLocalModelId) ||
+        new Set(unloadFirst).size !== unloadFirst.length)) ||
+    (value.force !== undefined &&
+      (action !== "load" || typeof value.force !== "boolean")) ||
+    (value.context_tokens !== undefined &&
+      ((action !== "load" && action !== "smoke_test") ||
+        !Number.isSafeInteger(value.context_tokens) ||
+        (action === "smoke_test"
+          ? value.context_tokens !== 2048 && value.context_tokens !== 4096
+          : Number(value.context_tokens) < 512 ||
+            Number(value.context_tokens) > 1_048_576))) ||
+    (action === "custom_download") !== (value.custom_download !== undefined)
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_LOCAL_MODEL_ACTION",
+      "Local model action is invalid",
+    );
+  }
+  return {
+    request_id: value.request_id,
+    action,
+    ...(value.model_id !== undefined ? { model_id: value.model_id } : {}),
+    ...(unloadFirst !== undefined
+      ? { unload_first: unloadFirst as readonly string[] }
+      : {}),
+    ...(value.force !== undefined ? { force: value.force } : {}),
+    ...(value.context_tokens !== undefined
+      ? { context_tokens: Number(value.context_tokens) }
+      : {}),
+    ...(value.custom_download !== undefined
+      ? { custom_download: parseCustomDownloadInput(value.custom_download) }
+      : {}),
+    expires_at: value.expires_at,
   };
 };
 
@@ -719,6 +1065,13 @@ const localModelsRequestError = (error: unknown): Error => {
       error.message,
     );
   }
+  if (error instanceof LocalModelsCustomUnsupportedError) {
+    return new LocalComputerHttpError(
+      409,
+      "LOCAL_MODELS_CUSTOM_UNSUPPORTED",
+      error.message,
+    );
+  }
   if (error instanceof LocalComputerCapabilityError) {
     return new LocalComputerHttpError(
       409,
@@ -732,6 +1085,21 @@ const localModelsRequestError = (error: unknown): Error => {
       "LOCAL_MODELS_ACTION_TIMEOUT",
       error.message,
     );
+  }
+  if (error instanceof LocalModelsCustomError) {
+    if (error.code === "INVALID_REPO_SPEC") {
+      return new LocalComputerHttpError(400, error.code, error.message);
+    }
+    if (
+      error.code === "TOOL_NOT_INSTALLED" ||
+      error.code === "LOCAL_MODELS_CUSTOM_UNSUPPORTED"
+    ) {
+      return new LocalComputerHttpError(409, error.code, error.message);
+    }
+    if (error.code === "LOCAL_MODELS_CUSTOM_EXPIRED") {
+      return new LocalComputerHttpError(503, error.code, error.message);
+    }
+    return new LocalComputerHttpError(502, error.code, error.message);
   }
   return error instanceof Error
     ? error

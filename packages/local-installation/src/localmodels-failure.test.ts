@@ -310,3 +310,17 @@ it("joins failure messages with single terminal punctuation and redacts secrets"
     "The upstream tool could not verify the local stack binding: Restore the existing install and try again. Bearer [REDACTED]. Existing resources were preserved.",
   );
 });
+
+it("redacts Hugging Face and ModelScope hub tokens", () => {
+  const hfToken = "hf_AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+  const msUnderscoreToken = "ms_0123456789abcdefghij_klmnop";
+  const msDashToken = "ms-0123456789abcdefghij-klmnop";
+  const input = `probe failed using ${hfToken} and ${msUnderscoreToken} and ${msDashToken}`;
+  const redacted = redactLocalmodelsOutput(input);
+  expect(redacted).not.toContain(hfToken);
+  expect(redacted).not.toContain(msUnderscoreToken);
+  expect(redacted).not.toContain(msDashToken);
+  expect(redacted).toBe(
+    "probe failed using [REDACTED] and [REDACTED] and [REDACTED]",
+  );
+});

@@ -244,6 +244,111 @@ paths:
           $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
       security:
         - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-models/custom/search:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    post:
+      summary: Search custom Hugging Face or ModelScope repositories on an owned Local Computer
+      operationId: searchLocalComputerCustomModels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/local-models.yaml#/components/schemas/LocalModelCustomSearchRequest
+      responses:
+        "200":
+          description: Custom repository search results.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/local-models.yaml#/components/schemas/LocalModelCustomSearchResponse
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "502":
+          $ref: ../components/common.yaml#/components/responses/BadGateway
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-models/custom/probe:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    post:
+      summary: Probe a custom Hugging Face or ModelScope repository on an owned Local Computer
+      operationId: probeLocalComputerCustomModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/local-models.yaml#/components/schemas/LocalModelCustomProbeRequest
+      responses:
+        "200":
+          description: Zero-download custom repository probe outcome.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/local-models.yaml#/components/schemas/LocalModelCustomProbeResponse
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "502":
+          $ref: ../components/common.yaml#/components/responses/BadGateway
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-models/custom/download:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    post:
+      summary: Start a Standby-First custom model download on an owned Local Computer
+      operationId: downloadLocalComputerCustomModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../components/local-models.yaml#/components/schemas/LocalModelCustomDownloadCommand
+      responses:
+        "200":
+          description: The Computer's immediate accepted or refused answer.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/local-models.yaml#/components/schemas/LocalModelActionAck
+        "400":
+          $ref: ../components/common.yaml#/components/responses/BadRequest
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "502":
+          $ref: ../components/common.yaml#/components/responses/BadGateway
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
   /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/model-source:
     parameters:
       - $ref: "#/components/parameters/TenantId"

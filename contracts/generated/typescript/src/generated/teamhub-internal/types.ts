@@ -2595,6 +2595,11 @@ export interface components {
       /** Format: int64 */
       free_bytes: number;
     };
+    /**
+     * @description Local weight format supported by localmodels engines.
+     * @enum {string}
+     */
+    LocalModelFormat: "gguf" | "mlx";
     /** @description Hardware and software of the Computer as localmodels reports it. */
     LocalModelHost: {
       /** @enum {string} */
@@ -2610,6 +2615,8 @@ export interface components {
       /** Format: int64 */
       disk_free_bytes: number;
       gpus: components["schemas"]["LocalModelGpu"][];
+      /** @description Weight formats the host can run natively (gguf, mlx). */
+      supported_formats?: components["schemas"]["LocalModelFormat"][];
     };
     /** @description A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs). */
     LocalModelPoolId: string;
@@ -2712,6 +2719,10 @@ export interface components {
       total_bytes: number;
       /** Format: int64 */
       bytes_per_second?: number;
+      /** @description 1-based index of the shard currently downloading. */
+      shard_index?: number;
+      /** @description Total number of shards in this download. */
+      shard_count?: number;
     };
     LocalModelEndpoint: {
       base_url: string;
@@ -2740,6 +2751,13 @@ export interface components {
       | "MODEL_FILES_MISSING"
       | "GATEWAY_REGISTRATION_FAILED"
       | "CANCELLED"
+      | "HUB_AUTH_REQUIRED"
+      | "HUB_FORBIDDEN"
+      | "HUB_REPO_NOT_FOUND"
+      | "HUB_FORMAT_UNSUPPORTED"
+      | "HUB_UNREACHABLE"
+      | "UNSUPPORTED_ARCHITECTURE"
+      | "CORRUPT_WEIGHTS"
       | "UNKNOWN_ERROR";
     LocalModelError: {
       code: components["schemas"]["LocalModelErrorCode"];
@@ -2793,7 +2811,69 @@ export interface components {
      * @description Inference engine family that runs this model entry. Never inferred from name or description.
      * @enum {string}
      */
-    LocalModelEngine: "llama.cpp" | "polystrata" | "strata";
+    LocalModelEngine: "llama.cpp" | "polystrata" | "strata" | "mlx";
+    /**
+     * @description Whether a model entry comes from the curated catalog or a custom hub repository.
+     * @enum {string}
+     */
+    LocalModelOrigin: "curated" | "custom";
+    /**
+     * @description Remote model hub hosting a custom repository.
+     * @enum {string}
+     */
+    LocalModelCustomHub: "huggingface" | "modelscope";
+    /** @description Provenance and Standby-First metadata for a custom hub model. */
+    LocalModelCustomInfo: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      revision?: string;
+      url?: string;
+      format: components["schemas"]["LocalModelFormat"];
+      variant_id: string;
+      shard_count: number;
+      mmproj_file?: string;
+      /** Format: int64 */
+      mmproj_bytes?: number;
+      accepted_risk?: boolean;
+      standby_on_restart: boolean;
+    };
+    /**
+     * @description Smoke-test verification state for a custom model.
+     * @enum {string}
+     */
+    LocalModelVerificationStatus:
+      | "untested"
+      | "running"
+      | "verified"
+      | "failed";
+    /**
+     * @description Classified failure category of a custom model smoke test.
+     * @enum {string}
+     */
+    LocalModelVerificationFailureKind:
+      | "oom"
+      | "unsupported_arch"
+      | "corrupt"
+      | "unknown";
+    /** @description Structured details of a failed custom model smoke test. */
+    LocalModelVerificationFailure: {
+      kind: components["schemas"]["LocalModelVerificationFailureKind"];
+      code: components["schemas"]["LocalModelErrorCode"];
+      /** Format: int64 */
+      context_tokens: number;
+      can_retry_lower_ctx: boolean;
+      can_redownload: boolean;
+      /** @description Redacted diagnostic excerpt from the smoke test; owner-only in public views. */
+      diagnostic_log?: string;
+    };
+    /** @description Smoke-test verification record for a custom model. */
+    LocalModelVerification: {
+      status: components["schemas"]["LocalModelVerificationStatus"];
+      /** Format: int64 */
+      context_tokens?: number;
+      tested_at?: components["schemas"]["Timestamp"];
+      failure?: components["schemas"]["LocalModelVerificationFailure"];
+    };
     /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
     LocalModel: {
       id: components["schemas"]["LocalModelId"];
@@ -2857,6 +2937,12 @@ export interface components {
        * @description Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
        */
       host_ram_bytes?: number;
+      /** @description Absent means curated for backward compatibility. */
+      origin?: components["schemas"]["LocalModelOrigin"];
+      /** @description Present when origin is custom. */
+      custom?: components["schemas"]["LocalModelCustomInfo"];
+      /** @description Smoke-test verification state for custom models. */
+      verification?: components["schemas"]["LocalModelVerification"];
     };
     /** @description Present only when localmodels debug mode (tiny or simulate) is active on the Computer. config_path is shown only to the Computer owner. */
     LocalModelsDebugInfo: {

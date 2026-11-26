@@ -49,6 +49,9 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/CapabilityLocalModelsExecute",
         },
         {
+          $ref: "#/$defs/CapabilityLocalModelsCustom",
+        },
+        {
           $ref: "#/$defs/CapabilityModelSource",
         },
         {
@@ -143,6 +146,12 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/CapabilityLocalModelsRefused",
         },
         {
+          $ref: "#/$defs/CapabilityLocalModelsCustomSucceeded",
+        },
+        {
+          $ref: "#/$defs/CapabilityLocalModelsCustomFailed",
+        },
+        {
           $ref: "#/$defs/CapabilityModelSourceSucceeded",
         },
         {
@@ -211,6 +220,7 @@ export const runnerGatewayEnvelopeSchema = {
         "model_invoke_outcomes",
         "local_models_engine",
         "local_models_concurrency_probe",
+        "local_models_custom",
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
@@ -2216,6 +2226,13 @@ export const runnerGatewayEnvelopeSchema = {
         "MODEL_FILES_MISSING",
         "GATEWAY_REGISTRATION_FAILED",
         "CANCELLED",
+        "HUB_AUTH_REQUIRED",
+        "HUB_FORBIDDEN",
+        "HUB_REPO_NOT_FOUND",
+        "HUB_FORMAT_UNSUPPORTED",
+        "HUB_UNREACHABLE",
+        "UNSUPPORTED_ARCHITECTURE",
+        "CORRUPT_WEIGHTS",
         "UNKNOWN_ERROR",
       ],
     },
@@ -2247,6 +2264,13 @@ export const runnerGatewayEnvelopeSchema = {
         "MODEL_FILES_MISSING",
         "GATEWAY_REGISTRATION_FAILED",
         "CANCELLED",
+        "HUB_AUTH_REQUIRED",
+        "HUB_FORBIDDEN",
+        "HUB_REPO_NOT_FOUND",
+        "HUB_FORMAT_UNSUPPORTED",
+        "HUB_UNREACHABLE",
+        "UNSUPPORTED_ARCHITECTURE",
+        "CORRUPT_WEIGHTS",
         "UNKNOWN_ERROR",
         "TOOL_NOT_INSTALLED",
         "TOOL_FAILED",
@@ -2319,6 +2343,143 @@ export const runnerGatewayEnvelopeSchema = {
           items: {
             $ref: "#/$defs/LocalModelGpu",
           },
+        },
+        supported_formats: {
+          description:
+            "Weight formats this Computer can run natively. Sent only when runner.welcome service_features names local_models_custom.",
+          type: "array",
+          maxItems: 8,
+          uniqueItems: true,
+          items: {
+            $ref: "#/$defs/LocalModelFormat",
+          },
+        },
+      },
+    },
+    LocalModelFormat: {
+      type: "string",
+      enum: ["gguf", "mlx"],
+    },
+    LocalModelCustomRepoFormat: {
+      type: "string",
+      enum: ["gguf", "mlx", "safetensors", "unknown"],
+    },
+    LocalModelOrigin: {
+      type: "string",
+      enum: ["curated", "custom"],
+    },
+    LocalModelCustomHub: {
+      type: "string",
+      enum: ["huggingface", "modelscope"],
+    },
+    LocalModelCustomInfo: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "hub",
+        "repo_id",
+        "format",
+        "variant_id",
+        "shard_count",
+        "standby_on_restart",
+      ],
+      properties: {
+        hub: {
+          $ref: "#/$defs/LocalModelCustomHub",
+        },
+        repo_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+        },
+        revision: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        url: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+          pattern: "^https://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]+$",
+        },
+        format: {
+          $ref: "#/$defs/LocalModelFormat",
+        },
+        variant_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        shard_count: {
+          type: "integer",
+          minimum: 1,
+          maximum: 256,
+        },
+        mmproj_file: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+        },
+        mmproj_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        accepted_risk: {
+          type: "boolean",
+        },
+        standby_on_restart: {
+          type: "boolean",
+        },
+      },
+    },
+    LocalModelVerificationFailure: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "kind",
+        "code",
+        "context_tokens",
+        "can_retry_lower_ctx",
+        "can_redownload",
+      ],
+      properties: {
+        kind: {
+          enum: ["oom", "unsupported_arch", "corrupt", "unknown"],
+        },
+        code: {
+          $ref: "#/$defs/LocalModelErrorCode",
+        },
+        context_tokens: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        can_retry_lower_ctx: {
+          type: "boolean",
+        },
+        can_redownload: {
+          type: "boolean",
+        },
+        diagnostic_log: {
+          type: "string",
+          maxLength: 4000,
+        },
+      },
+    },
+    LocalModelVerification: {
+      type: "object",
+      additionalProperties: false,
+      required: ["status"],
+      properties: {
+        status: {
+          enum: ["untested", "running", "verified", "failed"],
+        },
+        context_tokens: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        tested_at: {
+          $ref: "#/$defs/Timestamp",
+        },
+        failure: {
+          $ref: "#/$defs/LocalModelVerificationFailure",
         },
       },
     },
@@ -2542,6 +2703,16 @@ export const runnerGatewayEnvelopeSchema = {
         bytes_per_second: {
           $ref: "#/$defs/NonNegativeInteger",
         },
+        shard_index: {
+          description:
+            "1-based shard index for sharded custom downloads. Sent only when runner.welcome service_features names local_models_custom.",
+          $ref: "#/$defs/PositiveInteger",
+        },
+        shard_count: {
+          description:
+            "Total shard count for sharded custom downloads. Sent only when runner.welcome service_features names local_models_custom.",
+          $ref: "#/$defs/PositiveInteger",
+        },
       },
     },
     LocalModelEndpoint: {
@@ -2626,7 +2797,7 @@ export const runnerGatewayEnvelopeSchema = {
       description:
         "Inference engine family that runs this model entry. Never inferred from name or description.",
       type: "string",
-      enum: ["llama.cpp", "polystrata", "strata"],
+      enum: ["llama.cpp", "polystrata", "strata", "mlx"],
     },
     LocalModel: {
       description:
@@ -2818,6 +2989,21 @@ export const runnerGatewayEnvelopeSchema = {
             "Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.",
           $ref: "#/$defs/NonNegativeInteger",
         },
+        origin: {
+          description:
+            "Whether this entry is curated or custom. Sent only when runner.welcome service_features names local_models_custom.",
+          $ref: "#/$defs/LocalModelOrigin",
+        },
+        custom: {
+          description:
+            "Custom hub metadata. Sent only when runner.welcome service_features names local_models_custom.",
+          $ref: "#/$defs/LocalModelCustomInfo",
+        },
+        verification: {
+          description:
+            "Standby-First smoke-test verification state. Sent only when runner.welcome service_features names local_models_custom.",
+          $ref: "#/$defs/LocalModelVerification",
+        },
       },
     },
     LocalModelsUnavailableReason: {
@@ -2882,9 +3068,703 @@ export const runnerGatewayEnvelopeSchema = {
         },
       },
     },
+    LocalModelCustomDownloadInput: {
+      type: "object",
+      additionalProperties: false,
+      required: ["hub", "repo_id", "variant_id"],
+      properties: {
+        hub: {
+          $ref: "#/$defs/LocalModelCustomHub",
+        },
+        repo_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+        },
+        revision: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        variant_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        files: {
+          type: "array",
+          maxItems: 256,
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512,
+          },
+        },
+        mmproj: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+        },
+        force_memory: {
+          type: "boolean",
+        },
+        replace: {
+          type: "boolean",
+        },
+        token: {
+          type: "string",
+          maxLength: 4096,
+        },
+      },
+    },
+    LocalModelCustomSearchInput: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        hub: {
+          enum: ["all", "huggingface", "modelscope"],
+        },
+        query: {
+          type: "string",
+          maxLength: 256,
+        },
+        format: {
+          enum: ["compatible", "gguf", "mlx", "all"],
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 50,
+        },
+        token: {
+          type: "string",
+          maxLength: 4096,
+        },
+      },
+    },
+    LocalModelCustomDefaultQuant: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "label", "size_bytes"],
+      properties: {
+        id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        label: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        size_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    LocalModelCustomSearchResultItem: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "hub",
+        "repo_id",
+        "url",
+        "title",
+        "owner",
+        "format",
+        "downloads",
+        "likes",
+        "gated",
+        "compatible",
+      ],
+      properties: {
+        hub: {
+          $ref: "#/$defs/LocalModelCustomHub",
+        },
+        repo_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+        },
+        url: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+        },
+        owner: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+        },
+        format: {
+          $ref: "#/$defs/LocalModelCustomRepoFormat",
+        },
+        family: {
+          $ref: "#/$defs/LocalModelFamily",
+        },
+        architecture: {
+          type: "string",
+          maxLength: 64,
+        },
+        parameter_billions: {
+          type: "number",
+          minimum: 0,
+        },
+        context_tokens: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        downloads: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        likes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        updated_at: {
+          type: "string",
+          maxLength: 64,
+        },
+        description: {
+          type: "string",
+          maxLength: 2000,
+        },
+        license: {
+          type: "string",
+          maxLength: 120,
+        },
+        gated: {
+          type: "boolean",
+        },
+        compatible: {
+          type: "boolean",
+        },
+        incompatibility_code: {
+          type: "string",
+          maxLength: 64,
+        },
+        quant_count: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        default_quant: {
+          $ref: "#/$defs/LocalModelCustomDefaultQuant",
+        },
+      },
+    },
+    LocalModelCustomSearchResult: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "query",
+        "hub",
+        "format",
+        "platform",
+        "arch",
+        "supported_formats",
+        "results",
+        "warnings",
+      ],
+      properties: {
+        query: {
+          type: "string",
+          maxLength: 256,
+        },
+        hub: {
+          enum: ["all", "huggingface", "modelscope"],
+        },
+        format: {
+          enum: ["compatible", "gguf", "mlx", "all"],
+        },
+        platform: {
+          enum: ["linux", "darwin", "windows"],
+        },
+        arch: {
+          enum: ["x86_64", "arm64"],
+        },
+        supported_formats: {
+          type: "array",
+          maxItems: 8,
+          uniqueItems: true,
+          items: {
+            $ref: "#/$defs/LocalModelFormat",
+          },
+        },
+        results: {
+          type: "array",
+          maxItems: 100,
+          items: {
+            $ref: "#/$defs/LocalModelCustomSearchResultItem",
+          },
+        },
+        warnings: {
+          type: "array",
+          maxItems: 20,
+          items: {
+            type: "string",
+            maxLength: 400,
+          },
+        },
+      },
+    },
+    LocalModelCustomProbeInput: {
+      type: "object",
+      additionalProperties: false,
+      required: ["target"],
+      properties: {
+        target: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+        },
+        hub: {
+          enum: ["auto", "huggingface", "modelscope"],
+        },
+        revision: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        file_name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+        },
+        token: {
+          type: "string",
+          maxLength: 4096,
+        },
+      },
+    },
+    LocalModelCustomProbeRepo: {
+      type: "object",
+      additionalProperties: false,
+      required: ["hub", "repo_id", "url"],
+      properties: {
+        hub: {
+          $ref: "#/$defs/LocalModelCustomHub",
+        },
+        repo_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+        },
+        revision: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        url: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+        },
+        owner: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+        },
+        format: {
+          $ref: "#/$defs/LocalModelCustomRepoFormat",
+        },
+        family: {
+          $ref: "#/$defs/LocalModelFamily",
+        },
+        license: {
+          type: "string",
+          maxLength: 120,
+        },
+        gated: {
+          type: "boolean",
+        },
+      },
+    },
+    LocalModelCustomGgufMeta: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        architecture: {
+          type: "string",
+          maxLength: 64,
+        },
+        n_ctx_train: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        n_layer: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        moe: {
+          type: "boolean",
+        },
+        has_chat_template: {
+          type: "boolean",
+        },
+      },
+    },
+    LocalModelCustomProbeHost: {
+      type: "object",
+      additionalProperties: false,
+      required: ["platform", "arch", "supported_formats", "disk_free_bytes"],
+      properties: {
+        platform: {
+          enum: ["linux", "darwin", "windows"],
+        },
+        arch: {
+          enum: ["x86_64", "arm64"],
+        },
+        supported_formats: {
+          type: "array",
+          maxItems: 8,
+          uniqueItems: true,
+          items: {
+            $ref: "#/$defs/LocalModelFormat",
+          },
+        },
+        disk_free_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        target_pool: {
+          $ref: "#/$defs/LocalModelPoolId",
+        },
+        pool_total_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        pool_soft_budget_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        pool_hard_ceiling_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    LocalModelCustomMmprojCandidate: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "size_bytes", "recommended"],
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+        },
+        size_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        sha256: {
+          type: "string",
+          maxLength: 128,
+        },
+        recommended: {
+          type: "boolean",
+        },
+      },
+    },
+    LocalModelCustomQuantFile: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "size_bytes"],
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          maxLength: 512,
+        },
+        size_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        sha256: {
+          type: "string",
+          maxLength: 128,
+        },
+        revision: {
+          type: "string",
+          maxLength: 128,
+        },
+      },
+    },
+    LocalModelCustomQuantVariant: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "id",
+        "custom_model_id",
+        "label",
+        "quant",
+        "sharded",
+        "shard_count",
+        "files",
+        "weights_bytes",
+        "mmproj_bytes",
+        "total_download_bytes",
+        "disk_required_bytes",
+        "disk_ok",
+        "estimated_memory_bytes",
+        "memory_estimate_basis",
+        "memory_status",
+        "already_installed",
+      ],
+      properties: {
+        id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        custom_model_id: {
+          $ref: "#/$defs/LocalModelId",
+        },
+        label: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+        },
+        quant: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        bits_per_weight: {
+          type: "number",
+          minimum: 0,
+        },
+        sharded: {
+          type: "boolean",
+        },
+        shard_count: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        files: {
+          type: "array",
+          maxItems: 256,
+          items: {
+            $ref: "#/$defs/LocalModelCustomQuantFile",
+          },
+        },
+        weights_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        mmproj_file: {
+          type: "string",
+          maxLength: 512,
+        },
+        mmproj_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        total_download_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        disk_required_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        disk_ok: {
+          type: "boolean",
+        },
+        estimated_memory_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        memory_estimate_basis: {
+          enum: ["gguf_header", "rough_1.2x_plus_0.8gb"],
+        },
+        memory_status: {
+          enum: ["comfortable", "tight", "exceeds"],
+        },
+        already_installed: {
+          type: "boolean",
+        },
+      },
+    },
+    LocalModelCustomProbeResult: {
+      type: "object",
+      additionalProperties: false,
+      required: ["outcome"],
+      properties: {
+        outcome: {
+          enum: ["ready", "gated", "incompatible", "not_found"],
+        },
+        repo: {
+          $ref: "#/$defs/LocalModelCustomProbeRepo",
+        },
+        metadata_complete: {
+          type: "boolean",
+        },
+        metadata_note: {
+          type: "string",
+          maxLength: 400,
+        },
+        gguf_meta: {
+          $ref: "#/$defs/LocalModelCustomGgufMeta",
+        },
+        host: {
+          $ref: "#/$defs/LocalModelCustomProbeHost",
+        },
+        mmproj_candidates: {
+          type: "array",
+          maxItems: 32,
+          items: {
+            $ref: "#/$defs/LocalModelCustomMmprojCandidate",
+          },
+        },
+        recommended_variant_id: {
+          type: "string",
+          maxLength: 128,
+        },
+        selected_quant_id: {
+          type: "string",
+          maxLength: 128,
+        },
+        quant_variants: {
+          type: "array",
+          maxItems: 128,
+          items: {
+            $ref: "#/$defs/LocalModelCustomQuantVariant",
+          },
+        },
+        hub_http_status: {
+          type: "integer",
+          minimum: 400,
+          maximum: 499,
+        },
+        token_provided: {
+          type: "boolean",
+        },
+        reason: {
+          enum: ["raw_safetensors", "mlx_unsupported", "no_runnable_files"],
+        },
+        suggested_search_query: {
+          type: "string",
+          maxLength: 256,
+        },
+        hub: {
+          $ref: "#/$defs/LocalModelCustomHub",
+        },
+        repo_id: {
+          type: "string",
+          maxLength: 256,
+        },
+      },
+    },
+    CapabilityLocalModelsCustom: {
+      description:
+        "Synchronous custom hub search or zero-download probe on the Computer. Sent only to Computer 0.67.0 and later.",
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "action"],
+          properties: {
+            type: {
+              const: "execute",
+            },
+            kind: {
+              const: "local_models_custom",
+            },
+            action: {
+              enum: ["search", "probe"],
+            },
+            search: {
+              $ref: "#/$defs/LocalModelCustomSearchInput",
+            },
+            probe: {
+              $ref: "#/$defs/LocalModelCustomProbeInput",
+            },
+          },
+          if: {
+            properties: {
+              action: {
+                const: "search",
+              },
+            },
+          },
+          then: {
+            properties: {
+              probe: false,
+            },
+          },
+          else: {
+            properties: {
+              search: false,
+            },
+            required: ["probe"],
+          },
+        },
+      ],
+    },
+    CapabilityLocalModelsCustomSucceeded: {
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "action", "outcome"],
+          properties: {
+            type: {
+              const: "executed",
+            },
+            kind: {
+              const: "local_models_custom",
+            },
+            action: {
+              enum: ["search", "probe"],
+            },
+            outcome: {
+              const: "succeeded",
+            },
+            search_result: {
+              $ref: "#/$defs/LocalModelCustomSearchResult",
+            },
+            probe_result: {
+              $ref: "#/$defs/LocalModelCustomProbeResult",
+            },
+          },
+        },
+      ],
+    },
+    CapabilityLocalModelsCustomFailed: {
+      type: "object",
+      unevaluatedProperties: false,
+      allOf: [
+        {
+          $ref: "#/$defs/LocalSkillCommandIdentity",
+        },
+        {
+          type: "object",
+          required: ["type", "kind", "action", "error", "outcome"],
+          properties: {
+            type: {
+              const: "executed",
+            },
+            kind: {
+              const: "local_models_custom",
+            },
+            action: {
+              enum: ["search", "probe"],
+            },
+            error: {
+              $ref: "#/$defs/AgentRunnerError",
+            },
+            outcome: {
+              const: "failed",
+            },
+          },
+        },
+      ],
+    },
     CapabilityLocalModelsExecute: {
       description:
-        "Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load.",
+        "Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; custom_download carries custom_download without model_id; every other action names model_id. unload_first and force are only for load; context_tokens is for load or smoke_test.",
       type: "object",
       unevaluatedProperties: false,
       allOf: [
@@ -2909,6 +3789,8 @@ export const runnerGatewayEnvelopeSchema = {
                 "unload",
                 "remove",
                 "refresh",
+                "smoke_test",
+                "custom_download",
               ],
             },
             model_id: {
@@ -2922,7 +3804,18 @@ export const runnerGatewayEnvelopeSchema = {
                 $ref: "#/$defs/LocalModelId",
               },
             },
+            force: {
+              type: "boolean",
+            },
+            context_tokens: {
+              $ref: "#/$defs/PositiveInteger",
+            },
+            custom_download: {
+              $ref: "#/$defs/LocalModelCustomDownloadInput",
+            },
           },
+        },
+        {
           if: {
             properties: {
               action: {
@@ -2934,14 +3827,51 @@ export const runnerGatewayEnvelopeSchema = {
             properties: {
               model_id: false,
               unload_first: false,
+              force: false,
+              context_tokens: false,
+              custom_download: false,
             },
+          },
+        },
+        {
+          if: {
+            properties: {
+              action: {
+                const: "custom_download",
+              },
+            },
+          },
+          then: {
+            properties: {
+              model_id: false,
+              unload_first: false,
+              force: false,
+              context_tokens: false,
+            },
+            required: ["custom_download"],
           },
           else: {
             properties: {
-              model_id: {
-                $ref: "#/$defs/LocalModelId",
+              custom_download: false,
+            },
+          },
+        },
+        {
+          if: {
+            properties: {
+              action: {
+                enum: [
+                  "download",
+                  "cancel",
+                  "load",
+                  "unload",
+                  "remove",
+                  "smoke_test",
+                ],
               },
             },
+          },
+          then: {
             required: ["model_id"],
           },
         },
@@ -2956,6 +3886,21 @@ export const runnerGatewayEnvelopeSchema = {
           else: {
             properties: {
               unload_first: false,
+              force: false,
+            },
+          },
+        },
+        {
+          if: {
+            properties: {
+              action: {
+                enum: ["load", "smoke_test"],
+              },
+            },
+          },
+          else: {
+            properties: {
+              context_tokens: false,
             },
           },
         },
@@ -2988,6 +3933,8 @@ export const runnerGatewayEnvelopeSchema = {
                 "unload",
                 "remove",
                 "refresh",
+                "smoke_test",
+                "custom_download",
               ],
             },
             model_id: {
@@ -3056,6 +4003,8 @@ export const runnerGatewayEnvelopeSchema = {
                 "unload",
                 "remove",
                 "refresh",
+                "smoke_test",
+                "custom_download",
               ],
             },
             model_id: {

@@ -233,10 +233,29 @@ func valueEnd(s string, at int) int {
 	return at
 }
 
+// TextWithSecrets scrubs explicit literal secrets (such as transient hub
+// tokens held in memory) and then applies standard credential redaction.
+func TextWithSecrets(input string, secrets ...string) string {
+	out := input
+	for _, secret := range secrets {
+		trimmed := strings.TrimSpace(secret)
+		if trimmed != "" {
+			out = strings.ReplaceAll(out, trimmed, hidden)
+		}
+	}
+	return Text(out)
+}
+
 func tokenLabel(token string) string {
 	token = strings.TrimRight(token, ".")
 	if strings.HasPrefix(token, "sk-") && len(token) >= 23 {
 		return "[REDACTED API KEY]"
+	}
+	if strings.HasPrefix(token, "hf_") && len(token) >= 19 && isAlphaNum(token[3:]) {
+		return "[REDACTED HF TOKEN]"
+	}
+	if (strings.HasPrefix(token, "ms_") || strings.HasPrefix(token, "ms-")) && len(token) >= 19 && isHubTokenBody(token[3:]) {
+		return "[REDACTED MODELSCOPE TOKEN]"
 	}
 	if strings.HasPrefix(token, "AKIA") && len(token) == 20 {
 		return "[REDACTED AWS KEY]"
@@ -267,4 +286,24 @@ func tokenLabel(token string) string {
 		return "[REDACTED JWT]"
 	}
 	return ""
+}
+
+func isAlphaNum(s string) bool {
+	for i := range len(s) {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHubTokenBody(s string) bool {
+	for i := range len(s) {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }

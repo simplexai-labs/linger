@@ -5,6 +5,9 @@ import {
 import type {
   LocalModelActionAck,
   LocalModelActionCommand,
+  LocalModelCustomDownloadCommand,
+  LocalModelCustomProbeCommand,
+  LocalModelCustomSearchCommand,
 } from "./runner-local-models.js";
 import type {
   BrowserConnectionStatus,
@@ -12,6 +15,8 @@ import type {
   ByokModelList,
   ByokTestResult,
   ComputerPermissionStatus,
+  LocalModelCustomProbeResult,
+  LocalModelCustomSearchResult,
   ModelSourceStatus,
 } from "@linger/wire-contracts/runner-gateway/types";
 
@@ -92,6 +97,11 @@ export const FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION = "0.65.0";
 // The first release that decodes `"antigravity"` in `SessionCompact.runtime_type`.
 // Computers on 0.65.0 and earlier reject `"antigravity"` and close the connection.
 export const FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION = "0.66.0";
+
+// The first release that understands the `local_models_custom` welcome feature
+// and handles `execute` kind `local_models_custom` plus `custom_download` and
+// `smoke_test` actions on `local_models`.
+export const FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION = "0.67.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
@@ -204,6 +214,18 @@ export interface LocalComputerManagement {
 
   actOnLocalModels?(
     command: LocalModelActionCommand,
+  ): Promise<LocalModelActionAck>;
+
+  searchCustomLocalModels?(
+    command: LocalModelCustomSearchCommand,
+  ): Promise<LocalModelCustomSearchResult>;
+
+  probeCustomLocalModel?(
+    command: LocalModelCustomProbeCommand,
+  ): Promise<LocalModelCustomProbeResult>;
+
+  downloadCustomLocalModel?(
+    command: LocalModelCustomDownloadCommand,
   ): Promise<LocalModelActionAck>;
 
   modelSource?(command: LocalModelSourceCommand): Promise<{

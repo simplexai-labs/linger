@@ -1,13 +1,21 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
@@ -334,5 +342,180 @@ func TestLocalModelsViewPassesThroughConcurrencyProbingWhileLoading(t *testing.T
 	probingModel := view.Models[2].Model
 	if probingModel.State != httpapi.LocalModelStateLoading || probingModel.ConcurrencyProbing == nil || !*probingModel.ConcurrencyProbing {
 		t.Fatalf("probing model = %+v, want state=loading concurrency_probing=true", probingModel)
+	}
+}
+
+func TestValidLocalModelActionSupportsSmokeTestAndLoadOverrides(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+	int64Ptr := func(v int64) *int64 { return &v }
+	for _, test := range []struct {
+		name    string
+		modelID string
+		request httpapi.LocalModelActionRequest
+		want    bool
+	}{
+		{"smoke_test default", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestSmokeTest}, true},
+		{"smoke_test 4096", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestSmokeTest, ContextTokens: int64Ptr(4096)}, true},
+		{"smoke_test 2048", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestSmokeTest, ContextTokens: int64Ptr(2048)}, true},
+		{"smoke_test invalid ctx", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestSmokeTest, ContextTokens: int64Ptr(1024)}, false},
+		{"smoke_test forbids force", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestSmokeTest, Force: boolPtr(true)}, false},
+		{"load force and ctx", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestLoad, Force: boolPtr(true), ContextTokens: int64Ptr(8192)}, true},
+		{"load ctx too small", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestLoad, ContextTokens: int64Ptr(256)}, false},
+		{"unload forbids force", "hf-qwen-qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestUnload, Force: boolPtr(true)}, false},
+	} {
+		if got := validLocalModelAction(test.modelID, test.request); got != test.want {
+			t.Errorf("%s: got %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
+func TestWriteLocalModelsRefusalPreservesStructuredByteDetailsAndNeverReturns401(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	a := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	need := int64(8_000_000_000)
+	free := int64(2_000_000_000)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("request_id", "req_refusal")
+	a.writeMappedLocalModelRefusal(c, "computer_1", "load", &roomagent.LocalModelActionRefusal{
+		Code: "LOAD_NO_ROOM", Pool: "gpu:0", NeedBytes: &need, FreeBytes: &free,
+	})
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var resp httpapi.LocalModelsErrorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error.Code != httpapi.LocalModelsErrorCodeLOCALMODELNOROOM ||
+		resp.Error.Pool == nil || *resp.Error.Pool != "gpu:0" ||
+		resp.Error.NeedBytes == nil || *resp.Error.NeedBytes != need ||
+		resp.Error.FreeBytes == nil || *resp.Error.FreeBytes != free {
+		t.Fatalf("refusal response=%+v", resp.Error)
+	}
+
+	// Hub auth refusals MUST return HTTP 409 (never HTTP 401, which logs Web out).
+	for _, code := range []string{"HUB_AUTH_REQUIRED", "HUB_FORBIDDEN"} {
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Set("request_id", "req_hub")
+		a.writeMappedLocalModelRefusal(ctx, "computer_1", "custom_download", &roomagent.LocalModelActionRefusal{Code: code})
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("%s returned status %d, want 409 (never 401)", code, rec.Code)
+		}
+	}
+}
+
+func TestWriteLocalModelsCustomFailureMappings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	a := &App{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{"unsupported daemon", roomagent.ErrLocalModelsCustomUnsupported, http.StatusConflict, string(httpapi.LocalModelsErrorCodeLOCALMODELSCUSTOMUNSUPPORTED)},
+		{"hub unreachable", &roomagent.LocalModelsCustomError{Code: "HUB_UNREACHABLE"}, http.StatusBadGateway, string(httpapi.LocalModelsErrorCodeLOCALMODELHUBUNREACHABLE)},
+		{"hub auth never 401", &roomagent.LocalModelsCustomError{Code: "HUB_AUTH_REQUIRED"}, http.StatusConflict, string(httpapi.LocalModelsErrorCodeLOCALMODELHUBAUTHREQUIRED)},
+		{"invalid repo spec", &roomagent.LocalModelsCustomError{Code: "INVALID_REPO_SPEC"}, http.StatusBadRequest, "INVALID_REQUEST"},
+		{"deadline exceeded", context.DeadlineExceeded, http.StatusGatewayTimeout, string(httpapi.LocalModelsErrorCodeLOCALMODELACTIONUNCONFIRMED)},
+	} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Set("request_id", "req_custom")
+		a.writeLocalModelsCustomFailure(c, "computer_1", "probe", test.err)
+		if rec.Code != test.wantStatus || !strings.Contains(rec.Body.String(), `"code":"`+test.wantCode+`"`) {
+			t.Fatalf("%s: status=%d body=%s", test.name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestCustomProbeInvalidRequestNeverEchoesHubToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var logs bytes.Buffer
+	a := &App{logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+	secret := "hf_abcdefghijklmnopqrstuvwxyz123456"
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v0/tenants/t1/local-computers/c1/local-models/custom/probe",
+		strings.NewReader(`{"target":"","token":"`+secret+`"}`))
+	c.Set("request_id", "req_bad_probe")
+	a.probeLocalComputerCustomModel(c)
+	if rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), secret) || strings.Contains(logs.String(), secret) {
+		t.Fatalf("status=%d body=%s logs=%s", rec.Code, rec.Body.String(), logs.String())
+	}
+}
+
+func TestLocalModelsViewScrubsDiagnosticLogForNonOwnersAndSanitizesCustomFields(t *testing.T) {
+	hfSecret := "hf_secretToken1234567890abcd"
+	msSecret := "ms-secret_token_1234567890abcd"
+	customSnapshot := `{
+		"available":true,"observed_at":"2026-11-26T10:00:00Z","tool_version":"2.1.0",
+		"host":{"platform":"darwin","arch":"arm64","os_label":"macOS 15","engine_label":"MLX","ram_total_bytes":100,"disk_free_bytes":100,"gpus":[],"supported_formats":["mlx","gguf","gguf","unknown_fmt"]},
+		"pools":[{"id":"unified","kind":"unified","total_bytes":100,"used_bytes":10,"holders":[]}],
+		"models":[{
+			"id":"hf-qwen-qwen3-4b:Q4_K_M","name":"Qwen3 4B","description":"","quant":"Q4_K_M","context_tokens":32768,"vision":false,
+			"download_bytes":10,"memory_bytes":40,"fit":"unified","recommended":false,"availability":{"downloadable":true},
+			"pool":"unified","state":"idle","engine":"mlx","origin":"custom",
+			"download":{"step":"download","downloaded_bytes":5,"total_bytes":10,"shard_index":1,"shard_count":3},
+			"custom":{"hub":"huggingface","repo_id":"Qwen/Qwen3-4B-GGUF","variant_id":"Q4_K_M","format":"gguf","shard_count":3,"url":"https://huggingface.co/Qwen/Qwen3-4B-GGUF"},
+			"verification":{
+				"status":"failed",
+				"failure":{
+					"kind":"unsupported_architecture",
+					"code":"UNSUPPORTED_ARCHITECTURE",
+					"context_tokens":4096,
+					"diagnostic_log":"failed auth ` + hfSecret + ` and ` + msSecret + ` ` + strings.Repeat("x", 4500) + `"
+				}
+			}
+		}]
+	}`
+	var internal teamhubinternal.LocalModelsSnapshot
+	if err := json.Unmarshal([]byte(customSnapshot), &internal); err != nil {
+		t.Fatal(err)
+	}
+	sanitizeLocalModelsSnapshot(&internal)
+	if !validLocalModelsSnapshot(internal) {
+		t.Fatal("sanitized custom snapshot was rejected")
+	}
+	if internal.Host == nil || internal.Host.SupportedFormats == nil ||
+		!slices.Equal(*internal.Host.SupportedFormats, []teamhubinternal.LocalModelFormat{teamhubinternal.LocalModelFormatMlx, teamhubinternal.LocalModelFormatGguf}) {
+		t.Fatalf("supported_formats=%+v", internal.Host)
+	}
+	diag := *internal.Models[0].Verification.Failure.DiagnosticLog
+	if strings.Contains(diag, hfSecret) || strings.Contains(diag, msSecret) || len([]rune(diag)) > 4000 {
+		t.Fatalf("diagnostic_log not redacted or capped: len=%d containsHF=%v containsMS=%v", len([]rune(diag)), strings.Contains(diag, hfSecret), strings.Contains(diag, msSecret))
+	}
+
+	sanitizedJSON, err := json.Marshal(internal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostJSON, err := json.Marshal(internal.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := agentruntimestate.LocalModelsRecord{
+		ComputerID: "computer_1", DisplayName: "Mac", Status: "online",
+		Owner:    agentruntimestate.LocalComputerOwner{TenantID: "tenant_1", OwnerActorID: "actor_owner"},
+		Snapshot: sanitizedJSON,
+		Host:     hostJSON,
+	}
+	for viewer, wantDiag := range map[string]bool{"actor_owner": true, "actor_member": false} {
+		view, err := localModelsView(record, viewer, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := view.Models[0].Model
+		if got.Origin == nil || *got.Origin != httpapi.LocalModelOriginCustom ||
+			got.Engine == nil || *got.Engine != httpapi.LocalModelEngineMlx ||
+			got.Custom == nil || got.Custom.RepoId != "Qwen/Qwen3-4B-GGUF" ||
+			got.Download == nil || got.Download.ShardIndex == nil || *got.Download.ShardIndex != 1 ||
+			got.Verification == nil || got.Verification.Failure == nil ||
+			(got.Verification.Failure.DiagnosticLog != nil) != wantDiag {
+			t.Fatalf("%s: got=%+v", viewer, got)
+		}
 	}
 }

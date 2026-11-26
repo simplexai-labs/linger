@@ -839,6 +839,127 @@ paths:
           $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
         '504':
           $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/custom/search:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    post:
+      tags: [Local Computers]
+      operationId: searchLocalComputerCustomModels
+      summary: Search Hugging Face or ModelScope repositories from an owned Local Computer.
+      description: >-
+        Only the Computer owner may search custom model repositories. The Computer performs the
+        read-only hub query using any optional transient token without persisting it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/local-models.yaml#/components/schemas/LocalModelCustomSearchRequest'
+      responses:
+        '200':
+          description: Matching custom model repositories and host format capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelCustomSearchResponse'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '502':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '503':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '504':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/custom/probe:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    post:
+      tags: [Local Computers]
+      operationId: probeLocalComputerCustomModel
+      summary: Probe a Hugging Face or ModelScope repository without downloading weights.
+      description: >-
+        Only the Computer owner may probe custom repositories. Classified probe outcomes including
+        gated repositories (hub_http_status 401 or 403), incompatible formats, and missing
+        repositories return HTTP 200 so browser sessions are never logged out on hub auth challenges.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/local-models.yaml#/components/schemas/LocalModelCustomProbeRequest'
+      responses:
+        '200':
+          description: Classified zero-download probe result.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelCustomProbeResponse'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '502':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '503':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '504':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/local-models/custom/download:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    post:
+      tags: [Local Computers]
+      operationId: downloadLocalComputerCustomModel
+      summary: Start a Standby-First custom model download on an owned Local Computer.
+      description: >-
+        Only the Computer owner may start custom downloads. Progress and completion arrive as
+        local-models library snapshots. Optional tokens are forwarded transiently and never persisted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/local-models.yaml#/components/schemas/LocalModelCustomDownloadInput'
+      responses:
+        '202':
+          description: The Computer started the custom model download.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/local-models.yaml#/components/schemas/LocalModelCustomDownloadAccepted'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '502':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '503':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
+        '504':
+          $ref: '../components/local-models.yaml#/components/responses/LocalModelsRefused'
   /v0/tenants/{tenantId}/local-computers/{computerId}/model-source:
     parameters:
       - $ref: '#/components/parameters/TenantId'

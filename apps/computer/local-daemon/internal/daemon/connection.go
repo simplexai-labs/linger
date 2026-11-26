@@ -295,6 +295,15 @@ func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, str
 				slog.Warn("local_models.outcome_not_sent", "error", err)
 			}
 		}()
+	case protocol.CommandCapabilityLocalModelsCustom:
+		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
+			return errors.New("Custom local models command uses a stale connection epoch")
+		}
+		go func() {
+			if err := d.handleLocalModelsCustomCommand(connectionCtx, stream, command); err != nil {
+				slog.Warn("local_models_custom.outcome_not_sent", "error", err)
+			}
+		}()
 	case protocol.CommandCapabilityModelSource:
 		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
 			return errors.New("Model source command uses a stale connection epoch")
@@ -348,6 +357,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.localModelsEngine.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsEngine))
 	d.localModelsConcurrencyProbe.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsConcurrencyProbe))
 	d.localModelsExternalHolders.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsExternalHolders))
+	d.localModelsCustom.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsCustom))
 	d.modelInvokeOutcomes.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelInvokeOutcomes))
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
 	d.modelGatewayUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelGatewayUnavailable))
@@ -539,6 +549,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsEngine.Store(false)
 		d.localModelsConcurrencyProbe.Store(false)
 		d.localModelsExternalHolders.Store(false)
+		d.localModelsCustom.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
 	d.connectionMu.Unlock()

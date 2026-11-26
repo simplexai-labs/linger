@@ -226,6 +226,15 @@ take precedence.
   (older Computers and unprobed/unmeasured loads fall back to
   `{ initial: 1, max: 8 }`). Loading another model in the library does not drop
   the endpoint to `1` or reset an existing learned limit.
+- Custom hub local models (`local_models_custom` in `runner.welcome`'s
+  `service_features`, `execute` `local_models_custom` `search`/`probe`, and
+  `local_models` `custom_download`, `smoke_test`, and `load` `force`/`context_tokens`)
+  are sent only to Computer 0.67.0 or later
+  (`FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION`); older Computers answer `409`
+  `LOCAL_MODELS_CUSTOM_UNSUPPORTED`, and a Daemon talking to an older Agent
+  Service strips custom snapshot fields and downgrades new hub/verification
+  error codes. Transient hub tokens travel only inside the request/envelope and
+  are never echoed in validation errors or logged.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.

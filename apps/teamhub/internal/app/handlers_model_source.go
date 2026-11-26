@@ -408,7 +408,7 @@ var (
 	computerMessageURLQueryPattern     = regexp.MustCompile(`(?i)(\b[a-z][a-z0-9+.-]*://[^\s?#"'\)\]}]+)\?[^\s"'<>)\]}]*`)
 	computerMessageURLUserinfoPattern  = regexp.MustCompile(`(?i)(\b[a-z][a-z0-9+.-]*://)[^\s/@"'<>]+:[^\s/@"'<>]*@`)
 	computerMessageBearerPattern       = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[^\s,;\"'<>)\]}]+`)
-	computerMessageTokenPattern        = regexp.MustCompile(`\b(?:(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}|(?:gh[pousr]|glpat)[-_][A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{35}|AKIA[A-Z0-9]{16})\b`)
+	computerMessageTokenPattern        = regexp.MustCompile(`\b(?:(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}|(?:gh[pousr]|glpat)[-_][A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_-]{20,}|hf_[A-Za-z0-9]{16,}|ms[-_][A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{35}|AKIA[A-Z0-9]{16})\b`)
 	computerMessageSecretAssignPattern = regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|password|passwd|authorization)\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;\"'<>)\]}]+)`)
 	computerMessageWinHomeSingleQuoted = regexp.MustCompile(`(?i)'(?:\\\\\?\\)?[A-Z]:(?:\\|/)Users(?:\\|/)[^']*'`)
 	computerMessageWinHomeDoubleQuoted = regexp.MustCompile(`(?i)"(?:\\\\\?\\)?[A-Z]:(?:\\|/)Users(?:\\|/)[^"]*"`)

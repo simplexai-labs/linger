@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
 
@@ -35,14 +36,22 @@ var errorCodes = []string{
 	"PLATFORM_UNSUPPORTED", "GPU_UNSUPPORTED", "DRIVER_UPDATE_REQUIRED", "RUNTIME_DEPENDENCY_MISSING",
 	"LOAD_NO_ROOM", "DOWNLOAD_FAILED", "CHECKSUM_MISMATCH", "NETWORK_UNAVAILABLE",
 	"ENGINE_START_FAILED", "HEALTH_CHECK_FAILED", "OUT_OF_MEMORY", "MODEL_FILES_MISSING",
-	"GATEWAY_REGISTRATION_FAILED", "CANCELLED", "UNKNOWN_ERROR",
+	"GATEWAY_REGISTRATION_FAILED", "CANCELLED",
+	"HUB_AUTH_REQUIRED", "HUB_FORBIDDEN", "HUB_REPO_NOT_FOUND", "HUB_FORMAT_UNSUPPORTED",
+	"HUB_UNREACHABLE", "UNSUPPORTED_ARCHITECTURE", "CORRUPT_WEIGHTS",
+	"UNKNOWN_ERROR",
 }
 
 var (
 	families          = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
 	architectures     = []string{"dense", "moe"}
 	capabilities      = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
-	engines           = []string{"llama.cpp", "polystrata", "strata"}
+	engines           = []string{"llama.cpp", "polystrata", "strata", "mlx"}
+	origins           = []string{"curated", "custom"}
+	customHubs        = []string{"huggingface", "modelscope"}
+	customFormats     = []string{"gguf", "mlx"}
+	verificationState = []string{"untested", "running", "verified", "failed"}
+	failureKinds      = []string{"oom", "unsupported_arch", "corrupt", "unknown"}
 	availabilityCodes = []string{
 		"MEMORY_INSUFFICIENT", "DISK_INSUFFICIENT", "PLATFORM_UNSUPPORTED",
 		"GPU_UNSUPPORTED", "DRIVER_UPDATE_REQUIRED", "RUNTIME_DEPENDENCY_MISSING", "UNAVAILABLE",
@@ -120,6 +129,7 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 	if host.Gpus == nil {
 		host.Gpus = []wire.LocalModelGpu{}
 	}
+	host.SupportedFormats = sanitizeSupportedFormats(host.SupportedFormats)
 	observedAt := now.UTC().Format(time.RFC3339Nano)
 	if parsed, err := time.Parse(time.RFC3339Nano, status.ObservedAt); err == nil {
 		observedAt = parsed.UTC().Format(time.RFC3339Nano)
@@ -179,7 +189,7 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		// never comes from localmodels directly.
 		model.ConcurrencyProbing = nil
 		if model.Error != nil {
-			model.Error.Detail = clip(model.Error.Detail, 4000)
+			model.Error.Detail = clip(redact.Text(model.Error.Detail), 4000)
 		}
 		snapshot.Models = append(snapshot.Models, model)
 	}
@@ -281,9 +291,23 @@ func sanitizeModel(model *wire.LocalModel) {
 	} else {
 		model.Availability.Reason = sanitizeReason(model.Availability.Reason)
 	}
-	if model.Download != nil && model.Download.Step != "download" && model.Download.Step != "verify" {
-		model.Download.Step = "download"
+	if model.Download != nil {
+		if model.Download.Step != "download" && model.Download.Step != "verify" {
+			model.Download.Step = "download"
+		}
+		if model.Download.ShardIndex != nil && *model.Download.ShardIndex == 0 {
+			model.Download.ShardIndex = nil
+		}
+		if model.Download.ShardCount != nil && *model.Download.ShardCount == 0 {
+			model.Download.ShardCount = nil
+		}
 	}
+	model.Origin = strings.TrimSpace(model.Origin)
+	if model.Origin != "" && !slices.Contains(origins, model.Origin) {
+		model.Origin = ""
+	}
+	model.Custom = sanitizeCustomInfo(model.Custom)
+	model.Verification = sanitizeVerification(model.Verification)
 	if model.Error != nil {
 		if !slices.Contains(errorCodes, model.Error.Code) {
 			model.Error.Code = "UNKNOWN_ERROR"
@@ -295,6 +319,74 @@ func sanitizeModel(model *wire.LocalModel) {
 	if model.Note != nil && model.Note.Code != "NO_ROOM_TO_LOAD" {
 		model.Note = nil
 	}
+}
+
+func sanitizeCustomInfo(raw *wire.LocalModelCustomInfo) *wire.LocalModelCustomInfo {
+	if raw == nil {
+		return nil
+	}
+	info := *raw
+	info.Hub = strings.TrimSpace(info.Hub)
+	info.RepoID = clip(strings.TrimSpace(info.RepoID), 256)
+	info.Revision = clip(strings.TrimSpace(info.Revision), 128)
+	info.URL = strings.TrimSpace(info.URL)
+	if info.URL != "" && (len(info.URL) > 2048 || !sourceURLPattern.MatchString(info.URL)) {
+		info.URL = ""
+	}
+	info.Format = strings.TrimSpace(info.Format)
+	info.VariantID = clip(strings.TrimSpace(info.VariantID), 128)
+	info.MmprojFile = clip(strings.TrimSpace(info.MmprojFile), 512)
+	if !slices.Contains(customHubs, info.Hub) || !slices.Contains(customFormats, info.Format) ||
+		info.RepoID == "" || info.VariantID == "" {
+		return nil
+	}
+	if info.ShardCount < 1 {
+		info.ShardCount = 1
+	} else if info.ShardCount > 256 {
+		info.ShardCount = 256
+	}
+	return &info
+}
+
+func sanitizeVerification(raw *wire.LocalModelVerification) *wire.LocalModelVerification {
+	if raw == nil {
+		return nil
+	}
+	status := strings.TrimSpace(raw.Status)
+	if !slices.Contains(verificationState, status) {
+		return nil
+	}
+	out := &wire.LocalModelVerification{
+		Status: status,
+	}
+	if raw.ContextTokens != nil && *raw.ContextTokens >= 1 {
+		ctx := min(*raw.ContextTokens, maxWireInteger)
+		out.ContextTokens = &ctx
+	}
+	if trimmed := strings.TrimSpace(raw.TestedAt); trimmed != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+			out.TestedAt = parsed.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	if raw.Failure != nil {
+		f := *raw.Failure
+		f.Kind = strings.TrimSpace(f.Kind)
+		if !slices.Contains(failureKinds, f.Kind) {
+			f.Kind = "unknown"
+		}
+		f.Code = strings.TrimSpace(f.Code)
+		if !slices.Contains(errorCodes, f.Code) {
+			f.Code = "UNKNOWN_ERROR"
+		}
+		if f.ContextTokens < 1 {
+			f.ContextTokens = 4096
+		} else {
+			f.ContextTokens = min(f.ContextTokens, maxWireInteger)
+		}
+		f.DiagnosticLog = clip(redact.Text(f.DiagnosticLog), 4000)
+		out.Failure = &f
+	}
+	return out
 }
 
 // poolKind splits a pool id so no reader parses "gpu:1".
@@ -355,6 +447,9 @@ type libraryEvent struct {
 	Done           float64         `json:"done"`
 	Total          float64         `json:"total"`
 	BytesPerSecond float64         `json:"bytes_per_second"`
+	ShardIndex     *float64        `json:"shard_index"`
+	ShardCount     *float64        `json:"shard_count"`
+	ContextTokens  *float64        `json:"context_tokens"`
 	OK             bool            `json:"ok"`
 	Code           string          `json:"code"`
 	Detail         string          `json:"detail"`
@@ -394,7 +489,7 @@ func (e libraryEvent) refusal() *wire.LocalModelActionRefusal {
 	if !slices.Contains(errorCodes, code) {
 		code = "UNKNOWN_ERROR"
 	}
-	refusal := &wire.LocalModelActionRefusal{Code: code, Detail: clip(e.Detail, 4000)}
+	refusal := &wire.LocalModelActionRefusal{Code: code, Detail: clip(redact.Text(e.Detail), 4000)}
 	if _, _, err := poolKind(e.Pool); err == nil {
 		refusal.Pool = e.Pool
 	}

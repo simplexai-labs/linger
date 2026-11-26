@@ -114,6 +114,17 @@ Progress and outcomes travel back only as snapshots:
    `service_features` declares `local_models_concurrency_probe`
    (`FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION`, `0.64.0`);
    otherwise the Daemon strips it for older Agent Services.
+   Custom hub models (`origin`, `custom`, `verification`, `download.shard_index`,
+   `download.shard_count`, `engine: "mlx"`, `host.supported_formats`, extended
+   hub/verification error codes, `execute` `local_models_custom` `search`/`probe`,
+   and `local_models` `custom_download`/`smoke_test`/`load` `force`+`context_tokens`)
+   are gated on `local_models_custom`
+   (`FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION`, `0.67.0`); a Daemon talking to
+   an older Agent Service strips those fields and downgrades new codes, while
+   TeamHub serves `POST .../local-models/custom/{search,probe,download}` and
+   returns HTTP 200 for classified `probe` outcomes (including `gated` with
+   `hub_http_status: 401 | 403`) so browser sessions never confuse hub auth with
+   session expiry.
    Pool `external_holders` is sent only when `service_features` declares
    `local_models_external_holders` (to every Computer, which ignores unknown
    features); otherwise the Daemon strips it. `[]` means localmodels found no

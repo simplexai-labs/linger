@@ -883,6 +883,7 @@ export async function restoreByokSource(
 interface ObservedLibraryModel {
   id: string;
   piModel: string;
+  origin?: string;
 }
 
 interface ObservedFailedLibraryModel extends ObservedLibraryModel {
@@ -903,7 +904,7 @@ interface LibraryLoadErrorEvent {
   message?: string;
 }
 
-const LIBRARY_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/;
+const LIBRARY_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 const LIBRARY_LOAD_IDLE_TIMEOUT_MS = 240_000;
 
@@ -980,6 +981,9 @@ async function observeLibraryModels(
     const model: ObservedLibraryModel = {
       id: entry.id,
       piModel: typeof entry.pi_model === "string" ? entry.pi_model : "",
+      ...(typeof entry.origin === "string" && entry.origin.trim()
+        ? { origin: entry.origin.trim() }
+        : {}),
     };
     if (entry.state === "loaded") {
       loadedModels.push(model);
@@ -1211,6 +1215,8 @@ async function restoreLibraryModelUnderLock(
     : selectLibraryModel(library.failedModels, savedRuntimeModel);
   const target = idleTarget ?? failedTarget;
   if (!target) return { handled: false };
+  // Standby-First: custom hub models never auto-load on desktop resume.
+  if (target.origin === "custom") return { handled: true };
   if (failedTarget && isStoppedDownloadErrorCode(failedTarget.errorCode)) {
     const code = validErrorCode(
       failedTarget.errorCode,

@@ -498,6 +498,75 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/custom/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Search Hugging Face or ModelScope repositories from an owned Local Computer.
+     * @description Only the Computer owner may search custom model repositories. The Computer performs the read-only hub query using any optional transient token without persisting it.
+     */
+    post: operations["searchLocalComputerCustomModels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/custom/probe": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Probe a Hugging Face or ModelScope repository without downloading weights.
+     * @description Only the Computer owner may probe custom repositories. Classified probe outcomes including gated repositories (hub_http_status 401 or 403), incompatible formats, and missing repositories return HTTP 200 so browser sessions are never logged out on hub auth challenges.
+     */
+    post: operations["probeLocalComputerCustomModel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models/custom/download": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a Standby-First custom model download on an owned Local Computer.
+     * @description Only the Computer owner may start custom downloads. Progress and completion arrive as local-models library snapshots. Optional tokens are forwarded transiently and never persisted.
+     */
+    post: operations["downloadLocalComputerCustomModel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/tenants/{tenantId}/local-computers/{computerId}/model-source": {
     parameters: {
       query?: never;
@@ -4684,6 +4753,11 @@ export interface components {
       /** Format: int64 */
       free_bytes: number;
     };
+    /**
+     * @description Local weight format supported by localmodels engines.
+     * @enum {string}
+     */
+    LocalModelFormat: "gguf" | "mlx";
     /** @description Hardware and software of the Computer as localmodels reports it. */
     LocalModelHost: {
       /** @enum {string} */
@@ -4699,6 +4773,8 @@ export interface components {
       /** Format: int64 */
       disk_free_bytes: number;
       gpus: components["schemas"]["LocalModelGpu"][];
+      /** @description Weight formats the host can run natively (gguf, mlx). */
+      supported_formats?: components["schemas"]["LocalModelFormat"][];
     };
     LocalModelsComputer: {
       computer_id: components["schemas"]["Id"];
@@ -4819,6 +4895,10 @@ export interface components {
       total_bytes: number;
       /** Format: int64 */
       bytes_per_second?: number;
+      /** @description 1-based index of the shard currently downloading. */
+      shard_index?: number;
+      /** @description Total number of shards in this download. */
+      shard_count?: number;
     };
     LocalModelEndpoint: {
       base_url: string;
@@ -4847,6 +4927,13 @@ export interface components {
       | "MODEL_FILES_MISSING"
       | "GATEWAY_REGISTRATION_FAILED"
       | "CANCELLED"
+      | "HUB_AUTH_REQUIRED"
+      | "HUB_FORBIDDEN"
+      | "HUB_REPO_NOT_FOUND"
+      | "HUB_FORMAT_UNSUPPORTED"
+      | "HUB_UNREACHABLE"
+      | "UNSUPPORTED_ARCHITECTURE"
+      | "CORRUPT_WEIGHTS"
       | "UNKNOWN_ERROR";
     LocalModelError: {
       code: components["schemas"]["LocalModelErrorCode"];
@@ -4900,7 +4987,69 @@ export interface components {
      * @description Inference engine family that runs this model entry. Never inferred from name or description.
      * @enum {string}
      */
-    LocalModelEngine: "llama.cpp" | "polystrata" | "strata";
+    LocalModelEngine: "llama.cpp" | "polystrata" | "strata" | "mlx";
+    /**
+     * @description Whether a model entry comes from the curated catalog or a custom hub repository.
+     * @enum {string}
+     */
+    LocalModelOrigin: "curated" | "custom";
+    /**
+     * @description Remote model hub hosting a custom repository.
+     * @enum {string}
+     */
+    LocalModelCustomHub: "huggingface" | "modelscope";
+    /** @description Provenance and Standby-First metadata for a custom hub model. */
+    LocalModelCustomInfo: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      revision?: string;
+      url?: string;
+      format: components["schemas"]["LocalModelFormat"];
+      variant_id: string;
+      shard_count: number;
+      mmproj_file?: string;
+      /** Format: int64 */
+      mmproj_bytes?: number;
+      accepted_risk?: boolean;
+      standby_on_restart: boolean;
+    };
+    /**
+     * @description Smoke-test verification state for a custom model.
+     * @enum {string}
+     */
+    LocalModelVerificationStatus:
+      | "untested"
+      | "running"
+      | "verified"
+      | "failed";
+    /**
+     * @description Classified failure category of a custom model smoke test.
+     * @enum {string}
+     */
+    LocalModelVerificationFailureKind:
+      | "oom"
+      | "unsupported_arch"
+      | "corrupt"
+      | "unknown";
+    /** @description Structured details of a failed custom model smoke test. */
+    LocalModelVerificationFailure: {
+      kind: components["schemas"]["LocalModelVerificationFailureKind"];
+      code: components["schemas"]["LocalModelErrorCode"];
+      /** Format: int64 */
+      context_tokens: number;
+      can_retry_lower_ctx: boolean;
+      can_redownload: boolean;
+      /** @description Redacted diagnostic excerpt from the smoke test; owner-only in public views. */
+      diagnostic_log?: string;
+    };
+    /** @description Smoke-test verification record for a custom model. */
+    LocalModelVerification: {
+      status: components["schemas"]["LocalModelVerificationStatus"];
+      /** Format: int64 */
+      context_tokens?: number;
+      tested_at?: components["schemas"]["Timestamp"];
+      failure?: components["schemas"]["LocalModelVerificationFailure"];
+    };
     /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
     LocalModel: {
       id: components["schemas"]["LocalModelId"];
@@ -4964,6 +5113,12 @@ export interface components {
        * @description Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
        */
       host_ram_bytes?: number;
+      /** @description Absent means curated for backward compatibility. */
+      origin?: components["schemas"]["LocalModelOrigin"];
+      /** @description Present when origin is custom. */
+      custom?: components["schemas"]["LocalModelCustomInfo"];
+      /** @description Smoke-test verification state for custom models. */
+      verification?: components["schemas"]["LocalModelVerification"];
     };
     /** @description An Agent whose runtime model is this model on this Computer. */
     LocalModelUser: {
@@ -5022,6 +5177,14 @@ export interface components {
       | "LOCAL_MODEL_GPU_UNSUPPORTED"
       | "LOCAL_MODEL_DRIVER_UPDATE_REQUIRED"
       | "LOCAL_MODEL_RUNTIME_DEPENDENCY_MISSING"
+      | "LOCAL_MODELS_CUSTOM_UNSUPPORTED"
+      | "LOCAL_MODEL_HUB_AUTH_REQUIRED"
+      | "LOCAL_MODEL_HUB_FORBIDDEN"
+      | "LOCAL_MODEL_HUB_REPO_NOT_FOUND"
+      | "LOCAL_MODEL_HUB_FORMAT_UNSUPPORTED"
+      | "LOCAL_MODEL_HUB_UNREACHABLE"
+      | "LOCAL_MODEL_UNSUPPORTED_ARCHITECTURE"
+      | "LOCAL_MODEL_CORRUPT_WEIGHTS"
       | "LOCAL_MODEL_ACTION_FAILED"
       | "LOCAL_MODEL_ACTION_UNCONFIRMED"
       | "LOCAL_MODELS_SERVICE_UNAVAILABLE";
@@ -5034,22 +5197,255 @@ export interface components {
       details?: components["schemas"]["ErrorDetail"][];
       /** @default false */
       retryable: boolean;
+      /**
+       * Format: int64
+       * @description Structured byte requirement on disk or memory refusals.
+       */
+      need_bytes?: number;
+      /**
+       * Format: int64
+       * @description Structured available byte count on disk or memory refusals.
+       */
+      free_bytes?: number;
+      /** @description Memory pool implicated in a LOAD_NO_ROOM refusal. */
+      pool?: components["schemas"]["LocalModelPoolId"];
     };
     LocalModelsErrorResponse: {
       error: components["schemas"]["LocalModelsError"];
     };
-    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first only with load. */
+    /** @description A Human's action on one model. The click is the approval; there is no separate confirm step on the Computer. unload_first and force are only for load; context_tokens is for load or smoke_test (4096 or 2048). */
     LocalModelActionRequest: {
       /** @enum {string} */
-      action: "download" | "cancel" | "load" | "unload" | "remove";
+      action:
+        | "download"
+        | "cancel"
+        | "load"
+        | "unload"
+        | "remove"
+        | "smoke_test";
       /** @description Loaded models in the same pool to unload before the load starts. */
       unload_first?: components["schemas"]["LocalModelId"][];
+      /** @description Allow loading a custom model installed with force_memory. */
+      force?: boolean;
+      /**
+       * Format: int64
+       * @description Context token budget for smoke_test (4096 or 2048) or load.
+       */
+      context_tokens?: number;
     };
     LocalModelActionAccepted: {
       computer_id: components["schemas"]["Id"];
       model_id: components["schemas"]["LocalModelId"];
       /** @enum {string} */
-      action: "download" | "cancel" | "load" | "unload" | "remove";
+      action:
+        | "download"
+        | "cancel"
+        | "load"
+        | "unload"
+        | "remove"
+        | "smoke_test";
+    };
+    /** @enum {string} */
+    LocalModelCustomSearchHub: "all" | "huggingface" | "modelscope";
+    /** @enum {string} */
+    LocalModelCustomSearchFormat: "compatible" | "gguf" | "mlx" | "all";
+    /** @description Search or list trending custom repositories from Hugging Face or ModelScope. */
+    LocalModelCustomSearchRequest: {
+      hub?: components["schemas"]["LocalModelCustomSearchHub"];
+      query?: string;
+      format?: components["schemas"]["LocalModelCustomSearchFormat"];
+      limit?: number;
+      /** @description Transient read-only hub token; never persisted or logged. */
+      token?: string;
+    };
+    /**
+     * @description Weight format detected in a remote Hugging Face or ModelScope repository.
+     * @enum {string}
+     */
+    LocalModelCustomRepoFormat: "gguf" | "mlx" | "safetensors" | "unknown";
+    LocalModelCustomDefaultQuant: {
+      id: string;
+      label: string;
+      /** Format: int64 */
+      size_bytes: number;
+    };
+    LocalModelCustomSearchResultItem: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      url: string;
+      title: string;
+      owner: string;
+      format: components["schemas"]["LocalModelCustomRepoFormat"];
+      family?: components["schemas"]["LocalModelFamily"];
+      architecture?: string;
+      parameter_billions?: number;
+      /** Format: int64 */
+      context_tokens?: number;
+      /** Format: int64 */
+      downloads: number;
+      /** Format: int64 */
+      likes: number;
+      updated_at?: string;
+      description?: string;
+      license?: string;
+      gated: boolean;
+      compatible: boolean;
+      incompatibility_code?: string;
+      quant_count?: number;
+      default_quant?: components["schemas"]["LocalModelCustomDefaultQuant"];
+    };
+    LocalModelCustomSearchResponse: {
+      query: string;
+      hub: components["schemas"]["LocalModelCustomSearchHub"];
+      format: components["schemas"]["LocalModelCustomSearchFormat"];
+      /** @enum {string} */
+      platform: "linux" | "darwin" | "windows";
+      /** @enum {string} */
+      arch: "x86_64" | "arm64";
+      supported_formats: components["schemas"]["LocalModelFormat"][];
+      results: components["schemas"]["LocalModelCustomSearchResultItem"][];
+      warnings: string[];
+    };
+    /** @enum {string} */
+    LocalModelCustomProbeHub: "auto" | "huggingface" | "modelscope";
+    /** @description Zero-download metadata probe of a Hugging Face or ModelScope repository or file URL. */
+    LocalModelCustomProbeRequest: {
+      target: string;
+      hub?: components["schemas"]["LocalModelCustomProbeHub"];
+      revision?: string;
+      file_name?: string;
+      /** @description Transient read-only hub token; never persisted or logged. */
+      token?: string;
+    };
+    /** @enum {string} */
+    LocalModelCustomProbeOutcome:
+      | "ready"
+      | "gated"
+      | "incompatible"
+      | "not_found";
+    LocalModelCustomProbeRepo: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      revision?: string;
+      url: string;
+      title?: string;
+      owner?: string;
+      format?: components["schemas"]["LocalModelCustomRepoFormat"];
+      family?: components["schemas"]["LocalModelFamily"];
+      license?: string;
+      gated?: boolean;
+    };
+    LocalModelCustomGgufMeta: {
+      architecture?: string;
+      /** Format: int64 */
+      n_ctx_train?: number;
+      n_layer?: number;
+      moe?: boolean;
+      has_chat_template?: boolean;
+    };
+    LocalModelCustomProbeHost: {
+      /** @enum {string} */
+      platform: "linux" | "darwin" | "windows";
+      /** @enum {string} */
+      arch: "x86_64" | "arm64";
+      supported_formats: components["schemas"]["LocalModelFormat"][];
+      /** Format: int64 */
+      disk_free_bytes: number;
+      target_pool?: components["schemas"]["LocalModelPoolId"];
+      /** Format: int64 */
+      pool_total_bytes?: number;
+      /** Format: int64 */
+      pool_soft_budget_bytes?: number;
+      /** Format: int64 */
+      pool_hard_ceiling_bytes?: number;
+    };
+    LocalModelCustomMmprojCandidate: {
+      path: string;
+      /** Format: int64 */
+      size_bytes: number;
+      sha256?: string;
+      recommended: boolean;
+    };
+    LocalModelCustomQuantFile: {
+      path: string;
+      /** Format: int64 */
+      size_bytes: number;
+      sha256?: string;
+      revision?: string;
+    };
+    /** @enum {string} */
+    LocalModelCustomMemoryEstimateBasis:
+      | "gguf_header"
+      | "rough_1.2x_plus_0.8gb";
+    /** @enum {string} */
+    LocalModelCustomMemoryStatus: "comfortable" | "tight" | "exceeds";
+    LocalModelCustomQuantVariant: {
+      id: string;
+      custom_model_id: components["schemas"]["LocalModelId"];
+      label: string;
+      quant: string;
+      bits_per_weight?: number;
+      sharded: boolean;
+      shard_count: number;
+      files: components["schemas"]["LocalModelCustomQuantFile"][];
+      /** Format: int64 */
+      weights_bytes: number;
+      mmproj_file?: string;
+      /** Format: int64 */
+      mmproj_bytes: number;
+      /** Format: int64 */
+      total_download_bytes: number;
+      /** Format: int64 */
+      disk_required_bytes: number;
+      disk_ok: boolean;
+      /** Format: int64 */
+      estimated_memory_bytes: number;
+      memory_estimate_basis: components["schemas"]["LocalModelCustomMemoryEstimateBasis"];
+      memory_status: components["schemas"]["LocalModelCustomMemoryStatus"];
+      already_installed: boolean;
+    };
+    /** @enum {string} */
+    LocalModelCustomIncompatibleReason:
+      | "raw_safetensors"
+      | "mlx_unsupported"
+      | "no_runnable_files";
+    /** @description Classified zero-download probe outcome. Gated repositories return HTTP 200 with outcome gated and hub_http_status (401 or 403) so browser clients never confuse hub authentication with session expiry. */
+    LocalModelCustomProbeResponse: {
+      outcome: components["schemas"]["LocalModelCustomProbeOutcome"];
+      repo?: components["schemas"]["LocalModelCustomProbeRepo"];
+      metadata_complete?: boolean;
+      metadata_note?: string;
+      gguf_meta?: components["schemas"]["LocalModelCustomGgufMeta"];
+      host?: components["schemas"]["LocalModelCustomProbeHost"];
+      mmproj_candidates?: components["schemas"]["LocalModelCustomMmprojCandidate"][];
+      recommended_variant_id?: string;
+      selected_quant_id?: string;
+      quant_variants?: components["schemas"]["LocalModelCustomQuantVariant"][];
+      hub_http_status?: number;
+      token_provided?: boolean;
+      reason?: components["schemas"]["LocalModelCustomIncompatibleReason"];
+      suggested_search_query?: string;
+      hub?: components["schemas"]["LocalModelCustomHub"];
+      repo_id?: string;
+    };
+    /** @description Parameters to start a Standby-First custom model download on the Computer. */
+    LocalModelCustomDownloadInput: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      revision?: string;
+      variant_id: string;
+      files?: string[];
+      mmproj?: string;
+      force_memory?: boolean;
+      replace?: boolean;
+      /** @description Transient read-only hub token; never persisted or logged. */
+      token?: string;
+    };
+    LocalModelCustomDownloadAccepted: {
+      computer_id: components["schemas"]["Id"];
+      model_id?: components["schemas"]["LocalModelId"];
+      /** @enum {string} */
+      action: "custom_download";
     };
     /**
      * @description Active model source mode on a Local Computer.
@@ -9615,6 +10011,111 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["LocalModelActionAccepted"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["LocalModelsRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["LocalModelsRefused"];
+      502: components["responses"]["LocalModelsRefused"];
+      503: components["responses"]["LocalModelsRefused"];
+      504: components["responses"]["LocalModelsRefused"];
+    };
+  };
+  searchLocalComputerCustomModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelCustomSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description Matching custom model repositories and host format capabilities. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelCustomSearchResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["LocalModelsRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["LocalModelsRefused"];
+      502: components["responses"]["LocalModelsRefused"];
+      503: components["responses"]["LocalModelsRefused"];
+      504: components["responses"]["LocalModelsRefused"];
+    };
+  };
+  probeLocalComputerCustomModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelCustomProbeRequest"];
+      };
+    };
+    responses: {
+      /** @description Classified zero-download probe result. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelCustomProbeResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["LocalModelsRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["LocalModelsRefused"];
+      502: components["responses"]["LocalModelsRefused"];
+      503: components["responses"]["LocalModelsRefused"];
+      504: components["responses"]["LocalModelsRefused"];
+    };
+  };
+  downloadLocalComputerCustomModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelCustomDownloadInput"];
+      };
+    };
+    responses: {
+      /** @description The Computer started the custom model download. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelCustomDownloadAccepted"];
         };
       };
       400: components["responses"]["BadRequest"];
