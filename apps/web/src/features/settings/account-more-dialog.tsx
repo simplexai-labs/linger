@@ -414,10 +414,7 @@ export function AccountMoreDialog({
         }}
       />
       {displayError ? (
-        <p
-          className="border-t border-border px-5 py-3 text-sm text-app-danger"
-          role="alert"
-        >
+        <p className="px-5 py-3 text-sm text-app-danger" role="alert">
           {displayError}
         </p>
       ) : null}
@@ -428,7 +425,7 @@ export function AccountMoreDialog({
 function AccountMoreHeader({ onClose }: { onClose: () => void }) {
   const t = useT();
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+    <div className="flex items-start justify-between gap-4 px-5 py-4">
       <h2 className="text-base font-semibold">
         {t(accountSettingsMessages.addToProfile)}
       </h2>
@@ -456,7 +453,7 @@ function AccountMorePaneNav({
   return (
     <nav
       aria-label={t(accountSettingsMessages.profileSources)}
-      className="grid shrink-0 grid-cols-2 gap-1 border-b border-border bg-sidebar p-2 sm:flex sm:w-[168px] sm:flex-col sm:border-b-0 sm:border-r"
+      className="grid shrink-0 grid-cols-2 gap-1 border-border bg-sidebar p-2 sm:flex sm:w-[168px] sm:flex-col sm:border-r"
     >
       {SOURCE_PANES.map((item) => (
         <button
@@ -540,7 +537,7 @@ function AccountMoreAccountsPane({
         icon={<Icon icon={Link01Icon} size={14} />}
         title={t(accountSettingsMessages.accounts)}
       />
-      <div className="mt-3 divide-y divide-border">
+      <div className="mt-3">
         {appsPending ? (
           <p className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
             <Spinner size={15} />
@@ -841,7 +838,7 @@ function AccountMoreFooter({
 }) {
   const t = useT();
   return (
-    <div className="flex flex-col gap-3 border-t border-border px-5 py-4">
+    <div className="flex flex-col gap-3 px-5 py-4">
       <p className="text-xs text-muted-foreground">{privacyCopy}</p>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {blockedConnectUrl ? (
@@ -921,7 +918,7 @@ function AppConnectRow({
   return (
     <div className="py-2">
       <div className="flex min-h-10 items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-card shadow-outline">
+        <span className="flex size-9 shrink-0 items-center justify-center">
           <AppLogo name={app.display_name} url={app.logo_url} />
         </span>
         <div className="min-w-0 flex-1">
@@ -1000,7 +997,7 @@ function AppConnectRow({
         ) : null}
       </div>
       {active.length > 1 ? (
-        <div className="mt-1 ml-12 divide-y divide-border">
+        <div className="mt-1 ml-12">
           {active.map((connection) => {
             const identity =
               accountIdentityText(
@@ -1034,7 +1031,7 @@ function AppConnectRow({
       ) : null}
       {active.length && needsAttention ? (
         // An account that needs reconnecting stays visible beside an active one.
-        <div className="mt-1 ml-12 divide-y divide-border">
+        <div className="mt-1 ml-12">
           {connections
             .filter(externalConnectionNeedsAttention)
             .map((connection) => (

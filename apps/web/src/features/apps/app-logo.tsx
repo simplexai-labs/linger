@@ -98,8 +98,8 @@ export function AppLogo({
 }
 
 /**
- * A logo in the tile Connectors draws app logos in; `small` fits it beside a
- * dialog title. The name always sits beside it, so the tile is decorative.
+ * A logo at the size Connectors draws app logos; `small` fits it beside a
+ * dialog title. The name always sits beside it, so the logo is decorative.
  */
 export function AppLogoTile({
   name,
@@ -113,7 +113,7 @@ export function AppLogoTile({
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline ${small ? "size-7" : "size-10"}`}
+      className={`flex shrink-0 items-center justify-center text-foreground ${small ? "size-7" : "size-10"}`}
     >
       <AppLogo name={name} size={small ? "profile" : "md"} url={url} />
     </span>

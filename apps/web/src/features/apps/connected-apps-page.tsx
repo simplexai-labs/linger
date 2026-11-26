@@ -299,10 +299,8 @@ function CatalogAppCard({
     <article
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-4 py-3 transition-colors duration-150 motion-reduce:transition-none",
-        selected
-          ? "border-border-hover bg-muted"
-          : "border-border hover:bg-accent/40",
+        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl px-4 py-3 transition-colors duration-150 motion-reduce:transition-none",
+        selected ? "bg-muted" : "hover:bg-accent",
       )}
     >
       <button
@@ -311,7 +309,7 @@ function CatalogAppCard({
         onClick={onOpen}
         type="button"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline">
+        <span className="flex size-10 shrink-0 items-center justify-center text-foreground">
           <AppLogo name={app.display_name} url={app.logo_url} />
         </span>
         <span className="min-w-0 flex-1">

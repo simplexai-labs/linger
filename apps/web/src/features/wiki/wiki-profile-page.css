@@ -25,7 +25,6 @@
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 12px;
   padding: 8px 16px;
-  border-top: 1px solid hsl(var(--town-border));
 }
 
 .wiki-profile-infobox-row dt {
@@ -152,7 +151,6 @@
   margin-top: 20px;
   margin-bottom: 6px;
   padding-bottom: 3px;
-  border-bottom: 1px solid hsl(var(--town-border));
   font-size: 20px;
   font-weight: 580;
   letter-spacing: -0.4px;
@@ -206,12 +204,10 @@
   grid-template-columns: 104px minmax(0, 1fr);
   column-gap: 20px;
   padding: 16px 0;
-  border-top: 1px solid hsl(var(--town-border));
 }
 
 .wiki-profile-timeline-entry:first-child {
   padding-top: 0;
-  border-top: 0;
 }
 
 .wiki-profile-timeline-entry:last-child {
@@ -320,7 +316,6 @@
 
   .wiki-profile-infobox-row {
     padding: 3px 0;
-    border-top: 0;
   }
 
   .wiki-profile-body {
@@ -377,7 +372,6 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px 0 16px;
-  border-top: 1px solid hsl(var(--town-border));
   background: hsl(var(--town-background));
 }
 

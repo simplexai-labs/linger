@@ -1495,7 +1495,7 @@ function LinkedSourceMessagePanel({
   return (
     <section
       aria-label={t(m.linkedSourceMessage)}
-      className="border-b border-app-border bg-app-surface-soft"
+      className="bg-app-surface-soft"
     >
       <div className="room-readable px-4 py-3 md:px-0">
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3">

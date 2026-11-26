@@ -76,7 +76,7 @@ export function WikiPreviewPage() {
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <main className="room-document-main flex min-h-0 min-w-0 flex-1 flex-col bg-app-surface">
-        <header className="room-document-header border-b border-app-border/60">
+        <header className="room-document-header">
           <div className="room-document-header-identity">
             <div className="room-document-header-file">
               <span className="truncate text-sm font-semibold text-app-ink">
@@ -94,7 +94,7 @@ export function WikiPreviewPage() {
         </header>
         <div className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto">
           <div className="room-document-layout room-document-layout--knowledge mx-auto min-h-full">
-            <div className="room-document-content-lane mx-auto mb-6 border-b border-app-border pb-5">
+            <div className="room-document-content-lane mx-auto mb-6 pb-5">
               <h1 className="room-document-page-title">{page.name}</h1>
             </div>
             <div className="wiki-preview-body room-document-content-lane mx-auto">

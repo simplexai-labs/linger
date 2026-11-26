@@ -30,7 +30,7 @@ export function PreviewSessionExpiryNotice({
   if (!expiresAt || expiredAt !== expiresAt) return null;
   return (
     <div
-      className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-app-border bg-app-surface px-3 py-2"
+      className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-app-surface px-3 py-2"
       role="status"
     >
       <p className="text-sm text-app-muted">{t(m.previewExpired)}</p>

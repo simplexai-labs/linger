@@ -108,7 +108,7 @@ export function ActorProfilePanel({
       className="room-profile-panel flex h-full min-h-0 w-[336px] max-w-[min(21rem,calc(100%-min(22.5rem,45%)))] shrink flex-col border-l border-border bg-background max-sm:w-full max-sm:max-w-none max-sm:border-l-0"
     >
       <header className="shrink-0 px-5 pt-5">
-        <div className="flex items-center gap-2.5 border-b border-app-border pb-3.5">
+        <div className="flex items-center gap-2.5 pb-3.5">
           <ActorAvatar
             actorId={actor.id}
             kind={actor.kind}
@@ -916,7 +916,7 @@ function InfoRow({
     </>
   );
   const className =
-    "flex min-h-12 w-full items-center justify-between gap-3 border-b border-app-border px-4 py-3 text-left last:border-b-0";
+    "flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left";
   if (onClick) {
     return (
       <button

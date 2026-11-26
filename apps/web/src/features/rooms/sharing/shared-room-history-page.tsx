@@ -40,7 +40,7 @@ function SharedHistory({ token }: { token: string }) {
   const share = query.data?.pages[0]?.share;
   return (
     <main className="min-h-dvh bg-app-surface text-app-body">
-      <header className="border-b border-app-border px-6 py-5">
+      <header className="px-6 py-5">
         <div className="mx-auto max-w-3xl">
           <h1 className="text-lg">
             {share?.room_name ?? t(sharedConversationMessages.title)}

@@ -186,7 +186,7 @@ function ContentRow({
 }) {
   if (item.instruction !== undefined) {
     return (
-      <li className="border-t border-app-border first:border-t-0">
+      <li>
         <details className="px-3 py-2">
           <summary className="cursor-pointer text-sm text-app-ink">
             <span className="inline-flex items-center gap-2">
@@ -208,7 +208,7 @@ function ContentRow({
     // eslint-disable-next-line jsx-a11y/role-supports-aria-props -- aria-description / aria-disabled / aria-invalid are valid ARIA 1.3 global or form-group attributes missing from the rule data
     <li
       aria-disabled={item.unavailable || undefined}
-      className="flex items-center gap-2.5 border-t border-app-border px-3 py-2 first:border-t-0"
+      className="flex items-center gap-2.5 px-3 py-2"
     >
       <span aria-hidden className="shrink-0 text-app-muted">
         <Icon icon={icon} size={14} />

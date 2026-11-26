@@ -133,7 +133,7 @@ export function MeetingReader({
       ) : null}
       <div
         aria-label={t(m.views)}
-        className="flex items-center gap-1 border-b border-app-border"
+        className="flex items-center gap-1"
         role="tablist"
       >
         {tabs.map((item) => (

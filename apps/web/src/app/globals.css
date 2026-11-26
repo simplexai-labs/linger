@@ -434,6 +434,18 @@ a[href][aria-disabled="true"],
     border-color: var(--app-danger);
   }
 
+  /* A select reads as its value and chevron, with no box: it fills like a
+     ghost button on hover and while open, and keeps the red edge when it is
+     invalid. Typed comboboxes are inputs and keep their border. */
+  button.ui-field-control[role="combobox"]:not([aria-invalid="true"]) {
+    border-color: transparent;
+  }
+
+  button.ui-field-control[role="combobox"]:hover:not(:disabled),
+  button.ui-field-control[role="combobox"][aria-expanded="true"] {
+    background: hsl(var(--town-accent));
+  }
+
   /* Agent settings read as one 780px column (Town /assistant/settings) while
      the scroll container keeps its scrollbar at the panel edge. */
   .agent-settings-column {
@@ -605,9 +617,7 @@ a[href][aria-disabled="true"],
 }
 
 .auth-divider > span:not(:nth-child(2)) {
-  height: 1px;
   flex: 1;
-  background: hsl(var(--town-border-hover));
 }
 
 .auth-footer {
@@ -1382,7 +1392,6 @@ a[href][aria-disabled="true"],
   align-items: flex-start;
   gap: 12px;
   padding: 16px 16px 12px 20px;
-  border-bottom: 1px solid hsl(var(--town-border));
 }
 
 .app-dialog-title {
@@ -2429,17 +2438,6 @@ a[href][aria-disabled="true"],
 /* The pinned badge sits after the room name and pops in (town-pill-pop). */
 .room-pin-badge {
   color: var(--app-muted);
-}
-
-/* The Room list header grows a hairline underline once the list scrolls. */
-.app-secondary-navigation-header {
-  box-shadow: 0 1px 0 transparent;
-  transition: box-shadow var(--app-micro-duration) var(--app-out-quint);
-}
-
-.app-secondary-navigation[data-scrolled="true"]
-  .app-secondary-navigation-header {
-  box-shadow: 0 1px 0 hsl(var(--town-border) / 0.6);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3522,6 +3520,13 @@ a[href][aria-disabled="true"],
 .select-pill:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--app-ring);
+}
+
+/* A pill that opens a list draws no outline; choice pills keep theirs. */
+button.select-pill[role="combobox"],
+button.select-pill[role="combobox"]:hover:not(:disabled),
+button.select-pill[role="combobox"][aria-expanded="true"] {
+  border-color: transparent;
 }
 
 /* A pill that is one of several choices (weekdays, quick times) fills when

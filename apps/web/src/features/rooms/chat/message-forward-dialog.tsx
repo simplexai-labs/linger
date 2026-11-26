@@ -199,7 +199,7 @@ export function MessageForwardDialog({
             })}
           </div>
         ) : null}
-        <div className="mt-3 divide-y divide-app-border border-y border-app-border">
+        <div className="mt-3">
           {targets.map((target) => {
             const checked = selectedSet.has(target.id);
             return (

@@ -16,7 +16,6 @@
   justify-content: flex-start;
   gap: 4px;
   padding: 0 8px;
-  border-bottom: 1px solid var(--app-border);
   color: var(--app-body);
   background: var(--app-surface);
 }

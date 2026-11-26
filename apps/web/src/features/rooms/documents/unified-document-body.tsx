@@ -168,7 +168,7 @@ function UnifiedDocumentEditorLayout({
       className={`room-document-layout mx-auto min-h-full${knowledgeTitle !== undefined ? " room-document-layout--knowledge" : ""}`}
     >
       <div
-        className={`room-document-content-lane mx-auto ${mailCanvas ? "" : knowledgeTitle !== undefined ? "mb-6 border-b border-app-border pb-5" : "mb-3"}`}
+        className={`room-document-content-lane mx-auto ${mailCanvas ? "" : knowledgeTitle !== undefined ? "mb-6 pb-5" : "mb-3"}`}
       >
         <RoomDocumentConnectionStatus
           onRetry={resyncSession}
@@ -240,7 +240,7 @@ function DocumentStatusBanner({
     <>
       {exportError ? (
         <p
-          className="border-b border-app-border bg-app-sidebar px-4 py-2 text-sm text-app-danger"
+          className="bg-app-sidebar px-4 py-2 text-sm text-app-danger"
           role="alert"
         >
           {exportError}
@@ -248,7 +248,7 @@ function DocumentStatusBanner({
       ) : null}
       {documentActionError ? (
         <p
-          className="border-b border-app-border bg-app-sidebar px-4 py-2 text-sm text-app-danger"
+          className="bg-app-sidebar px-4 py-2 text-sm text-app-danger"
           role="alert"
         >
           {documentActionError}

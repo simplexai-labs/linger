@@ -512,7 +512,7 @@ export function ByokPanel({
           ) : null}
         </div>
       </div>
-      <footer className="flex flex-wrap items-center justify-end gap-2 rounded-b-xl border-t border-border bg-muted/35 px-5 py-3">
+      <footer className="flex flex-wrap items-center justify-end gap-2 rounded-b-xl bg-muted/35 px-5 py-3">
         <Button
           disabled={disabled || !complete}
           loading={switcher.pending?.mode === "byok"}

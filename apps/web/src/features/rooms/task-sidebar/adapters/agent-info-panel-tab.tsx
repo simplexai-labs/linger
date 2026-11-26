@@ -93,10 +93,7 @@ export function AgentActivityLog({
       {visible.length ? (
         <ul className="overflow-hidden rounded-xl border border-app-border">
           {visible.map((entry) => (
-            <li
-              key={entry.id}
-              className="border-t border-app-border first:border-t-0"
-            >
+            <li key={entry.id}>
               <button
                 aria-label={t(agentInfoMessages.viewAgentActivity, {
                   name: agentName,

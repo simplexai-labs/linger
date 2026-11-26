@@ -203,7 +203,7 @@ export function PdfPreviewAdapter({
       className="flex h-full min-h-[420px] flex-col bg-app-surface-soft"
       role="document"
     >
-      <div className="flex h-11 shrink-0 items-center justify-center gap-1 border-b border-app-border bg-app-surface px-2">
+      <div className="flex h-11 shrink-0 items-center justify-center gap-1 bg-app-surface px-2">
         <Button
           aria-label={t(m.previousPdfPage)}
           disabled={!document || pageNumber <= 1}

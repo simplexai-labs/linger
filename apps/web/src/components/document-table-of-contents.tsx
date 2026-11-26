@@ -26,7 +26,7 @@ export function DocumentTableOfContents({
       className="absolute inset-y-0 right-0 z-30 w-[min(300px,calc(100vw-24px))] border-l border-app-border bg-app-surface shadow-xl sm:relative sm:z-auto sm:shrink-0 sm:shadow-none"
       id={id}
     >
-      <header className="flex h-12 items-center justify-between border-b border-app-border/60 px-3">
+      <header className="flex h-12 items-center justify-between px-3">
         <h3 className="text-sm font-semibold">
           {t(commonMessages.tableOfContents)}
         </h3>

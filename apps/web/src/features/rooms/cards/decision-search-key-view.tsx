@@ -213,7 +213,7 @@ function OtherProviders({
       <CardRowDetails open={open}>
         <ul
           aria-label={t(m.otherProviders)}
-          className="max-h-62 divide-y divide-app-border overflow-y-auto overscroll-contain border-t border-app-border px-2"
+          className="max-h-62 overflow-y-auto overscroll-contain px-2"
         >
           {backends.map((backend) => (
             <li className="flex flex-col gap-1 py-2.5" key={backend.id}>

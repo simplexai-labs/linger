@@ -21,7 +21,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--app-border);
   padding: 5px 7px 5px 10px;
   background: var(--app-surface-soft);
 }

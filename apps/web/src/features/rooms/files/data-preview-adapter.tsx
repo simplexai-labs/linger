@@ -189,7 +189,7 @@ function VirtualDataGrid({
       className="flex h-full min-h-[420px] flex-col bg-app-surface"
       role="table"
     >
-      <div className="flex min-h-11 shrink-0 items-center gap-3 border-b border-app-border px-3 text-xs text-app-muted">
+      <div className="flex min-h-11 shrink-0 items-center gap-3 px-3 text-xs text-app-muted">
         <span>{t(m.dataRows, { count: result.rows.length })}</span>
         <span>{t(m.dataColumns, { count: columnCount })}</span>
         {result.truncated ? (

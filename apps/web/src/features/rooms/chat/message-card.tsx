@@ -140,7 +140,7 @@ function MessageCardLayout({
         <div className="flex flex-col items-start gap-1.5">{files}</div>
       ) : null}
       {profile ? (
-        <div className="flex items-center justify-between gap-3 border-t border-app-border pt-3">
+        <div className="flex items-center justify-between gap-3 pt-3">
           {profileContent?.sources ?? <span />}
           <Link
             className="inline-flex min-h-9 items-center justify-center rounded-full border border-app-border px-4 text-sm font-medium text-app-ink transition-colors hover:bg-app-surface-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-focus"

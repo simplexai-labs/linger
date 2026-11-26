@@ -372,7 +372,7 @@ function UnifiedDocumentHeader({
   }
   return (
     <header
-      className="room-document-header border-b border-app-border/60"
+      className="room-document-header"
       data-mail-canvas={mailCanvas || undefined}
     >
       <div className="room-document-header-identity">

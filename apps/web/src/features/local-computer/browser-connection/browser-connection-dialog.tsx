@@ -316,7 +316,7 @@ export function BrowserConnectionDialog({
         </div>
 
         {showForm ? (
-          <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
+          <p className="mt-4 pt-3 text-sm text-muted-foreground">
             <RichMessage
               message={computersMessages.noExtensionYet}
               tags={{

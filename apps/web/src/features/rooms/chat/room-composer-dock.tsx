@@ -110,7 +110,7 @@ function AgentDirectoryUnavailableNotice({ onRetry }: { onRetry: () => void }) {
   const t = useT();
   return (
     <div
-      className="room-readable flex items-center justify-between gap-3 border-t border-[var(--app-status-warning-border)] py-4 text-sm text-app-body"
+      className="room-readable flex items-center justify-between gap-3 py-4 text-sm text-app-body"
       role="alert"
     >
       <span>{t(composerMessages.agentStatusUnavailable)}</span>
@@ -124,10 +124,7 @@ function AgentDirectoryUnavailableNotice({ onRetry }: { onRetry: () => void }) {
 function DeletedAgentNotice() {
   const t = useT();
   return (
-    <div
-      className="room-readable border-t border-app-border py-4 text-sm text-app-muted"
-      role="status"
-    >
+    <div className="room-readable py-4 text-sm text-app-muted" role="status">
       {t(composerMessages.agentDeleted)}
     </div>
   );

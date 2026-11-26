@@ -10,7 +10,7 @@ export function PanelCollectionChrome({
   title: string;
 }) {
   return (
-    <header className="shrink-0 border-b border-app-border bg-app-surface px-3 py-2.5">
+    <header className="shrink-0 bg-app-surface px-3 py-2.5">
       <p className="flex items-center gap-2 text-sm font-semibold text-app-ink">
         <Icon className="text-app-muted" icon={icon} size={14} />
         {title}

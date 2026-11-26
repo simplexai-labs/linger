@@ -366,7 +366,7 @@ export function MeetingsPanel({ tenantId }: { tenantId: string }) {
                 </label>
               </div>
               {chosen && !byDate.has(chosen) && !needle ? (
-                <p className="border-b border-app-border px-4 py-2.5 text-sm text-app-muted md:px-5">
+                <p className="px-4 py-2.5 text-sm text-app-muted md:px-5">
                   {t(m.noneOnDay, { day: formatMeetingDay(chosen) })}
                 </p>
               ) : null}
