@@ -100,12 +100,20 @@ export function ModalDialog({
     if (typeof dialog.showModal === "function") {
       if (!dialog.open) {
         dialog.showModal();
-        // showModal focuses the header close button first; keep initial focus on the content.
-        if (document.activeElement === closeButtonRef.current) {
-          (
+        // showModal focuses the header close button first; keep initial focus
+        // on the content. Moving focus on from a focused control would mark it
+        // keyboard focus, so the first row or field lit up on every open; it
+        // shows only once the person uses the keyboard.
+        const close = closeButtonRef.current;
+        if (close && document.activeElement === close) {
+          const target =
             firstFocusable(dialog.querySelector(".app-dialog-body")) ??
-            firstFocusable(dialog.querySelector(".app-dialog-footer"))
-          )?.focus();
+            firstFocusable(dialog.querySelector(".app-dialog-footer")) ??
+            close;
+          // Refocusing the close button itself would keep its ring, so it
+          // lets go first.
+          close.blur();
+          target.focus({ focusVisible: false });
         }
       }
     } else {
