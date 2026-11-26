@@ -94,6 +94,7 @@ export class SetupWindowModule implements Module {
   // Re-check local models when returning from NVIDIA App or a driver download.
   #driverUpdatePendingRecheck = false;
   #lastDriverAutoRecheckAt = 0;
+  #lastLocationSpaceRefreshAt = 0;
   #permissions: PermissionStatuses | undefined;
   #diagnostics: SetupState["diagnostics"];
   #account: SetupAccount | undefined;
@@ -122,10 +123,12 @@ export class SetupWindowModule implements Module {
     };
     ipcMain.handle(SETUP_IPC.state, async (event) => {
       fromSetup(event);
+      this.#lastLocationSpaceRefreshAt = Date.now();
       await Promise.all([
         this.#refreshSignedIn(),
         this.#refreshPermissions(),
         this.#refreshAccount(),
+        local.refreshLocationSpace(),
       ]);
       return this.#state();
     });
@@ -233,10 +236,12 @@ export class SetupWindowModule implements Module {
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     contents.on("will-attach-webview", (event) => event.preventDefault());
     window.once("ready-to-show", () => window.show());
-    // Back from System Settings or a driver updater: show what changed there.
+    // Back from System Settings, a driver updater, or freeing disk space:
+    // show what changed there.
     window.on("focus", () => {
       void this.#refreshPermissions().then(() => this.#push());
       this.#maybeRecheckDriverOnFocus();
+      this.#maybeRefreshLocationSpaceOnFocus();
     });
     window.on("closed", () => {
       if (this.#window === window) this.#window = undefined;
@@ -533,6 +538,21 @@ export class SetupWindowModule implements Module {
     local.recheck();
   }
 
+  #maybeRefreshLocationSpaceOnFocus(): void {
+    const local = this.#ctx?.get<LocalServerModule>("LocalServer");
+    if (!local) return;
+    const status = local.status();
+    if (
+      !status.available ||
+      (status.phase !== "idle" && status.phase !== "failed")
+    )
+      return;
+    const now = Date.now();
+    if (now - this.#lastLocationSpaceRefreshAt < 2000) return;
+    this.#lastLocationSpaceRefreshAt = now;
+    void local.refreshLocationSpace();
+  }
+
   #push(): void {
     const contents = this.#window?.webContents;
     if (contents && !contents.isDestroyed())
@@ -617,6 +637,9 @@ const localServerState = (
     location: {
       ...location,
       path: shown(location.path),
+      ...(location.rejectedPath
+        ? { rejectedPath: shown(location.rejectedPath) }
+        : {}),
     },
     keys,
     ...(signIn ? { signIn } : {}),

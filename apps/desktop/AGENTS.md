@@ -94,9 +94,12 @@ Gateway and runs Agents. The daemon exits with the app.
   `scripts/installs/README.md`) and unpacks the linger source package
   into the install location (the default home, or a folder picked on the
   welcome screen). The selected folder's disk must have enough room for the
-  services and any local model shown in the install plan. Windows validates
-  private access when a folder is picked and checks the default disk's free
-  space too. Tar runs inside the target with relative paths, falling back to
+  services (`LOCATION_FREE_BYTES`) plus any local model shown in the install
+  plan: `freeDiskBytes` performs a read-only `statfs` pre-check (refreshed
+  when opening Setup, picking or resetting a folder, rechecking, or refocusing
+  Setup) so the welcome screen warns dynamically by plan, and `checkLocation`
+  enforces write access and free space on all platforms before unpacking.
+  Windows also validates private access when a folder is picked. Tar runs inside the target with relative paths, falling back to
   the pure-Node extractor when `tar.exe` is missing with `ENOENT` on stripped
   Windows images. The
   finished folder is moved into place with `renameRetrying`, which waits out

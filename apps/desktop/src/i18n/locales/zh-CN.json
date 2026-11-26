@@ -56,6 +56,8 @@
     "keep": "保留",
     "installLocation": "安装位置",
     "changeLocation": "更改…",
+    "resetLocation": "恢复默认",
+    "locationSpaceLow": "需要 {needed} GB 可用空间，当前磁盘仅剩 {free} GB。",
     "quickInstall": "快速安装",
     "install": "安装",
     "getStarted": "开始使用",
