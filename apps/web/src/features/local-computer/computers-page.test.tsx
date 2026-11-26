@@ -59,6 +59,12 @@ describe("ComputersPage", () => {
       "href",
       "/t/tenant-northstar/settings/models?computer=computer-offline-lab",
     );
+    expect(
+      within(detail).getByRole("link", { name: /System telemetry/ }),
+    ).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/system?computer=computer-offline-lab",
+    );
     fireEvent.click(within(detail).getByRole("button", { name: "Advanced" }));
     fireEvent.click(within(detail).getByRole("button", { name: "Remove" }));
     expect(

@@ -86,6 +86,7 @@ export function ComputerDetail({
   onConnect,
   onOpenAgent,
   onRemove,
+  systemTelemetryHref,
 }: {
   /** Active runtime from the Computer's current model source when known. */
   activeRuntime?: TeamHubLocalRuntimeType;
@@ -101,6 +102,8 @@ export function ComputerDetail({
   onConnect?: () => void;
   onOpenAgent: (actorId: string) => void;
   onRemove?: () => void;
+  /** Where this Computer's System telemetry page is; the page owns the route. */
+  systemTelemetryHref?: string;
 }) {
   const t = useT();
   const [reportedComputer, setReportedComputer] = useState(latestComputer);
@@ -207,6 +210,26 @@ export function ComputerDetail({
               size={16}
             />
           </Link>
+          {systemTelemetryHref ? (
+            <Link
+              className="flex min-h-14 w-full items-center gap-3 rounded-lg py-2 pr-2.5 pl-2 transition-colors duration-150 hover:bg-sidebar-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+              to={systemTelemetryHref}
+            >
+              <RowMark>
+                <Icon icon={Activity01Icon} size={20} />
+              </RowMark>
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block truncate text-sm text-foreground">
+                  {t(computersMessages.systemTelemetry)}
+                </span>
+              </span>
+              <Icon
+                className="text-muted-foreground/60"
+                icon={ArrowRight01Icon}
+                size={16}
+              />
+            </Link>
+          ) : null}
         </Group>
       ) : null}
       {isThisComputer ? (

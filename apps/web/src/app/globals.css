@@ -5603,3 +5603,124 @@ button.question-choice:focus-visible {
   :is(.voice-mode-window, .recording-window-frame) {
   -webkit-app-region: no-drag;
 }
+
+/* System Telemetry optical routing stage and instrument animations. */
+.telemetry-stage {
+  background-color: var(--telemetry-stage-bg);
+  background-image: radial-gradient(
+    var(--telemetry-stage-dot) 1px,
+    transparent 1px
+  );
+  background-size: 16px 16px;
+  box-shadow: var(--telemetry-stage-inset);
+}
+
+.telemetry-node {
+  position: relative;
+  overflow: hidden;
+  background-image: var(--telemetry-node-sheen);
+}
+
+.telemetry-node::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  background: radial-gradient(
+    150px circle at var(--lx, 50%) var(--ly, 50%),
+    var(--telemetry-lamp-color),
+    transparent 72%
+  );
+}
+
+.telemetry-node:hover::after {
+  opacity: 1;
+}
+
+@keyframes telemetry-rtflow-dash {
+  from {
+    stroke-dashoffset: 22;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.telemetry-rtflow-carrier {
+  stroke-dasharray: 6 5;
+  animation: telemetry-rtflow-dash 1.05s linear infinite;
+}
+
+@keyframes telemetry-hub-ring-pulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
+
+.telemetry-hub-pulse-ring {
+  animation: telemetry-hub-ring-pulse 1.8s cubic-bezier(0.16, 1, 0.3, 1)
+    infinite;
+}
+
+@keyframes telemetry-prefill-scan {
+  0% {
+    background-position: -120% 0;
+  }
+  100% {
+    background-position: 220% 0;
+  }
+}
+
+.telemetry-slot-prefill-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 100%
+  );
+  background-size: 60% 100%;
+  animation: telemetry-prefill-scan 1.3s linear infinite;
+}
+
+@keyframes telemetry-eq-bar {
+  0%,
+  100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.telemetry-eq-bar-1 {
+  transform-origin: bottom;
+  animation: telemetry-eq-bar 0.72s ease-in-out infinite;
+}
+
+.telemetry-eq-bar-2 {
+  transform-origin: bottom;
+  animation: telemetry-eq-bar 0.54s ease-in-out 0.16s infinite;
+}
+
+.telemetry-eq-bar-3 {
+  transform-origin: bottom;
+  animation: telemetry-eq-bar 0.86s ease-in-out 0.3s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .telemetry-rtflow-carrier,
+  .telemetry-hub-pulse-ring,
+  .telemetry-slot-prefill-shimmer,
+  .telemetry-eq-bar-1,
+  .telemetry-eq-bar-2,
+  .telemetry-eq-bar-3 {
+    animation: none;
+  }
+}

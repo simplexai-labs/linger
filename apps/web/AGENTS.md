@@ -118,6 +118,19 @@ build:assets` to check the initial JS budget.
   `LOCAL_COMPUTER_OFFLINE` disables BYOK edits immediately. A Computer's detail
   on the Computers page links here, reads `model-source` for its active runtime
   pill, and reads no local model library state itself.
+- `src/features/system-telemetry`: Settings › System (`settings/system?computer=<id>`),
+  lazily loaded from `router.tsx`. Subscribes to TeamHub's on-demand 1 Hz SSE
+  stream (`GET /v0/tenants/{tenantId}/local-computers/{computerId}/system-telemetry/stream`)
+  with a resource-identity-only effect (`tenantId`, `computerId`, `computerOnline`,
+  `paused`, `document.visibilityState`, retry nonce), suspends streaming when the
+  tab is hidden, keeps a bounded 60-tick rolling history buffer, classifies
+  `LOCAL_COMPUTER_OFFLINE` (preserving the last snapshot dimmed),
+  `SYSTEM_TELEMETRY_UNSUPPORTED` (upgrade guidance), and `SYSTEM_TELEMETRY_FORBIDDEN`,
+  and renders the Magpie-inspired Pi Agent → Bifrost Pi → Loaded Local Models
+  optical routing stage, 24-tick hardware & bandwidth precision dials (rendering
+  `—` with `basis: "none"` for unavailable sensors), and collapsed-by-default
+  Request Waterfall, Dual-Track Oscilloscope + `/slots` KV rack, and What-If
+  capacity sandbox computed locally from snapshot `what_if` coefficients.
 - `src/i18n`: the interface languages (English and Simplified Chinese).
   `messages.ts` re-exports the React-free core from
   `@linger/service-kit/messages`, which the desktop shell shares,

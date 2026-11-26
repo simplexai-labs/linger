@@ -764,6 +764,14 @@ function createSettingsRoute(): RouteObject {
       {
         lazy: async () => ({
           Component: (
+            await import("@/features/system-telemetry/system-telemetry-page")
+          ).SystemTelemetryPage,
+        }),
+        path: "system",
+      },
+      {
+        lazy: async () => ({
+          Component: (
             await import("@/features/settings/language-settings-page")
           ).LanguageSettingsPage,
         }),
