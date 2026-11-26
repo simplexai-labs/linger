@@ -6,6 +6,7 @@ import type { PropsWithChildren } from "react";
 
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/features/local-computer/computer-row";
+import { computerSetupMessages } from "@/features/local-computer/computer-setup.messages";
 import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
 import { signInCommand } from "@/features/local-computer/local-runtime-commands";
 import { localRuntimeMessage } from "@/features/local-computer/local-runtime-message";
@@ -189,6 +190,11 @@ function LocalRuntimeAttentionNotice({
               command: signInCommand(status.runtime_type, undefined, desktop),
             }}
           />
+          {status.runtime_type === "pi"
+            ? ` ${t(computerSetupMessages.piSignIn)}`
+            : status.runtime_type === "antigravity"
+              ? ` ${t(computerSetupMessages.antigravitySignIn)}`
+              : null}
         </span>
       ) : null}
     </div>

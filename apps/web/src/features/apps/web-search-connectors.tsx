@@ -214,8 +214,7 @@ function WebSearchBackendDialog({
               {webSearchBackendFreeTier(backend, t) ?? ""}
             </Fact>
           ) : null}
-          {/* You.com's free tier and free use say the same thing. */}
-          {backend.tier_text && !(backend.free_tier && backend.id === "you") ? (
+          {backend.tier_text ? (
             <Fact label={t(m.factFreeUse)}>
               {webSearchBackendFreeUse(backend, t) ?? ""}
             </Fact>

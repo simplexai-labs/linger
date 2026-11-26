@@ -193,11 +193,12 @@ describe("Room Chat", () => {
   });
 
   it.each([
-    ["codex", "Codex", "codex login"],
-    ["claude", "Claude Code", "claude auth login"],
+    ["codex", "Codex", "codex login", undefined],
+    ["claude", "Claude Code", "claude auth login", undefined],
+    ["pi", "Pi", "pi", "Or enter /login in Pi."],
   ] as const)(
     "allows messages to an unauthenticated %s Local Agent with recovery guidance",
-    async (runtimeType, runtimeName, command) => {
+    async (runtimeType, runtimeName, command, alternative) => {
       const fixture = createTestTeamHubRuntime();
 
       const agents = await readTenantAgents(fixture);
@@ -242,7 +243,10 @@ describe("Room Chat", () => {
           `${runtimeName} on Jenny's Mac needs you to sign in.`,
         ),
       ).toBeVisible();
-      expect(screen.getByText(command)).toBeVisible();
+      const code = screen.getByText(command, { selector: "code" });
+      expect(code).toBeVisible();
+      if (alternative)
+        expect(code.parentElement).toHaveTextContent(alternative);
       expect(screen.getByLabelText("Room timeline").textContent).toContain(
         "I can continue the Room V0 implementation",
       );
