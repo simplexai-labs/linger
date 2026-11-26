@@ -1621,6 +1621,49 @@ describe("RunnerGateway", () => {
         connection.disconnect();
       }
     });
+
+    it("halves a confirmed limit and preserves diagnostics when a Run fails with model_service_error", async () => {
+      const { gateway, peer, connection } = await connectApi();
+      try {
+        await promoteToTwo(gateway, peer, connection);
+        const { operation, start } = await startRun(gateway, peer, connection);
+        const lease = await gateway.acquireModelCall(
+          codex,
+          approval,
+          new AbortController().signal,
+        );
+        await connection.receive(
+          event(start, 2, {
+            type: "operation.failed",
+            stage: "runtime_execution",
+            error: {
+              code: "RUNTIME_EXECUTION_FAILED",
+              message: "Runtime execution failed",
+              retryable: false,
+              failure: { code: "model_service_error", runtime_type: "codex" },
+              diagnostics: { code: "unavailable_error", statusCode: 503 },
+            },
+          }),
+        );
+        await expect(operation.result).rejects.toMatchObject({
+          failure: { code: "model_service_error", runtime_type: "codex" },
+          diagnostics: { code: "unavailable_error", statusCode: 503 },
+        });
+        const next = admittedLater(
+          gateway.acquireModelCall(
+            codex,
+            approval,
+            new AbortController().signal,
+          ),
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(next.admitted).toBe(false);
+        lease.release({ outcome: "completed" });
+        await vi.waitFor(() => expect(next.admitted).toBe(true));
+      } finally {
+        connection.disconnect();
+      }
+    });
   });
 
   it.each(["disconnect", "replacement", "removal"] as const)(

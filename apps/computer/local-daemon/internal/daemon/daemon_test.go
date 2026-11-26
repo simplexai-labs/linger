@@ -2528,3 +2528,48 @@ func TestDaemonFlushesRuntimeInventoryUpdatedBeforeWelcome(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalPayloadPiLocalCapacityAndOverflowDiagnostics(t *testing.T) {
+	spec := provider.OperationSpec{Provider: "pi", OperationKind: "run.start"}
+	for _, tc := range []struct {
+		name           string
+		rawDiagnostics string
+		wantCode       string
+		wantDiagCode   string
+		wantHTTPStatus float64
+	}{
+		{
+			name:           "exceed_context_size_error 400",
+			rawDiagnostics: `{"code":"exceed_context_size_error","statusCode":400,"exitCode":0}`,
+			wantCode:       "context_too_long",
+			wantDiagCode:   "exceed_context_size_error",
+			wantHTTPStatus: 400,
+		},
+		{
+			name:           "shared KV pool full 503 unavailable_error",
+			rawDiagnostics: `{"code":"unavailable_error","statusCode":503,"exitCode":0}`,
+			wantCode:       "model_service_error",
+			wantDiagCode:   "unavailable_error",
+			wantHTTPStatus: 503,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := provider.Result{Status: "failed", Error: "server error"}
+			if err := json.Unmarshal([]byte(tc.rawDiagnostics), &result.Diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
+				t.Fatal(err)
+			}
+			failure := payload["failure"].(map[string]any)
+			if failure["code"] != tc.wantCode || failure["runtime_type"] != "pi" {
+				t.Fatalf("failure = %+v, want code=%q runtime_type=pi", failure, tc.wantCode)
+			}
+			diagnostics := payload["diagnostics"].(map[string]any)
+			if diagnostics["code"] != tc.wantDiagCode || diagnostics["statusCode"] != tc.wantHTTPStatus {
+				t.Fatalf("diagnostics = %+v", diagnostics)
+			}
+		})
+	}
+}

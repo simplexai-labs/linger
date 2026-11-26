@@ -68,22 +68,17 @@ func classifyPiModelInvokeFailure(err error, answer native.Outcome) ModelInvokeR
 	if err != nil {
 		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background runtime failed to start"}
 	}
-	if apiErr, ok := parseStructuredAPIError(answer.Error); ok {
-		if isContextTooLongErrorCode(apiErr.Code) || isContextTooLongErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
-		}
-		if apiErr.Code == "model_not_found" {
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: "Pi background model is not available"}
-		}
-		if isAuthErrorCode(apiErr.Code) || isAuthErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: "Pi background authentication is required"}
-		}
-		if isUnavailableErrorCode(apiErr.Code) || isUnavailableErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background model service is unavailable"}
-		}
+	diagnostics := answer.Diagnostics
+	if diagnostics.Code == "" && diagnostics.StatusCode == nil {
+		diagnostics = native.APIErrorDiagnostics(answer.Error)
 	}
-	if posixNetworkErrnoPattern.MatchString(answer.Error) {
-		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background model service is unavailable"}
+	classified := ClassifyExecutionFailure("pi", "", "failed", answer.FailureCode, diagnostics)
+	if result, ok := modelInvokeResultForFailureCode(classified.Code, modelInvokeFailureReasons{
+		authRequired:     "Pi background authentication is required",
+		modelUnavailable: "Pi background model is not available",
+		unavailable:      "Pi background model service is unavailable",
+	}); ok {
+		return result
 	}
 	return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: "Pi background call did not complete"}
 }

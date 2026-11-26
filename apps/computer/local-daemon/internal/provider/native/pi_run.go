@@ -63,6 +63,7 @@ type piTurnState struct {
 	sawAssistant     bool
 	aborted          bool
 	settleAborted    bool
+	overflowFailed   bool
 	failure          string
 	output           string
 	textID           string

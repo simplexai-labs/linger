@@ -215,6 +215,110 @@ func TestPiRetryWaitsForSettle(t *testing.T) {
 	}
 }
 
+func TestPiStructuredFailureDiagnosticsAndCompactionEvents(t *testing.T) {
+	t.Run("retry exhausted preserves 503 unavailable_error diagnostics", func(t *testing.T) {
+		h := piNewHarness(t, "retry-exhausted", nil)
+		_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
+		if outcome.Status != statusFailed || !strings.Contains(outcome.Error, "shared KV pool full") {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		if outcome.FailureCode != "" {
+			t.Fatalf("failure code = %q, want empty (classified from diagnostics)", outcome.FailureCode)
+		}
+		if outcome.Diagnostics.Code != "unavailable_error" || outcome.Diagnostics.StatusCode == nil || *outcome.Diagnostics.StatusCode != 503 {
+			t.Fatalf("diagnostics = %+v", outcome.Diagnostics)
+		}
+	})
+
+	t.Run("overflow compaction failure sets context_too_long and preserves API diagnostics", func(t *testing.T) {
+		h := piNewHarness(t, "overflow-compaction-failed", nil)
+		_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
+		if outcome.Status != statusFailed || outcome.FailureCode != "context_too_long" {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		if !strings.Contains(outcome.Error, "exceed_context_size_error") {
+			t.Fatalf("error = %q, want underlying server error preserved", outcome.Error)
+		}
+		if outcome.Diagnostics.Code != "exceed_context_size_error" || outcome.Diagnostics.StatusCode == nil || *outcome.Diagnostics.StatusCode != 400 {
+			t.Fatalf("diagnostics = %+v", outcome.Diagnostics)
+		}
+	})
+
+	t.Run("compaction_end with result increments compaction count", func(t *testing.T) {
+		h := piNewHarness(t, "compaction-succeeded", nil)
+		_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
+		if outcome.Status != statusCompleted || outcome.CompactionCount == nil || *outcome.CompactionCount != 1 {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+	})
+}
+
+func TestAPIErrorDiagnosticsParsing(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		text       string
+		wantCode   string
+		wantStatus int
+	}{
+		{
+			name:       "llama-server numeric 400 exceed_context_size_error",
+			text:       `400: {"code":400,"message":"request exceeds context","type":"exceed_context_size_error"}`,
+			wantCode:   "exceed_context_size_error",
+			wantStatus: 400,
+		},
+		{
+			name:       "nested error with numeric 503",
+			text:       `POST http://127.0.0.1:18100/v1/chat/completions: {"error":{"code":503,"type":"unavailable_error","message":"shared KV pool full"}}`,
+			wantCode:   "unavailable_error",
+			wantStatus: 503,
+		},
+		{
+			name:       "openai responses provider prefix",
+			text:       `localmodels API error (413): {"type":"request_too_large","message":"too large"}`,
+			wantCode:   "request_too_large",
+			wantStatus: 413,
+		},
+		{
+			name:       "string code beats generic invalid_request_error type",
+			text:       `400: {"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"too long"}}`,
+			wantCode:   "context_length_exceeded",
+			wantStatus: 400,
+		},
+		{
+			name:       "plain HTTP 503 status",
+			text:       "503 Service Unavailable",
+			wantCode:   "",
+			wantStatus: 503,
+		},
+		{
+			name:       "POSIX ECONNREFUSED",
+			text:       "fetch failed: connect ECONNREFUSED 127.0.0.1:18100",
+			wantCode:   "ECONNREFUSED",
+			wantStatus: 0,
+		},
+		{
+			name:       "prose without structured code or status stays empty",
+			text:       "shared KV pool full during decode",
+			wantCode:   "",
+			wantStatus: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := APIErrorDiagnostics(tc.text)
+			if got.Code != tc.wantCode {
+				t.Fatalf("Code = %q, want %q", got.Code, tc.wantCode)
+			}
+			gotStatus := 0
+			if got.StatusCode != nil {
+				gotStatus = *got.StatusCode
+			}
+			if gotStatus != tc.wantStatus {
+				t.Fatalf("StatusCode = %d, want %d", gotStatus, tc.wantStatus)
+			}
+		})
+	}
+}
+
 func TestPiSteer(t *testing.T) {
 	h := piNewHarness(t, "steer", nil)
 	run := h.start(t.Context(), "go", RunSpec{})

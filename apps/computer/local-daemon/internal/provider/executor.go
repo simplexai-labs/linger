@@ -514,7 +514,19 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		finish := func(result Result) {
 			logger.Info("runtime.readiness", append([]any{"kind", spec.OperationKind}, readiness.LogAttrs()...)...)
 			if result.Error != "" {
-				logger.Error("runtime.operation.failed", "error", result.Error)
+				attrs := []any{"error", result.Error}
+				if result.FailureCode != "" {
+					attrs = append(attrs, "code", result.FailureCode)
+				}
+				if diagnostics := result.Diagnostics.Sanitized(); diagnostics != nil {
+					if diagnostics.Code != "" {
+						attrs = append(attrs, "reason", diagnostics.Code)
+					}
+					if diagnostics.StatusCode != nil {
+						attrs = append(attrs, "status", *diagnostics.StatusCode)
+					}
+				}
+				logger.Error("runtime.operation.failed", attrs...)
 			} else {
 				logger.Info("runtime.operation.finished", "kind", result.Status)
 			}
