@@ -516,8 +516,10 @@ function shellQuote(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 // Release lock: sourced from https://go.dev/dl/?mode=json&include=all on 2026-10-29.
-// The Aliyun mirror serves the same archives; the download region orders them.
-// Runtime preparation never resolves mutable toolchain metadata or upgrades this pin.
+// The China mirror (Aliyun) serves the exact same archives directly without
+// redirects (downloadVerified enforces redirect: "error"); the download region
+// orders them. Runtime preparation never resolves mutable toolchain metadata or
+// upgrades this pin.
 const pinnedGoSources: Readonly<Record<string, Artifact>> = {
   "1.26.5-darwin-arm64": {
     url: "https://dl.google.com/go/go1.26.5.darwin-arm64.tar.gz",
@@ -764,6 +766,7 @@ export async function prepareNativeDependencies(options: {
           ...orderByRegion(region!, [
             "https://proxy.golang.org",
             "https://goproxy.cn",
+            "https://goproxy.io",
           ]),
           "direct",
         ].join("|"),

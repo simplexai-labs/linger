@@ -44,6 +44,7 @@ export const NODE_RUNTIME_DOWNLOAD_BASE_URL = "https://nodejs.org/dist";
 // first in the cn download region (scripts/installs/README.md).
 export const NODE_RUNTIME_DOWNLOAD_MIRRORS = Object.freeze([
   "https://cdn.npmmirror.com/binaries/node",
+  "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release",
 ]);
 const NODE_RUNTIME_IDLE_TIMEOUT_MS = 60_000;
 

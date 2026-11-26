@@ -71,10 +71,11 @@ type codexProcess struct {
 	dir             string
 	model           string
 	effort          string
-	// authPrint and skillPrint are the account and the delivered Skills the
-	// app-server loaded at launch.
+	// authPrint, skillPrint, and envPrint capture the account, delivered Skills,
+	// and non-temp process environment the app-server loaded at launch.
 	authPrint  string
 	skillPrint string
+	envPrint   string
 
 	stdoutDone chan struct{}
 	waitDone   chan struct{}
@@ -113,6 +114,7 @@ func codexLaunch(profile Profile, spec RunSpec, executable, home, key string, at
 	args := codexExecutionArgs(profile, spec, home, logger)
 	authPrint := codexAuthFingerprint(home)
 	skillPrint := profile.ResidentSkillDigest
+	envPrint := codexEnvFingerprint(profile.Env)
 	var release func() error
 	if profile.RetainProcessTemp != nil {
 		var err error
@@ -179,7 +181,7 @@ func codexLaunch(profile Profile, spec RunSpec, executable, home, key string, at
 		configArgs:      append([]string(nil), profile.CodexConfigArgs...),
 		withoutWebTools: spec.WithoutNativeWebTools,
 		dir:             spec.Dir, model: spec.Model, effort: spec.Effort,
-		authPrint: authPrint, skillPrint: skillPrint,
+		authPrint: authPrint, skillPrint: skillPrint, envPrint: envPrint,
 		stdoutDone: make(chan struct{}), waitDone: make(chan struct{}),
 		front: front,
 	}

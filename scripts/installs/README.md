@@ -112,32 +112,50 @@ llm-inference-lab's product documents and dated reports.
 
 <!-- <<< llm-inference-lab: stack -->
 
-## Download region: `SIMPLEX_REGION` and `region.json`
+## Download region: `SIMPLEX_REGION`, `SIMPLEX_REGION_FILE`, and `region.json`
 
-Linger and localmodels share one download region, so a computer in mainland
-China gets the China mirrors without first waiting for a foreign host to time
-out. The region only orders the sources of a download: no source is ever
-dropped, and the pinned SHA256, SHA512 or lockfile integrity still decides
-which bytes are used.
+Linger, the Computer Daemon, and `localmodels` share one download region and
+per-ecosystem speed profile (`<LINGER_HOME>/runtime/region.json`, passed via
+`SIMPLEX_REGION_FILE`), so every download selects the fastest measured global
+or mainland-China mirror without waiting on throttled hosts. See
+[Network Download Optimization Strategy](../../docs/network-download-optimization.md)
+for the complete specification. The region only orders candidate sources: no
+source is ever dropped, and pinned SHA-256, SHA-512, or lockfile digests still
+decide which bytes are accepted.
 
 The installer resolves the region once per process, in this order:
 
 1. `SIMPLEX_REGION`: `cn` or `global` forces that region; `auto` or unset
    does not. Any other value is an error.
 2. `<LINGER_HOME>/runtime/region.json` when it was resolved within the last
-   24 hours.
-3. A probe: up to three rounds racing the first 1 MiB of the pinned pnpm
-   tarball from `registry.npmjs.org` and `cdn.npmmirror.com` (4 seconds per
-   round), stopping once one registry wins two rounds or leads clearly over a
-   full window; `cn` when the China mirror wins. A probe that reaches neither
+   6 hours and its `network_fingerprint` matches the current proxy environment.
+3. A concurrent multi-signal probe racing npm (`registry.npmjs.org` vs
+   `cdn.npmmirror.com`) and PyPI (`pypi.org` vs Tsinghua / Aliyun / USTC /
+   Tencent mirrors) so Cloudflare Anycast on npm alone cannot falsely lock a
+   China host onto slow PyPI or model downloads. A probe that reaches neither
    uses `global` and is not saved.
 
 ```json
 {
   "schema": "simplex.region/v1",
   "region": "cn",
-  "resolved_at": "2026-11-18T08:00:00.000Z",
-  "method": "probe"
+  "resolved_at": "2026-11-24T08:00:00.000Z",
+  "method": "probe",
+  "network_fingerprint": "direct",
+  "ecosystems": {
+    "pypi": {
+      "region": "cn",
+      "name": "pypi-tsinghua",
+      "url": "https://pypi.tuna.tsinghua.edu.cn/simple/",
+      "bytes_per_second": 880000,
+      "candidates": [
+        "https://pypi.tuna.tsinghua.edu.cn/simple/",
+        "https://mirrors.aliyun.com/pypi/simple/"
+      ],
+      "measured_at": "2026-11-24T08:00:00.000Z",
+      "method": "probe"
+    }
+  }
 }
 ```
 
@@ -147,16 +165,19 @@ proves faster and finishes the download, the file is rewritten with that
 region and `fallback`, and later downloads start there (unless
 `SIMPLEX_REGION` forces a region).
 
-| Download                             | global first         | cn first                                 |
-| ------------------------------------ | -------------------- | ---------------------------------------- |
-| Node.js runtime (desktop app)        | `nodejs.org`         | `cdn.npmmirror.com`                      |
-| pnpm, npm and package installs       | `registry.npmjs.org` | `registry.npmmirror.com`                 |
-| Go toolchain                         | `dl.google.com`      | `mirrors.aliyun.com`                     |
-| Go modules (`GOPROXY`, unless set)   | `proxy.golang.org`   | `goproxy.cn`                             |
-| localmodels kit                      | CloudFront, then npm | `cdn.npmmirror.com` where it has the kit |
-| Voice model packages (node-services) | `registry.npmjs.org` | `registry.npmmirror.com`                 |
+| Download                             | global first                               | cn first (speed-ranked where multiple exist)                          |
+| ------------------------------------ | ------------------------------------------ | --------------------------------------------------------------------- |
+| Node.js runtime (desktop app)        | `nodejs.org`                               | `cdn.npmmirror.com`, `mirrors.tuna.tsinghua.edu.cn/nodejs-release`    |
+| pnpm, npm and package installs       | `registry.npmjs.org`                       | `registry.npmmirror.com`                                              |
+| Go toolchain                         | `dl.google.com`                            | `mirrors.aliyun.com/golang`                                           |
+| Go modules (`GOPROXY`, unless set)   | `proxy.golang.org`                         | `goproxy.cn`, `goproxy.io`                                            |
+| PyPI indexes & engine wheels         | `pypi.org`, `files.pythonhosted.org`       | Tsinghua (`pypi.tuna.tsinghua.edu.cn`), Aliyun, USTC, Tencent, Huawei |
+| Rust / Homebrew (Agent runs)         | `static.rust-lang.org`, `formulae.brew.sh` | Tsinghua, USTC                                                        |
+| Model hubs                           | `huggingface.co`                           | `modelscope.cn`, `hf-mirror.com`                                      |
+| localmodels kit                      | CloudFront, then npm                       | `cdn.npmmirror.com` where it has the kit                              |
+| Voice model packages (node-services) | `registry.npmjs.org`                       | `registry.npmmirror.com`                                              |
 
-A registry or `GOPROXY` the person configured still wins. The installer
-passes the resolved region as `SIMPLEX_REGION` to every `localmodels` child
-(stack, foundations, Harness) and to every native service, so none of them
-probes again.
+A registry, index, or `GOPROXY` the person configured still wins. The installer
+and Computer Daemon pass `SIMPLEX_REGION` and `SIMPLEX_REGION_FILE` to every
+`localmodels` child and inject cached per-ecosystem language mirrors into Agent
+Runs with zero network round trips.

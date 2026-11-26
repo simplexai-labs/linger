@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/mirrors"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
@@ -207,6 +208,33 @@ func (t Tool) commandArgs(environment map[string]string, args []string) *exec.Cm
 		}
 	} else if piProfile := localGatewayPiProfile(environment, t.StateDirectory, overlay, legacy); piProfile != "" {
 		effective["PI_CODING_AGENT_DIR"] = piProfile
+	}
+	for existing, val := range effective {
+		if strings.EqualFold(existing, "SIMPLEX_REGION") {
+			trimmed := strings.TrimSpace(val)
+			if trimmed != "auto" && trimmed != "global" && trimmed != "cn" {
+				delete(effective, existing)
+			} else if existing != "SIMPLEX_REGION" || trimmed != val {
+				delete(effective, existing)
+				effective["SIMPLEX_REGION"] = trimmed
+			}
+		} else if strings.EqualFold(existing, "SIMPLEX_REGION_FILE") {
+			trimmed := strings.TrimSpace(val)
+			if trimmed == "" || !filepath.IsAbs(trimmed) {
+				delete(effective, existing)
+			} else if existing != "SIMPLEX_REGION_FILE" || trimmed != val {
+				delete(effective, existing)
+				effective["SIMPLEX_REGION_FILE"] = filepath.Clean(trimmed)
+			}
+		}
+	}
+	for key, value := range mirrors.LocalmodelsEnv(environment, t.StateDirectory, time.Now()) {
+		for existing := range effective {
+			if strings.EqualFold(existing, key) && existing != key {
+				delete(effective, existing)
+			}
+		}
+		effective[key] = value
 	}
 	effective["PYTHONNOUSERSITE"] = "1"
 	effective["PYTHONDONTWRITEBYTECODE"] = "1"

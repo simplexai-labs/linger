@@ -373,6 +373,50 @@ sha256_file() {
   fi
 }
 
+probe_single_registry() {
+  local url="$1" out="$2"
+  local metrics="" rc=0
+  set +e
+  metrics="$(LC_ALL=C curl -fsSL --proto '=https' --proto-redir '=https' --max-redirs 5 \
+    -r 0-262143 --connect-timeout 3 --max-time 4 -o /dev/null \
+    -w '%{speed_download} %{size_download}' "$url" 2>/dev/null)"
+  rc=$?
+  set -e
+  local speed="${metrics%% *}"
+  local size="${metrics##* }"
+  if [[ "$rc" -eq 0 ]] || { [[ "$rc" -eq 28 ]] && [[ "${size:-0}" =~ ^[0-9]+$ ]] && (( size > 0 )); }; then
+    printf '%s\n' "${speed:-0}" >"$out"
+  else
+    printf '0\n' >"$out"
+  fi
+}
+
+probe_npm_registry_order() {
+  local probe_dir="$WORK_DIR/registry-probe"
+  mkdir -p "$probe_dir"
+  local pkg_tail="@simplexai/localmodels/-/localmodels-${STACK_PIN_NPM_VERSION}.tgz"
+  local global_url="https://registry.npmjs.org/$pkg_tail"
+  local cn_url="https://registry.npmmirror.com/$pkg_tail"
+  local g_out="$probe_dir/global.bps"
+  local c_out="$probe_dir/cn.bps"
+
+  probe_single_registry "$global_url" "$g_out" &
+  local g_pid=$!
+  probe_single_registry "$cn_url" "$c_out" &
+  local c_pid=$!
+  wait "$g_pid" 2>/dev/null || true
+  wait "$c_pid" 2>/dev/null || true
+
+  local g_bps="0" c_bps="0"
+  [[ -s "$g_out" ]] && g_bps="$(cat "$g_out")"
+  [[ -s "$c_out" ]] && c_bps="$(cat "$c_out")"
+  if LC_ALL=C awk -v c="${c_bps//,/.}" -v g="${g_bps//,/.}" 'BEGIN { exit !(c + 0 > g + 0) }'; then
+    printf 'cn\n'
+  else
+    printf 'global\n'
+  fi
+}
+
 download_pinned_stack_script() {
   local dest="$1"
   command -v tar >/dev/null 2>&1 || die "tar is required."
@@ -391,7 +435,14 @@ download_pinned_stack_script() {
   else
     local region="${SIMPLEX_REGION:-auto}"
     case "$region" in
-      auto | global) registries=("https://registry.npmjs.org" "https://registry.npmmirror.com") ;;
+      auto)
+        if [[ "$(probe_npm_registry_order)" == "cn" ]]; then
+          registries=("https://registry.npmmirror.com" "https://registry.npmjs.org")
+        else
+          registries=("https://registry.npmjs.org" "https://registry.npmmirror.com")
+        fi
+        ;;
+      global) registries=("https://registry.npmjs.org" "https://registry.npmmirror.com") ;;
       cn) registries=("https://registry.npmmirror.com" "https://registry.npmjs.org") ;;
       *) die "SIMPLEX_REGION must be auto, global, or cn." ;;
     esac

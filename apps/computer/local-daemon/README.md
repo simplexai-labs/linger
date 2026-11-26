@@ -16,6 +16,12 @@ control through Linger's Runner Gateway.
   (Runner Gateway protocol 2).
 - `internal/linger`: Linger Gateway, device identity, process-instance lease,
   Registration, Context, Local MCP Relay, and Local Skill catalog adapters.
+- `internal/mirrors`: reads Linger's shared `<home>/runtime/region.json`
+  (`simplex.region/v1`) with 6-hour freshness and proxy-fingerprint validation,
+  forwards `SIMPLEX_REGION_FILE` / `SIMPLEX_REGION` to `localmodels` tool
+  invocations, and applies cached per-ecosystem language mirror variables to
+  Agent Runs with zero network round trips (see
+  `docs/network-download-optimization.md`).
 
 The Go daemon must not own TeamHub records, Agent scheduling, Context authority,
 MCP policy, or Artifact publication. Those remain in TeamHub and Agent Service.

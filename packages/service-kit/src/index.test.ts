@@ -106,7 +106,27 @@ describe("download regions", () => {
   it("knows the mainland-China mirrors", () => {
     expect(sources.map(sourceRegion)).toEqual(["global", "cn", "global", "cn"]);
     expect(sourceRegion("https://goproxy.cn")).toBe("cn");
+    expect(sourceRegion("https://goproxy.io")).toBe("cn");
+    expect(
+      sourceRegion("https://golang.google.cn/dl/go1.26.5.linux-amd64.tar.gz"),
+    ).toBe("cn");
+    expect(sourceRegion("https://pypi.tuna.tsinghua.edu.cn/simple/")).toBe(
+      "cn",
+    );
+    expect(
+      sourceRegion("https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/"),
+    ).toBe("cn");
+    expect(sourceRegion("https://pypi.mirrors.ustc.edu.cn/simple/")).toBe("cn");
+    expect(sourceRegion("https://mirrors.cloud.tencent.com/pypi/simple/")).toBe(
+      "cn",
+    );
+    expect(
+      sourceRegion("https://repo.huaweicloud.com/repository/pypi/packages/"),
+    ).toBe("cn");
+    expect(sourceRegion("https://hf-mirror.com/org/repo")).toBe("cn");
+    expect(sourceRegion("https://modelscope.cn/models/org/repo")).toBe("cn");
     expect(sourceRegion("https://npmmirror.com.example/x")).toBe("global");
+    expect(sourceRegion("https://tsinghua.edu.cn.example/x")).toBe("global");
     expect(sourceRegion("not a url")).toBe("global");
   });
 

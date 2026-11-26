@@ -87,12 +87,12 @@ it("treats auto and unset as not forced and refuses anything else", () => {
   );
 });
 
-it("reuses a region saved within 24 hours without probing", async () => {
+it("reuses a region saved within 6 hours without probing", async () => {
   const directory = await home();
   await saved(directory, {
     region: "cn",
     method: "fallback",
-    resolved_at: new Date(Date.now() - 20 * hour).toISOString(),
+    resolved_at: new Date(Date.now() - 4 * hour).toISOString(),
   });
   const fetcher = probe(1, 10);
   expect(await resolveRegion(directory, { fetcher })).toBe("cn");
@@ -103,7 +103,7 @@ it("probes again once the saved region is stale or unreadable", async () => {
   for (const contents of [
     {
       region: "global",
-      resolved_at: new Date(Date.now() - 25 * hour).toISOString(),
+      resolved_at: new Date(Date.now() - 7 * hour).toISOString(),
     },
     { region: "mars" },
   ] as const) {

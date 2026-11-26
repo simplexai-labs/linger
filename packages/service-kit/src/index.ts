@@ -76,8 +76,30 @@ export const requestBodyText = (body: unknown): string => {
 /** Where a download source serves from: a mainland-China mirror, or anywhere else. */
 export type Region = "cn" | "global";
 
+/** Package or artifact ecosystems covered by dynamic speed-based mirror selection. */
+export type MirrorEcosystem =
+  | "npm"
+  | "pypi"
+  | "node"
+  | "go"
+  | "rust"
+  | "model_hub"
+  | "homebrew";
+
 // Hosts that mirror public downloads inside mainland China.
-const chinaMirrorDomains = ["npmmirror.com", "aliyun.com", "goproxy.cn"];
+const chinaMirrorDomains = [
+  "npmmirror.com",
+  "aliyun.com",
+  "tsinghua.edu.cn",
+  "ustc.edu.cn",
+  "cloud.tencent.com",
+  "huaweicloud.com",
+  "goproxy.cn",
+  "goproxy.io",
+  "golang.google.cn",
+  "hf-mirror.com",
+  "modelscope.cn",
+];
 
 /** The region of a download source's host; an unparsable URL counts as global. */
 export function sourceRegion(source: string | URL): Region {

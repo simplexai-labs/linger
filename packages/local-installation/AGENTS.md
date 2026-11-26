@@ -408,16 +408,21 @@ workers have released their file handles.
 
 Every download offered by both a global host and a mainland-China mirror
 goes through `downloadInRegion` (`region.ts`), which tries the home's
-download region first and never drops a source; the region is
-`SIMPLEX_REGION`, else `<home>/runtime/region.json` (24 hours), else a
-best-of-three npm registry probe (up to 1 MiB per round, fastest wins). When
-the preferred region fails or transfers slowly while a mirror in the other
-region proves faster, the transfer resumes there and rewrites the file. The
-probe is shared per home, but cancellation belongs to each caller: one setup
-leaving does not cancel another, and the last waiter leaving aborts the probe
-so a later caller can retry. Even a cached region respects caller cancellation.
-The resolved region reaches every `localmodels` child and native service as
-`SIMPLEX_REGION`. The contract is in `scripts/installs/README.md`.
+download region first (applying any cached per-ecosystem speed ranking from
+`mirror-probe.ts`) and never drops a source; the region is `SIMPLEX_REGION`,
+else `<home>/runtime/region.json` (6 hours, invalidated on proxy
+`network_fingerprint` changes), else a concurrent multi-ecosystem speed probe
+(npm + PyPI decide the region, while Node, Go, Rust, model hubs, and macOS
+Homebrew are measured in the same parallel batch and persisted under
+`ecosystems`). When the preferred region fails or
+transfers slowly while a mirror in the other region proves faster, the
+transfer resumes there and rewrites the file. The probe is shared per home,
+but cancellation belongs to each caller: one setup leaving does not cancel
+another, and the last waiter leaving aborts the probe so a later caller can
+retry. Even a cached region respects caller cancellation. The resolved region
+and shared `<home>/runtime/region.json` path reach every `localmodels` child
+as `SIMPLEX_REGION` and `SIMPLEX_REGION_FILE`. The contract is in
+`docs/network-download-optimization.md` and `scripts/installs/README.md`.
 
 Verified downloads stop reading on explicit cancellation even when a response
 body ignores the fetch signal. They retain the caller's abort reason, cancel

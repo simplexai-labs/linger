@@ -547,8 +547,35 @@ test("passes the resolved download region to every localmodels child", async () 
     string,
     string[],
     { env: NodeJS.ProcessEnv },
-  ][])
+  ][]) {
     expect(call[2].env.SIMPLEX_REGION).toBe("cn");
+    expect(call[2].env.SIMPLEX_REGION_FILE).toBe(regionFile(f.home));
+  }
+  // Mixed-case inherited variants do not survive alongside canonical keys.
+  run.mockClear();
+  await runLocalmodels(
+    f.home,
+    ["library", "status", "--json"],
+    {
+      env: {
+        simplex_region: "global",
+        Simplex_Region_File: "/tmp/other-region.json",
+      },
+    },
+    { run },
+  );
+  const childEnv = (
+    run.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ]
+  )[2].env;
+  expect(
+    Object.keys(childEnv).filter((k) =>
+      k.toUpperCase().startsWith("SIMPLEX_REGION"),
+    ),
+  ).toEqual(["SIMPLEX_REGION", "SIMPLEX_REGION_FILE"]);
 });
 // What `library status` prints, cut to the fields the stop reads.
 const libraryStatus = (

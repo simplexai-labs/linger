@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/mirrors"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
@@ -114,7 +116,10 @@ type ExecutionResolver struct {
 	// CLICredentials finds the Agent-level TeamHub CLI credential the Daemon
 	// stored. Nil leaves every Operation without a TeamHub CLI profile.
 	CLICredentials CLICredentialLookup
-	Views          interface {
+	// RegionFile points to Linger's shared <home>/runtime/region.json so Runs
+	// inherit cached language-mirror acceleration with zero network round trips.
+	RegionFile string
+	Views      interface {
 		ValidatedView(context.Context, string, json.RawMessage) (ViewRecord, error)
 	}
 }
@@ -266,6 +271,19 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 			searchPath = os.Getenv("PATH")
 		}
 		spec.Environment["PATH"] = r.TeamHubCLIBin + string(os.PathListSeparator) + searchPath
+	}
+	mirrorRegionFile := r.RegionFile
+	if mirrorRegionFile == "" {
+		mirrorRegionFile = mirrors.ResolveRegionFile(spec.Environment, "")
+	}
+	if mirrorRegionFile != "" || spec.Environment != nil {
+		if spec.Environment == nil {
+			spec.Environment = make(map[string]string)
+		}
+		mirrors.ApplyAgentEnvironmentInDir(spec.Environment, mirrorRegionFile, workingDirectory, time.Now())
+		if len(spec.Environment) == 0 {
+			spec.Environment = nil
+		}
 	}
 	if command.RuntimeType == "codex" {
 		// Local Codex records the same reasoning the Cloud Runtime does and

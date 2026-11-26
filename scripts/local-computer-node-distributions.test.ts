@@ -186,6 +186,7 @@ describe("Local Computer Node distributions", () => {
     expect(nodeRuntimeDownloadUrls("node-linux-x64.tar.gz", "99.1.0")).toEqual([
       "https://nodejs.org/dist/v99.1.0/node-linux-x64.tar.gz",
       "https://cdn.npmmirror.com/binaries/node/v99.1.0/node-linux-x64.tar.gz",
+      "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v99.1.0/node-linux-x64.tar.gz",
     ]);
     const official = [
       () => new Response("missing", { status: 404 }),
@@ -210,6 +211,31 @@ describe("Local Computer Node distributions", () => {
       expect(hosts).toEqual(["nodejs.org", "cdn.npmmirror.com"]);
       await expect(readFile(destination, "utf8")).resolves.toBe(content);
     }
+    // Also falls back to the Tsinghua mirror when both nodejs.org and npmmirror fail.
+    const tsinghuaRoot = await temporaryRoot();
+    const tsinghuaHosts: string[] = [];
+    const tsinghuaDest = await ensureNodeRuntimeArchive(
+      "linux-x64",
+      tsinghuaRoot,
+      {
+        fetchImplementation: async (url: string) => {
+          const host = new URL(url).host;
+          tsinghuaHosts.push(host);
+          return host === "mirrors.tuna.tsinghua.edu.cn"
+            ? new Response(content)
+            : new Response("gone", { status: 503 });
+        },
+        idleTimeoutMs: 20,
+        releases,
+        version: "99.1.0",
+      },
+    );
+    expect(tsinghuaHosts).toEqual([
+      "nodejs.org",
+      "cdn.npmmirror.com",
+      "mirrors.tuna.tsinghua.edu.cn",
+    ]);
+    await expect(readFile(tsinghuaDest, "utf8")).resolves.toBe(content);
   });
 
   it("names the archive and every host when all of them fail", async () => {
@@ -225,7 +251,7 @@ describe("Local Computer Node distributions", () => {
         },
       }),
     ).rejects.toThrow(
-      "Node runtime download of node-linux-x64.tar.gz failed (nodejs.org: HTTP 503; cdn.npmmirror.com: HTTP 503).",
+      "Node runtime download of node-linux-x64.tar.gz failed (nodejs.org: HTTP 503; cdn.npmmirror.com: HTTP 503; mirrors.tuna.tsinghua.edu.cn: HTTP 503).",
     );
     expect(await readdir(root)).toEqual([]);
   });

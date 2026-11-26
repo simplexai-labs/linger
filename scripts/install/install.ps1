@@ -661,6 +661,84 @@ function Get-BytesSha256Hex([byte[]]$Bytes) {
     }
 }
 
+function Resolve-AutoNpmRegistryOrder {
+    $tail = "@simplexai/localmodels/-/localmodels-$($script:StackPinNpmVersion).tgz"
+    $client = $null
+    $handler = $null
+    $cts = $null
+    try {
+        Add-Type -AssemblyName System.Net.Http
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.AllowAutoRedirect = $false
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds(4)
+        $cts = New-Object System.Threading.CancellationTokenSource(4000)
+
+        $probeUrls = @{
+            global = "https://registry.npmjs.org/$tail"
+            cn     = "https://registry.npmmirror.com/$tail"
+        }
+        $hops = @{ global = 0; cn = 0 }
+        $stopwatches = @{}
+        $tasks = @{}
+        $startRequest = {
+            param([string]$Region, [string]$Url)
+            $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $Url)
+            $req.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue(0, 262143)
+            $tasks[$Region] = $client.SendAsync($req, [System.Net.Http.HttpCompletionOption]::ResponseContentRead, $cts.Token)
+        }
+        foreach ($region in @('global', 'cn')) {
+            $stopwatches[$region] = [System.Diagnostics.Stopwatch]::StartNew()
+            & $startRequest $region $probeUrls[$region]
+        }
+
+        $bestRegion = 'global'
+        $bestBps = 0.0
+        while ($tasks.Count -gt 0) {
+            $finished = [System.Threading.Tasks.Task]::WhenAny([System.Threading.Tasks.Task[]]@($tasks.Values)).GetAwaiter().GetResult()
+            $region = @($tasks.Keys | Where-Object { $tasks[$_] -eq $finished })[0]
+            $tasks.Remove($region)
+            if ($finished.Status -ne [System.Threading.Tasks.TaskStatus]::RanToCompletion) {
+                continue
+            }
+            $resp = $finished.Result
+            try {
+                $status = [int]$resp.StatusCode
+                if ($status -in @(301, 302, 303, 307, 308) -and $hops[$region] -lt 5 -and $null -ne $resp.Headers.Location) {
+                    $nextUri = New-Object System.Uri([System.Uri]$probeUrls[$region], $resp.Headers.Location)
+                    if ($nextUri.Scheme -eq 'https') {
+                        $hops[$region]++
+                        $probeUrls[$region] = $nextUri.AbsoluteUri
+                        & $startRequest $region $probeUrls[$region]
+                    }
+                    continue
+                }
+                if ($resp.IsSuccessStatusCode) {
+                    $bytes = $resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult().Length
+                    $elapsed = [Math]::Max(0.001, $stopwatches[$region].Elapsed.TotalSeconds)
+                    $bps = $bytes / $elapsed
+                    if ($bps -gt $bestBps) {
+                        $bestBps = $bps
+                        $bestRegion = $region
+                    }
+                }
+            } finally {
+                $resp.Dispose()
+            }
+        }
+        return $bestRegion
+    } catch {
+        return 'global'
+    } finally {
+        if ($null -ne $client) {
+            try { $client.CancelPendingRequests() } catch {}
+            $client.Dispose()
+        }
+        if ($null -ne $handler) { $handler.Dispose() }
+        if ($null -ne $cts) { $cts.Dispose() }
+    }
+}
+
 function Download-PinnedStackScript([string]$DestinationPath, [string]$TempDir) {
     if (-not $script:StackPinNpmVersion -or -not $script:StackPinSha256) {
         Exit-Fail 'Local model runtime release pin is missing.'
@@ -678,6 +756,9 @@ function Download-PinnedStackScript([string]$DestinationPath, [string]$TempDir) 
         $region = if ($env:SIMPLEX_REGION) { $env:SIMPLEX_REGION } else { 'auto' }
         if ($region -notin @('auto', 'global', 'cn')) {
             Exit-Fail 'SIMPLEX_REGION must be auto, global, or cn.'
+        }
+        if ($region -eq 'auto') {
+            $region = Resolve-AutoNpmRegistryOrder
         }
         if ($region -eq 'cn') {
             $registries = @('https://registry.npmmirror.com', 'https://registry.npmjs.org')

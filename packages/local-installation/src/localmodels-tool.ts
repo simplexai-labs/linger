@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { sleep } from "@linger/service-kit";
 import { x as extract } from "tar";
-import { downloadInRegion, resolveRegion } from "./region.js";
+import { downloadInRegion, regionFile, resolveRegion } from "./region.js";
 import {
   atomicPrivate,
   privateDirectory,
@@ -515,6 +515,8 @@ const STRIPPED_LOCALMODELS_ENVIRONMENT = new Set([
   "LOCALMODELS_TOOLS_DIR",
   "LOCALMODELS_BIFROST_DIR",
   "LOCALMODELS_BIFROST_ADDR",
+  "SIMPLEX_REGION",
+  "SIMPLEX_REGION_FILE",
 ]);
 
 const resolvingBifrostAddr = new Map<string, Promise<string>>();
@@ -878,8 +880,10 @@ async function runLocalmodelsCommand(
   const isolation = await localmodelsIsolation(home, args, control);
   const env: NodeJS.ProcessEnv = {
     ...stripInheritedEnvironment({ ...process.env, ...options.env }),
-    // localmodels downloads from the same region and does not probe again.
+    // localmodels shares Linger's region.json and resolved region so it never
+    // splits mirror state or probes a second time.
     SIMPLEX_REGION: await resolveRegion(home, { signal: options.signal }),
+    SIMPLEX_REGION_FILE: regionFile(home),
     PYTHONPATH: tool.moduleDir,
     LOCALMODELS_STATE: state,
     ...isolation,

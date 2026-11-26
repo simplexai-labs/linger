@@ -24,7 +24,7 @@ import {
   validateNativeVoiceTools,
 } from "./native-dependencies.js";
 import * as downloads from "./download.js";
-import { REGION_SCHEMA, regionFile } from "./region.js";
+import { MIRROR_ECOSYSTEMS, REGION_SCHEMA, regionFile } from "./region.js";
 import type { InstallerEvent } from "./events.js";
 const roots: string[] = [];
 afterEach(async () => {
@@ -583,7 +583,7 @@ it("prepares real executable launchers and reuses verified warm dependencies ent
   expect(result.env.GOROOT).toContain(`${path.sep}components${path.sep}`);
   expect(result.env.GOTOOLCHAIN).toBe("local");
   expect(result.env.GOPROXY).toBe(
-    "https://proxy.golang.org|https://goproxy.cn|direct",
+    "https://proxy.golang.org|https://goproxy.cn|https://goproxy.io|direct",
   );
   // Toolchain work belongs to the release stage, not to starting services.
   expect(new Set(events.map((event) => event.stage))).toEqual(
@@ -600,12 +600,18 @@ it("prepares real executable launchers and reuses verified warm dependencies ent
     path.join(result.toolchainRoot, "bin"),
   );
   expect(download).toHaveBeenCalledTimes(4);
-  // Only the registry probe touches the network; it fails here, so the
+  // Only the region probes touch the network; they fail here, so the
   // public registry stays first.
-  expect(
-    fetcher.mock.calls.every(([url]) =>
-      (url as URL | string).toString().includes("/pnpm-11.7.0.tgz"),
+  const allowedProbeUrls = new Set(
+    Object.values(MIRROR_ECOSYSTEMS).flatMap((pool) =>
+      pool.map((candidate) => candidate.probeUrl),
     ),
+  );
+  expect(
+    fetcher.mock.calls.every(([url]) => {
+      const text = (url as URL | string).toString();
+      return text.includes("/pnpm-11.7.0.tgz") || allowedProbeUrls.has(text);
+    }),
   ).toBe(true);
   expect(result.registries[0]).toBe("https://registry.npmjs.org/");
   expect(download.mock.calls[1]![0].mirrors).toEqual([
@@ -722,7 +728,7 @@ it("prepares real executable launchers and reuses verified warm dependencies ent
   ]);
   expect(cn.env.pnpm_config_registry).toBe("https://registry.npmmirror.com/");
   expect(cn.env.GOPROXY).toBe(
-    "https://goproxy.cn|https://proxy.golang.org|direct",
+    "https://goproxy.cn|https://goproxy.io|https://proxy.golang.org|direct",
   );
   // A Go module proxy the person set still wins.
   vi.stubEnv("GOPROXY", "https://proxy.example");
@@ -774,7 +780,7 @@ it("prepares real executable launchers and reuses verified warm dependencies ent
     "https://registry.npmmirror.com/",
   );
   expect(fallenBack.env.GOPROXY).toBe(
-    "https://goproxy.cn|https://proxy.golang.org|direct",
+    "https://goproxy.cn|https://goproxy.io|https://proxy.golang.org|direct",
   );
 }, 15000);
 describe("native voice tools", () => {

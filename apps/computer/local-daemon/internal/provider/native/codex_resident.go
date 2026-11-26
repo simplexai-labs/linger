@@ -36,8 +36,28 @@ func (p *codexProcess) residentAttrs() []any {
 // serving an Operation. A change of MCP servers alone stays compatible.
 // Skills count only as the Daemon delivered them, never as Codex or an Agent
 // later wrote them; the account is read again for every check.
+func codexEnvFingerprint(env map[string]string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	entries := make([]string, 0, len(env))
+	for name, value := range env {
+		if strings.EqualFold(name, "TMPDIR") || strings.EqualFold(name, "TMP") || strings.EqualFold(name, "TEMP") {
+			continue
+		}
+		entries = append(entries, name+"="+value)
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	slices.Sort(entries)
+	sum := sha256.Sum256([]byte(strings.Join(entries, "\x00")))
+	return hex.EncodeToString(sum[:])
+}
+
 func codexMismatch(profile Profile, spec RunSpec, executable string) func(*codexProcess) []string {
 	home := strings.TrimSpace(profile.Env["CODEX_HOME"])
+	envPrint := codexEnvFingerprint(profile.Env)
 	return func(p *codexProcess) []string {
 		var fields []string
 		add := func(differs bool, name string) {
@@ -52,6 +72,7 @@ func codexMismatch(profile Profile, spec RunSpec, executable string) func(*codex
 		add(p.executable != executable, "exec_path")
 		add(p.authPrint != codexAuthFingerprint(home), "auth")
 		add(p.skillPrint != profile.ResidentSkillDigest, "skills")
+		add(p.envPrint != envPrint, "env")
 		add(p.withoutWebTools != spec.WithoutNativeWebTools, "web_tools")
 		return fields
 	}
