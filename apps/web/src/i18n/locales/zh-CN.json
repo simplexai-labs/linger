@@ -146,7 +146,6 @@
     "computer": "本地电脑",
     "connectNewComputer": "连接新电脑",
     "selectComputer": "选择一台本地电脑",
-    "offlineComputer": "{name} · 离线",
     "offlineComputerHint": "这台电脑处于离线状态，连接后 Agent 就会开始工作。",
     "runtime": "Runtime",
     "noRuntimes": "没有可用的 Runtime",

@@ -18,7 +18,6 @@ export const createAgentMessages = defineMessages("createAgent", {
   computer: "Local Computer",
   connectNewComputer: "Connect new computer",
   selectComputer: "Select a Local Computer",
-  offlineComputer: "{name} · Offline",
   offlineComputerHint: OFFLINE_COMPUTER_HINT,
   runtime: "Runtime",
   noRuntimes: "No runtimes available",
