@@ -25,7 +25,9 @@ import os from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   compileFailureExcerpt,
+  createVoiceToolsBackgroundLauncher,
   installNativeSource,
+  prepareVoiceToolsAndStartLiveKit,
   stopNativeSource,
 } from "./native-source.js";
 import {
@@ -44,6 +46,7 @@ import type { InstallOutcome, InstallerEvent } from "./events.js";
 import {
   prepareNativeDependencies,
   prepareNativeVoiceTools,
+  resolveNativeVoiceToolsPlan,
 } from "./native-dependencies.js";
 import {
   prepareLiveKitSettings,
@@ -63,7 +66,11 @@ import {
 import { prepareRuntime, type RuntimeDescriptor } from "./managed-runtimes.js";
 import { managedRuntimeEnvironment } from "./managed-codex.js";
 import { applyNativeSource, prepareByokRuntime } from "./byok-source.js";
-import { atomicPrivate, privateDirectory } from "./instance.js";
+import {
+  atomicPrivate,
+  privateDirectory,
+  withInstanceLock,
+} from "./instance.js";
 import {
   prepareLocalModels,
   restoreByokSource,
@@ -73,6 +80,7 @@ import {
   inspectNativeListeners,
   inspectNativeProcess,
   nativeConfigurationChanged,
+  reclaimNativeOrphans,
   SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
@@ -89,6 +97,7 @@ vi.mock("./apple-developer-tools.js", () => ({
 vi.mock("./native-dependencies.js", () => ({
   prepareNativeDependencies: vi.fn(),
   prepareNativeVoiceTools: vi.fn(),
+  resolveNativeVoiceToolsPlan: vi.fn(),
 }));
 vi.mock("./native-livekit.js", async (original) => {
   const actual = await original<typeof import("./native-livekit.js")>();
@@ -141,7 +150,7 @@ vi.mock("./native-process.js", () => {
           })),
         ),
     ),
-    reclaimNativeOrphans: async () => [],
+    reclaimNativeOrphans: vi.fn(async () => []),
     nativeConfigurationChanged: vi.fn(),
     startNativeProcess: vi.fn(),
     stopNativeProcess: vi.fn(),
@@ -213,6 +222,7 @@ async function fixture() {
     return { running: true, pid: 100 };
   });
   vi.mocked(nativeConfigurationChanged).mockResolvedValue(false);
+  vi.mocked(reclaimNativeOrphans).mockResolvedValue([]);
   vi.mocked(stopNativeProcess).mockImplementation(async (_root, name) => {
     running.delete(name);
   });
@@ -2840,6 +2850,695 @@ test("a changed voice key leaves the voice setting alone", async () => {
     run.services.map((options) => JSON.parse(options.settings!).voice);
   expect(voice(second)).toEqual(voice(first));
   expect(second.env("node-services").XAI_API_KEY).toBe("xai-2");
+});
+
+test("cold first install defers voice tools extraction, reserves LiveKit HTTP port, and commits after releasing it", async () => {
+  const f = await fixture();
+  const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+    "./native-livekit.js",
+  );
+  vi.mocked(readLiveKitSettings).mockImplementation(actual.readLiveKitSettings);
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const bin = path.join(
+    f.home,
+    "tools",
+    "native",
+    "components",
+    "a".repeat(64),
+    "bin",
+  );
+  const livekit = path.join(bin, "livekit-server");
+  vi.mocked(resolveNativeVoiceToolsPlan).mockResolvedValue({
+    bin,
+    livekit,
+    prepared: false,
+    damaged: false,
+  });
+
+  const tryBind = (port: number) =>
+    new Promise<"free" | "in_use">((resolve, reject) => {
+      const probe = net.createServer();
+      probe.once("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "EADDRINUSE") resolve("in_use");
+        else reject(error);
+      });
+      probe.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
+        probe.close(() => resolve("free"));
+      });
+    });
+
+  let portStateDuringRuntime: "free" | "in_use" | undefined;
+  vi.mocked(prepareRuntime).mockImplementation(async () => {
+    const root = path.join(f.home, "instances", "native-voice-async");
+    const liveKitSettings = (await actual.readLiveKitSettings(root))!;
+    portStateDuringRuntime = await tryBind(liveKitSettings.httpPort);
+    return { code: 0, state: "ready", message: "ready" };
+  });
+
+  let liveKitHttpPort: number | undefined;
+  let portStateDuringFoundation: "free" | "in_use" | undefined;
+  vi.mocked(prepareFoundationServices).mockImplementation(async (instance) => {
+    const liveKitSettings = (await actual.readLiveKitSettings(instance.root))!;
+    liveKitHttpPort = liveKitSettings.httpPort;
+    portStateDuringFoundation = await tryBind(liveKitHttpPort);
+  });
+
+  const order: string[] = [];
+  let portStateAtLaunch: Promise<"free" | "in_use"> | undefined;
+  vi.mocked(reclaimNativeOrphans).mockImplementation(async () => {
+    order.push("reclaim");
+    return [];
+  });
+  let portStateAtCommit: Promise<"free" | "in_use"> | undefined;
+  const commit = vi.fn(() => {
+    order.push("commit");
+    if (liveKitHttpPort !== undefined) {
+      portStateAtCommit = tryBind(liveKitHttpPort);
+    }
+  });
+  const abort = vi.fn(() => {
+    order.push("abort");
+  });
+  const launchVoiceToolsBackground = vi.fn(() => {
+    order.push("launch");
+    const root = path.join(f.home, "instances", "native-voice-async");
+    portStateAtLaunch = actual
+      .readLiveKitSettings(root)
+      .then((settings) => tryBind(settings!.httpPort));
+    return { commit, abort };
+  });
+  const events: string[] = [];
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-voice-async",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: (event) => events.push(event.message),
+    launchVoiceToolsBackground,
+  });
+
+  expect(result.code, result.message).toBe(0);
+  expect(launchVoiceToolsBackground).toHaveBeenCalledTimes(1);
+  expect(prepareNativeVoiceTools).not.toHaveBeenCalled();
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+  expect(portStateDuringRuntime).toBe("in_use");
+  expect(await portStateAtLaunch).toBe("in_use");
+  expect(portStateDuringFoundation).toBe("in_use");
+  expect(await portStateAtCommit).toBe("free");
+  expect(order).toEqual(["reclaim", "launch", "commit"]);
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(abort).not.toHaveBeenCalled();
+  expect(events.join("")).toContain(
+    "Voice tools preparation and LiveKit startup are continuing in the background.",
+  );
+
+  const services = vi
+    .mocked(startNativeProcess)
+    .mock.calls.map(([options]) => options)
+    .filter((options) => options.name !== "postgres");
+  const env = (name: string) =>
+    services.find((options) => options.name === name)!.env;
+  for (const options of services) {
+    expect(JSON.parse(options.settings!).voice).toBe(bin);
+  }
+  expect(env("teamhub").TEAMHUB_VOICE_TOOLS_BIN).toBe(bin);
+  expect(env("node-services").TEAMHUB_VOICE_TOOLS_BIN).toBeUndefined();
+  expect(env("web").TEAMHUB_VOICE_TOOLS_BIN).toBeUndefined();
+  for (const name of ["teamhub", "node-services"]) {
+    expect(env(name).PATH!.split(path.delimiter)[0]).toBe(bin);
+    expect(env(name).TEAMHUB_VOICE_MEDIA).toBeUndefined();
+    expect(env(name).LIVEKIT_URL).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/);
+    expect(env(name).LIVEKIT_API_KEY).toBeTruthy();
+    expect(env(name).LIVEKIT_API_SECRET).toBeTruthy();
+  }
+});
+
+test("cold install rollback releases LiveKit port reservation and aborts background voice worker", async () => {
+  const f = await fixture();
+  const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+    "./native-livekit.js",
+  );
+  vi.mocked(readLiveKitSettings).mockImplementation(actual.readLiveKitSettings);
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const bin = path.join(
+    f.home,
+    "tools",
+    "native",
+    "components",
+    "b".repeat(64),
+    "bin",
+  );
+  vi.mocked(resolveNativeVoiceToolsPlan).mockResolvedValue({
+    bin,
+    livekit: path.join(bin, "livekit-server"),
+    prepared: false,
+    damaged: false,
+  });
+
+  let reservedPort: number | undefined;
+  vi.mocked(prepareFoundationServices).mockImplementation(async (instance) => {
+    reservedPort = (await actual.readLiveKitSettings(instance.root))!.httpPort;
+    throw new Error("foundation failed");
+  });
+
+  const commit = vi.fn();
+  const abort = vi.fn();
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-voice-async-fail",
+    setupChoice: "pi",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+    launchVoiceToolsBackground: () => ({ commit, abort }),
+  });
+
+  expect(result.code).toBe(1);
+  expect(abort).toHaveBeenCalledTimes(1);
+  expect(commit).not.toHaveBeenCalled();
+  expect(reservedPort).toBeDefined();
+  const portAfterFailure = await new Promise<"free" | "in_use">(
+    (resolve, reject) => {
+      const probe = net.createServer();
+      probe.once("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "EADDRINUSE") resolve("in_use");
+        else reject(error);
+      });
+      probe.listen(
+        { host: "127.0.0.1", port: reservedPort!, exclusive: true },
+        () => {
+          probe.close(() => resolve("free"));
+        },
+      );
+    },
+  );
+  expect(portAfterFailure).toBe("free");
+});
+
+test("prepareVoiceToolsAndStartLiveKit starts LiveKit only on go when the instance is still running", async () => {
+  const f = await fixture();
+  const { prepareNativeConfiguration } = await import("./native-source.js");
+  const configured = await prepareNativeConfiguration(f.repo, {
+    home: f.home,
+    name: "native-bg-worker",
+    externalComputer: true,
+  });
+  const liveKitSettings = {
+    httpPort: 31234,
+    rtcPort: 31235,
+    apiKey: "APIabcdef123456",
+    apiSecret: "s".repeat(64),
+  };
+  const livekitBin = path.join(f.home, "voice", "bin", "livekit-server");
+  vi.mocked(prepareNativeVoiceTools).mockResolvedValue({
+    bin: path.dirname(livekitBin),
+    livekit: livekitBin,
+  });
+  vi.mocked(readLiveKitSettings).mockResolvedValue(liveKitSettings);
+
+  async function* chunks(items: string[]) {
+    for (const item of items) yield item;
+  }
+
+  // Running postgres + teamhub + "go\n" starts LiveKit.
+  f.running.add("postgres");
+  f.running.add("teamhub");
+  await prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: chunks(["go\n"]),
+  });
+  expect(prepareNativeVoiceTools).toHaveBeenCalledTimes(1);
+  expect(startNativeLiveKit).toHaveBeenCalledTimes(1);
+  expect(startNativeLiveKit).toHaveBeenCalledWith(
+    expect.objectContaining({
+      root: configured.instance.root,
+      executable: livekitBin,
+      settings: liveKitSettings,
+    }),
+  );
+
+  // "abort\n" skips LiveKit.
+  vi.mocked(startNativeLiveKit).mockClear();
+  await prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: chunks(["abort\n"]),
+  });
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+
+  // Empty EOF skips LiveKit.
+  await prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: chunks([]),
+  });
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+
+  // Only postgres running (teamhub stopped by --stop) skips LiveKit.
+  f.running.clear();
+  f.running.add("postgres");
+  await prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: chunks(["go\n"]),
+  });
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+
+  // Already running livekit skips duplicate startup.
+  f.running.add("teamhub");
+  f.running.add("livekit");
+  await prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: chunks(["go\n"]),
+  });
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+
+  // Serializes with withInstanceLock: waits until lock is released before starting LiveKit.
+  f.running.delete("livekit");
+  let lockHeld!: () => void;
+  let releaseLock!: () => void;
+  const held = new Promise<void>((resolve) => {
+    lockHeld = resolve;
+  });
+  const holder = withInstanceLock(configured.instance, async () => {
+    lockHeld();
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await held;
+  const lockedRun = prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: chunks(["go\n"]),
+    lockWaitMs: 5_000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+  releaseLock();
+  await holder;
+  await lockedRun;
+  expect(startNativeLiveKit).toHaveBeenCalledTimes(1);
+
+  const log = await readFile(
+    path.join(configured.instance.root, "native", "logs", "livekit.log"),
+    "utf8",
+  );
+  expect(log).toContain(
+    "Instance core services are not running; skipping background LiveKit startup.",
+  );
+  expect(log).toContain(
+    "Native LiveKit is already running; skipping duplicate startup.",
+  );
+});
+
+test("existing provisioned account, configured voice key, or damaged cache keeps voice tools synchronous", async () => {
+  for (const scenario of [
+    "provisioned_account",
+    "soniox_key",
+    "xai_key",
+    "damaged_cache",
+  ] as const) {
+    const f = await fixture();
+    const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+      "./native-livekit.js",
+    );
+    vi.mocked(readLiveKitSettings).mockImplementation(
+      actual.readLiveKitSettings,
+    );
+    vi.mocked(prepareRuntime).mockResolvedValue({
+      code: 0,
+      state: "ready",
+      message: "ready",
+    });
+    const instanceName = `native-sync-${scenario.replace(/_/g, "-")}`;
+    const instanceRoot = path.join(f.home, "instances", instanceName);
+    if (scenario === "provisioned_account") {
+      const { prepareNativeConfiguration } = await import("./native-source.js");
+      await prepareNativeConfiguration(f.repo, {
+        home: f.home,
+        name: instanceName,
+        externalComputer: true,
+      });
+      await atomicPrivate(
+        path.join(instanceRoot, "local-account.json"),
+        JSON.stringify({
+          email: "owner@example.com",
+          password: "secret-password-123",
+          provisioned: true,
+        }),
+      );
+    } else if (scenario === "soniox_key") {
+      await updateUserKeys(instanceRoot, { SONIOX_API_KEY: "soniox-key" });
+    } else if (scenario === "xai_key") {
+      await updateUserKeys(instanceRoot, { XAI_API_KEY: "xai-key" });
+    }
+
+    const bin = path.join(f.home, "voice", "bin");
+    const livekit = path.join(bin, "livekit-server");
+    vi.mocked(resolveNativeVoiceToolsPlan).mockResolvedValue({
+      bin,
+      livekit,
+      prepared: false,
+      damaged: scenario === "damaged_cache",
+    });
+    vi.mocked(prepareNativeVoiceTools).mockResolvedValue({ bin, livekit });
+    const launchVoiceToolsBackground = vi.fn();
+
+    const result = await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: instanceName,
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+      launchVoiceToolsBackground,
+    });
+
+    expect(result.code, `${scenario}: ${result.message}`).toBe(0);
+    expect(launchVoiceToolsBackground).not.toHaveBeenCalled();
+    expect(prepareNativeVoiceTools).toHaveBeenCalled();
+    expect(startNativeLiveKit).toHaveBeenCalled();
+    vi.mocked(prepareNativeVoiceTools).mockClear();
+    vi.mocked(startNativeLiveKit).mockClear();
+  }
+});
+
+test("persistent EADDRINUSE on LiveKit port disables voice instead of deferring unreserved", async () => {
+  const f = await fixture();
+  const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+    "./native-livekit.js",
+  );
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const blocker = net.createServer();
+  await new Promise<void>((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen({ host: "127.0.0.1", port: 0, exclusive: true }, () => {
+      blocker.off("error", reject);
+      resolve();
+    });
+  });
+  const occupiedPort = (blocker.address() as net.AddressInfo).port;
+  try {
+    const blockedSettings = {
+      httpPort: occupiedPort,
+      rtcPort: occupiedPort + 1,
+      apiKey: "APIabcdef123456",
+      apiSecret: "s".repeat(64),
+    };
+    vi.mocked(prepareLiveKitSettings).mockResolvedValueOnce(blockedSettings);
+    vi.mocked(readLiveKitSettings).mockImplementation(
+      actual.readLiveKitSettings,
+    );
+    const bin = path.join(f.home, "voice", "bin");
+    vi.mocked(resolveNativeVoiceToolsPlan).mockResolvedValue({
+      bin,
+      livekit: path.join(bin, "livekit-server"),
+      prepared: false,
+      damaged: false,
+    });
+    const launchVoiceToolsBackground = vi.fn();
+    const events: string[] = [];
+
+    const result = await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-voice-eaddrinuse",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: (event) => events.push(event.message),
+      launchVoiceToolsBackground,
+    });
+
+    expect(result.code, result.message).toBe(0);
+    expect(launchVoiceToolsBackground).not.toHaveBeenCalled();
+    expect(prepareNativeVoiceTools).not.toHaveBeenCalled();
+    expect(startNativeLiveKit).not.toHaveBeenCalled();
+    expect(events.join("")).toContain(
+      `Voice stays off: LiveKit could not reserve local port ${occupiedPort} (EADDRINUSE).`,
+    );
+    const teamhub = vi
+      .mocked(startNativeProcess)
+      .mock.calls.map(([options]) => options)
+      .find((options) => options.name === "teamhub")!;
+    expect(teamhub.env.TEAMHUB_VOICE_MEDIA).toBe("off");
+    expect(teamhub.env.TEAMHUB_VOICE_TOOLS_BIN).toBeUndefined();
+    expect(JSON.parse(teamhub.settings!).voice).toBe("off");
+  } finally {
+    await new Promise<void>((resolve) => blocker.close(() => resolve()));
+  }
+});
+
+test("non-desktop install aborted during computer stage aborts background voice worker instead of committing", async () => {
+  const f = await fixture();
+  const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+    "./native-livekit.js",
+  );
+  vi.mocked(readLiveKitSettings).mockImplementation(actual.readLiveKitSettings);
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const bin = path.join(f.home, "voice", "bin");
+  vi.mocked(resolveNativeVoiceToolsPlan).mockResolvedValue({
+    bin,
+    livekit: path.join(bin, "livekit-server"),
+    prepared: false,
+    damaged: false,
+  });
+
+  const controller = new AbortController();
+  const commit = vi.fn();
+  const abort = vi.fn();
+  vi.mocked(connectComputer).mockImplementationOnce(async () => {
+    controller.abort();
+    throw new DOMException("Aborted", "AbortError");
+  });
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-voice-computer-abort",
+    setupChoice: "pi",
+    externalComputer: false,
+    signal: controller.signal,
+    onEvent: () => {},
+    launchVoiceToolsBackground: () => ({ commit, abort }),
+  });
+
+  expect(result.code).toBe(130);
+  expect(result.state).toBe("cancelled");
+  expect(commit).not.toHaveBeenCalled();
+  expect(abort).toHaveBeenCalledTimes(1);
+});
+
+test("prepareVoiceToolsAndStartLiveKit cancels in-flight extraction cleanly on stdin abort", async () => {
+  const f = await fixture();
+  const { prepareNativeConfiguration } = await import("./native-source.js");
+  const configured = await prepareNativeConfiguration(f.repo, {
+    home: f.home,
+    name: "native-bg-abort-inflight",
+    externalComputer: true,
+  });
+
+  let extractionStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    extractionStarted = resolve;
+  });
+  let extractionAborted = false;
+  vi.mocked(prepareNativeVoiceTools).mockImplementation(
+    ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        extractionStarted();
+        const abortNow = () => {
+          extractionAborted = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        if (signal.aborted) {
+          abortNow();
+          return;
+        }
+        signal.addEventListener("abort", abortNow, { once: true });
+      }),
+  );
+
+  let sendAbort!: () => void;
+  async function* controlledStdin() {
+    await new Promise<void>((resolve) => {
+      sendAbort = resolve;
+    });
+    yield "abort\n";
+  }
+
+  const running = prepareVoiceToolsAndStartLiveKit({
+    home: f.home,
+    instanceName: configured.instance.name,
+    waitForGoOnStdin: true,
+    stdin: controlledStdin(),
+  });
+  await started;
+  sendAbort();
+  await expect(running).resolves.toBeUndefined();
+  expect(extractionAborted).toBe(true);
+  expect(startNativeLiveKit).not.toHaveBeenCalled();
+
+  const log = await readFile(
+    path.join(configured.instance.root, "native", "logs", "livekit.log"),
+    "utf8",
+  );
+  expect(log).toContain('installer signaled "abort"');
+});
+
+test("createVoiceToolsBackgroundLauncher spawns the explicit script path and delivers commit or abort over stdin", async () => {
+  const dir = await realpath(
+    await mkdtemp(path.join(os.tmpdir(), "linger-voice-launcher-")),
+  );
+  try {
+    const script = path.join(dir, "custom-entry.mjs");
+    await writeFile(
+      script,
+      [
+        'import { renameSync, writeFileSync } from "node:fs";',
+        'let stdin = "";',
+        "for await (const chunk of process.stdin) stdin += String(chunk);",
+        "const out = process.env.VOICE_LAUNCHER_OUT;",
+        "const tmp = `${out}.tmp`;",
+        "writeFileSync(tmp, JSON.stringify({ argv: process.argv.slice(1), stdin, marker: process.env.VOICE_LAUNCHER_MARKER }));",
+        "renameSync(tmp, out);",
+      ].join("\n"),
+    );
+
+    const relativeScript = path.relative(process.cwd(), script);
+    const launcher = createVoiceToolsBackgroundLauncher(relativeScript);
+    const home = path.join(dir, "home");
+
+    const commitOut = path.join(dir, "commit.json");
+    const commitHandle = launcher({
+      home,
+      instanceName: "voice-commit",
+      env: {
+        ...process.env,
+        VOICE_LAUNCHER_OUT: commitOut,
+        VOICE_LAUNCHER_MARKER: "commit-marker",
+      },
+    });
+    commitHandle.commit();
+    commitHandle.abort();
+    await vi.waitFor(() => expect(existsSync(commitOut)).toBe(true), {
+      timeout: 10_000,
+    });
+    expect(JSON.parse(await readFile(commitOut, "utf8"))).toEqual({
+      argv: [
+        path.resolve(relativeScript),
+        "--prepare-voice-tools",
+        "--home",
+        home,
+        "--instance",
+        "voice-commit",
+      ],
+      stdin: "go\n",
+      marker: "commit-marker",
+    });
+
+    const abortOut = path.join(dir, "abort.json");
+    const abortHandle = launcher({
+      home,
+      instanceName: "voice-abort",
+      env: {
+        ...process.env,
+        VOICE_LAUNCHER_OUT: abortOut,
+        VOICE_LAUNCHER_MARKER: "abort-marker",
+      },
+    });
+    abortHandle.abort();
+    abortHandle.commit();
+    await vi.waitFor(() => expect(existsSync(abortOut)).toBe(true), {
+      timeout: 10_000,
+    });
+    expect(JSON.parse(await readFile(abortOut, "utf8"))).toEqual({
+      argv: [
+        path.resolve(relativeScript),
+        "--prepare-voice-tools",
+        "--home",
+        home,
+        "--instance",
+        "voice-abort",
+      ],
+      stdin: "abort\n",
+      marker: "abort-marker",
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("omitting launchVoiceToolsBackground keeps voice tools synchronous regardless of process.argv[1]", async () => {
+  const f = await fixture();
+  const actual = await vi.importActual<typeof import("./native-livekit.js")>(
+    "./native-livekit.js",
+  );
+  vi.mocked(readLiveKitSettings).mockImplementation(actual.readLiveKitSettings);
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const bin = path.join(f.home, "voice", "bin");
+  const livekit = path.join(bin, "livekit-server");
+  vi.mocked(resolveNativeVoiceToolsPlan).mockResolvedValue({
+    bin,
+    livekit,
+    prepared: false,
+    damaged: false,
+  });
+  vi.mocked(prepareNativeVoiceTools).mockResolvedValue({ bin, livekit });
+
+  const originalArgv1 = process.argv[1];
+  process.argv[1] = "/opt/linger/dist/installer.js";
+  try {
+    const result = await installNativeSource({
+      home: f.home,
+      repo: f.repo,
+      name: "native-voice-no-argv-sniff",
+      setupChoice: "pi",
+      externalComputer: true,
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    });
+    expect(result.code, result.message).toBe(0);
+    expect(prepareNativeVoiceTools).toHaveBeenCalledTimes(1);
+    expect(startNativeLiveKit).toHaveBeenCalledTimes(1);
+  } finally {
+    if (originalArgv1 === undefined) process.argv.splice(1, 1);
+    else process.argv[1] = originalArgv1;
+  }
 });
 
 test("fresh install overlaps migrate, services, and account with pending runtime while holding succeeded until both finish", async () => {

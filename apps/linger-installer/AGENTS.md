@@ -163,6 +163,16 @@ A missing pinned kit has nothing to stop.
 Windows private-path validation, `--inspect` reports the `WINDOWS_PRIVATE_PATH_UNSAFE`
 code on stderr and writes `{ error, refusal }` on stdout before exiting nonzero.
 
+`--prepare-voice-tools --home <dir> --instance <name>` is the detached
+background worker spawned on cold first installs without voice provider keys
+(skipping legacy migration), wired explicitly by `serve` through
+`createVoiceToolsBackgroundLauncher(fileURLToPath(import.meta.url))`. It
+listens on stdin for `"go\n"` vs `"abort\n"`/EOF while extracting and verifying
+the bundled voice tools, cancels in-flight extraction on abort/EOF, and on
+`"go\n"` acquires `withInstanceLock(instance)` (waiting boundedly on
+`INSTANCE_BUSY`), checks that both `postgres` and `teamhub` are running and
+`livekit` is not yet running, and starts LiveKit.
+
 Every other mode first converts an install from before the rename to Linger
 (`migrateLegacyInstallation`); `--migrate` does only that and exits, for the
 desktop client. An instance it could not convert never stops the

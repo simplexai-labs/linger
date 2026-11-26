@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -522,5 +523,121 @@ func TestPublisherAbsenceGapInsideMediaIsExcludedNotCompacted(t *testing.T) {
 	excluded := compactVoiceMediaExclusions(inMedia, ranges)
 	if len(excluded) != 2 || excluded[0] != (MediaTimeRange{StartMS: 4_000, EndMS: 5_000}) || excluded[1] != (MediaTimeRange{StartMS: 17_000, EndMS: 18_000}) {
 		t.Fatalf("joined-timeline exclusions=%v", excluded)
+	}
+}
+
+func TestNewHLSMaterializerWithToolsBinResolvesLazily(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	if _, err := NewHLSMaterializer(nil, nil, nil); !errors.Is(err, ErrMediaToolsMissing) {
+		t.Fatalf("NewHLSMaterializer without tools on PATH error = %v, want ErrMediaToolsMissing", err)
+	}
+
+	toolsBin := filepath.Join(t.TempDir(), "voice", "bin")
+	m, err := NewHLSMaterializerWithToolsBin(nil, nil, nil, toolsBin)
+	if err != nil {
+		t.Fatalf("NewHLSMaterializerWithToolsBin error = %v", err)
+	}
+	m.staging = memoryStaging{objects: map[string]string{"segment-000.ts": "payload"}}
+
+	if _, err := m.probe(t.Context(), "missing.m4a"); !errors.Is(err, ErrMediaToolsMissing) {
+		t.Fatalf("probe before ffprobe exists error = %v, want ErrMediaToolsMissing", err)
+	}
+	temporary := t.TempDir()
+	if err := m.joinSegments(t.Context(), []string{"segment-000.ts"}, temporary, filepath.Join(temporary, "joined.m4a")); !errors.Is(err, ErrMediaToolsMissing) {
+		t.Fatalf("joinSegments before ffmpeg exists error = %v, want ErrMediaToolsMissing", err)
+	}
+
+	if err := os.MkdirAll(toolsBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture executables require POSIX")
+	}
+	ffmpegPath := filepath.Join(toolsBin, "ffmpeg")
+	ffprobePath := filepath.Join(toolsBin, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ffprobePath, []byte("#!/bin/sh\nprintf '{\"format\":{\"duration\":\"2.5\"},\"streams\":[{\"codec_type\":\"audio\"}]}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.joinSegments(t.Context(), []string{"segment-000.ts"}, temporary, filepath.Join(temporary, "joined.m4a")); err != nil {
+		t.Fatalf("joinSegments after ffmpeg appears error = %v", err)
+	}
+	duration, err := m.probe(t.Context(), filepath.Join(temporary, "joined.m4a"))
+	if err != nil {
+		t.Fatalf("probe after ffprobe appears error = %v", err)
+	}
+	if duration != 2_500 {
+		t.Fatalf("duration = %d, want 2500", duration)
+	}
+	if resolved, err := m.resolveFFmpeg(); err != nil || resolved != ffmpegPath {
+		t.Fatalf("resolveFFmpeg = (%q, %v), want %q", resolved, err, ffmpegPath)
+	}
+	if resolved, err := m.resolveFFprobe(); err != nil || resolved != ffprobePath {
+		t.Fatalf("resolveFFprobe = (%q, %v), want %q", resolved, err, ffprobePath)
+	}
+}
+
+func TestNewHLSMaterializerWithToolsBinPrefersToolsBinOverSystemPATH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture executables require POSIX")
+	}
+	systemBin := filepath.Join(t.TempDir(), "system-bin")
+	if err := os.MkdirAll(systemBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sysFFmpeg := filepath.Join(systemBin, "ffmpeg")
+	sysFFprobe := filepath.Join(systemBin, "ffprobe")
+	if err := os.WriteFile(sysFFmpeg, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sysFFprobe, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", systemBin)
+
+	toolsBin := filepath.Join(t.TempDir(), "voice", "bin")
+	m, err := NewHLSMaterializerWithToolsBin(nil, nil, nil, toolsBin)
+	if err != nil {
+		t.Fatalf("NewHLSMaterializerWithToolsBin error = %v", err)
+	}
+
+	// Before toolsBin binaries exist, resolution temporarily falls back to PATH without caching it.
+	if got, err := m.resolveFFmpeg(); err != nil || got != sysFFmpeg {
+		t.Fatalf("resolveFFmpeg before extraction = (%q, %v), want %q", got, err, sysFFmpeg)
+	}
+	if got, err := m.resolveFFprobe(); err != nil || got != sysFFprobe {
+		t.Fatalf("resolveFFprobe before extraction = (%q, %v), want %q", got, err, sysFFprobe)
+	}
+
+	if err := os.MkdirAll(toolsBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bundledFFmpeg := filepath.Join(toolsBin, "ffmpeg")
+	bundledFFprobe := filepath.Join(toolsBin, "ffprobe")
+	if err := os.WriteFile(bundledFFmpeg, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bundledFFprobe, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Once toolsBin binaries appear, resolution switches to and permanently caches them.
+	if got, err := m.resolveFFmpeg(); err != nil || got != bundledFFmpeg {
+		t.Fatalf("resolveFFmpeg after extraction = (%q, %v), want %q", got, err, bundledFFmpeg)
+	}
+	if got, err := m.resolveFFprobe(); err != nil || got != bundledFFprobe {
+		t.Fatalf("resolveFFprobe after extraction = (%q, %v), want %q", got, err, bundledFFprobe)
+	}
+
+	t.Setenv("PATH", "")
+	if got, err := m.resolveFFmpeg(); err != nil || got != bundledFFmpeg {
+		t.Fatalf("cached resolveFFmpeg = (%q, %v), want %q", got, err, bundledFFmpeg)
+	}
+	if got, err := m.resolveFFprobe(); err != nil || got != bundledFFprobe {
+		t.Fatalf("cached resolveFFprobe = (%q, %v), want %q", got, err, bundledFFprobe)
 	}
 }

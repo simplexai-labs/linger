@@ -528,3 +528,132 @@ it("aborts --inspect gracefully on SIGTERM and removes the listener", async () =
     vi.resetModules();
   }
 });
+
+it("parses --prepare-voice-tools without a source checkout and requires an instance", async () => {
+  const { parseInstallerArguments } = await import("./main.js");
+  const home = path.join(os.tmpdir(), "linger-voice-home");
+  expect(
+    parseInstallerArguments([
+      "--prepare-voice-tools",
+      "--home",
+      home,
+      "--instance",
+      "native-test",
+    ]),
+  ).toMatchObject({
+    home: path.resolve(home),
+    instanceName: "native-test",
+    prepareVoiceTools: true,
+  });
+  expect(() =>
+    parseInstallerArguments(["--prepare-voice-tools", "--home", home]),
+  ).toThrow("Voice tools preparation needs an instance.");
+});
+
+it("wires explicit launchVoiceToolsBackground from import.meta.url when serving", async () => {
+  const migrate = vi.fn().mockResolvedValue([]);
+  const voiceLauncher = vi.fn(() => ({ commit: vi.fn(), abort: vi.fn() }));
+  const createVoiceToolsBackgroundLauncher = vi
+    .fn()
+    .mockReturnValue(voiceLauncher);
+  const launchInstaller = vi.fn().mockResolvedValue({
+    origin: "http://127.0.0.1:41234",
+    close: vi.fn(),
+    closed: Promise.resolve(),
+  });
+  vi.doMock("@linger/local-installation/legacy-migration", () => ({
+    migrateLegacyInstallation: migrate,
+  }));
+  vi.doMock("@linger/local-installation/native-source", () => ({
+    createVoiceToolsBackgroundLauncher,
+  }));
+  vi.doMock("./server/launch.js", () => ({
+    launchInstaller,
+  }));
+  const argv = process.argv;
+  const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  const once = vi
+    .spyOn(process, "once")
+    .mockImplementation((() => process) as never);
+  const mainPath = fileURLToPath(new URL("./main.ts", import.meta.url));
+  try {
+    process.argv = [
+      process.execPath,
+      mainPath,
+      "--home",
+      "serve-home",
+      "--source-repo",
+      "serve-repo",
+      "--no-open",
+    ];
+    vi.resetModules();
+    await import("./main.js");
+    expect(createVoiceToolsBackgroundLauncher).toHaveBeenCalledWith(mainPath);
+    expect(launchInstaller).toHaveBeenCalledWith(
+      expect.objectContaining({
+        home: path.resolve("serve-home"),
+        sourceRepo: path.resolve("serve-repo"),
+        launchVoiceToolsBackground: voiceLauncher,
+      }),
+    );
+  } finally {
+    process.argv = argv;
+    stdout.mockRestore();
+    once.mockRestore();
+    vi.doUnmock("@linger/local-installation/legacy-migration");
+    vi.doUnmock("@linger/local-installation/native-source");
+    vi.doUnmock("./server/launch.js");
+    vi.resetModules();
+  }
+});
+
+it("runs --prepare-voice-tools without legacy migration and exits 0 even on error", async () => {
+  const migrate = vi.fn().mockResolvedValue([]);
+  const prepareVoiceToolsAndStartLiveKit = vi
+    .fn()
+    .mockRejectedValue(new Error("archive missing"));
+  vi.doMock("@linger/local-installation/legacy-migration", () => ({
+    migrateLegacyInstallation: migrate,
+  }));
+  vi.doMock("@linger/local-installation/native-source", () => ({
+    prepareVoiceToolsAndStartLiveKit,
+  }));
+  const argv = process.argv;
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL("./main.ts", import.meta.url)),
+      "--prepare-voice-tools",
+      "--home",
+      "voice-home",
+      "--instance",
+      "native-test",
+    ];
+    vi.resetModules();
+    await import("./main.js");
+    expect(migrate).not.toHaveBeenCalled();
+    expect(prepareVoiceToolsAndStartLiveKit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        home: path.resolve("voice-home"),
+        instanceName: "native-test",
+        waitForGoOnStdin: true,
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(stderr).toHaveBeenCalledWith(
+      "Background voice tools preparation failed: archive missing\n",
+    );
+    expect(exit).toHaveBeenCalledWith(0);
+  } finally {
+    process.argv = argv;
+    stderr.mockRestore();
+    exit.mockRestore();
+    vi.doUnmock("@linger/local-installation/legacy-migration");
+    vi.doUnmock("@linger/local-installation/native-source");
+    vi.resetModules();
+  }
+});

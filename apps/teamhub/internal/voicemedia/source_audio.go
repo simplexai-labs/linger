@@ -95,7 +95,11 @@ func (m *HLSMaterializer) openRecoveryAudio(ctx context.Context, source store.Ca
 		return nil, err
 	}
 	output := filepath.Join(directory, "source.pcm")
-	if err = exec.CommandContext(ctx, m.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", input, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-f", "s16le", output).Run(); err != nil {
+	ffmpeg, err := m.resolveFFmpeg()
+	if err != nil {
+		return nil, err
+	}
+	if err = exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", input, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-f", "s16le", output).Run(); err != nil {
 		return nil, fmt.Errorf("decode recovery audio: %w", err)
 	}
 	file, err := os.Open(output)

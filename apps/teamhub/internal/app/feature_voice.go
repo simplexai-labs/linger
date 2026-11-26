@@ -155,7 +155,7 @@ func newVoiceMedia(pool *pgxpool.Pool, objects artifactstore.ObjectStore, stagin
 		return nil, nil, fmt.Errorf("configure LiveKit voice media provider: %w", err)
 	}
 	recordings := voicemedia.NewLocalStagingStore(pool, stagingRoot)
-	materializer, err := voicemedia.NewHLSMaterializer(pool, objects, recordings)
+	materializer, err := voicemedia.NewHLSMaterializerWithToolsBin(pool, objects, recordings, cfg.MediaToolsBin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure voice media materializer: %w", err)
 	}

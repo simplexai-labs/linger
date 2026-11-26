@@ -28,6 +28,7 @@ export function parseInstallerArguments(args: string[]) {
     migrate?: boolean;
     stop?: boolean;
     stopLocalModels?: boolean;
+    prepareVoiceTools?: boolean;
   } = {
     home: lingerHome(),
   };
@@ -59,6 +60,10 @@ export function parseInstallerArguments(args: string[]) {
     }
     if (flag === "--stop-local-models") {
       options.stopLocalModels = true;
+      continue;
+    }
+    if (flag === "--prepare-voice-tools") {
+      options.prepareVoiceTools = true;
       continue;
     }
     if (flag === "--user-keys") {
@@ -104,7 +109,8 @@ export function parseInstallerArguments(args: string[]) {
     !options.userKeys &&
     !options.migrate &&
     !options.stop &&
-    !options.stopLocalModels
+    !options.stopLocalModels &&
+    !options.prepareVoiceTools
   )
     throw new Error("The installer needs a source checkout (--source-repo).");
   if (options.inspectTarget && !options.inspect)
@@ -115,6 +121,8 @@ export function parseInstallerArguments(args: string[]) {
     throw new Error("Keys need an instance.");
   if (options.stop && !options.instanceName)
     throw new Error("Stop needs an instance.");
+  if (options.prepareVoiceTools && !options.instanceName)
+    throw new Error("Voice tools preparation needs an instance.");
   return options;
 }
 // The desktop client shows this line, so it carries the real cause; only an
@@ -423,10 +431,44 @@ async function stopLocalModels(
     process.exit(outcome.failed.length ? 1 : 0),
   );
 }
+// Detached background worker for cold first installs: extracts and verifies
+// voice tools while the main install proceeds, then waits for "go\n" on stdin
+// before starting native LiveKit.
+async function prepareVoiceTools(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const { prepareVoiceToolsAndStartLiveKit } =
+    await import("@linger/local-installation/native-source");
+  const controller = new AbortController();
+  const onStop = () => controller.abort();
+  process.once("SIGTERM", onStop);
+  process.once("SIGINT", onStop);
+  try {
+    await prepareVoiceToolsAndStartLiveKit({
+      home: options.home,
+      instanceName: options.instanceName!,
+      waitForGoOnStdin: true,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    process.stderr.write(
+      `Background voice tools preparation failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  } finally {
+    process.off("SIGTERM", onStop);
+    process.off("SIGINT", onStop);
+  }
+  process.exit(0);
+}
 async function serve(options: ReturnType<typeof parseInstallerArguments>) {
+  const { createVoiceToolsBackgroundLauncher } =
+    await import("@linger/local-installation/native-source");
   const server = await launchInstaller({
     ...options,
     sourceRepo: options.sourceRepo!,
+    launchVoiceToolsBackground: createVoiceToolsBackgroundLauncher(
+      fileURLToPath(import.meta.url),
+    ),
   });
   process.stdout.write(
     `Installer is running at ${server.origin}\nOpen the private launcher in your browser: ${path.join(options.home, "installer", "launch.html")}\nOn a remote Linux host, forward the installer port over SSH and open the private launcher on your computer.\n`,
@@ -483,7 +525,13 @@ if (
   // warning on stderr would read as the reason a start failed. A skipped
   // instance is refused with its own error when a mode opens it.
   let skipped: LegacyInstanceSkipped[] = [];
-  if (options && !options.inspect && !options.stop && !options.stopLocalModels)
+  if (
+    options &&
+    !options.inspect &&
+    !options.stop &&
+    !options.stopLocalModels &&
+    !options.prepareVoiceTools
+  )
     await import("@linger/local-installation/legacy-migration")
       .then(async ({ migrateLegacyInstallation }) => {
         skipped = await migrateLegacyInstallation({ home: options!.home });
@@ -497,6 +545,7 @@ if (
       });
   if (options?.stop) await stopInstallation(options);
   else if (options?.stopLocalModels) await stopLocalModels(options);
+  else if (options?.prepareVoiceTools) await prepareVoiceTools(options);
   else if (options?.migrate)
     process.stdout.write(`${JSON.stringify({ skipped })}\n`, () =>
       process.exit(0),
