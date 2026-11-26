@@ -7,7 +7,6 @@ import {
   CheckmarkCircle02Icon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
-import { motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -528,40 +527,40 @@ export function InspectPlanPanels({
                 </div>
 
                 <div className="mt-2 flex h-7 w-full overflow-hidden rounded-lg bg-muted">
-                  {projectedSegments
-                    .filter((segment) => segment.gb > 0.05)
-                    .map((segment) => {
-                      const pct = Math.min(
-                        100,
-                        (segment.gb / projectedTotal) * 100,
-                      );
-                      return (
-                        <motion.div
-                          animate={{ width: `${pct}%` }}
-                          className={cn(
-                            "flex h-full items-center justify-center overflow-hidden border-r border-card px-1 text-[10px] font-medium tabular-nums last:border-r-0",
-                            segment.id === "free"
-                              ? "bg-muted text-muted-foreground"
-                              : segment.id === "weights"
-                                ? "bg-rain-500/25 text-rain-700"
-                                : segment.id === "kv_cache"
-                                  ? "bg-lichen-500/28 text-lichen-700"
-                                  : segment.id === "compute_buf"
-                                    ? "bg-bluebell-500/25 text-bluebell-700"
-                                    : "bg-muted-foreground/20 text-foreground",
-                          )}
-                          key={segment.id}
-                          title={`${segment.label}: ${formatGb(segment.gb)}`}
-                          transition={{ duration: animated ? 0.35 : 0 }}
-                        >
-                          {pct > 16 ? (
-                            <span className="truncate">
-                              {segment.label} {segment.gb.toFixed(1)}G
-                            </span>
-                          ) : null}
-                        </motion.div>
-                      );
-                    })}
+                  {projectedSegments.map((segment) => {
+                    if (segment.gb <= 0.05) return null;
+                    const pct = Math.min(
+                      100,
+                      (segment.gb / projectedTotal) * 100,
+                    );
+                    return (
+                      <div
+                        className={cn(
+                          "flex h-full items-center justify-center overflow-hidden border-r border-card px-1 text-[10px] font-medium tabular-nums last:border-r-0",
+                          animated &&
+                            "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+                          segment.id === "free"
+                            ? "bg-muted text-muted-foreground"
+                            : segment.id === "weights"
+                              ? "bg-rain-500/25 text-rain-700"
+                              : segment.id === "kv_cache"
+                                ? "bg-lichen-500/28 text-lichen-700"
+                                : segment.id === "compute_buf"
+                                  ? "bg-bluebell-500/25 text-bluebell-700"
+                                  : "bg-muted-foreground/20 text-foreground",
+                        )}
+                        key={segment.id}
+                        style={{ width: `${pct}%` }}
+                        title={`${segment.label}: ${formatGb(segment.gb)}`}
+                      >
+                        {pct > 16 ? (
+                          <span className="truncate">
+                            {segment.label} {segment.gb.toFixed(1)}G
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <p className="mt-2.5 flex items-start gap-1.5 text-xs">
@@ -1150,28 +1149,33 @@ function LiveSlotRow({
           </span>
         </div>
         <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <motion.span
-            animate={{ width: `${cachedPct}%` }}
-            className="h-full bg-lake-500"
-            transition={{ duration: animated ? 0.35 : 0 }}
+          <span
+            className={cn(
+              "h-full bg-lake-500",
+              animated &&
+                "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+            )}
+            style={{ width: `${cachedPct}%` }}
           />
-          <motion.span
-            animate={{ width: `${prefillPct}%` }}
+          <span
             className={cn(
               "h-full bg-rain-500",
+              animated &&
+                "transition-[width] duration-300 ease-out motion-reduce:transition-none",
               slot.phase === "prefill" &&
                 animated &&
                 "telemetry-slot-prefill-shimmer",
             )}
-            transition={{ duration: animated ? 0.35 : 0 }}
+            style={{ width: `${prefillPct}%` }}
           />
-          <motion.span
-            animate={{ width: `${decodePct}%` }}
+          <span
             className={cn(
               "h-full bg-lichen-500",
+              animated &&
+                "transition-[width] duration-300 ease-out motion-reduce:transition-none",
               slot.phase === "decoding" && animated && "animate-pulse",
             )}
-            transition={{ duration: animated ? 0.35 : 0 }}
+            style={{ width: `${decodePct}%` }}
           />
         </div>
       </div>

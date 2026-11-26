@@ -3,7 +3,6 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
 } from "@hugeicons/core-free-icons";
-import { motion } from "motion/react";
 import { useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Link } from "react-router";
 
@@ -653,17 +652,15 @@ export function PiRoutingStage({
                       </span>
                     </div>
                     <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                      <motion.div
-                        animate={{
-                          width: `${Math.min(100, Math.max(0, metrics.bwCeilingPct ?? 0))}%`,
-                        }}
+                      <div
                         className={cn(
                           "h-full rounded-full",
+                          animated &&
+                            "transition-[width] duration-300 ease-out motion-reduce:transition-none",
                           bwHot ? "bg-sun-500" : "bg-rain-500",
                         )}
-                        transition={{
-                          duration: animated ? 0.4 : 0,
-                          ease: "easeOut",
+                        style={{
+                          width: `${Math.min(100, Math.max(0, metrics.bwCeilingPct ?? 0))}%`,
                         }}
                       />
                     </div>

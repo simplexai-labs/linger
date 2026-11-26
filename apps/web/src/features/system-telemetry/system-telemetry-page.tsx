@@ -371,16 +371,17 @@ function ComputerSystemTelemetry({
   }
 
   function handleToggleSpotlight(next: TelemetryOpticalTarget) {
-    setLockedTarget((current) => {
-      const same =
-        current.kind === next.kind &&
-        current.kind !== "none" &&
-        next.kind !== "none" &&
-        current.id === next.id;
-      if (same) return { kind: "none" };
-      setOpenPanels((previous) => ({ ...previous, waterfall: true }));
-      return next;
-    });
+    const same =
+      lockedTarget.kind === next.kind &&
+      lockedTarget.kind !== "none" &&
+      next.kind !== "none" &&
+      lockedTarget.id === next.id;
+    if (same) {
+      setLockedTarget({ kind: "none" });
+      return;
+    }
+    setLockedTarget(next);
+    setOpenPanels((previous) => ({ ...previous, waterfall: true }));
   }
 
   function handleTogglePanel(key: InspectDisclosureKey) {

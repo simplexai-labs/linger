@@ -296,16 +296,19 @@ export function deriveSnapshotMetrics(
       : null;
 
   const rawSegments = primaryGpu?.segments ?? ram?.segments ?? [];
-  const derivedSegments: DerivedMemorySegment[] = rawSegments
-    .filter((segment) => segment.bytes > 0)
-    .map((segment, index) => ({
+  const derivedSegments: DerivedMemorySegment[] = [];
+  for (let index = 0; index < rawSegments.length; index += 1) {
+    const segment = rawSegments[index]!;
+    if (segment.bytes <= 0) continue;
+    derivedSegments.push({
       id: `${segment.kind}-${index}`,
       category: classifySegmentCategory(segment),
       label: segment.label || segment.kind,
       bytes: segment.bytes,
       gb: bytesToGb(segment.bytes),
       basis: segment.basis,
-    }));
+    });
+  }
 
   // Ensure a free headroom segment exists when pool total exceeds summed segments.
   if (
@@ -454,11 +457,15 @@ export function deriveSnapshotMetrics(
       targetModelId: client.model || models[0]?.id || "",
     });
   }
+  const waterfallByClient = new Map<string, typeof waterfall>();
+  for (const entry of waterfall) {
+    const existing = waterfallByClient.get(entry.client_id);
+    if (existing) existing.push(entry);
+    else waterfallByClient.set(entry.client_id, [entry]);
+  }
   for (const laneClientId of Object.keys(clientLanes)) {
     if (!clientMap.has(laneClientId)) {
-      const recentEntry = waterfall.find(
-        (entry) => entry.client_id === laneClientId,
-      );
+      const recentEntry = waterfallByClient.get(laneClientId)?.[0];
       clientMap.set(laneClientId, {
         id: laneClientId,
         name: laneClientId,

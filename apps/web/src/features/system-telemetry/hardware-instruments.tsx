@@ -1,5 +1,4 @@
 import { Alert02Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
-import { motion } from "motion/react";
 import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -250,29 +249,29 @@ export function HardwareInstruments({
         {metrics.poolTotalGb !== null && metrics.segments.length > 0 ? (
           <>
             <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
-              {metrics.segments
-                .filter(
-                  (segment) => segment.category !== "free" && segment.gb > 0.05,
-                )
-                .map((segment) => (
-                  <motion.span
-                    animate={{
+              {metrics.segments.map((segment) =>
+                segment.category !== "free" && segment.gb > 0.05 ? (
+                  <span
+                    className={cn(
+                      "h-full border-r border-card last:border-r-0",
+                      animated &&
+                        "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+                    )}
+                    key={segment.id}
+                    style={{
+                      backgroundColor: segmentStroke(segment.category),
                       width: `${Math.min(100, (segment.gb / Math.max(0.1, metrics.poolTotalGb ?? 1)) * 100)}%`,
                     }}
-                    className="h-full border-r border-card last:border-r-0"
-                    key={segment.id}
-                    style={{ backgroundColor: segmentStroke(segment.category) }}
                     title={`${segment.label}: ${formatGb(segment.gb)}`}
-                    transition={{ duration: animated ? 0.4 : 0 }}
                   />
-                ))}
+                ) : null,
+              )}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] tabular-nums text-muted-foreground">
-                {metrics.segments
-                  .filter((segment) => segment.gb > 0.05)
-                  .map((segment) => (
+                {metrics.segments.map((segment) =>
+                  segment.gb > 0.05 ? (
                     <span
                       className="inline-flex items-center gap-1.5"
                       key={segment.id}
@@ -288,7 +287,8 @@ export function HardwareInstruments({
                         {formatGb(segment.gb)}
                       </span>
                     </span>
-                  ))}
+                  ) : null,
+                )}
               </div>
             </div>
           </>
@@ -453,19 +453,21 @@ function PrecisionArcDial({
               transform={`rotate(150 ${cx} ${cy})`}
             />
             {pct !== null ? (
-              <motion.circle
-                animate={{
-                  strokeDasharray: `${filledLen} ${circumference}`,
-                }}
+              <circle
+                className={
+                  animated
+                    ? "transition-[stroke-dasharray] duration-300 ease-out motion-reduce:transition-none"
+                    : undefined
+                }
                 cx={cx}
                 cy={cy}
                 fill="none"
                 r={r}
                 stroke={strokeVar}
+                strokeDasharray={`${filledLen} ${circumference}`}
                 strokeLinecap="round"
                 strokeWidth="5.5"
                 transform={`rotate(150 ${cx} ${cy})`}
-                transition={{ duration: animated ? 0.45 : 0, ease: "easeOut" }}
               />
             ) : null}
             {pct !== null && clamped > 2 ? (
@@ -529,15 +531,19 @@ function PrecisionMemoryDial({
 
   const arcs = useMemo(() => {
     if (!totalGb || totalGb <= 0) return [];
+    const result: {
+      segment: DerivedMemorySegment;
+      len: number;
+      offset: number;
+    }[] = [];
     let offset = 0;
-    return segments
-      .filter((segment) => segment.category !== "free" && segment.gb > 0)
-      .map((segment) => {
-        const len = (segment.gb / totalGb) * circumference;
-        const entry = { segment, len, offset };
-        offset += len;
-        return entry;
-      });
+    for (const segment of segments) {
+      if (segment.category === "free" || segment.gb <= 0) continue;
+      const len = (segment.gb / totalGb) * circumference;
+      result.push({ segment, len, offset });
+      offset += len;
+    }
+    return result;
   }, [circumference, segments, totalGb]);
 
   const freeGb =
@@ -580,19 +586,21 @@ function PrecisionMemoryDial({
                 strokeWidth="5.5"
               />
               {arcs.map(({ segment, len, offset }) => (
-                <motion.circle
-                  animate={{
-                    strokeDasharray: `${Math.max(0, len - 1.4)} ${circumference}`,
-                    strokeDashoffset: -offset,
-                  }}
+                <circle
+                  className={
+                    animated
+                      ? "transition-[stroke-dasharray,stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
+                      : undefined
+                  }
                   cx={cx}
                   cy={cy}
                   fill="none"
                   key={segment.id}
                   r={r}
                   stroke={segmentStroke(segment.category)}
+                  strokeDasharray={`${Math.max(0, len - 1.4)} ${circumference}`}
+                  strokeDashoffset={-offset}
                   strokeWidth="5.5"
-                  transition={{ duration: animated ? 0.45 : 0 }}
                 />
               ))}
             </g>
@@ -659,10 +667,13 @@ function PrecisionCpuInstrument({
                 key={core.core}
                 title={`CPU ${core.core}: ${core.pct}%`}
               >
-                <motion.span
-                  animate={{ height: `${core.pct}%` }}
-                  className="w-full rounded-[2px] bg-bluebell-500"
-                  transition={{ duration: animated ? 0.35 : 0 }}
+                <span
+                  className={cn(
+                    "w-full rounded-[2px] bg-bluebell-500",
+                    animated &&
+                      "transition-[height] duration-300 ease-out motion-reduce:transition-none",
+                  )}
+                  style={{ height: `${core.pct}%` }}
                 />
               </div>
             ))
