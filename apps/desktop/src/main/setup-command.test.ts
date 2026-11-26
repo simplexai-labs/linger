@@ -354,8 +354,18 @@ describe("parseSetupCommand", () => {
       { op: "local.runtime.open", runtime: "codex" },
       { op: "local.runtime.copy", runtime: "codex", what: "code" },
       { op: "local.leave-local" },
+      { op: "local.model.check", model: "inkling-2-mini:UD-Q4_K_M" },
+      {
+        op: "local.start",
+        runtime: "local",
+        model: "qwen3.6-35b-a3b:UD-IQ4_XS",
+      },
     ])
       expect(parseSetupCommand(command)).toEqual(command);
+    for (const model of ["--llm", "../x:y", "a", `a:${"b".repeat(200)}`])
+      expect(() =>
+        parseSetupCommand({ op: "local.model.check", model }),
+      ).toThrow();
     for (const command of [
       { op: "local.runtime.install", runtime: "bash" },
       // Pi has no sign-in of its own.

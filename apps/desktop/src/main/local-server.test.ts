@@ -300,7 +300,10 @@ if (args.includes("--prefetch-bifrost")) {
   // The model library's name for the plan, when a test asks for one.
   const libraryFile = path.join(target, "library-model");
   const libraryModel = fs.existsSync(libraryFile) ? fs.readFileSync(libraryFile, "utf8").trim() : undefined;
-  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate, ...(libraryModel ? { libraryModel } : {}) }, recommendation }) + "\n");
+  // The picker's models, when a test lists some.
+  const modelsFile = path.join(target, "library-models");
+  const models = fs.existsSync(modelsFile) ? JSON.parse(fs.readFileSync(modelsFile, "utf8")) : undefined;
+  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate, ...(libraryModel ? { libraryModel } : {}), ...(models ? { models, totalMemoryBytes: 68719476736 } : {}) }, recommendation }) + "\n");
   process.exit(0);
 } else {
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
@@ -10206,6 +10209,207 @@ describe("LocalServerModule setup sources", () => {
     expect(f.api.created).toEqual([
       expect.objectContaining({ setupChoice: "pi", byok }),
     ]);
+    await f.host.stop("quit");
+  });
+
+  const PICKER_MODELS = [
+    {
+      library: "inkling-2-mini:UD-Q4_K_M",
+      name: "Inkling 2 Mini",
+      publisher: "Thinking Machines",
+      quant: "UD-Q4_K_M",
+      quality: 54,
+      decodeTokS: 63.2,
+      downloadBytes: 17252349088,
+      memoryBytes: 26164568756,
+      fits: true,
+      recommended: true,
+      role: "smartest",
+    },
+    {
+      library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      name: "Inkling 2 Mini",
+      quant: "UD-IQ3_XXS",
+      downloadBytes: 12305115264,
+      memoryBytes: 24005334676,
+      fits: true,
+      role: "fastest",
+    },
+    {
+      library: "qwen3.8-flash-next-iq2xs:GSQ-RCO-IQ2_XS",
+      name: "Qwen3.8 Flash Next",
+      quant: "GSQ-RCO-IQ2_XS",
+      downloadBytes: 68933635968,
+      memoryBytes: 73749164887,
+      fits: false,
+      tooLarge: true,
+      needsMemoryBytes: 69513662903,
+    },
+    // Malformed rows never reach the page.
+    {
+      library: "../escape:x",
+      name: "Bad",
+      quant: "x",
+      downloadBytes: 1,
+      memoryBytes: 1,
+      fits: true,
+    },
+    { library: "ok:Q4", name: "No sizes", quant: "Q4", fits: true },
+  ];
+  const withPicker = (home: string) => {
+    checkout(home);
+    writeFileSync(path.join(home, "library-model"), "inkling-2-mini:UD-Q4_K_M");
+    writeFileSync(
+      path.join(home, "library-models"),
+      JSON.stringify(PICKER_MODELS),
+    );
+  };
+
+  it("lists the kit's models, prices a pick and installs exactly that model", async () => {
+    const commands = setupCommands({
+      "--check-local-model": [
+        {
+          library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+          fits: true,
+          memoryBytes: 24e9,
+          downloadBytes: 12.3e9,
+          diskBytes: 12.5e9,
+          diskFreeBytes: 400e9,
+        },
+      ],
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "local-models",
+      origin: "http://localhost:3000",
+    });
+    api.runtime.setupChoice = "local-models";
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        totalMemoryBytes: 68719476736,
+      }),
+    );
+    const check = f.module.status().localModels;
+    const listed = check.state === "checked" ? check.models : undefined;
+    expect(listed).toEqual(PICKER_MODELS.slice(0, 3));
+    await f.module.checkModel("inkling-2-mini-iq3xxs:UD-IQ3_XXS");
+    expect(commands.calls).toContainEqual({
+      args: ["--check-local-model", "inkling-2-mini-iq3xxs:UD-IQ3_XXS"],
+    });
+    expect(f.module.status().modelCheck).toEqual({
+      library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      state: "checked",
+      fits: true,
+      memoryBytes: 24e9,
+      downloadBytes: 12.3e9,
+      diskBytes: 12.5e9,
+      diskFreeBytes: 400e9,
+    });
+    // Only a model the check listed is priced.
+    await expect(f.module.checkModel("other:Q4")).rejects.toThrow(
+      "Pick a model this computer offers.",
+    );
+    await f.module.beginSetup({
+      runtime: "local",
+      localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+    });
+    expect(f.api.created).toEqual([
+      expect.objectContaining({
+        setupChoice: "local-models",
+        localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      }),
+    ]);
+    await f.host.stop("quit");
+  });
+
+  it("reports a pick the kit refuses, and keeps an unlisted model out of the install", async () => {
+    const commands = setupCommands({
+      "--check-local-model": [
+        {
+          library: "inkling-2-mini:UD-Q4_K_M",
+          fits: false,
+          code: "MEMORY_INSUFFICIENT",
+        },
+      ],
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "local-models",
+      origin: "http://localhost:3000",
+    });
+    api.runtime.setupChoice = "local-models";
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+      }),
+    );
+    await f.module.checkModel("inkling-2-mini:UD-Q4_K_M");
+    expect(f.module.status().modelCheck).toEqual({
+      library: "inkling-2-mini:UD-Q4_K_M",
+      state: "checked",
+      fits: false,
+      code: "MEMORY_INSUFFICIENT",
+    });
+    await f.module.beginSetup({ runtime: "local", localModel: "other:Q4" });
+    expect(f.api.created[0]).not.toHaveProperty("localModel");
+    await f.host.stop("quit");
+  });
+
+  it("downloads the picked model in the background for another source", async () => {
+    const commands = setupCommands({
+      "--download-local-model": [{ outcome: { state: "done" } }],
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+      }),
+    );
+    const byok = {
+      baseUrl: "https://byok.example",
+      path: "/v1",
+      endpoint: "/chat/completions",
+      protocol: "openai-chat" as const,
+      modelId: "m",
+      runtime: "pi" as const,
+    };
+    await f.module.beginSetup({
+      runtime: "pi",
+      byok,
+      background: true,
+      localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+    });
+    expect(
+      commands.calls.filter(
+        (call) => call.args[0] === "--download-local-model",
+      ),
+    ).toEqual([
+      { args: ["--download-local-model", "inkling-2-mini-iq3xxs:UD-IQ3_XXS"] },
+    ]);
+    expect(f.api.created[0]).not.toHaveProperty("localModel");
     await f.host.stop("quit");
   });
 

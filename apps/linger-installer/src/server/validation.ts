@@ -1,4 +1,5 @@
 import { validateByokConfiguration } from "@linger/local-installation/byok-source";
+import { isLibraryModel } from "@linger/local-installation/setup-models";
 import type { components } from "@linger/wire-contracts/linger-installer/types";
 type Input = components["schemas"]["InstallationInput"];
 type Model = components["schemas"]["ModelConfiguration"];
@@ -79,6 +80,7 @@ export function validateInput(value: unknown): Input {
     "localModelsReplan",
     "setupChoice",
     "linkedRuntimes",
+    "localModel",
     "shareGpu",
     "instance",
     "port",
@@ -111,6 +113,12 @@ export function validateInput(value: unknown): Input {
       throw new Error("Invalid linked runtimes");
     if (input.setupChoice !== "codex" && input.setupChoice !== "claude")
       throw new Error("Linked runtimes need a codex or claude setup choice");
+  }
+  if (input.localModel !== undefined) {
+    if (!isLibraryModel(input.localModel))
+      throw new Error("Invalid local model");
+    if (input.setupChoice !== "local-models")
+      throw new Error("A local model needs the local-models setup choice");
   }
   if (
     input.setupChoice &&

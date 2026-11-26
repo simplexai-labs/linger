@@ -315,6 +315,7 @@ export class SetupWindowModule implements Module {
           ...(command.byok ? { byok: command.byok } : {}),
           ...(command.keys ? { keys: command.keys } : {}),
           ...(command.background ? { background: true } : {}),
+          ...(command.model ? { localModel: command.model } : {}),
         } as const;
         // Nothing signed in for a subscription: the page keeps Install off
         // until one is, so this only answers a stale page.
@@ -373,6 +374,12 @@ export class SetupWindowModule implements Module {
       }
       case "local.leave-local":
         await ctx.get<LocalServerModule>("LocalServer").leaveLocalModel();
+        return;
+      case "local.model.check":
+        // The answer arrives through state as modelCheck.
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .checkModel(command.model);
         return;
       case "local.byok.check":
         await ctx.get<LocalServerModule>("LocalServer").checkByok(command.byok);
@@ -677,6 +684,7 @@ const localServerState = (
     signIn,
     byokCheck,
     byokModels,
+    modelCheck,
     legacyBackup,
     refusal,
     failure,
@@ -712,6 +720,7 @@ const localServerState = (
     ...(signIn ? { signIn } : {}),
     ...(byokCheck ? { byokCheck } : {}),
     ...(byokModels ? { byokModels } : {}),
+    ...(modelCheck ? { modelCheck } : {}),
     ...(legacyBackup ? { legacyBackup: shown(legacyBackup) } : {}),
     ...(refusal ? { refusal } : {}),
     ...(failure ? { failure } : {}),

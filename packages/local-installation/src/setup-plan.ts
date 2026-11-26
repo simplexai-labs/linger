@@ -2,13 +2,21 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { InstallerEvent } from "./events.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
-import { runLocalmodels } from "./localmodels-tool.js";
+import {
+  localmodelsBaseDirectory,
+  runLocalmodels,
+} from "./localmodels-tool.js";
 import {
   probeRuntimesWithDaemon,
   recommendRuntimeFromDaemon,
   type DaemonRuntimeStatus,
 } from "./daemon-runtime-probe.js";
 import { DEFAULT_GPU_SHARING } from "./setup-selection.js";
+import {
+  isLibraryModel,
+  listSetupModels,
+  type SetupModelOption,
+} from "./setup-models.js";
 import { windowsPrivateRefusal } from "./windows-private.js";
 
 export type SetupChoice = "local-models" | "codex" | "claude" | "pi";
@@ -135,6 +143,13 @@ export interface SetupReport {
      * model than the currently selected plan.
      */
     upgrade?: SetupUpgrade;
+    /**
+     * Every model the kit's catalog offers here, fitting or not, with its
+     * estimates (`setup-models.ts`), for the setup page's model picker.
+     */
+    models?: SetupModelOption[];
+    /** This computer's memory, from the same library report. */
+    totalMemoryBytes?: number;
   };
   runtimes: {
     choice: RuntimeChoice;
@@ -230,15 +245,12 @@ interface UpstreamReport {
   };
   recommendation?: SetupChoice;
 }
-/** The id `localmodels library` uses for a model: `<catalog id>:<quant>`. */
-export const LIBRARY_MODEL_ID = /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/;
+export { LIBRARY_MODEL_ID } from "./setup-models.js";
 function planLibraryModel(plan: UpstreamPlan): string | undefined {
   const { id, quant } = plan.llm.model;
   if (typeof id !== "string" || typeof quant !== "string") return undefined;
   const value = `${id.trim()}:${quant.trim()}`;
-  return value.length <= 200 && LIBRARY_MODEL_ID.test(value)
-    ? value
-    : undefined;
+  return isLibraryModel(value) ? value : undefined;
 }
 export const setupChoices: readonly SetupChoice[] = [
   "local-models",
@@ -331,6 +343,18 @@ export async function inspectSetup(
       failure = cause;
       throw new Error("Upstream setup failed");
     }
+    // The picker's list: every catalog model with the kit's estimates for
+    // this computer. Read after the report, once the tool is in place (the
+    // first check downloads it); a failure only leaves the list out.
+    const choices = await listSetupModels(home, {
+      baseDir: localmodelsBaseDirectory(targetHome),
+      signal: options.signal,
+      ...(options.env ? { env: options.env } : {}),
+      localmodels: tool,
+    }).catch((): { models: SetupModelOption[]; totalMemoryBytes?: number } => {
+      options.signal?.throwIfAborted();
+      return { models: [] };
+    });
     const value = JSON.parse(result.stdout) as UpstreamReport;
     const hasValidHarness =
       value.harness === undefined ||
@@ -606,6 +630,10 @@ export async function inspectSetup(
         },
         ...(libraryModel ? { libraryModel } : {}),
         ...(upgrade ? { upgrade } : {}),
+        ...(choices.models.length ? { models: choices.models } : {}),
+        ...(choices.totalMemoryBytes !== undefined
+          ? { totalMemoryBytes: choices.totalMemoryBytes }
+          : {}),
       },
       runtimes: reportedRuntimes,
       recommendation,

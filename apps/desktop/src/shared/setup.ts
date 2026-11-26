@@ -69,6 +69,8 @@ export interface SetupLocalServer {
   // The latest BYOK endpoint test and model listing asked for on the page.
   readonly byokCheck?: SetupByokCheck;
   readonly byokModels?: SetupByokModels;
+  // The latest picked local model priced again on this computer.
+  readonly modelCheck?: SetupModelCheck;
   // Once installed: the owner account, for signing in again after logging
   // out.
   readonly account?: SetupLocalAccount;
@@ -246,6 +248,47 @@ export interface SetupBackgroundModel {
   readonly message?: string;
 }
 
+// One model the picker offers, from the localmodels kit's own data: the
+// library report (name, publisher, sizes, whether it fits) and the hardware
+// report's estimates for this computer (quality score, decode speed).
+export interface SetupModelOption {
+  readonly library: string;
+  readonly name: string;
+  readonly publisher?: string;
+  readonly quant: string;
+  readonly parameters?: string;
+  readonly activeParameters?: string;
+  readonly quality?: number;
+  readonly decodeTokS?: number;
+  readonly downloadBytes: number;
+  readonly memoryBytes: number;
+  readonly fits: boolean;
+  // For one that does not fit: the memory it needs, and whether it can
+  // never fit this computer rather than not fitting the memory free now.
+  readonly needsMemoryBytes?: number;
+  readonly tooLarge?: true;
+  readonly recommended?: true;
+  readonly role?: "smartest" | "fastest";
+}
+
+// The picked model priced again with an offline install plan
+// (installer.js --check-local-model), so memory and disk are checked for
+// the model Install will download.
+export type SetupModelCheck =
+  | { readonly library: string; readonly state: "checking" }
+  | {
+      readonly library: string;
+      readonly state: "checked";
+      readonly fits: boolean;
+      // The kit's code when it does not fit (MEMORY_INSUFFICIENT,
+      // DISK_INSUFFICIENT, MODEL_SUBSTITUTED, PLAN_FAILED).
+      readonly code?: string;
+      readonly memoryBytes?: number;
+      readonly downloadBytes?: number;
+      readonly diskBytes?: number;
+      readonly diskFreeBytes?: number;
+    };
+
 export type SetupLocalModelsCheck =
   | { readonly state: "unchecked" | "unavailable" }
   // While the check first downloads the localmodels tool: its bytes.
@@ -273,6 +316,11 @@ export type SetupLocalModelsCheck =
         // The model library's name for it (<id>:<quant>).
         readonly library?: string;
       };
+      // Every model the localmodels catalog offers here, fitting or not,
+      // for the model picker; absent when the kit could not list them.
+      readonly models?: readonly SetupModelOption[];
+      // This computer's memory, for the picker's memory bar.
+      readonly totalMemoryBytes?: number;
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries. The
       // page words each code itself.
@@ -379,7 +427,11 @@ export type SetupCommand =
       readonly keys?: SetupProviderKeys;
       // Also download the planned local model in the background.
       readonly background?: boolean;
+      // The local model picked on the page (`<catalog id>:<quant>`).
+      readonly model?: string;
     }
+  // Prices a picked local model again; the answer is state's modelCheck.
+  | { readonly op: "local.model.check"; readonly model: string }
   // Step 2's subscription runtimes: read them again, install one, start its
   // sign-in (device: Codex's device-code login), give Claude Code the code
   // its page showed, stop an install or sign-in, open its page again or

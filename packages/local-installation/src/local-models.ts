@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { sleep } from "@linger/service-kit";
 import { resolveBundledPi } from "./bundled-pi.js";
+import { splitLibraryModel } from "./setup-models.js";
 import {
   atomicPrivate,
   INSTANCE_BUSY,
@@ -112,6 +113,11 @@ interface Binding {
 }
 interface Options {
   shareGpu?: boolean;
+  /**
+   * The model the person picked in setup, as a library id
+   * (`<catalog id>:<quant>`); the plan installs exactly that model.
+   */
+  localModel?: string;
   localModelsApproval?: string;
   localModelsReplan?: boolean;
   signal: AbortSignal;
@@ -613,12 +619,30 @@ export async function prepareLocalModels(
         "LOCAL_MODELS_APPROVAL_REQUIRED",
         "The approved upstream plan does not exist. Generate and review a plan first.",
       );
-    if (!saved || options.localModelsReplan) {
+    const chosen = options.localModel
+      ? splitLibraryModel(options.localModel)
+      : undefined;
+    // A saved plan for another model than the one picked now plans again;
+    // an approval always refers to the saved plan as it is.
+    const savedModel = (() => {
+      try {
+        const model = saved ? JSON.parse(saved)?.llm?.model : undefined;
+        return model ? `${model.id}:${model.quant}` : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    const otherModel =
+      !!options.localModel &&
+      !options.localModelsApproval &&
+      savedModel !== options.localModel;
+    if (!saved || options.localModelsReplan || otherModel) {
       const temporary = path.join(root, `plan-${randomUUID()}.json`);
       try {
         const result = await command([
           "stack",
           "plan",
+          ...(chosen ? ["--llm", chosen.id, "--quant", chosen.quant] : []),
           "--defer-services",
           ...(shareGpu ? ["--share-gpu"] : []),
           "--decision",
@@ -639,6 +663,14 @@ export async function prepareLocalModels(
         const generated = await readPrivate(temporary);
         if (!generated)
           throw new Error("The upstream planner did not save a plan.");
+        if (chosen) {
+          const model = JSON.parse(generated)?.llm?.model;
+          if (model?.id !== chosen.id || model?.quant !== chosen.quant)
+            return action(
+              "LOCAL_MODELS_UNAVAILABLE",
+              "The upstream planner did not plan the chosen local model.",
+            );
+        }
         const planned = await reviewSavedModelPlan(
           home,
           temporary,
@@ -648,7 +680,12 @@ export async function prepareLocalModels(
         await atomicPrivate(planFile, generated);
         await atomicPrivate(
           inputsFile,
-          JSON.stringify({ planId: planned.planId, shareGpu, decision: false }),
+          JSON.stringify({
+            planId: planned.planId,
+            shareGpu,
+            decision: false,
+            ...(options.localModel ? { llm: options.localModel } : {}),
+          }),
         );
         saved = generated;
       } finally {

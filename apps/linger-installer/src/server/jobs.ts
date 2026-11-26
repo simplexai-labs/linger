@@ -31,7 +31,9 @@ const active = (job: Job) =>
 const choiceOf = (input: Input) =>
   input.byok
     ? `byok:${input.byok.runtime ?? input.setupChoice ?? ""}`
-    : input.setupChoice;
+    : input.localModel
+      ? `${input.setupChoice}:${input.localModel}`
+      : input.setupChoice;
 function validOutcome(value: unknown): value is {
   state: string;
   code: number;
@@ -336,6 +338,7 @@ export class JobManager {
       id,
       instance: input.instance,
       ...(input.setupChoice ? { setupChoice: input.setupChoice } : {}),
+      ...(input.localModel ? { localModel: input.localModel } : {}),
       ...(input.shareGpu !== undefined ? { shareGpu: input.shareGpu } : {}),
       ...(input.preparation ? { preparation: input.preparation } : {}),
       state: "queued",

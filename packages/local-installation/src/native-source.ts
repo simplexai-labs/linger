@@ -1278,6 +1278,9 @@ async function runNativeSource(
                     shareGpu: options.shareGpu,
                     signal,
                     onEvent: emit,
+                    ...(options.localModel
+                      ? { localModel: options.localModel }
+                      : {}),
                     localModelsApproval: options.localModelsApproval,
                     localModelsReplan: options.localModelsReplan,
                   });

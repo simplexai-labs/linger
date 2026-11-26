@@ -1,7 +1,7 @@
 // Headless commands the desktop setup page runs before anything is
 // installed: which AI runtimes this computer has and whether they are signed
-// in, installing one, its sign-in, and downloading the planned local model
-// in the background. Each writes JSON lines on stdout; sign-in codes arrive
+// in, installing one, its sign-in, pricing a local model picked in setup, and
+// downloading the planned local model in the background. Each writes JSON lines on stdout; sign-in codes arrive
 // on stdin and are never written back.
 import {
   inspectRuntime,
@@ -16,6 +16,10 @@ import {
   runLocalmodels,
 } from "@linger/local-installation/localmodels-tool";
 import { LIBRARY_MODEL_ID } from "@linger/local-installation/setup-plan";
+import {
+  checkSetupModel,
+  type SetupModelCheck,
+} from "@linger/local-installation/setup-models";
 import {
   RuntimeLoginManager,
   type LoginMethod,
@@ -220,6 +224,20 @@ export async function setupRuntimeLogin(
  * last line is the outcome. A busy library (exit 2) is retried a few times,
  * since an installation that just stopped may still hold it.
  */
+/**
+ * Whether the local model picked in setup fits this computer now: the same
+ * offline plan the install makes, priced and then thrown away.
+ */
+export async function checkLocalModel(
+  home: string,
+  model: string,
+  options: { signal: AbortSignal; localmodels?: typeof runLocalmodels },
+): Promise<SetupModelCheck> {
+  return checkSetupModel(home, model, {
+    signal: options.signal,
+    ...(options.localmodels ? { localmodels: options.localmodels } : {}),
+  });
+}
 export async function downloadLocalModel(
   home: string,
   model: string,

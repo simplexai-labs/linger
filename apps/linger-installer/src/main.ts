@@ -37,6 +37,7 @@ export function parseInstallerArguments(args: string[]) {
     runtimeLogin?: string;
     deviceLogin?: boolean;
     downloadModel?: string;
+    checkModel?: string;
   } = {
     home: lingerHome(),
   };
@@ -108,6 +109,7 @@ export function parseInstallerArguments(args: string[]) {
         "--prepare-runtime",
         "--runtime-login",
         "--download-local-model",
+        "--check-local-model",
       ].includes(flag ?? "")
     )
       throw new Error("Invalid installer option.");
@@ -123,13 +125,17 @@ export function parseInstallerArguments(args: string[]) {
         throw new Error("Invalid runtime.");
       if (flag === "--prepare-runtime") options.prepareRuntime = value;
       else options.runtimeLogin = value;
-    } else if (flag === "--download-local-model") {
+    } else if (
+      flag === "--download-local-model" ||
+      flag === "--check-local-model"
+    ) {
       if (
         value.length > 200 ||
         !/^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/.test(value)
       )
         throw new Error("Invalid local model.");
-      options.downloadModel = value;
+      if (flag === "--check-local-model") options.checkModel = value;
+      else options.downloadModel = value;
     } else if (flag === "--instance") {
       if (!/^[a-z][a-z0-9-]{0,39}$/.test(value))
         throw new Error("Invalid instance name.");
@@ -176,12 +182,14 @@ function setupCommand(options: {
   prepareRuntime?: string;
   runtimeLogin?: string;
   downloadModel?: string;
+  checkModel?: string;
 }): boolean {
   return Boolean(
     options.runtimeStatus ||
     options.prepareRuntime ||
     options.runtimeLogin ||
-    options.downloadModel,
+    options.downloadModel ||
+    options.checkModel,
   );
 }
 // The desktop client shows this line, so it carries the real cause; only an
@@ -600,6 +608,13 @@ async function runSetupCommand(
         },
       );
       finish({ ended: true }, 0);
+    } else if (options.checkModel) {
+      const check = await commands.checkLocalModel(
+        options.home,
+        commands.libraryModel(options.checkModel),
+        { signal: controller.signal },
+      );
+      finish({ ...check }, 0);
     } else if (options.downloadModel) {
       const outcome = await commands.downloadLocalModel(
         options.home,

@@ -496,6 +496,8 @@ export interface components {
       setupChoice?: components["schemas"]["SetupChoice"];
       /** @description Subscription runtimes signed in during setup that the Computer also configures beside setupChoice, which stays the default runtime. Requires setupChoice codex or claude. */
       linkedRuntimes?: ("codex" | "claude")[];
+      /** @description The local model picked in setup as a model library id (`<catalog id>:<quant>`); the plan installs exactly this model. Requires setupChoice local-models. */
+      localModel?: string;
       /** @description Approve only this saved plan. Must not be combined with localModelsReplan. */
       localModelsApproval?: string;
       /** @description Explicitly review an updated plan on the previously selected GPU; approval requires a separate request. */
@@ -613,6 +615,8 @@ export interface components {
     InstallationJob: {
       /** @description Explicit consent to share currently free GPU memory with existing tasks; defaults to false and never stops other processes. */
       shareGpu?: boolean;
+      /** @description The local model picked in setup that this job installs, when one was picked. */
+      localModel?: string;
       /** @description Runtime paths from this completed desktop installation, available when polling the live job. */
       runtime?: components["schemas"]["InstanceRuntime"];
       runtimeAuth?: {

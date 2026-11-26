@@ -41,6 +41,13 @@ const byokConfig = z
 
 const externalUrl = z.enum(SETUP_EXTERNAL_URLS);
 
+// A local model the page picked, `<catalog id>:<quant>` as localmodels
+// names it; LocalServer also requires it to be one the check listed.
+const localModel = z
+  .string()
+  .max(200)
+  .regex(/^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/, "Invalid model");
+
 const setupRuntime = z.enum(["claude", "codex", "pi"]);
 const signInRuntime = z.enum(["claude", "codex"]);
 
@@ -82,8 +89,10 @@ const setupCommand = z.discriminatedUnion("op", [
         .strict()
         .optional(),
       background: z.boolean().optional(),
+      model: localModel.optional(),
     })
     .strict(),
+  z.object({ op: z.literal("local.model.check"), model: localModel }).strict(),
   z.object({ op: z.literal("local.runtimes.check") }).strict(),
   z
     .object({ op: z.literal("local.runtime.install"), runtime: setupRuntime })

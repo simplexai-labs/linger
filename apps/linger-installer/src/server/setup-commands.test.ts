@@ -4,6 +4,7 @@ import type { inspectRuntime } from "@linger/local-installation/managed-runtimes
 import { parseInstallerArguments } from "../main.js";
 import type { RuntimeLoginManager } from "./runtime-login.js";
 import {
+  checkLocalModel,
   downloadLocalModel,
   libraryModel,
   prepareSetupRuntime,
@@ -26,16 +27,75 @@ it("parses the setup commands without a source checkout and refuses bad values",
   expect(
     parseInstallerArguments(["--download-local-model", "qwen3-8b:Q4_K_M"]),
   ).toMatchObject({ downloadModel: "qwen3-8b:Q4_K_M" });
+  expect(
+    parseInstallerArguments(["--check-local-model", "qwen3-8b:Q4_K_M"]),
+  ).toMatchObject({ checkModel: "qwen3-8b:Q4_K_M" });
   for (const args of [
     ["--prepare-runtime", "bash"],
     ["--runtime-login", "pi", "--device-login"],
     ["--owner-account"],
     ["--download-local-model", "--base-dir"],
     ["--download-local-model", "../x:Q4"],
+    ["--check-local-model", "--llm"],
+    ["--check-local-model", "x"],
   ])
     expect(() => parseInstallerArguments(args)).toThrow();
   expect(() => setupRuntime("bash")).toThrow("Invalid runtime.");
   expect(() => libraryModel("a b:c")).toThrow("Invalid local model.");
+});
+
+it("prices a picked local model with an offline plan in the install home", async () => {
+  const home = path.resolve("/owned");
+  const localmodels = vi.fn(async () => ({
+    code: 2,
+    stdout: JSON.stringify({
+      schema: "localmodels.stack-plan-error/v1",
+      event: "error",
+      code: "MEMORY_INSUFFICIENT",
+    }),
+    stderr: "",
+  }));
+  const check = await checkLocalModel(home, "qwen3.6-35b-a3b:UD-Q4_K_M", {
+    signal: new AbortController().signal,
+    localmodels,
+  });
+  expect(check).toEqual({
+    library: "qwen3.6-35b-a3b:UD-Q4_K_M",
+    fits: false,
+    code: "MEMORY_INSUFFICIENT",
+  });
+  const args = (localmodels.mock.calls[0] as unknown as [string, string[]])[1];
+  expect(args.slice(0, 6)).toEqual([
+    "stack",
+    "plan",
+    "--llm",
+    "qwen3.6-35b-a3b",
+    "--quant",
+    "UD-Q4_K_M",
+  ]);
+  expect(args).toContain("--offline");
+  expect(args[args.indexOf("--base-dir") + 1]).toBe(
+    path.join(home, "runtime", "localmodels", "models"),
+  );
+});
+
+it("accepts a picked local model only with the local-models choice", () => {
+  expect(
+    validateInput({
+      instance: "desktop",
+      setupChoice: "local-models",
+      localModel: "inkling-2-mini:UD-Q4_K_M",
+    }),
+  ).toMatchObject({ localModel: "inkling-2-mini:UD-Q4_K_M" });
+  for (const input of [
+    { setupChoice: "codex", localModel: "inkling-2-mini:UD-Q4_K_M" },
+    { localModel: "inkling-2-mini:UD-Q4_K_M" },
+    { setupChoice: "local-models", localModel: "--llm" },
+    { setupChoice: "local-models", localModel: 4 },
+  ])
+    expect(() => validateInput({ instance: "desktop", ...input })).toThrow(
+      /local model/i,
+    );
 });
 
 it("accepts linked runtimes only beside a subscription choice", () => {

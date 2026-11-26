@@ -123,6 +123,8 @@ import type {
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
+  SetupModelCheck,
+  SetupModelOption,
   SetupReason,
   SetupRuntimeRow,
 } from "../shared/setup.js";
@@ -182,6 +184,9 @@ export type LocalModelsCheck =
       readonly gpu?: string;
       // Present when eligible or when a blocked-now report included a plan.
       readonly model?: LocalModel;
+      // Every model the localmodels catalog offers here, for the picker.
+      readonly models?: readonly SetupModelOption[];
+      readonly totalMemoryBytes?: number;
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries.
       readonly reasons?: readonly SetupReason[];
@@ -211,6 +216,9 @@ export interface LocalServerPlan {
   // Other subscription runtimes signed in here that the installation also
   // configures beside the one it runs by default (codex or claude only).
   readonly linkedRuntimes?: readonly ("codex" | "claude")[];
+  // The local model picked on the page (`<catalog id>:<quant>`); the local
+  // runtime installs exactly it, another source downloads it meanwhile.
+  readonly localModel?: string;
 }
 
 // What setup's Install asks for: a plan, or "subscription" for the runtimes
@@ -385,6 +393,8 @@ export interface LocalServerStatus {
   readonly signIn?: RuntimeSignIn;
   readonly byokCheck?: SetupByokCheck;
   readonly byokModels?: SetupByokModels;
+  // The latest picked local model priced again on this computer.
+  readonly modelCheck?: SetupModelCheck;
   // Where this installation moved the data of the earlier Simplex app,
   // which it could not upgrade.
   readonly legacyBackup?: string;
@@ -665,6 +675,9 @@ export class LocalServerModule implements Module {
   #signIn: RuntimeSignIn | undefined;
   #byokCheck: SetupByokCheck | undefined;
   #byokModels: SetupByokModels | undefined;
+  #modelCheck: SetupModelCheck | undefined;
+  // The local model picked on the page, for the background download.
+  #pickedModel: string | undefined;
   #legacyBackup: string | undefined;
   // The installer that runs the sign-in, and what the person asked for
   // while the step waits.
@@ -682,6 +695,7 @@ export class LocalServerModule implements Module {
   #serverOk: boolean | undefined;
   readonly #runtimes: SetupRuntimes;
   readonly #background: BackgroundModel;
+  readonly #run: SetupCommandRunner;
   // The running installation's own stop, and what it installs.
   #installAbort: AbortController | undefined;
   #source: LocalServerStatus["source"];
@@ -700,6 +714,7 @@ export class LocalServerModule implements Module {
       ...(options.platform ? { platform: options.platform } : {}),
     });
     this.#background = new BackgroundModel({ run, changed });
+    this.#run = run;
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -1142,6 +1157,7 @@ export class LocalServerModule implements Module {
       ...(this.#signIn ? { signIn: this.#signIn } : {}),
       ...(this.#byokCheck ? { byokCheck: this.#byokCheck } : {}),
       ...(this.#byokModels ? { byokModels: this.#byokModels } : {}),
+      ...(this.#modelCheck ? { modelCheck: this.#modelCheck } : {}),
       ...(this.#legacyBackup ? { legacyBackup: this.#legacyBackup } : {}),
       ...(this.#refusal ? { refusal: this.#refusal } : {}),
       ...(this.#failure ? { failure: this.#failure } : {}),
@@ -1204,7 +1220,14 @@ export class LocalServerModule implements Module {
   // the page, and starts the local model's background download when asked.
   beginSetup(request: LocalServerRequest): Promise<void> {
     if (this.#running) return this.#running;
-    const { runtime, background, ...rest } = request;
+    const { runtime, background, localModel, ...rest } = request;
+    // Only a model the check listed; the installer validates it again.
+    const listed =
+      this.#check.state === "checked" &&
+      this.#check.models?.some((model) => model.library === localModel)
+        ? localModel
+        : undefined;
+    if (listed) this.#pickedModel = listed;
     let plan: LocalServerPlan;
     if (runtime === "subscription") {
       const signedIn = this.#runtimes.signedIn();
@@ -1217,7 +1240,12 @@ export class LocalServerModule implements Module {
         runtime: signedIn[0],
         ...(signedIn.length > 1 ? { linkedRuntimes: signedIn.slice(1) } : {}),
       };
-    } else plan = { ...rest, runtime };
+    } else
+      plan = {
+        ...rest,
+        runtime,
+        ...(runtime === "local" && listed ? { localModel: listed } : {}),
+      };
     if (background && plan.runtime !== "local") this.#downloadInBackground();
     return this.begin(plan);
   }
@@ -1231,7 +1259,10 @@ export class LocalServerModule implements Module {
   // another source installs; Settings › Models offers it once done.
   #downloadInBackground(): void {
     const library =
-      this.#check.state === "checked" ? this.#check.model?.library : undefined;
+      this.#pickedModel ??
+      (this.#check.state === "checked"
+        ? this.#check.model?.library
+        : undefined);
     if (library) void this.#background.start(library);
   }
 
@@ -1530,6 +1561,68 @@ export class LocalServerModule implements Module {
           };
   }
 
+  // Prices the local model picked on the page with the install's own plan,
+  // offline (installer.js --check-local-model), so memory and disk are
+  // checked for the model Install downloads. A newer pick replaces an older
+  // one's answer.
+  async checkModel(library: string): Promise<void> {
+    if (
+      this.#check.state !== "checked" ||
+      !this.#check.models?.some((model) => model.library === library)
+    )
+      throw new Error("Pick a model this computer offers.");
+    this.#pickedModel = library;
+    this.#modelCheck = { library, state: "checking" };
+    this.#ctx?.bus.emit("local-server.changed");
+    let answer: Record<string, unknown> = {};
+    try {
+      const child = await this.#run(["--check-local-model", library], {
+        inspect: true,
+        onLine: (line) => {
+          if (line.library === library) answer = line;
+        },
+      });
+      // A plan answers in seconds; a stuck one leaves the install to decide.
+      const timer = setTimeout(() => child.stop(), 90_000);
+      await child.done.finally(() => clearTimeout(timer));
+    } catch (error) {
+      this.#ctx?.log.warn("local_server.model_check_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (this.#modelCheck?.library !== library) return;
+    const count = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : undefined;
+    const code =
+      typeof answer.code === "string" && /^[A-Z0-9_]{1,60}$/.test(answer.code)
+        ? answer.code
+        : undefined;
+    const numbers = {
+      memoryBytes: count(answer.memoryBytes),
+      downloadBytes: count(answer.downloadBytes),
+      diskBytes: count(answer.diskBytes),
+      diskFreeBytes: count(answer.diskFreeBytes),
+    };
+    this.#modelCheck = {
+      library,
+      state: "checked",
+      // No answer: the install's own plan decides, as before the picker.
+      fits: answer.fits === true || answer.fits === undefined,
+      ...(answer.fits === false ? { code: code ?? "PLAN_FAILED" } : {}),
+      ...Object.fromEntries(
+        Object.entries(numbers).filter(([, value]) => value !== undefined),
+      ),
+    };
+    this.#ctx?.log.info("local_server.model_checked", {
+      library,
+      fits: this.#modelCheck.fits,
+      ...(code ? { code } : {}),
+    });
+    this.#ctx?.bus.emit("local-server.changed");
+  }
+
   // Lists the models the endpoint serves at its base URL + path + /models,
   // read back like a test from byokModels.
   async listByokModels(endpoint: SetupByokEndpoint): Promise<void> {
@@ -1709,6 +1802,8 @@ export class LocalServerModule implements Module {
         eligible?: unknown;
         state?: unknown;
         libraryModel?: unknown;
+        models?: unknown;
+        totalMemoryBytes?: unknown;
         memory?: Record<string, unknown>;
         reasons?: unknown;
         estimate?: {
@@ -1793,6 +1888,7 @@ export class LocalServerModule implements Module {
         ? `${code}: ${message}`
         : `${code}`,
     );
+    const models = setupModelOptions(report.localModels.models);
     const pick = report.recommendation;
     // The local model is recommended only with a model the page can show.
     const recommendation =
@@ -1828,6 +1924,10 @@ export class LocalServerModule implements Module {
         : {}),
       ...(reasons.length ? { reasons } : {}),
       ...(recommendation ? { recommendation } : {}),
+      ...(models.length ? { models } : {}),
+      ...(bytes(report.localModels.totalMemoryBytes) !== null
+        ? { totalMemoryBytes: report.localModels.totalMemoryBytes as number }
+        : {}),
     };
     return { check, reasonLog };
   }
@@ -5441,6 +5541,7 @@ export const anotherMeMissing = (
 interface Job {
   readonly runtime?: InstanceRuntime;
   readonly setupChoice?: string;
+  readonly localModel?: string;
   readonly id: string;
   readonly instance: string;
   readonly state: string;
@@ -5823,6 +5924,9 @@ export class InstallerApi {
       job = await this.#json<Job>("/api/jobs", {
         instance: LOCAL_INSTANCE,
         ...(setupChoice ? { setupChoice } : {}),
+        ...(setupChoice === "local-models" && plan.localModel
+          ? { localModel: plan.localModel }
+          : {}),
         ...(plan.byok ? { byok: plan.byok } : {}),
         ...(linkedRuntimes.length ? { linkedRuntimes } : {}),
       });
@@ -6204,12 +6308,64 @@ const recommended = (report: { recommendation?: string }) =>
 // Whether the job installs what the plan asks for. The installer picks for
 // "recommended", which never deploys the local model (see `recommended`).
 // A job that names no choice used the saved one and is followed as before.
+// A local model picked on the page must be the one the job installs.
 const runsPlan = (job: Job, plan: LocalServerPlan): boolean =>
   !job.setupChoice ||
   (plan.runtime === "recommended"
     ? job.setupChoice !== "local-models"
     : job.setupChoice ===
-      (plan.runtime === "local" ? "local-models" : plan.runtime));
+        (plan.runtime === "local" ? "local-models" : plan.runtime) &&
+      (plan.runtime !== "local" ||
+        !plan.localModel ||
+        job.localModel === plan.localModel));
+
+// The picker's models from the installer's report, each checked; one that
+// is malformed is left out rather than failing the check.
+export function setupModelOptions(value: unknown): SetupModelOption[] {
+  if (!Array.isArray(value)) return [];
+  const count = (entry: unknown): entry is number =>
+    typeof entry === "number" && Number.isFinite(entry) && entry >= 0;
+  const label = (entry: unknown, max: number): entry is string =>
+    typeof entry === "string" && entry.length > 0 && entry.length <= max;
+  return value.slice(0, 200).flatMap((raw): SetupModelOption[] => {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    if (
+      !label(row.library, 200) ||
+      !LIBRARY_MODEL_ID.test(row.library) ||
+      !label(row.name, 120) ||
+      !label(row.quant, 60) ||
+      !count(row.downloadBytes) ||
+      !count(row.memoryBytes) ||
+      typeof row.fits !== "boolean"
+    )
+      return [];
+    return [
+      {
+        library: row.library,
+        name: row.name,
+        quant: row.quant,
+        ...(label(row.publisher, 80) ? { publisher: row.publisher } : {}),
+        ...(label(row.parameters, 20) ? { parameters: row.parameters } : {}),
+        ...(label(row.activeParameters, 20)
+          ? { activeParameters: row.activeParameters }
+          : {}),
+        ...(count(row.quality) ? { quality: row.quality } : {}),
+        ...(count(row.decodeTokS) ? { decodeTokS: row.decodeTokS } : {}),
+        downloadBytes: row.downloadBytes,
+        memoryBytes: row.memoryBytes,
+        fits: row.fits,
+        ...(count(row.needsMemoryBytes)
+          ? { needsMemoryBytes: row.needsMemoryBytes }
+          : {}),
+        ...(row.tooLarge === true ? { tooLarge: true as const } : {}),
+        ...(row.recommended === true ? { recommended: true as const } : {}),
+        ...(row.role === "smartest" || row.role === "fastest"
+          ? { role: row.role }
+          : {}),
+      },
+    ];
+  });
+}
 
 export interface SetCookie {
   readonly name: string;
