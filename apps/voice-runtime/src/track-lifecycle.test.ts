@@ -765,6 +765,96 @@ describe("Voice publisher input retention and absence evidence", () => {
     });
   });
 
+  it("resumes from live input once the retained window overflowed instead of failing every retry", async () => {
+    const room = Object.assign(new EventEmitter(), {
+      remoteParticipants: new Map(),
+    });
+    const queues: ASREventQueue[] = [];
+    const received: number[][] = [];
+    const accepted: VoiceObservation[] = [];
+    let releaseWrite!: () => void;
+    const pendingWrite = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const track = microphoneTrack("overflowed-track");
+    // Frames keep arriving into the full window while a consumer restarts.
+    const arrive = async (value: number) => {
+      audioInputs.get(track)!.enqueue(frame(value));
+      await vi.waitFor(() =>
+        expect(audioInputs.get(track)!.desiredSize).toBe(1),
+      );
+    };
+    const claim = claimEpochs();
+    const worker = new VoiceTrackWorker(
+      {
+        claimMediaEpoch: async (session: string) => {
+          const epoch = await claim(session);
+          if (epoch > 0) await arrive(8);
+          return epoch;
+        },
+        reportObservation: async (event: VoiceObservation) => {
+          accepted.push(event);
+          return { event_id: event.event_id, status: "accepted" };
+        },
+      } as TeamHubVoiceRuntimeClient,
+      {
+        open: async () => {
+          const index = queues.length;
+          if (index > 0) await arrive(index + 10);
+          const queue = new ASREventQueue();
+          queues.push(queue);
+          received.push([]);
+          return {
+            async sendPCM(pcm: Int16Array) {
+              received[index]!.push(pcm[0]!);
+              if (index === 0) await pendingWrite;
+            },
+            events: () => queue.events(),
+            async finish() {
+              queue.end();
+            },
+            async close() {
+              queue.end();
+            },
+          };
+        },
+      },
+    );
+    const { shutdown } = await startWorker(
+      worker,
+      room,
+      "voice_session_overflowed",
+    );
+    try {
+      room.emit(
+        "trackSubscribed",
+        track,
+        { source: TrackSource.SOURCE_MICROPHONE },
+        publisher("publisher-voice_session_overflowed"),
+      );
+      await vi.waitFor(() => expect(audioInputs.has(track)).toBe(true));
+      await arrive(1);
+      await vi.waitFor(() => expect(received[0]).toEqual([1]));
+      // The ASR write stalls past the 20 second window.
+      for (let index = 0; index < 1001; index++)
+        audioInputs.get(track)!.enqueue(frame(9));
+      await vi.waitFor(() =>
+        expect(audioInputs.get(track)!.desiredSize).toBe(1),
+      );
+      releaseWrite();
+      await vi.waitFor(() => expect(received[1]).toEqual([11]));
+      expect(queues).toHaveLength(2);
+      expect(accepted.some((event) => event.kind === "input_gap")).toBe(true);
+    } finally {
+      await shutdown();
+      audioInputs.delete(track);
+    }
+    expect(accepted.at(-1)).toMatchObject({
+      kind: "track_ended",
+      media_epoch: 1,
+    });
+  });
+
   it("reports publisher absence only when a new publisher generation follows a cleanly ended input", async () => {
     const room = Object.assign(new EventEmitter(), {
       remoteParticipants: new Map(),
