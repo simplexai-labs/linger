@@ -12,7 +12,6 @@ export interface LocalRuntimeUpdateGuidanceProps {
   readonly diagnosticMessage?: string;
   readonly platform?: ComputerPlatform;
   readonly runtimeType: TeamHubLocalRuntimeType;
-  readonly version?: string;
 }
 
 /**
@@ -26,7 +25,6 @@ export function LocalRuntimeUpdateGuidance({
   diagnosticMessage,
   platform,
   runtimeType,
-  version,
 }: LocalRuntimeUpdateGuidanceProps) {
   const t = useT();
   const app = appNames[runtimeType];
@@ -43,15 +41,6 @@ export function LocalRuntimeUpdateGuidance({
     >
       <p className="font-medium text-foreground">
         {t(m.updateRequiredTitle, { app })}
-      </p>
-      <p className="mt-1 text-muted-foreground">
-        {version
-          ? t(m.updateRequiredBodyWithVersion, {
-              app,
-              computer: computerName,
-              version,
-            })
-          : t(m.updateRequiredBody, { app, computer: computerName })}
       </p>
       {diagnosticMessage ? (
         <p className="mt-2 rounded-md bg-background/60 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
@@ -77,9 +66,6 @@ export function LocalRuntimeUpdateGuidance({
           {t(m.npmNeedsNode)}
         </p>
       ) : null}
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        {t(m.readyAfterUpdate)}
-      </p>
     </div>
   );
 }

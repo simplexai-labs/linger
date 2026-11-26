@@ -7,6 +7,8 @@ import { lstat, open, realpath, statfs } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  canBuildNativeServicesFromSource,
+  canCompileTeamhubFromSource,
   prepareSourceConfiguration,
   saveSourceBinding,
   validateSourceRepository,
@@ -29,7 +31,12 @@ import { checkNativeRuntime } from "./native-runtime.js";
 import { checkTeamhubBinaries } from "./teamhub-binaries.js";
 import { sourceRegion } from "@linger/service-kit";
 import { npmRegistryEnvironment } from "./npm-registry.js";
-import { recordRegionFallback, resolveRegion } from "./region.js";
+import {
+  formatRegionResolution,
+  recordRegionFallback,
+  resolveRegion,
+  type RegionResolutionInfo,
+} from "./region.js";
 import { prepareNativeDatabase } from "./native-database.js";
 import {
   inspectNativeListeners,
@@ -39,6 +46,7 @@ import {
   SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
+  type NativeListenerState,
   type NativeService,
 } from "./native-process.js";
 import {
@@ -191,15 +199,69 @@ const probeEndpoints = (source: NonNullable<Instance["source"]>) =>
     ["node-services", "node-services", source.ports.nodeServices, "/readyz"],
     ["document-runtime", "node-services", source.ports.document, "/readyz"],
   ] as const;
+type ProbeEndpoints = ReturnType<typeof probeEndpoints>;
+type ProbeEndpoint = ProbeEndpoints[number];
+interface HttpEndpointProbe {
+  service: ProbeEndpoint[0];
+  owner: ProbeEndpoint[1];
+  port: number;
+  ok: boolean;
+}
+interface ServiceReadiness {
+  service: ProbeEndpoint[0];
+  ready: boolean;
+}
+// Interval between listener snapshots while endpoints remain unready, avoiding
+// per-tick OS process enumeration during startup.
+const LISTENER_SNAPSHOT_INTERVAL_MS = 5_000;
+async function probeHttpEndpoint(
+  port: number,
+  endpoint: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${endpoint}`, {
+      redirect: "error",
+      signal: AbortSignal.any([
+        ...(signal ? [signal] : []),
+        AbortSignal.timeout(2_000),
+      ]),
+    });
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+async function probeHttpEndpoints(
+  endpoints: ProbeEndpoints,
+  signal?: AbortSignal,
+): Promise<HttpEndpointProbe[]> {
+  return Promise.all(
+    endpoints.map(async ([service, owner, port, endpoint]) => ({
+      service,
+      owner,
+      port,
+      ok: await probeHttpEndpoint(port, endpoint, signal),
+    })),
+  );
+}
+async function snapshotNativeListeners(
+  instance: Instance,
+  endpoints: ProbeEndpoints,
+): Promise<NativeListenerState[] | undefined> {
+  return inspectNativeListeners(
+    instance.root,
+    endpoints.map(([, name, port]) => ({ name, port })),
+  ).catch(() => undefined);
+}
 export async function probeNativeSourceServices(
   instance: Instance,
   signal?: AbortSignal,
 ) {
   const endpoints = probeEndpoints(requireNative(instance));
-  const states = await inspectNativeListeners(
-    instance.root,
-    endpoints.map(([, name, port]) => ({ name, port })),
-  ).catch(() => endpoints.map(() => ({ running: false, foreign: undefined })));
+  const states = await snapshotNativeListeners(instance, endpoints);
+  if (!states) return endpoints.map(([service]) => ({ service, ready: false }));
   return Promise.all(
     endpoints.map(async ([service, , port, endpoint], index) => {
       const { running, foreign } = states[index]!;
@@ -207,20 +269,11 @@ export async function probeNativeSourceServices(
       // service that cannot listen there.
       if (foreign !== undefined)
         return { service, ready: false, foreign, port };
-      try {
-        if (!running) return { service, ready: false };
-        const response = await fetch(`http://127.0.0.1:${port}${endpoint}`, {
-          redirect: "error",
-          signal: AbortSignal.any([
-            ...(signal ? [signal] : []),
-            AbortSignal.timeout(2_000),
-          ]),
-        });
-        await response.body?.cancel();
-        return { service, ready: response.ok };
-      } catch {
-        return { service, ready: false };
-      }
+      if (!running) return { service, ready: false };
+      return {
+        service,
+        ready: await probeHttpEndpoint(port, endpoint, signal),
+      };
     }),
   );
 }
@@ -299,45 +352,135 @@ async function waitHealthy(
   signal: AbortSignal,
   onEvent: (event: InstallerEvent) => void,
   ends: Map<string, number>,
-) {
-  const deadline = Date.now() + 20 * 60_000;
+): Promise<ServiceReadiness[]> {
+  const endpoints = probeEndpoints(requireNative(instance));
+  const startedAt = Date.now();
+  const deadline = startedAt + 20 * 60_000;
   let last = 0;
+  let lastSnapshotAt = startedAt;
   const occupied = new Map<string, number>();
+  const readyAt = new Map<string, string>();
+  const recordReady = (service: string, now: number) => {
+    if (readyAt.has(service)) return;
+    const elapsed = ((now - startedAt) / 1000).toFixed(1);
+    readyAt.set(service, elapsed);
+    onEvent({
+      kind: "log",
+      stage: "services",
+      message: `Native service ${service} ready in ${elapsed}s.\n`,
+    });
+  };
   for (;;) {
     signal.throwIfAborted();
-    const probed = await probeNativeSourceServices(instance, signal);
-    if (probed.every((check) => check.ready))
-      return probed.map(({ service, ready }) => ({ service, ready }));
-    // A port another process holds never frees up by waiting; the service
-    // that should listen there exits or retries until the deadline.
-    for (const check of probed) {
-      if (!("foreign" in check)) {
-        occupied.delete(check.service);
-        continue;
-      }
-      const since = occupied.get(check.service) ?? Date.now();
-      occupied.set(check.service, since);
-      if (Date.now() - since >= 15_000)
-        throw new Error(
-          `Native ${check.service} cannot listen on port ${check.port}: another program (PID ${check.foreign}) is using it. End that program, then try again.`,
-        );
-    }
-    const checks = probed;
-    // A failed build exits the service, so its log explains the stop.
-    const failure = await startupFailure(instance, ends);
-    if (failure) throw new Error(failure);
-    for (const name of watchedServices)
-      if (!(await inspectNativeProcess(instance.root, name)).running) {
-        // With the service gone, whatever holds its port is another program.
-        for (const [, owner, port] of probeEndpoints(instance.source!))
-          if (owner === name && !(await portFree(port)))
+    const httpChecks = await probeHttpEndpoints(endpoints, signal);
+    signal.throwIfAborted();
+    const allHttpOk = httpChecks.every((check) => check.ok);
+    // Confirm listener ownership once all HTTP probes pass, track an active
+    // foreign holder for its 15s limit, and periodically snapshot to detect
+    // silent process exits.
+    const shouldSnapshot =
+      allHttpOk ||
+      occupied.size > 0 ||
+      Date.now() - lastSnapshotAt >= LISTENER_SNAPSHOT_INTERVAL_MS;
+    let checks: ServiceReadiness[];
+    if (shouldSnapshot) {
+      const states = await snapshotNativeListeners(instance, endpoints);
+      signal.throwIfAborted();
+      const now = Date.now();
+      lastSnapshotAt = now;
+      if (states) {
+        checks = endpoints.map(([service], index) => {
+          const state = states[index]!;
+          return {
+            service,
+            ready:
+              httpChecks[index]!.ok &&
+              state.running &&
+              state.foreign === undefined,
+          };
+        });
+        if (!allHttpOk) {
+          for (const check of checks) {
+            if (check.ready) recordReady(check.service, now);
+          }
+        }
+        if (checks.every((check) => check.ready)) {
+          // Confirm HTTP readiness after the listener snapshot so a foreign
+          // process that answered before exiting cannot satisfy readiness for
+          // a service that has not bound its port yet.
+          const confirmed = await probeHttpEndpoints(endpoints, signal);
+          signal.throwIfAborted();
+          if (confirmed.every((check) => check.ok)) {
+            const confirmedAt = Date.now();
+            for (const check of checks) recordReady(check.service, confirmedAt);
+            const summary = checks
+              .map(
+                ({ service }) => `${service} ${readyAt.get(service) ?? "0.0"}`,
+              )
+              .join(", ");
+            onEvent({
+              kind: "log",
+              stage: "services",
+              message: `Native collaboration services ready (s): ${summary}.\n`,
+            });
+            return checks;
+          }
+          checks = confirmed.map(({ service, ok }) => ({ service, ready: ok }));
+        }
+        // A port another process holds never frees up by waiting; the service
+        // that should listen there exits or retries until the deadline.
+        for (const [index, [service, , port]] of endpoints.entries()) {
+          const foreign = states[index]!.foreign;
+          if (foreign === undefined) {
+            occupied.delete(service);
+            continue;
+          }
+          const since = occupied.get(service) ?? Date.now();
+          occupied.set(service, since);
+          if (Date.now() - since >= 15_000)
             throw new Error(
-              `Native ${name} cannot listen on port ${port}: another program is using it. Quit that program, then try again.`,
+              `Native ${service} cannot listen on port ${port}: another program (PID ${foreign}) is using it. End that program, then try again.`,
             );
-        throw new Error(
-          `Native ${name} stopped during startup. Inspect ${path.join(instance.root, "native/logs", `${name}.log`)}.`,
-        );
+        }
+        // A failed build exits the service, so its log explains the stop.
+        const failure = await startupFailure(instance, ends);
+        if (failure) throw new Error(failure);
+        for (const name of watchedServices) {
+          const ownerStopped = endpoints.some(
+            ([, owner], index) => owner === name && !states[index]!.running,
+          );
+          if (ownerStopped) {
+            // With the service gone, whatever holds its port is another program.
+            for (const [, owner, port] of endpoints)
+              if (owner === name && !(await portFree(port)))
+                throw new Error(
+                  `Native ${name} cannot listen on port ${port}: another program is using it. Quit that program, then try again.`,
+                );
+            throw new Error(
+              `Native ${name} stopped during startup. Inspect ${path.join(instance.root, "native/logs", `${name}.log`)}.`,
+            );
+          }
+        }
+      } else {
+        // A failed listener query proves neither readiness nor a stopped
+        // service; check logs and retry on a later tick.
+        checks = endpoints.map(([service]) => ({ service, ready: false }));
+        const failure = await startupFailure(instance, ends);
+        if (failure) throw new Error(failure);
       }
+    } else {
+      const now = Date.now();
+      checks = httpChecks.map(({ service, ok }) => ({
+        service,
+        ready: ok && !occupied.has(service),
+      }));
+      for (const check of checks) {
+        if (check.ready) recordReady(check.service, now);
+      }
+      // A failed build exits the service, so its log explains the stop.
+      const failure = await startupFailure(instance, ends);
+      if (failure) throw new Error(failure);
+    }
     if (Date.now() >= deadline) {
       const waiting = checks
         .filter((row) => !row.ready)
@@ -752,6 +895,28 @@ async function runNativeSource(
             : Promise.resolve(false as const),
         ]);
         signal.throwIfAborted();
+        const offline = bundled === "verified";
+        if (
+          binaries !== "verified" &&
+          !(await canCompileTeamhubFromSource(current.source!.repo))
+        ) {
+          throw new Error(
+            binaries === "removed"
+              ? "The bundled TeamHub binaries are damaged and could not be verified. Reinstall Linger to restore them."
+              : "The bundled TeamHub binaries are missing and this release does not include Go source files to compile them. Reinstall Linger to restore them.",
+          );
+        }
+        if (
+          options.externalComputer &&
+          !offline &&
+          !(await canBuildNativeServicesFromSource(current.source!.repo))
+        ) {
+          throw new Error(
+            bundled === "removed"
+              ? "The bundled offline Linger services are damaged and could not be verified. Reinstall Linger to restore them."
+              : "The bundled offline Linger services are unavailable (for example due to an incomplete install or Linux older than glibc 2.35) and this release does not include source files to build them. Reinstall Linger to restore them.",
+          );
+        }
         if (binaries !== "absent")
           emit({
             kind: "log",
@@ -770,7 +935,6 @@ async function runNativeSource(
                 ? "Using the bundled Native services; no packages are installed.\n"
                 : "The bundled Native services do not verify; installing the checkout's packages instead.\n",
           });
-        const offline = bundled === "verified";
         // Voice needs LiveKit and ffmpeg; the desktop ships them for each
         // computer. They run whether or not a voice key is set, so a key
         // saved later in the app works without a reinstall. A computer
@@ -815,8 +979,20 @@ async function runNativeSource(
         const voice = configured.liveKit ? voiceTools : undefined;
         // node-services downloads its voice model packages from the region's
         // registry first, and nothing it starts probes again.
-        const region = await resolveRegion(home, { signal });
-        emit({ kind: "log", stage, message: `Download region: ${region}.\n` });
+        let regionInfo: RegionResolutionInfo | undefined;
+        const region = await resolveRegion(home, {
+          signal,
+          onResolved: (info) => {
+            regionInfo = info;
+          },
+        });
+        emit({
+          kind: "log",
+          stage,
+          message: regionInfo
+            ? `${formatRegionResolution(regionInfo)}\n`
+            : `Download region: ${region}.\n`,
+        });
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           ...tools.env,
@@ -1615,31 +1791,73 @@ async function reclaimEarlierProcesses(
 export async function stopNativeSource(
   instance: Instance,
   signal?: AbortSignal,
+  options: { log?: (message: string) => void } = {},
 ) {
   requireNative(instance);
   await withInstanceLock(instance, async () => {
-    signal?.throwIfAborted();
-    await stopComputer(instance, { signal });
-    for (const name of nativeServices) {
-      signal?.throwIfAborted();
+    const timings: [string, string][] = [];
+    const seconds = (ms: number) => (ms / 1000).toFixed(1);
+    const timedStep = async (
+      name: string,
+      label: string,
+      run: () => Promise<void>,
+    ) => {
+      const startedAt = Date.now();
+      let failed = false;
       try {
-        await stopNativeProcess(instance.root, name);
+        await run();
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException | null)?.code;
-        throw Object.assign(
-          new Error(
-            error instanceof Error ? error.message : `Could not stop ${name}.`,
-            { cause: error },
-          ),
-          { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
+        failed = true;
+        throw error;
+      } finally {
+        const elapsed = seconds(Date.now() - startedAt);
+        timings.push([name, elapsed]);
+        options.log?.(
+          failed
+            ? `Stopping ${label} failed after ${elapsed}s.`
+            : `Stopped ${label} in ${elapsed}s.`,
+        );
+      }
+    };
+    try {
+      signal?.throwIfAborted();
+      await timedStep("computer", "native computer", () =>
+        stopComputer(instance, { signal }),
+      );
+      for (const name of nativeServices) {
+        signal?.throwIfAborted();
+        await timedStep(name, `native ${name}`, async () => {
+          try {
+            await stopNativeProcess(instance.root, name);
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException | null)?.code;
+            throw Object.assign(
+              new Error(
+                error instanceof Error
+                  ? error.message
+                  : `Could not stop ${name}.`,
+                { cause: error },
+              ),
+              { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
+            );
+          }
+        });
+      }
+      await timedStep("orphans", "native orphans", () =>
+        reclaimEarlierProcesses(instance, path.resolve(instance.root, "../..")),
+      );
+      await timedStep("gateway", "native model gateway", () =>
+        stopModelGateway(instance, signal),
+      );
+    } finally {
+      if (timings.length > 0) {
+        options.log?.(
+          `Native stop timings (s): ${timings
+            .map(([name, elapsed]) => `${name} ${elapsed}`)
+            .join(", ")}.`,
         );
       }
     }
-    await reclaimEarlierProcesses(
-      instance,
-      path.resolve(instance.root, "../.."),
-    );
-    await stopModelGateway(instance, signal);
   });
 }
 export async function nativeSourceLogs(

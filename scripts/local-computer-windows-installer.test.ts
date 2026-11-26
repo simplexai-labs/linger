@@ -626,6 +626,7 @@ describe("Windows installer trust boundary", () => {
           content: "",
         },
         { path: "cua/cua-driver.exe", content: "fixture driver" },
+        { path: "bin/pi.exe", content: "fixture pi launcher" },
       ];
       const assets = files.map((file) => ({
         path: file.path,
@@ -639,6 +640,7 @@ describe("Windows installer trust boundary", () => {
             schema_version: 1,
             playwright_entry: files[1]!.path,
             pi_extension: files[0]!.path,
+            pi_entry: files[4]!.path,
             cua_entry: files[3]!.path,
             assets,
             artifact_sha256: hash(JSON.stringify(assets)),

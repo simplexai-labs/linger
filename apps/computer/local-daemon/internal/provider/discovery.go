@@ -74,8 +74,12 @@ type DiscoveryResult struct {
 type DiscoveryOptions struct {
 	RuntimeHomeRoot string
 	ConfiguredPaths map[string]string
-	Environment     map[string]string
-	Timeout         time.Duration
+	// ManagedPaths holds installer- or harness-managed Runtime executables
+	// checked after user PATH and macOS app bundles, and before BundledPaths.
+	ManagedPaths map[string]string
+	BundledPaths map[string]string
+	Environment  map[string]string
+	Timeout      time.Duration
 	// Runtimes limits discovery to these types; empty diagnoses every Runtime.
 	Runtimes []string
 	// PreferredRuntime is the type whose diagnostic is marked Preferred.
@@ -394,7 +398,12 @@ func boundedModelCatalogError(err error) string {
 
 func resolveExecutableEntry(ctx context.Context, kind, name string, options DiscoveryOptions) (string, error) {
 	if selected := options.ConfiguredPaths[kind]; selected != "" {
-		return selected, nil
+		if options.ManagedPaths[kind] == "" && options.BundledPaths[kind] == "" {
+			return selected, nil
+		}
+		if _, err := canonicalExecutable(selected); err == nil {
+			return selected, nil
+		}
 	}
 	path := options.Environment["PATH"]
 	if path == "" {
@@ -411,6 +420,16 @@ func resolveExecutableEntry(ctx context.Context, kind, name string, options Disc
 			if _, err := canonicalExecutable(candidate); err == nil {
 				return candidate, nil
 			}
+		}
+	}
+	if managed := options.ManagedPaths[kind]; managed != "" {
+		if _, err := canonicalExecutable(managed); err == nil {
+			return managed, nil
+		}
+	}
+	if bundled := options.BundledPaths[kind]; bundled != "" {
+		if _, err := canonicalExecutable(bundled); err == nil {
+			return bundled, nil
 		}
 	}
 	return "", os.ErrNotExist

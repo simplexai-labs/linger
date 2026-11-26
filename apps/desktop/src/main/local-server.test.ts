@@ -9,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -28,7 +29,11 @@ import {
 
 import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
 import { rename } from "node:fs/promises";
-import { composeProject } from "@linger/local-installation/instance";
+import {
+  atomicPrivate,
+  composeProject,
+  privateDirectory,
+} from "@linger/local-installation/instance";
 
 import { CredentialStore } from "./computer-credential.js";
 import { EnrollmentModule } from "./enrollment.js";
@@ -67,6 +72,7 @@ import {
   stubModule,
   tempDirectory,
   testHost,
+  waitForInstaller,
 } from "./test-support.js";
 
 // These tests unpack source archives with real tar and run the installer stub
@@ -74,8 +80,6 @@ import {
 // take longer on Windows).
 const isWindowsHost = process.platform === "win32";
 vi.setConfig({ testTimeout: isWindowsHost ? 20_000 : 15_000 });
-const waitForInstaller = (check: () => unknown) =>
-  vi.waitFor(check, { timeout: isWindowsHost ? 10_000 : 5_000 });
 
 // Fake timers that still advance with real time, for the installer stub's
 // subprocess; AbortSignal.timeout runs on them too, since the native one
@@ -1726,79 +1730,468 @@ describe("LocalServerModule", () => {
     expect(existsSync(path.join(offline, "verified.json"))).toBe(true);
   });
 
-  it("copies the services and Node.js a Mac build bundles as folders", async () => {
-    const node = (home: string) =>
-      path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
-    const f = fixture({}, {}, (home) =>
-      rmSync(node(home), { recursive: true, force: true }),
-    );
-    const installer = path.join(f.root, "installer");
-    const archive = sourceArchive(f.root);
-    mkdirSync(path.join(installer, "source"));
+  it("fails explicitly instead of falling back to source builds for a minimal 8-file offline skeleton", async () => {
+    const f = fixture();
+    const skeletonRoot = path.join(f.root, "skeleton-tree", "linger-1.0.0");
+    mkdirSync(path.join(skeletonRoot, "apps", "teamhub"), { recursive: true });
+    mkdirSync(path.join(skeletonRoot, "scripts"), { recursive: true });
+    writeFileSync(path.join(skeletonRoot, ".env.example"), "");
     writeFileSync(
-      path.join(installer, "source", "linger.tar.gz"),
-      archive.bytes,
+      path.join(skeletonRoot, "apps", "teamhub", "go.mod"),
+      "module example.com/teamhub\n",
     );
     writeFileSync(
-      path.join(installer, "distribution.json"),
+      path.join(skeletonRoot, "package.json"),
+      JSON.stringify({ name: "linger" }),
+    );
+    writeFileSync(
+      path.join(skeletonRoot, "scripts", "env-inventory.json"),
+      JSON.stringify({ variables: [] }),
+    );
+    writeFileSync(path.join(skeletonRoot, "scripts", "local-defaults.env"), "");
+    writeFileSync(
+      path.join(skeletonRoot, "scripts", "replace-process.mjs"),
+      "",
+    );
+    writeFileSync(path.join(skeletonRoot, "scripts", "source-native.mjs"), "");
+    writeFileSync(path.join(skeletonRoot, "scripts", "with-local-env.mjs"), "");
+
+    const archiveFile = path.join(f.root, "skeleton-linger.tar.gz");
+    execFileSync("tar", [
+      "-czf",
+      archiveFile,
+      "-C",
+      path.join(f.root, "skeleton-tree"),
+      "linger-1.0.0",
+    ]);
+    const archiveBytes = readFileSync(archiveFile);
+    const archiveSha = createHash("sha256").update(archiveBytes).digest("hex");
+
+    mkdirSync(path.join(f.root, "installer", "source"), { recursive: true });
+    writeFileSync(
+      path.join(f.root, "installer", "source", "linger.tar.gz"),
+      archiveBytes,
+    );
+
+    const runtimeBundle = path.join(
+      f.root,
+      "installer",
+      "native",
+      "runtime-linux-x64",
+    );
+    const runtimeTree = path.join(f.root, "skeleton-runtime-tree", "runtime");
+    mkdirSync(runtimeTree, { recursive: true });
+    writeFileSync(
+      path.join(runtimeTree, "files.json"),
       JSON.stringify({
-        platform: "darwin",
-        arch: "arm64",
-        nativeSources: [{ target: "darwin-arm64" }],
+        target: "linux-x64",
+        sourceCommit: "a".repeat(40),
+        sourceArchiveSha256: archiveSha,
+        files: {},
       }),
     );
-    const bundle = path.join(installer, "native", "runtime-darwin-arm64");
-    mkdirSync(path.join(bundle, "runtime", "web"), { recursive: true });
-    mkdirSync(path.join(bundle, "node", "bin"), { recursive: true });
-    const files = JSON.stringify({
-      target: "darwin-arm64",
-      sourceCommit: "a".repeat(40),
-      sourceArchiveSha256: archive.sha256,
-      files: {},
-    });
-    writeFileSync(path.join(bundle, "runtime", "files.json"), files);
-    writeFileSync(path.join(bundle, "runtime", "web", "static-host.mjs"), "");
-    // The signed binary; here the Node.js running the tests.
-    fixtureNode(path.join(bundle, "node", "bin", "node"));
-    const sha256 = (data: string | Buffer) =>
-      createHash("sha256").update(data).digest("hex");
+    mkdirSync(runtimeBundle, { recursive: true });
     writeFileSync(
-      path.join(bundle, "manifest.json"),
+      path.join(runtimeBundle, "runtime.tar.zst"),
+      zstdCompressSync(
+        execFileSync("tar", [
+          "-cf",
+          "-",
+          "-C",
+          path.dirname(runtimeTree),
+          "runtime",
+        ]),
+      ),
+    );
+    const runtimeSha = createHash("sha256")
+      .update(readFileSync(path.join(runtimeBundle, "runtime.tar.zst")))
+      .digest("hex");
+    const writeRuntimeManifest = (sha256 = runtimeSha) =>
+      writeFileSync(
+        path.join(runtimeBundle, "manifest.json"),
+        JSON.stringify({
+          target: "linux-x64",
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: archiveSha,
+          archive: { file: "runtime.tar.zst", sha256, bytes: 1 },
+        }),
+      );
+
+    const runInstall = (glibcVersion = "2.35") =>
+      new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: path.join(f.root, "installer"),
+        platform: "linux",
+        arch: "x64",
+        glibcVersion,
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archiveSha },
+        signIn: f.signIn,
+      }).begin();
+
+    // 1. Linux glibc older than 2.35 fails explicitly instead of skipping silently.
+    writeRuntimeManifest();
+    await expect(runInstall("2.31")).rejects.toThrow(
+      "Linger requires Linux with glibc 2.35 or later (detected 2.31) because this release uses prebuilt offline services.",
+    );
+
+    // 2. Damaged offline runtime archive fails explicitly instead of falling back.
+    writeRuntimeManifest("0".repeat(64));
+    await expect(runInstall("2.35")).rejects.toThrow(
+      /The bundled offline Linger services could not be unpacked or verified \(.*\)\. Reinstall Linger to restore them\./,
+    );
+
+    // 3. Damaged TeamHub binaries fail explicitly instead of falling back to Go compilation.
+    const teamhubBundle = path.join(
+      f.root,
+      "installer",
+      "native",
+      "teamhub-linux-x64",
+    );
+    mkdirSync(teamhubBundle, { recursive: true });
+    writeFileSync(
+      path.join(teamhubBundle, "manifest.json"),
       JSON.stringify({
+        target: "linux-x64",
+        sourceCommit: "a".repeat(40),
+        sourceArchiveSha256: "0".repeat(64),
+        goVersion: "1.26.5",
+        binaries: {},
+      }),
+    );
+    await expect(runInstall("2.35")).rejects.toThrow(
+      /The bundled TeamHub binaries could not be verified \(.*\)\. Reinstall Linger to restore them\./,
+    );
+  });
+
+  it(
+    "copies the services and Node.js a Mac build bundles as folders",
+    async () => {
+      const node = (home: string) =>
+        path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+      const f = fixture({}, {}, (home) =>
+        rmSync(node(home), { recursive: true, force: true }),
+      );
+      const installer = path.join(f.root, "installer");
+      const archive = sourceArchive(f.root);
+      mkdirSync(path.join(installer, "source"));
+      writeFileSync(
+        path.join(installer, "source", "linger.tar.gz"),
+        archive.bytes,
+      );
+      writeFileSync(
+        path.join(installer, "distribution.json"),
+        JSON.stringify({
+          platform: "darwin",
+          arch: "arm64",
+          nativeSources: [{ target: "darwin-arm64" }],
+        }),
+      );
+      const bundle = path.join(installer, "native", "runtime-darwin-arm64");
+      mkdirSync(path.join(bundle, "runtime", "web"), { recursive: true });
+      mkdirSync(path.join(bundle, "node", "bin"), { recursive: true });
+      const files = JSON.stringify({
         target: "darwin-arm64",
         sourceCommit: "a".repeat(40),
         sourceArchiveSha256: archive.sha256,
-        layout: "directory",
-        directory: { file: "runtime/files.json", sha256: sha256(files) },
-        node: {
-          version: NODE_RUNTIME_VERSION,
-          file: "node/bin/node",
-          sha256: sha256(readFileSync(process.execPath)),
-        },
-      }),
-    );
-    await new LocalServerModule({
-      home: f.home,
-      version: APP_VERSION,
-      installerDirectory: installer,
-      platform: "darwin",
-      arch: "arm64",
-      sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
-      signIn: f.signIn,
-    })
-      .begin()
-      .catch(() => undefined);
-    expect(sha256(readFileSync(path.join(node(f.home), "bin", "node")))).toBe(
-      sha256(readFileSync(process.execPath)),
-    );
-    const args = installerArgs(f.home);
-    const offline = path.join(
-      args[args.indexOf("--source-repo") + 1]!,
-      ".simplexai-runtime/offline",
-    );
-    expect(readFileSync(path.join(offline, "files.json"), "utf8")).toBe(files);
-    expect(existsSync(path.join(offline, "web", "static-host.mjs"))).toBe(true);
-    expect(existsSync(`${offline}.partial`)).toBe(false);
+        files: {},
+      });
+      writeFileSync(path.join(bundle, "runtime", "files.json"), files);
+      writeFileSync(path.join(bundle, "runtime", "web", "static-host.mjs"), "");
+      // The signed binary; here the Node.js running the tests.
+      fixtureNode(path.join(bundle, "node", "bin", "node"));
+      const sha256 = (data: string | Buffer) =>
+        createHash("sha256").update(data).digest("hex");
+      writeFileSync(
+        path.join(bundle, "manifest.json"),
+        JSON.stringify({
+          target: "darwin-arm64",
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: archive.sha256,
+          layout: "directory",
+          directory: { file: "runtime/files.json", sha256: sha256(files) },
+          node: {
+            version: NODE_RUNTIME_VERSION,
+            file: "node/bin/node",
+            sha256: sha256(readFileSync(process.execPath)),
+          },
+        }),
+      );
+      await new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: installer,
+        platform: "darwin",
+        arch: "arm64",
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        signIn: f.signIn,
+      })
+        .begin()
+        .catch(() => undefined);
+      expect(sha256(readFileSync(path.join(node(f.home), "bin", "node")))).toBe(
+        sha256(readFileSync(process.execPath)),
+      );
+      const args = installerArgs(f.home);
+      const offline = path.join(
+        args[args.indexOf("--source-repo") + 1]!,
+        ".simplexai-runtime/offline",
+      );
+      expect(readFileSync(path.join(offline, "files.json"), "utf8")).toBe(
+        files,
+      );
+      expect(existsSync(path.join(offline, "web", "static-host.mjs"))).toBe(
+        true,
+      );
+      expect(existsSync(`${offline}.partial`)).toBe(false);
+    },
+    isWindowsHost ? 40_000 : 15_000,
+  );
+
+  it("reuses the shared Computer tools Node.js on Windows and macOS without network downloads", async () => {
+    const sha256 = (data: string | Buffer) =>
+      createHash("sha256").update(data).digest("hex");
+
+    // Windows: copies resources/runtime/bin/node.exe into <home>/desktop/node/v<version>/node.exe.
+    {
+      const nodeDir = (home: string) =>
+        path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+      const f = fixture({}, {}, (home) =>
+        rmSync(nodeDir(home), { recursive: true, force: true }),
+      );
+      const resources = path.join(f.root, "resources");
+      const installer = path.join(resources, "app", "dist", "installer");
+      mkdirSync(installer, { recursive: true });
+      writeFileSync(path.join(installer, "installer.js"), "process.exit(0);\n");
+      writeFileSync(
+        path.join(installer, "distribution.json"),
+        JSON.stringify({
+          platform: "win32",
+          arch: "x64",
+          nativeSources: [{ target: "win32-x64" }],
+        }),
+      );
+      const sharedNode = path.join(resources, "runtime", "bin", "node.exe");
+      mkdirSync(path.dirname(sharedNode), { recursive: true });
+      const nodeBytes = Buffer.from("MZ-fake-windows-node-binary");
+      writeFileSync(sharedNode, nodeBytes);
+
+      const bundle = path.join(installer, "native", "runtime-win32-x64");
+      mkdirSync(bundle, { recursive: true });
+      writeFileSync(
+        path.join(bundle, "manifest.json"),
+        JSON.stringify({
+          target: "win32-x64",
+          sourceArchiveSha256: "a".repeat(64),
+          layout: "archive",
+          node: {
+            version: NODE_RUNTIME_VERSION,
+            shared: true,
+            binary: "runtime/bin/node.exe",
+            sha256: sha256(nodeBytes),
+            bytes: nodeBytes.length,
+          },
+        }),
+      );
+      const archive = sourceArchive(f.root);
+      mkdirSync(path.join(installer, "source"));
+      writeFileSync(
+        path.join(installer, "source", "linger.tar.gz"),
+        archive.bytes,
+      );
+      const fetchMock = vi.fn(async () => {
+        throw new Error("unexpected network download");
+      }) as unknown as typeof fetch;
+
+      await new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: installer,
+        bundledNodePath: sharedNode,
+        platform: "win32",
+        arch: "x64",
+        freeBytes: 1,
+        checkPrivateLocation: async () => {},
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        signIn: f.signIn,
+        fetch: fetchMock,
+      })
+        .begin()
+        .catch(() => undefined);
+
+      const copied = path.join(nodeDir(f.home), "node.exe");
+      expect(existsSync(copied)).toBe(true);
+      expect(readFileSync(copied)).toEqual(nodeBytes);
+      expect(existsSync(`${nodeDir(f.home)}.partial`)).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+
+    // macOS: resolves fallback <resources>/runtime/bin/node when bundledNodePath is omitted.
+    {
+      const nodeDir = (home: string) =>
+        path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+      const f = fixture({}, {}, (home) =>
+        rmSync(nodeDir(home), { recursive: true, force: true }),
+      );
+      const resources = path.join(
+        f.root,
+        "Linger.app",
+        "Contents",
+        "Resources",
+      );
+      const installer = path.join(resources, "app", "dist", "installer");
+      mkdirSync(installer, { recursive: true });
+      writeFileSync(
+        path.join(installer, "installer.js"),
+        readFileSync(path.join(f.root, "installer", "installer.js")),
+      );
+      writeFileSync(
+        path.join(installer, "distribution.json"),
+        JSON.stringify({
+          platform: "darwin",
+          arch: "arm64",
+          nativeSources: [{ target: "darwin-arm64" }],
+        }),
+      );
+      const sharedNode = path.join(resources, "runtime", "bin", "node");
+      mkdirSync(path.dirname(sharedNode), { recursive: true });
+      fixtureNode(sharedNode);
+      const nodeBytes = readFileSync(sharedNode);
+
+      const bundle = path.join(installer, "native", "runtime-darwin-arm64");
+      mkdirSync(bundle, { recursive: true });
+      writeFileSync(
+        path.join(bundle, "manifest.json"),
+        JSON.stringify({
+          target: "darwin-arm64",
+          sourceArchiveSha256: "a".repeat(64),
+          layout: "directory",
+          node: {
+            version: NODE_RUNTIME_VERSION,
+            shared: true,
+            binary: "runtime/bin/node",
+            sha256: sha256(nodeBytes),
+            bytes: nodeBytes.length,
+          },
+        }),
+      );
+      const archive = sourceArchive(f.root);
+      mkdirSync(path.join(installer, "source"));
+      writeFileSync(
+        path.join(installer, "source", "linger.tar.gz"),
+        archive.bytes,
+      );
+      const fetchedUrls: string[] = [];
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        fetchedUrls.push(String(input));
+        throw new Error("unexpected network download");
+      }) as unknown as typeof fetch;
+
+      await new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: installer,
+        platform: "darwin",
+        arch: "arm64",
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        signIn: f.signIn,
+        fetch: fetchMock,
+      })
+        .begin()
+        .catch(() => undefined);
+
+      const copied = path.join(nodeDir(f.home), "bin", "node");
+      expect(existsSync(copied)).toBe(true);
+      expect(sha256(readFileSync(copied))).toBe(sha256(nodeBytes));
+      expect(existsSync(`${nodeDir(f.home)}.partial`)).toBe(false);
+      expect(fetchedUrls.some((url) => url.includes("node-v"))).toBe(false);
+    }
+  });
+
+  it("falls back to downloading Node.js when the shared binary is missing or fails checksum", async () => {
+    for (const mode of ["missing", "tampered"] as const) {
+      const nodeDir = (home: string) =>
+        path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+      const warn = vi.spyOn(silentLog, "warn");
+      const f = fixture({}, {}, (home) =>
+        rmSync(nodeDir(home), { recursive: true, force: true }),
+      );
+      const installer = path.join(f.root, "installer");
+      writeFileSync(
+        path.join(installer, "distribution.json"),
+        JSON.stringify({
+          platform: "win32",
+          arch: "x64",
+          nativeSources: [{ target: "win32-x64" }],
+        }),
+      );
+      const sharedNode = path.join(f.root, "shared", "node.exe");
+      if (mode === "tampered") {
+        mkdirSync(path.dirname(sharedNode), { recursive: true });
+        writeFileSync(sharedNode, "corrupted-bytes");
+      }
+      const bundle = path.join(installer, "native", "runtime-win32-x64");
+      mkdirSync(bundle, { recursive: true });
+      writeFileSync(
+        path.join(bundle, "manifest.json"),
+        JSON.stringify({
+          target: "win32-x64",
+          sourceArchiveSha256: "a".repeat(64),
+          layout: "archive",
+          node: {
+            version: NODE_RUNTIME_VERSION,
+            shared: true,
+            binary: "runtime/bin/node.exe",
+            sha256: "f".repeat(64),
+            bytes: 123,
+          },
+        }),
+      );
+      const fetchedUrls: string[] = [];
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        fetchedUrls.push(String(input));
+        return new Response("missing", { status: 404 });
+      }) as unknown as typeof fetch;
+
+      const archive = sourceArchive(f.root);
+      mkdirSync(path.join(installer, "source"));
+      writeFileSync(
+        path.join(installer, "source", "linger.tar.gz"),
+        archive.bytes,
+      );
+
+      const module = new LocalServerModule({
+        home: f.home,
+        version: APP_VERSION,
+        installerDirectory: installer,
+        bundledNodePath: sharedNode,
+        platform: "win32",
+        arch: "x64",
+        freeBytes: 1,
+        checkPrivateLocation: async () => {},
+        sourceArchive: { file: "source/linger.tar.gz", sha256: archive.sha256 },
+        signIn: f.signIn,
+        fetch: fetchMock,
+      });
+      const host = testHost([
+        stubModule("WindowManager"),
+        stubModule("Enrollment"),
+        module,
+      ]);
+      await host.start();
+      await expect(module.begin()).rejects.toThrow();
+      await host.stop("quit");
+
+      expect(fetchedUrls.some((url) => url.includes("node-v"))).toBe(true);
+      expect(existsSync(path.join(nodeDir(f.home), "node.exe"))).toBe(false);
+      expect(existsSync(`${nodeDir(f.home)}.partial`)).toBe(false);
+      expect(warn).toHaveBeenCalledWith(
+        mode === "missing"
+          ? "local_server.shared_node_missing"
+          : "local_server.shared_node_failed",
+        expect.any(Object),
+      );
+      warn.mockRestore();
+    }
   });
 
   it("checks once whether this computer can serve a local model", async () => {
@@ -3523,6 +3916,89 @@ describe("LocalServerModule install location", () => {
     },
   );
 
+  it("aborts an in-flight inspection without warning when installing into a custom location", async () => {
+    const warn = vi.spyOn(silentLog, "warn");
+    const f = fixture(withCheckout, {}, checkout);
+    const picked = path.join(f.root, "custom-home");
+    writeFileSync(path.join(f.home, "tool-download"), "");
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await waitForInstaller(() =>
+        expect(f.module.status().localModels).toEqual({
+          state: "checking",
+          download: { completed: 5, total: 10 },
+        }),
+      );
+      await f.module.chooseLocation(picked);
+      await f.module.begin({
+        runtime: "codex",
+        byok: {
+          baseUrl: "https://api.example.com",
+          path: "/v1",
+          endpoint: "/responses",
+          protocol: "openai-responses",
+          modelId: "gpt-5.4",
+          runtime: "codex",
+        },
+      });
+      // tool-ready was never created: the check only settled because install aborted it.
+      await waitForInstaller(() =>
+        expect(f.module.status().localModels).toEqual({ state: "unchecked" }),
+      );
+      expect(warn).not.toHaveBeenCalledWith(
+        "local_server.inspect_failed",
+        expect.anything(),
+      );
+      expect(f.module.status().phase).toBe("ready");
+      expect(installerArgs(picked)).toContain(picked);
+    } finally {
+      warn.mockRestore();
+      writeFileSync(path.join(f.home, "tool-ready"), "");
+      await f.host.stop("quit");
+    }
+  });
+
+  it("keeps an in-flight inspection running when installing BYOK into the default location", async () => {
+    const f = fixture(withCheckout, {}, checkout);
+    writeFileSync(path.join(f.home, "tool-download"), "");
+    await f.host.start();
+    try {
+      f.module.inspect();
+      await waitForInstaller(() =>
+        expect(f.module.status().localModels).toEqual({
+          state: "checking",
+          download: { completed: 5, total: 10 },
+        }),
+      );
+      await f.module.begin({
+        runtime: "codex",
+        byok: {
+          baseUrl: "https://api.example.com",
+          path: "/v1",
+          endpoint: "/responses",
+          protocol: "openai-responses",
+          modelId: "gpt-5.4",
+          runtime: "codex",
+        },
+      });
+      // Default-location install succeeds while inspection stays in flight.
+      expect(f.module.status().phase).toBe("ready");
+      expect(f.module.status().localModels.state).toBe("checking");
+      // Releasing the tool download lets the same un-aborted inspection finish cleanly.
+      writeFileSync(path.join(f.home, "tool-ready"), "");
+      await waitForInstaller(() =>
+        expect(f.module.status().localModels).toMatchObject({
+          state: "checked",
+          eligible: true,
+        }),
+      );
+    } finally {
+      writeFileSync(path.join(f.home, "tool-ready"), "");
+      await f.host.stop("quit");
+    }
+  });
+
   it("installs into the folder picked on the setup page", async () => {
     const archive = sourceArchive(tempDirectory());
     const file = path.join(tempDirectory(), "linger.tar.gz");
@@ -3619,6 +4095,40 @@ describe("LocalServerModule install location", () => {
     expect(await checkLocation("relative", 1)).toBe(
       "Choose a folder on this computer.",
     );
+  });
+
+  it("checks the default Windows data folder before launching the installer", async () => {
+    const f = fixture({
+      checkout: "/src",
+      platform: "win32",
+      freeBytes: Number.MAX_SAFE_INTEGER,
+    });
+    await f.host.start();
+    try {
+      await expect(f.module.begin()).rejects.toThrow(/Needs \d+ GB free/);
+      expect(f.module.status().message).toContain(f.home);
+      expect(existsSync(path.join(f.home, "installer", "args.json"))).toBe(
+        false,
+      );
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("reports an unsafe Windows folder without selecting it", async () => {
+    const f = fixture({
+      platform: "win32",
+      checkPrivateLocation: async () => {
+        throw new Error("This folder has shared access.");
+      },
+    });
+    const picked = path.join(f.root, "shared");
+    await f.module.chooseLocation(picked);
+    expect(f.module.status().location).toEqual({
+      path: f.home,
+      custom: false,
+      error: "This folder has shared access.",
+    });
   });
 });
 
@@ -3743,17 +4253,17 @@ describe("LocalServerModule after a restart", () => {
   });
 
   it("syncs the local Runner Gateway URL when node-services moved to a new port on resume", async () => {
-    const writeDesktopInstance = (
+    // Owner-only, as loadInstance requires; plain writes on Windows inherit
+    // the folder's shared DACL.
+    const writeDesktopInstance = async (
       home: string,
       webPort: number,
       nodeServicesPort: number,
     ) => {
       const instanceRoot = path.join(home, "instances", LOCAL_INSTANCE);
-      mkdirSync(instanceRoot, { recursive: true, mode: 0o700 });
-      chmodSync(instanceRoot, 0o700);
-      const file = path.join(instanceRoot, "instance.json");
-      writeFileSync(
-        file,
+      await privateDirectory(instanceRoot);
+      await atomicPrivate(
+        path.join(instanceRoot, "instance.json"),
         JSON.stringify({
           schemaVersion: 1,
           name: LOCAL_INSTANCE,
@@ -3776,14 +4286,10 @@ describe("LocalServerModule after a restart", () => {
             },
           },
         }),
-        { mode: 0o600 },
       );
-      chmodSync(file, 0o600);
     };
-    const f = fixture({}, enrolled, (home) => {
-      record(home);
-      writeDesktopInstance(home, 3000, 59894);
-    });
+    const f = fixture({}, enrolled, record);
+    await writeDesktopInstance(f.home, 3000, 59894);
     await f.host.start();
     await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(f.syncLocalGatewayUrl).toHaveBeenCalledWith(
@@ -4138,6 +4644,143 @@ describe("LocalServerModule after a restart", () => {
       ),
     ).toMatchObject({ repo: current });
     expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await f.host.stop("quit");
+  });
+
+  it("uses Starting instead of Updating for a same-version source bundle refresh and updates local-server.json", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: APP_VERSION,
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    const sources = path.join(f.home, "desktop", "source");
+    const current = path.join(sources, archive.sha256.slice(0, 16));
+    expect(f.showStarting).toHaveBeenCalledOnce();
+    expect(f.showUpdating).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toEqual({
+      home: f.home,
+      repo: current,
+      origin: "http://localhost:3000",
+      version: APP_VERSION,
+    });
+    expect(readdirSync(sources)).toEqual([path.basename(current)]);
+    await f.host.stop("quit");
+
+    // A second launch with the updated local-server.json does not re-trigger
+    // a source update or download.
+    const download = vi.fn(
+      async (_url: string | URL | Request) =>
+        new Response(null, { status: 200 }),
+    );
+    const second = fixture(
+      {
+        home: f.home,
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: download as typeof fetch,
+      },
+      enrolled,
+    );
+    await second.host.start();
+    await waitForInstaller(() =>
+      expect(second.module.status().phase).toBe("ready"),
+    );
+    expect(second.showUpdating).not.toHaveBeenCalled();
+    expect(second.showStarting).not.toHaveBeenCalled();
+    expect(
+      download.mock.calls.some(([url]) =>
+        String(url).startsWith("https://cdn.example/"),
+      ),
+    ).toBe(false);
+    await second.host.stop("quit");
+  });
+
+  it("shows Updating when moving services to a newer version's source package", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = fixture(
+      {
+        sourceArchive: {
+          url: "https://cdn.example/linger.tar.gz",
+          sha256: archive.sha256,
+        },
+        fetch: (async () => new Response(archive.bytes)) as typeof fetch,
+      },
+      enrolled,
+      (home) => {
+        const sources = path.join(home, "desktop", "source");
+        unpackedSource(path.join(sources, "previous"));
+        writeFileSync(
+          path.join(home, "desktop", "local-server.json"),
+          JSON.stringify({
+            home,
+            repo: path.join(sources, "previous"),
+            origin: "http://localhost:3000",
+            version: "0.16.0",
+          }),
+        );
+      },
+    );
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.showUpdating).toHaveBeenCalledOnce();
+    expect(f.showStarting).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("normalizes trailing slashes and symlinks in serving.source so moved records do not stay stale", async () => {
+    const root = tempDirectory();
+    const archive = sourceArchive(root);
+    const f = installedBy(archive);
+    const current = path.join(
+      f.home,
+      "desktop",
+      "source",
+      archive.sha256.slice(0, 16),
+    );
+    let reported = `${current}${path.sep}`;
+    if (!isWindowsHost) {
+      const link = path.join(f.root, "home-link");
+      symlinkSync(f.home, link);
+      reported = `${path.join(link, "desktop", "source", archive.sha256.slice(0, 16))}${path.sep}`;
+    }
+    writeFileSync(path.join(f.home, "resume-serving"), reported);
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    expect(f.showStartFailed).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(path.join(f.home, "desktop", "local-server.json"), "utf8"),
+      ),
+    ).toMatchObject({ repo: current, version: APP_VERSION });
     await f.host.stop("quit");
   });
 

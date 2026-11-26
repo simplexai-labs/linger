@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { probePi } from "./windows-pi-smoke.mjs";
+import { assertNoFreshHarnessPi, probePi } from "./windows-pi-smoke.mjs";
 
 const tempDirs: string[] = [];
 
@@ -71,4 +71,18 @@ it("kills a silent probe at its deadline", async () => {
       200,
     ),
   ).rejects.toThrow("RPC deadline exceeded");
+});
+
+it("verifies that bundled Pi was reused without a fresh harness download", async () => {
+  const home = await privateCwd();
+  await expect(assertNoFreshHarnessPi(home)).resolves.toBeUndefined();
+
+  const piRoot = join(home, "runtime", "harness", "tools", "pi");
+  await mkdir(join(piRoot, "1.5.2"), { recursive: true });
+  await expect(assertNoFreshHarnessPi(home)).resolves.toBeUndefined();
+
+  await writeFile(join(piRoot, "1.5.2", "pi.exe"), "MZ");
+  await expect(assertNoFreshHarnessPi(home)).rejects.toThrow(
+    "Expected bundled Pi reuse",
+  );
 });

@@ -30,7 +30,6 @@ export const agentInfoMessages = defineMessages("agentInfo", {
   editInstructions: "Edit instructions",
   instructionsContent: "Instructions content",
   instructionsUnset: UNSET_AGENT_INSTRUCTIONS,
-  instructionsDescription: "Define how your Agent should work and respond.",
   showMore: "Show more",
   showLess: "Show less",
 
@@ -61,8 +60,6 @@ export const agentInfoMessages = defineMessages("agentInfo", {
   sponsorOnlySkills: "Only the Sponsor can change Skills",
   removeSkill: "Remove {name}",
   noSkillsTitle: "No Skills added",
-  noSkillsBody:
-    "Add a Skill to give this Agent a repeatable way to handle a task.",
   showFewerSkills: "Show fewer",
   showAllSkills: {
     one: "Show all {count} Skill",
@@ -87,8 +84,6 @@ export const agentInfoMessages = defineMessages("agentInfo", {
   avatarBackgroundColor: "Avatar background color",
   avatarUnusable: "This image could not be used. Try a JPEG, PNG, or WebP.",
   editProfile: "Edit profile",
-  profileDescription: "Update your Agent's name and avatar.",
-  avatarDescription: "Update your Agent's avatar.",
   editAgentName: "Edit agent name",
   avatarSaveFailed: "The avatar could not be saved. Try again.",
 

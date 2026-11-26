@@ -11,11 +11,11 @@ The archive holds one folder, Linger-<version>-linux-x64/, with the
 `linger` executable at the top; it runs from wherever it is unpacked. The Go
 daemon goes to resources/computer/ and the browser and computer-control tools
 it loads to resources/cli/ and resources/runtime/ (../computer_tools.py); the
-finished archive is checked for them. With a bundled source package, the
-TeamHub binaries and the Native runtime build.mjs built from it must be there
-and match their manifests and that package (../native_bundle.py). The
-runtime and the bundled PostgreSQL need glibc 2.35 or newer (Ubuntu 22.04,
-Debian 12); on an older system the desktop installs Native from the network.
+finished archive is checked for them. With a bundled source package (the
+minimal source skeleton in release packages), the TeamHub binaries and the
+Native runtime build.mjs built from the full source archive must be there and
+match their manifests and that package (../native_bundle.py). The bundled
+runtime and PostgreSQL require glibc 2.35 or newer (Ubuntu 22.04, Debian 12).
 """
 import argparse
 import json

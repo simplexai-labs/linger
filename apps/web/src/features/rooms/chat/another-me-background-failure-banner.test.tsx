@@ -69,7 +69,7 @@ describe("Another Me background failure banner", () => {
       },
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Background tasks failed 3 times in a row: your Runtime is incompatible, or its model isn't available to your account. Update your local CLI or Linger, or check its model setting.",
+      "Wiki, Memory and daily reports aren't updating: your AI app needs an update, or its model isn't available.",
     );
     expect(
       screen.getByRole("button", { name: "Dismiss background failure notice" }),
@@ -84,7 +84,7 @@ describe("Another Me background failure banner", () => {
     });
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Background tasks failed 4 times in a row: your Runtime needs you to sign in again.",
+        "Wiki, Memory and daily reports aren't updating: sign in to your AI app again.",
       ),
     );
 
@@ -137,7 +137,7 @@ describe("Another Me background failure banner", () => {
       },
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Background tasks failed 7 times in a row: your Runtime needs you to sign in again.",
+      "Wiki, Memory and daily reports aren't updating: sign in to your AI app again.",
     );
 
     // Dismissing, clearing the streak (as RoomShell does), and hitting a new streak shows the banner again.
@@ -156,7 +156,7 @@ describe("Another Me background failure banner", () => {
       },
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Background tasks failed 3 times in a row: your Runtime needs you to sign in again.",
+      "Wiki, Memory and daily reports aren't updating: sign in to your AI app again.",
     );
   });
 
@@ -188,7 +188,7 @@ describe("Another Me background failure banner", () => {
       },
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Background tasks failed 3 times in a row",
+      "Wiki, Memory and daily reports aren't updating",
     );
   });
 
@@ -197,8 +197,7 @@ describe("Another Me background failure banner", () => {
       ...chat,
       background_failure: { consecutive_failures: 5, reason: "unknown" },
     });
-    const unknown =
-      "Background tasks failed 5 times in a row. Wiki, Memory and daily reports may be out of date until a task succeeds.";
+    const unknown = "Wiki, Memory and daily reports aren't updating right now.";
     expect(await screen.findByRole("alert")).toHaveTextContent(unknown);
 
     await answer({

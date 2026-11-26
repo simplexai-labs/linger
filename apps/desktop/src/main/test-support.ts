@@ -1,6 +1,9 @@
 import { copyFileSync, linkSync, mkdtempSync, symlinkSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+import { afterEach, vi } from "vitest";
 
 import { ConfigStore, type DesktopConfig } from "./config.js";
 import type { Logger } from "./log.js";
@@ -12,8 +15,25 @@ export const silentLog: Logger = {
   error: () => {},
 };
 
-export const tempDirectory = (): string =>
-  mkdtempSync(path.join(os.tmpdir(), "desktop-test-"));
+const tempDirectories: string[] = [];
+
+afterEach(async () => {
+  // Windows caps hard links per file. Do not let repeated test runs exhaust
+  // the executable's links and fall back to copying it for every fixture.
+  await Promise.all(
+    tempDirectories
+      .splice(0)
+      .map((directory) =>
+        rm(directory, { recursive: true, force: true, maxRetries: 5 }),
+      ),
+  );
+});
+
+export function tempDirectory(): string {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "desktop-test-"));
+  tempDirectories.push(directory);
+  return directory;
+}
 
 /**
  * Places the running Node.js at a simulated runtime's binary path. The runtime
@@ -34,6 +54,16 @@ export function fixtureNode(binary: string): void {
   };
   put(binary);
   if (path.extname(binary) !== ".exe") put(binary + ".exe");
+}
+
+/**
+ * Waits for state the installer stub's real subprocess reports. Subprocesses
+ * can take longer under load, especially on Windows.
+ */
+export function waitForInstaller<T>(check: () => T): Promise<T> {
+  return vi.waitFor(check, {
+    timeout: process.platform === "win32" ? 10_000 : 5_000,
+  });
 }
 
 export const testHost = (

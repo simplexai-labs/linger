@@ -7,6 +7,7 @@ export const NODE_RUNTIME_RELEASES: Readonly<
   Record<string, { readonly archive: string; readonly sha256: string }>
 >;
 export function nodeRuntimeEntry(target: string): string;
+export function piRuntimeEntry(target: string): string;
 export function validatedComputerToolBundle(
   bundle: string,
   target: string,

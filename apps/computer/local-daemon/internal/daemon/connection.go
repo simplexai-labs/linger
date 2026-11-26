@@ -348,6 +348,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
 	d.modelGatewayUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelGatewayUnavailable))
 	d.runtimeFailureDetail.Store(slices.Contains(command.ServiceFeatures, serviceFeatureRuntimeFailureDetail))
+	d.operationBackgroundWait.Store(slices.Contains(command.ServiceFeatures, serviceFeatureOperationBackgroundWait))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
 	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels); err != nil {
 		return err
@@ -506,6 +507,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.modelInvokeOutcomes.Store(false)
 		d.modelGatewayUnavailable.Store(false)
 		d.runtimeFailureDetail.Store(false)
+		d.operationBackgroundWait.Store(false)
 	}
 	if d.localModelsStream == stream {
 		d.localModelsStream = nil

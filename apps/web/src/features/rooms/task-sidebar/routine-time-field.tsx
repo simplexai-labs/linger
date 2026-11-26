@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useT } from "@/i18n/use-translation";
 
 import { routinesMessages as m } from "./routines.messages";
+import { suppressFollowUpClick } from "@/components/ui/suppress-follow-up-click";
 
 const HOURS = Array.from({ length: 24 }, (_, hour) =>
   String(hour).padStart(2, "0"),
@@ -38,7 +39,10 @@ export function RoutineTimeField({
   useEffect(() => {
     if (!open) return;
     function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (rootRef.current?.contains(event.target as Node)) return;
+      // The paired click would otherwise activate the control under the list.
+      if ((event.button ?? 0) === 0) suppressFollowUpClick(event);
+      setOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") setOpen(false);

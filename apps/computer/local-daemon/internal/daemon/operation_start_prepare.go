@@ -50,7 +50,7 @@ func (d *Daemon) openOperationMCP(ctx context.Context, spec provider.OperationSp
 // An accepted Operation owns its preparation and Context slot even before the
 // provider starts. MCP preparation runs here, off the admission lock, so a slow
 // tool catalog cannot delay accepted or other Contexts' admissions.
-func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Command, spec provider.OperationSpec, prepared *preparedOperation, acceptedRevision uint64, modelGatewayUnavailable bool, emit func(context.Context, protocol.Event) error, cancel context.CancelFunc) {
+func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Command, spec provider.OperationSpec, prepared *preparedOperation, acceptedRevision uint64, modelGatewayUnavailable, operationBackgroundWait bool, emit func(context.Context, protocol.Event) error, cancel context.CancelFunc) {
 	// A compaction of this Context holds its process. It is canceled now, so
 	// its retirement overlaps MCP preparation, and awaited before the start.
 	compactions := d.cancelSessionCompacts(sessionCompactForContext(command.ExecutionContextKey), "run_start")
@@ -136,6 +136,7 @@ func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Co
 			spec.LocalEvidence = proxies.LocalEvidence
 			spec.LocalAllowed = proxies.LocalAllowed
 			spec.RegisterToolReviewer = proxies.RegisterToolReviewer
+			spec.SupportsBackgroundWait = operationBackgroundWait
 			startedAt := time.Now()
 			execution, err = d.executor.Start(ctx, spec, emit)
 			startMs = time.Since(startedAt).Milliseconds()

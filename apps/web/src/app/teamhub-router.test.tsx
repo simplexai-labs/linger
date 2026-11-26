@@ -401,9 +401,14 @@ describe("TeamHub routes", () => {
 
     expect(await screen.findByText("Room shell")).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "This view could not be loaded" }),
+      screen.getByRole("heading", { name: "Couldn't load this page" }),
     ).toBeVisible();
-    expect(screen.getByText("Chat projection unavailable.")).toBeVisible();
+    expect(
+      screen.getByText("Check your connection and try again."),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Chat projection unavailable."),
+    ).not.toBeInTheDocument();
   });
 
   it("opens an authorized Room without waiting for the sidebar Room list", async () => {
@@ -566,7 +571,7 @@ describe("TeamHub routes", () => {
 
     expect(await screen.findByText("Room shell")).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "This view could not be loaded" }),
+      screen.getByRole("heading", { name: "Couldn't load this page" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
   });
@@ -594,7 +599,7 @@ describe("TeamHub routes", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "TeamHub unavailable" }),
+      screen.getByRole("heading", { name: "Can't reach Linger" }),
     ).toBeVisible();
   });
 

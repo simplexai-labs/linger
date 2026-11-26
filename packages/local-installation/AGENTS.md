@@ -410,9 +410,19 @@ Every download offered by both a global host and a mainland-China mirror
 goes through `downloadInRegion` (`region.ts`), which tries the home's
 download region first and never drops a source; the region is
 `SIMPLEX_REGION`, else `<home>/runtime/region.json` (24 hours), else a
-best-of-three npm registry probe (up to 1 MiB per round, fastest wins). When
+best-of-three npm registry probe (up to 1 MiB per round, fastest wins; a
+full-window first round short-circuits only on a 4x margin, when the other
+registry delivered nothing, or on a 2x margin at >= 160 KiB/s, so slow
+cold-start handshakes still run confirmation rounds). When
 the preferred region fails or transfers slowly while a mirror in the other
-region proves faster, the transfer resumes there and rewrites the file. The
+region proves faster, the transfer resumes there and rewrites the file;
+`downloadVerified` keeps `minRemainingMs` while another mirror remains so a
+faster alternate mirror finishing soon completes instead of aborting, and
+keeps slow-mirror comparison enabled until a round measures host throughput.
+`resolveRegion` tracks per-home resolution metadata (`method`, duration `ms`,
+and probe rates) via optional `onResolved`, and `downloadInRegion` /
+`downloadVerified` emit hostname-only diagnostic events (`region_resolved`,
+`slow_switch`, `host_switch`, `region_fallback`) for caller logs. The
 probe is shared per home, but cancellation belongs to each caller: one setup
 leaving does not cancel another, and the last waiter leaving aborts the probe
 so a later caller can retry. Even a cached region respects caller cancellation.
@@ -484,7 +494,16 @@ endpoint probe of up to about 35 s followed by Bifrost's health wait of up to
 180 s) stops it only after that long with no output. The resume mount
 keeps its 90 s wall clock. `prepareByokRuntime` logs elapsed time every 10 s while mounting
 the BYOK gateway (a log line, since the job appends and persists every stage
-event).
+event) and logs separate `runtime` and `gateway` elapsed seconds when done.
+`prepareLocalmodelsTool` waits for and reuses an in-progress cross-process kit
+download when the publication lock reports `INSTANCE_BUSY` (bounded by
+`lockWaitMs` and cancellable via `signal`), logs region/mirror events and kit
+preparation timings (`download`, `unpack`, `verify`); `runLocalmodels` logs sub-phase
+breakdowns (`download`, retries/switches, `extract`, `verify`, `install`,
+`post-download`) alongside its `tool checked in / ran in` line; `waitHealthy`
+logs per-service readiness times and a summary across `web`, `teamhub`,
+`node-services`, and `document-runtime`; `stopNativeSource` and
+`stopLocalmodels` log per-step stop durations and `Native stop timings (s)`.
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

@@ -1148,14 +1148,15 @@ components:
           const: status.changed
         status:
           type: string
-          enum: [queued, working, thinking]
+          enum: [queued, working, thinking, waiting_background]
         title:
           type: string
           minLength: 1
           maxLength: 50000
           description: >-
-            Optional public queue label for queued, or the full provider-visible reasoning
-            summary title for thinking. Omit for working; raw reasoning is never allowed.
+            Optional public queue label for queued, or the full provider-visible reasoning summary
+            title for thinking. Omit for working and waiting_background; raw reasoning is never
+            allowed.
     AgentRuntimeExecutionFailure:
       type: object
       additionalProperties: false

@@ -210,7 +210,7 @@ export interface ModelRespondedEvent {
   agent?: { id: string; parentCallId?: string };
 }
 
-export type RunActivityStatus = "working" | "thinking";
+export type RunActivityStatus = "working" | "thinking" | "waiting_background";
 export type RunActivityKind =
   | "command"
   | "tool"

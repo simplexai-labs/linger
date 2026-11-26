@@ -27,6 +27,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/daemon"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/assignment"
 	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/localmodels"
@@ -1681,5 +1682,136 @@ exec /bin/sh -c "$2"
 		if !strings.Contains(allLogs, reused) {
 			t.Fatalf("missing %q in diagnostics log:\n%s", reused, allLogs)
 		}
+	}
+}
+
+func TestDaemonPiDiscoveryPrecedence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX shell scripts")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	stateDir := filepath.Join(home, "runtime", "localmodels", "state")
+	harness := localmodels.HarnessRoot(stateDir)
+	userBin := filepath.Join(root, "user-bin")
+	emptyBin := filepath.Join(root, "empty-bin")
+	bundledBin := filepath.Join(root, "bundled-bin")
+	explicitBin := filepath.Join(root, "explicit-bin")
+	for _, dir := range []string{home, stateDir, userBin, emptyBin, bundledBin, explicitBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeFakePi := func(path, version string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then echo '%s'; exit 0; fi
+if [ "$1" = "auth" ]; then echo '{"status":"ready"}'; exit 0; fi
+while IFS= read -r line; do
+  case "$line" in
+    *linger-probe*) echo '{"type":"response","id":"linger-probe","command":"get_state","success":true,"data":{"isStreaming":false}}' ;;
+    *linger-state*) echo '{"type":"response","id":"linger-state","command":"get_state","success":true,"data":{"model":null,"thinkingLevel":"off"}}' ;;
+    *linger-models*) echo '{"type":"response","id":"linger-models","command":"get_available_models","success":true,"data":{"models":[]}}' ;;
+  esac
+done
+`, version)
+		if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	canonical := func(path string) string {
+		t.Helper()
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatalf("EvalSymlinks(%q): %v", path, err)
+		}
+		return resolved
+	}
+
+	explicitPi := writeFakePi(filepath.Join(explicitBin, "pi"), "1.8.0")
+	pathPi := writeFakePi(filepath.Join(userBin, "pi"), "1.6.0")
+	bundledPi := writeFakePi(filepath.Join(bundledBin, "pi"), "1.5.2")
+	harnessNewerPi := writeFakePi(filepath.Join(harness, "tools", "pi", "1.7.0", "pi"), "1.7.0")
+	harnessEqualPi := writeFakePi(filepath.Join(harness, "tools", "pi", "1.5.2", "pi"), "1.5.2")
+	harnessLegacyPi := writeFakePi(filepath.Join(harness, "tools", "pi", "1.2.0", "pi"), "1.2.0")
+	bundledWrapperPi := writeFakePi(filepath.Join(home, "runtime", "bundled-pi", "bin", "pi"), "1.5.2")
+
+	toolInstallation := &localtools.Installation{
+		PiEntry:   bundledPi,
+		PiVersion: "1.5.2",
+	}
+
+	discoverPi := func(configured map[string]string, managedPi, searchPath string) provider.RuntimeDiagnostic {
+		t.Helper()
+		configuredPaths, managedPaths, bundledPaths := daemonDiscoveryPaths(configured, stateDir, managedPi, toolInstallation)
+		result, err := provider.Discover(t.Context(), provider.DiscoveryOptions{
+			ConfiguredPaths:  configuredPaths,
+			ManagedPaths:     managedPaths,
+			BundledPaths:     bundledPaths,
+			Runtimes:         []string{"pi"},
+			SkipModelCatalog: true,
+			Timeout:          5 * time.Second,
+			Environment: map[string]string{
+				"HOME":  home,
+				"PATH":  searchPath,
+				"SHELL": filepath.Join(root, "no-shell"),
+			},
+		})
+		if err != nil {
+			t.Fatalf("Discover failed: %v", err)
+		}
+		if len(result.Diagnostics) != 1 || result.Diagnostics[0].Type != "pi" {
+			t.Fatalf("unexpected diagnostics: %+v", result.Diagnostics)
+		}
+		return result.Diagnostics[0]
+	}
+
+	// 1. Explicit SIMPLEX_PI_PATH (computer.RuntimePaths["pi"]) beats PATH 1.6,
+	//    harness 1.7, and bundled 1.5.2.
+	got := discoverPi(map[string]string{"pi": explicitPi}, harnessNewerPi, userBin)
+	if got.Version != "1.8.0" || got.ExecutablePath != canonical(explicitPi) {
+		t.Fatalf("explicit pi precedence: got version=%q exe=%q, want 1.8.0 at %q", got.Version, got.ExecutablePath, canonical(explicitPi))
+	}
+
+	// 2. User PATH 1.6 beats strictly newer harness 1.7 and bundled 1.5.2.
+	got = discoverPi(nil, harnessNewerPi, userBin)
+	if got.Version != "1.6.0" || got.ExecutablePath != canonical(pathPi) {
+		t.Fatalf("user PATH vs harness 1.7: got version=%q exe=%q, want 1.6.0 at %q", got.Version, got.ExecutablePath, canonical(pathPi))
+	}
+
+	// 3. Strictly newer harness 1.7 beats bundled 1.5.2 when user PATH is empty.
+	got = discoverPi(nil, "", emptyBin)
+	if got.Version != "1.7.0" || got.ExecutablePath != canonical(harnessNewerPi) {
+		t.Fatalf("harness 1.7 vs bundled 1.5.2: got version=%q exe=%q, want 1.7.0 at %q", got.Version, got.ExecutablePath, canonical(harnessNewerPi))
+	}
+
+	// 4. Legacy harness 1.2 and equal harness 1.5.2 lose to bundled 1.5.2 even
+	//    when model-source.json or managedPi names harness 1.2 or configured
+	//    names the bundled-pi wrapper.
+	if err := os.RemoveAll(filepath.Join(harness, "tools", "pi", "1.7.0")); err != nil {
+		t.Fatal(err)
+	}
+	overlayDoc, err := json.Marshal(map[string]any{
+		"schema":        "localmodels.model-source/v1",
+		"mode":          "local",
+		"runtime":       "pi",
+		"runtime_paths": map[string]string{"pi": harnessLegacyPi},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "model-source.json"), overlayDoc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = discoverPi(map[string]string{"pi": bundledWrapperPi}, harnessLegacyPi, emptyBin)
+	if got.Version != "1.5.2" || got.ExecutablePath != canonical(bundledPi) {
+		t.Fatalf("legacy/equal harness (%q, %q) vs bundled 1.5.2: got version=%q exe=%q, want 1.5.2 at %q",
+			harnessLegacyPi, harnessEqualPi, got.Version, got.ExecutablePath, canonical(bundledPi))
 	}
 }

@@ -115,6 +115,8 @@ interface EndpointState {
   readonly key: string;
   readonly endpoint: ModelEndpoint;
   active: number;
+  /** Operations temporarily suspended while waiting on background tools. */
+  suspended: number;
   /** Active units that are not yieldable background calls. */
   activeNonBackground: number;
   /** A timed request lies within its unit's place, so the history never
@@ -354,6 +356,7 @@ export class ModelQueue {
         key,
         endpoint,
         active: 0,
+        suspended: 0,
         activeNonBackground: 0,
         occupancy: new Occupancy(this.now()),
         waiting: [],
@@ -384,11 +387,16 @@ export class ModelQueue {
     const nonBackground = !isBackgroundModelCall(work.kind);
     let result: ModelLeaseResult | undefined;
     let borrowers = 0;
+    let suspended = false;
     const finish = () => {
       if (!result || borrowers > 0) return;
-      state.active -= 1;
-      if (nonBackground) state.activeNonBackground -= 1;
-      state.occupancy.record(this.now(), state.active);
+      if (suspended) {
+        state.suspended -= 1;
+      } else {
+        state.active -= 1;
+        if (nonBackground) state.activeNonBackground -= 1;
+        state.occupancy.record(this.now(), state.active);
+      }
       logAgentEvent("info", "model_queue.finished", {
         kind: work.kind,
         key: work.key.slice(0, 200),
@@ -415,6 +423,23 @@ export class ModelQueue {
             finish();
           },
         };
+      },
+      suspend: () => {
+        if (result || suspended) return;
+        suspended = true;
+        state.active -= 1;
+        state.suspended += 1;
+        if (nonBackground) state.activeNonBackground -= 1;
+        state.occupancy.record(this.now(), state.active);
+        this.#drain(state);
+      },
+      resume: () => {
+        if (result || !suspended) return;
+        suspended = false;
+        state.suspended -= 1;
+        state.active += 1;
+        if (nonBackground) state.activeNonBackground += 1;
+        state.occupancy.record(this.now(), state.active);
       },
       release(outcome) {
         if (result) return;
@@ -480,6 +505,7 @@ export class ModelQueue {
   #prune(state: EndpointState): void {
     if (
       state.active === 0 &&
+      state.suspended === 0 &&
       state.waiting.length === 0 &&
       this.#endpoints.get(state.key) === state
     ) {

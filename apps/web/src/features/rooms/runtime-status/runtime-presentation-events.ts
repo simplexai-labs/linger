@@ -51,7 +51,7 @@ export type RuntimeChatPresentationItem =
       outputs?: readonly RuntimeOutputPresentation[];
       plan?: RuntimePlanPresentation;
       segmentId: string;
-      status: "queued" | "working" | "thinking";
+      status: "queued" | "working" | "thinking" | "waiting_background";
       terminalOutcome?: "canceled" | "completed" | "failed";
       failure?: RuntimeExecutionFailure;
       unconfirmedInputIds?: readonly string[];
@@ -66,7 +66,7 @@ export type RuntimeChatPresentationItem =
     };
 
 export interface RuntimeChatPresentation {
-  currentStatus?: "queued" | "working" | "thinking";
+  currentStatus?: "queued" | "working" | "thinking" | "waiting_background";
   currentTitle?: string;
   items: readonly RuntimeChatPresentationItem[];
 }
@@ -83,7 +83,7 @@ interface MutableSegment {
   outputs: RuntimeOutputPresentation[];
   plan?: RuntimePlanPresentation;
   segmentId: string;
-  status?: "queued" | "working" | "thinking";
+  status?: "queued" | "working" | "thinking" | "waiting_background";
   terminalOutcome?: "canceled" | "completed" | "failed";
   failure?: RuntimeExecutionFailure;
   unconfirmedInputIds?: readonly string[];
@@ -97,7 +97,12 @@ export function projectRuntimeChatPresentation(
   const items: RuntimeChatPresentationItem[] = [];
   const activities = new Map<string, MutableActivity>();
   let currentPlan: RuntimePlanPresentation | undefined;
-  let currentStatus: "queued" | "working" | "thinking" | undefined;
+  let currentStatus:
+    | "queued"
+    | "working"
+    | "thinking"
+    | "waiting_background"
+    | undefined;
   let currentTitle: string | undefined;
   let segment: MutableSegment | undefined;
 
@@ -201,7 +206,10 @@ export function projectRuntimeChatPresentation(
         currentTitle = undefined;
       } else {
         currentStatus = event.status;
-        currentTitle = event.status === "working" ? undefined : event.title;
+        currentTitle =
+          event.status === "working" || event.status === "waiting_background"
+            ? undefined
+            : event.title;
         selected.status = currentStatus;
         selected.title = currentTitle;
         if (event.status === "thinking") {

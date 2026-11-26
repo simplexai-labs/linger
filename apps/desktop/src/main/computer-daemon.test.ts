@@ -6,6 +6,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import * as fs from "node:fs";
+import * as childProcess from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -29,6 +31,9 @@ import type {
   SystemPermission,
   SystemPermissionId,
 } from "./system-permissions.js";
+
+vi.mock("node:fs", { spy: true });
+vi.mock("node:child_process", { spy: true });
 
 const TOKEN = "sr1.test-credential-0123456789abcdefghij";
 
@@ -785,6 +790,49 @@ describe("restartDelay", () => {
       1_000, 2_000, 4_000, 60_000,
     ]);
   });
+});
+
+it("keeps handling daemon status after the log disk fills up", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "spawn-daemon-"));
+  const log = path.join(directory, "computer-daemon.log");
+  const { createWriteStream } = fs;
+  const { spawn } = childProcess;
+  const openLog = vi.spyOn(fs, "createWriteStream").mockImplementationOnce(() =>
+    createWriteStream(log, {
+      fs: {
+        open: fs.open,
+        close: fs.close,
+        write: (_fd, _buffer, _offset, _length, _position, callback) => {
+          callback(
+            Object.assign(new Error("no space left"), { code: "ENOSPC" }),
+            0,
+          );
+        },
+      },
+    }),
+  );
+  const launch = vi.spyOn(childProcess, "spawn").mockImplementationOnce(() =>
+    spawn(process.execPath, [
+      "-e",
+      `process.stderr.write("daemon started\\n");
+       process.stdin.once("data", () => console.log('{"type":"status"}'));`,
+    ]),
+  );
+  try {
+    const child = spawnDaemon(process.execPath, log)("config.json", {});
+    const stream = openLog.mock.results[0]!.value;
+    await new Promise<void>((resolve) => stream.once("close", resolve));
+    const status = new Promise<string>((resolve) => child.onLine(resolve));
+    const exit = new Promise<number | null>((resolve) => child.onExit(resolve));
+    child.write("status");
+    await expect(status).resolves.toBe('{"type":"status"}');
+    child.stop();
+    await expect(exit).resolves.toBe(0);
+  } finally {
+    launch.mockRestore();
+    openLog.mockRestore();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 describe.skipIf(process.platform === "win32")("spawnDaemon", () => {

@@ -255,16 +255,6 @@ export function UpdateDriverDialog({
 
   return (
     <ModalDialog
-      description={
-        model
-          ? t(m.driverDialogDescriptionForModel, {
-              computer: view.computer.display_name,
-              model: model.name,
-            })
-          : t(m.driverDialogDescriptionHost, {
-              computer: view.computer.display_name,
-            })
-      }
       footer={
         <>
           {onRecheck && !offline ? (
@@ -571,9 +561,6 @@ export function UpdateDriverDialog({
                 </p>
               </>
             )}
-            <p className="text-xs text-muted-foreground">
-              {t(m.driverDialogWindowsRestartNote)}
-            </p>
           </div>
         )}
 

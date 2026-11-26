@@ -115,6 +115,69 @@ it("recovers from a single-round hiccup through best-of-three confirmation", asy
   expect(order[0]?.registry).toBe("https://registry.npmmirror.com/");
 });
 
+it("confirms across rounds when a slow cold-start first round has only a modest lead under the default 4s window", async () => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "performance"],
+  });
+  try {
+    let npmCalls = 0;
+    let mirrorCalls = 0;
+    const probe = probeNpmRegistries(
+      new AbortController().signal,
+      async (url) => {
+        if ((url as URL | string).toString().includes("npmmirror")) {
+          mirrorCalls += 1;
+          // ~110 KiB/s across the default 4_000 ms window (below 160 KiB/s).
+          return slow(440 * 1024);
+        }
+        npmCalls += 1;
+        // Cold-start round 0 gets ~50 KiB/s (ratio 2.2, below 4x and 160 KiB/s);
+        // warmed rounds deliver the full 1 MiB target immediately.
+        return npmCalls === 1
+          ? slow(200 * 1024)
+          : new Response(new Uint8Array(1024 * 1024));
+      },
+    );
+    await vi.advanceTimersByTimeAsync(4_000);
+    const order = await probe;
+    expect(npmCalls).toBe(3);
+    expect(mirrorCalls).toBe(3);
+    expect(order[0]?.registry).toBe("https://registry.npmjs.org/");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("short-circuits in round 0 under the default 4s window on a sustained >= 160 KiB/s 2x lead", async () => {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "performance"],
+  });
+  try {
+    let npmCalls = 0;
+    let mirrorCalls = 0;
+    const probe = probeNpmRegistries(
+      new AbortController().signal,
+      async (url) => {
+        if ((url as URL | string).toString().includes("npmmirror")) {
+          mirrorCalls += 1;
+          // 80 KiB/s across the 4_000 ms window.
+          return slow(320 * 1024);
+        }
+        npmCalls += 1;
+        // 200 KiB/s across the 4_000 ms window (ratio 2.5 >= 2 and >= 160 KiB/s).
+        return slow(800 * 1024);
+      },
+    );
+    await vi.advanceTimersByTimeAsync(4_000);
+    const order = await probe;
+    expect(npmCalls).toBe(1);
+    expect(mirrorCalls).toBe(1);
+    expect(order[0]?.registry).toBe("https://registry.npmjs.org/");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("measures nothing when neither registry answers", async () => {
   expect(
     await probeNpmRegistries(

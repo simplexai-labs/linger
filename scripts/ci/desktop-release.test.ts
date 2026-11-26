@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync, verify } from "node:crypto";
 import {
   chmodSync,
@@ -11,9 +11,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { gunzipSync } from "node:zlib";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { SOURCE_SKELETON_FILES } from "../prepare-source-archive.mjs";
 
 const script = join(process.cwd(), "scripts/ci/desktop-release.sh");
 const temporary: string[] = [];
@@ -309,6 +312,111 @@ describe("desktop-release.sh build", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("DESKTOP_REQUIRE_MACOS_SIGNING");
+  });
+
+  it("prepares minimal shipped and full build archives from one commit for compile", () => {
+    const root = folder();
+    const out = folder();
+    const record = join(root, "build-env.json");
+    mkdirSync(join(root, "scripts/ci"), { recursive: true });
+    mkdirSync(join(root, "apps/desktop"), { recursive: true });
+    copyFileSync(script, join(root, "scripts/ci/desktop-release.sh"));
+    copyFileSync(
+      join(process.cwd(), "scripts/prepare-source-archive.mjs"),
+      join(root, "scripts/prepare-source-archive.mjs"),
+    );
+    for (const relativePath of SOURCE_SKELETON_FILES) {
+      const target = join(root, relativePath);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(
+        target,
+        relativePath === "package.json"
+          ? '{"name":"linger"}\n'
+          : `${relativePath}\n`,
+      );
+    }
+    writeFileSync(join(root, "README.md"), "full-only\n");
+    writeFileSync(
+      join(root, "apps/desktop/package.json"),
+      `${JSON.stringify({ name: "@linger/desktop", version: "0.0.0" }, null, 2)}\n`,
+    );
+    writeFileSync(
+      join(root, "apps/desktop/build.mjs"),
+      [
+        'import { readFileSync, writeFileSync } from "node:fs";',
+        'const pkg = JSON.parse(readFileSync("package.json", "utf8"));',
+        "writeFileSync(process.env.RECORD_FILE, JSON.stringify({",
+        "  shipped: process.env.LINGER_SOURCE_ARCHIVE_FILE,",
+        "  full: process.env.LINGER_BUILD_SOURCE_ARCHIVE_FILE,",
+        "  target: process.env.LINGER_DESKTOP_DAEMON_TARGETS,",
+        "  version: pkg.version,",
+        "}));",
+        "",
+      ].join("\n"),
+    );
+    const git = (...args: string[]) =>
+      execFileSync(
+        "git",
+        ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", ...args],
+        { encoding: "utf8" },
+      ).trim();
+    git("init", "-q");
+    git("add", ".");
+    git("commit", "-q", "-m", "init");
+    const head = git("rev-parse", "HEAD");
+
+    const result = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: out,
+        RECORD_FILE: record,
+      },
+      join(root, "scripts/ci/desktop-release.sh"),
+    );
+
+    expect(result.status).toBe(0);
+    const recorded = JSON.parse(readFileSync(record, "utf8")) as {
+      shipped: string;
+      full: string;
+      target: string;
+      version: string;
+    };
+    expect(recorded.target).toBe("linux-x64");
+    expect(recorded.version).toBe("1.2.3");
+    expect(recorded.shipped.startsWith(join(out, "source/shipped/"))).toBe(
+      true,
+    );
+    expect(recorded.full.startsWith(join(out, "source/full/"))).toBe(true);
+
+    const paxCommit = (archive: string) => {
+      const tar = gunzipSync(readFileSync(archive));
+      return /comment=([0-9a-f]{40})\n/.exec(
+        tar.subarray(512, 1024).toString(),
+      )?.[1];
+    };
+    expect(paxCommit(recorded.shipped)).toBe(head);
+    expect(paxCommit(recorded.full)).toBe(head);
+
+    const listEntries = (archive: string) =>
+      execFileSync("tar", ["-tzf", archive], { encoding: "utf8" })
+        .trim()
+        .split("\n");
+    const shippedFiles = listEntries(recorded.shipped).filter(
+      (entry) => !entry.endsWith("/"),
+    );
+    const fullEntries = listEntries(recorded.full);
+    expect(shippedFiles).toHaveLength(SOURCE_SKELETON_FILES.length);
+    expect(shippedFiles.some((entry) => entry.endsWith("/README.md"))).toBe(
+      false,
+    );
+    expect(fullEntries.some((entry) => entry.endsWith("/README.md"))).toBe(
+      true,
+    );
+    expect(
+      JSON.parse(readFileSync(join(root, "apps/desktop/package.json"), "utf8"))
+        .version,
+    ).toBe("0.0.0");
   });
 });
 

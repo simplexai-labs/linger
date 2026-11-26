@@ -32,6 +32,9 @@ const (
 )
 
 func init() {
+	if len(os.Args) == 3 && os.Args[1] == "antigravity-hook" {
+		os.Exit(AntigravityRunHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
+	}
 	if mode := os.Getenv(agyFakeEnv); mode != "" {
 		os.Exit(agyFake(mode, os.Args[1:]))
 	}
@@ -47,14 +50,20 @@ type agyFakeProcess struct {
 	mode      string
 	geminiDir string
 	logFile   string
+	addDir    string
 	out       sync.Mutex
 	record    *os.File
 	authed    bool
 	mcpMu     sync.Mutex
 	mcpList   []agyFakeMCPTarget
 	// answers carries the client's responses to the fake's own requests.
-	answers chan map[string]any
-	closed  chan struct{}
+	answers     chan map[string]any
+	closed      chan struct{}
+	promptMu    sync.Mutex
+	promptCount int
+	p1ID        json.RawMessage
+	p1Done      bool
+	toolDone    chan struct{}
 }
 
 func (f *agyFakeProcess) send(value any) {
@@ -140,7 +149,7 @@ func agyFake(mode string, args []string) int {
 		fmt.Fprintln(os.Stderr, "unexpected argv")
 		return 2
 	}
-	var geminiDir, logFile string
+	var geminiDir, logFile, addDir string
 	for i := 1; i < len(args); i += 2 {
 		if i+1 >= len(args) {
 			fmt.Fprintln(os.Stderr, "missing flag value")
@@ -159,6 +168,12 @@ func agyFake(mode string, args []string) int {
 				fmt.Fprintln(os.Stderr, "log-file must be absolute")
 				return 2
 			}
+		case "--add-dir":
+			addDir = args[i+1]
+			if !filepath.IsAbs(addDir) {
+				fmt.Fprintln(os.Stderr, "add-dir must be absolute")
+				return 2
+			}
 		default:
 			fmt.Fprintln(os.Stderr, "unexpected flag:", args[i])
 			return 2
@@ -168,8 +183,10 @@ func agyFake(mode string, args []string) int {
 		mode:      mode,
 		geminiDir: geminiDir,
 		logFile:   logFile,
+		addDir:    addDir,
 		answers:   make(chan map[string]any, 1),
 		closed:    make(chan struct{}),
+		toolDone:  make(chan struct{}),
 	}
 	f.writeStartupFiles(args)
 	if pidFile := os.Getenv(agyFakePIDFileEnv); pidFile != "" {
@@ -233,11 +250,43 @@ func (f *agyFakeProcess) writeStartupFiles(args []string) {
 		"args":      args,
 		"geminiDir": f.geminiDir,
 		"logFile":   f.logFile,
+		"addDir":    f.addDir,
 		"home":      os.Getenv("HOME"),
 		"token":     string(token),
 		"settings":  string(settings),
 	})
 	_ = os.WriteFile(metaPath, meta, 0o600)
+}
+
+func (f *agyFakeProcess) callHook(payload map[string]any) AntigravityHookResponse {
+	if f.addDir == "" {
+		return AntigravityHookResponse{}
+	}
+	raw, err := os.ReadFile(filepath.Join(f.addDir, ".agents", "hooks.json"))
+	if err != nil {
+		return AntigravityHookResponse{}
+	}
+	var doc map[string]map[string][]map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return AntigravityHookResponse{}
+	}
+	cmdStr, _ := doc["linger-steer"]["PreInvocation"][0]["command"].(string)
+	idx := strings.Index(cmdStr, "http://127.0.0.1:")
+	if idx < 0 {
+		return AntigravityHookResponse{}
+	}
+	urlPart := cmdStr[idx:]
+	if end := strings.IndexAny(urlPart, "'\" "); end >= 0 {
+		urlPart = urlPart[:end]
+	}
+	encoded, _ := json.Marshal(payload)
+	var out, errBuf bytes.Buffer
+	if AntigravityRunHook(bytes.NewReader(encoded), &out, &errBuf, urlPart) != 0 {
+		return AntigravityHookResponse{}
+	}
+	var resp AntigravityHookResponse
+	_ = json.Unmarshal(out.Bytes(), &resp)
+	return resp
 }
 
 func (f *agyFakeProcess) checkAuth(id json.RawMessage) bool {
@@ -432,6 +481,108 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string
 			f.fail(id, -32603, err.Error())
 			return
 		}
+	}
+	f.promptMu.Lock()
+	f.promptCount++
+	promptNum := f.promptCount
+	if promptNum == 1 {
+		f.p1ID = id
+	}
+	f.promptMu.Unlock()
+
+	if f.mode == "steer-hook" {
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Before tool."}})
+		f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call-1", "name": "run_command", "title": "ls", "kind": "execute", "status": "pending", "rawInput": map[string]any{"CommandLine": "ls"}})
+		f.update(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "completed", "content": []any{
+			map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "a.txt"}},
+		}})
+		var steered []string
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			resp := f.callHook(map[string]any{
+				"hookEventName":  "PreInvocation",
+				"conversationId": sessionID,
+				"invocationNum":  1,
+			})
+			if len(resp.InjectSteps) > 0 {
+				for _, step := range resp.InjectSteps {
+					steered = append(steered, step.UserMessage)
+				}
+				break
+			}
+			select {
+			case <-f.closed:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		reply := "NO_STEER"
+		if len(steered) > 0 {
+			reply = "STEERED:" + strings.Join(steered, "|")
+		}
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": reply}})
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 5, "outputTokens": 3}})
+		return
+	}
+
+	if f.mode == "waiting-background-v2" {
+		if promptNum == 1 {
+			f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call-sched-1", "name": "schedule", "title": "schedule", "kind": "other", "status": "pending", "rawInput": map[string]any{"DurationSeconds": 60}})
+			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Scheduled."}})
+			fullyIdle := false
+			f.callHook(map[string]any{
+				"hookEventName":  "Stop",
+				"conversationId": sessionID,
+				"fullyIdle":      fullyIdle,
+			})
+			select {
+			case <-f.toolDone:
+			case <-f.closed:
+			}
+			return
+		}
+		f.promptMu.Lock()
+		p1ID := f.p1ID
+		alreadySent := f.p1Done
+		f.p1Done = true
+		f.promptMu.Unlock()
+		if !alreadySent && len(p1ID) > 0 {
+			f.result(p1ID, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 10, "outputTokens": 2}})
+			close(f.toolDone)
+		}
+		preResp := f.callHook(map[string]any{
+			"hookEventName":  "PreInvocation",
+			"conversationId": sessionID,
+			"invocationNum":  1,
+		})
+		extra := ""
+		if len(preResp.InjectSteps) > 0 {
+			extra = " [unexpected-inject]"
+		}
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Woken:" + promptText + extra}})
+		f.update(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call-sched-1", "status": "completed", "content": []any{}})
+		f.callHook(map[string]any{
+			"hookEventName":  "Stop",
+			"conversationId": sessionID,
+			"fullyIdle":      true,
+		})
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 20, "outputTokens": 5}})
+		return
+	}
+
+	if f.mode == "background-wake" {
+		if promptNum == 1 {
+			f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call-1", "name": "run_command", "title": "sleep 60", "kind": "execute", "status": "pending", "rawInput": map[string]any{"CommandLine": "sleep 60"}})
+			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Running in the background."}})
+			f.result(id, map[string]any{"stopReason": "end_turn"})
+			return
+		}
+		f.update(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "completed", "content": []any{
+			map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "done"}},
+		}})
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "WokenLegacy:" + promptText}})
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 8, "outputTokens": 3}})
+		return
 	}
 	f.update(sessionID, map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "**Looking** around"}})
 	f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Let me check."}})

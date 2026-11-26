@@ -101,7 +101,6 @@ describe("web search in the language on screen", () => {
     expect(
       within(dialog).getByRole("button", { name: connectors.removeKey }),
     ).toHaveAttribute("data-voice-risk", "never");
-    expect(dialog).toHaveTextContent(keyField.storedEncrypted);
   });
 
   it("words the chat's search key card in Chinese", async () => {

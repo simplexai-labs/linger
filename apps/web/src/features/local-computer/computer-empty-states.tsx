@@ -65,7 +65,6 @@ export function ConnectComputerDialog({
   const t = useT();
   return (
     <ModalDialog
-      description={t(computersMessages.connectDialogDescription)}
       onClose={onClose}
       size="md"
       title={t(computersMessages.connectDialogTitle)}

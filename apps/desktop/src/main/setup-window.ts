@@ -56,8 +56,9 @@ export interface SetupWindowOptions {
   readonly preload: string;
   readonly version: string;
   readonly defaultDisplayName: string;
-  // Open on start; set when this computer is not connected yet.
-  readonly show: boolean;
+  // Open on start; set when this computer is not connected yet. Accepts a
+  // predicate so recovery during LocalServer.start() is observed before show.
+  readonly show: boolean | (() => boolean);
   readonly loginItem: {
     get(): boolean;
     set(on: boolean): void;
@@ -170,7 +171,11 @@ export class SetupWindowModule implements Module {
       ctx.bus.on("server.moved", onCookie),
       ctx.bus.on("setup.open", () => this.show()),
     );
-    if (this.#options.show) this.show();
+    const show =
+      typeof this.#options.show === "function"
+        ? this.#options.show()
+        : this.#options.show;
+    if (show) this.show();
   }
 
   async stop(): Promise<void> {

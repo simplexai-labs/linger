@@ -624,6 +624,9 @@ export const spawnDaemon =
       windowsHide: true,
     });
     const log = createWriteStream(logFile, { flags: "a", mode: 0o600 });
+    // A full disk can break the log while the daemon is still serving. Keep
+    // consuming its output and reporting its status until it actually exits.
+    log.on("error", () => {});
     const lines: ((line: string) => void)[] = [];
     const exits: ((code: number | null, reason?: string) => void)[] = [];
     let exiting = false;
@@ -654,13 +657,13 @@ export const spawnDaemon =
     });
     createInterface({ input: child.stdout }).on("line", (line) => {
       if (line.startsWith("{")) for (const listener of lines) listener(line);
-      else log.write(`${line}\n`);
+      else if (!log.destroyed) log.write(`${line}\n`);
     });
     // stdin errors when the daemon already exited; exit reports that.
     child.stdin.on("error", () => {});
     child.on("error", (error) => {
       reason = `spawn failed: ${String(error)}`;
-      log.write(`${reason}\n`);
+      if (!log.destroyed) log.write(`${reason}\n`);
       exit(null);
     });
     // close follows exit once stdout and stderr are drained into the log.

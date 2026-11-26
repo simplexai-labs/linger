@@ -31,7 +31,6 @@ describe("Connected apps", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Connect Slack" });
     expect(dialog).toHaveTextContent("COMPOSIO_API_KEY");
-    expect(dialog).toHaveTextContent("TEAMHUB_SECRET_ENCRYPTION_KEY");
     expect(
       within(dialog).queryByLabelText("Composio API key"),
     ).not.toBeInTheDocument();
@@ -67,24 +66,17 @@ describe("Connected apps", () => {
       await screen.findByRole("button", { name: "Connect Slack" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Connect Slack" });
+    expect(dialog.querySelector(".app-dialog-description")).toBeNull();
+    expect(dialog.querySelector("ol")).toBeNull();
+    expect(dialog).toHaveTextContent("Get your API key");
     expect(dialog).toHaveTextContent(
-      "Connect Slack securely through Composio. Add your API key once to enable your connectors.",
+      "Don't forget to select Read All and Write All.",
     );
-    expect(dialog).toHaveTextContent("full read and write access");
-    expect(dialog).toHaveTextContent("Read All");
-    expect(dialog).toHaveTextContent("Write All");
-    expect(dialog).toHaveTextContent(
+    expect(dialog).not.toHaveTextContent("securely through Composio");
+    expect(dialog).not.toHaveTextContent(
       "Permissions cannot be changed after a key is created",
     );
-    expect(dialog).toHaveTextContent(
-      "Copy the key, paste it below, and select Save key",
-    );
-    expect(dialog).toHaveTextContent(
-      "select Connect, and complete authorization",
-    );
-    expect(dialog).toHaveTextContent(
-      "Read-only keys cannot create the authorization",
-    );
+    expect(dialog).not.toHaveTextContent("stored encrypted");
     expect(
       within(dialog).getByRole("link", { name: "Get a key" }),
     ).toHaveAttribute(
@@ -94,13 +86,25 @@ describe("Connected apps", () => {
     expect(createConnection).not.toHaveBeenCalled();
 
     listApps.mockRestore();
-    fireEvent.change(within(dialog).getByLabelText("Composio API key"), {
+    const keyInput = within(dialog).getByLabelText("Composio API key");
+    expect(keyInput).not.toHaveAttribute("aria-describedby");
+    fireEvent.change(keyInput, {
       target: { value: " ck_live " },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save key" }));
-    fireEvent.click(
-      await within(dialog).findByRole("button", { name: "Connect Slack" }),
-    );
+    const connectButton = await within(dialog).findByRole("button", {
+      name: "Connect Slack",
+    });
+    expect(dialog).not.toHaveClass("app-dialog-standard");
+    expect(dialog).toHaveAttribute("aria-label", "Connect Slack");
+    expect(
+      within(dialog).getByRole("heading", { level: 2, name: "Connect Slack" }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("button", { name: "Close" }),
+    ).toHaveAttribute("data-voice-close");
+    expect(connectButton).toHaveFocus();
+    fireEvent.click(connectButton);
 
     expect(save).toHaveBeenCalledWith("ck_live");
     await waitFor(() => expect(createConnection).toHaveBeenCalledWith("slack"));
@@ -135,7 +139,7 @@ describe("Connected apps", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("shows a one-line summary on the card and the full description in the dialog", async () => {
+  it("shows a one-line summary on the card and keeps the description out of the dialog", async () => {
     const runtime = await testRuntime();
     const description =
       "Import the last six months, up to 3,000 messages, for Profile and Wiki.";
@@ -170,7 +174,7 @@ describe("Connected apps", () => {
     fireEvent.click(card);
     expect(
       await screen.findByRole("dialog", { name: "Gmail" }),
-    ).toHaveTextContent(description);
+    ).not.toHaveTextContent(description);
   });
 
   it("renders a concise non-truncating subtitle for Calendly with full title tooltip", async () => {
@@ -950,7 +954,7 @@ describe("Connected apps", () => {
       within(dialog).getAllByRole("button", { name: "Close" }).length,
     ).toBeGreaterThan(0);
     expect(within(dialog).getByRole("status")).toHaveTextContent(
-      "Provider authorization: pending",
+      "Disconnected. Revoking access…",
     );
     expect(disconnect.mock.calls[0]?.[1]).toEqual({ expected_revision: 1 });
   });

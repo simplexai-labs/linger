@@ -78,9 +78,7 @@ describe("ArtifactPreviewSurface trust boundary", () => {
     renderPreview(runtime, node);
 
     expect(
-      await screen.findByText(
-        /Version does not belong to the selected Document/,
-      ),
+      await screen.findByText("This version can't be previewed here."),
     ).toBeVisible();
     const downloadButton = screen.getByRole("button", {
       name: `Download ${node.title}`,

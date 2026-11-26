@@ -397,9 +397,10 @@ func (e AgentRuntimeStoppedStatusChangedEventOutcome) Valid() bool {
 
 // Defines values for AgentRuntimeWorkingStatusChangedEventStatus.
 const (
-	AgentRuntimeWorkingStatusChangedEventStatusQueued   AgentRuntimeWorkingStatusChangedEventStatus = "queued"
-	AgentRuntimeWorkingStatusChangedEventStatusThinking AgentRuntimeWorkingStatusChangedEventStatus = "thinking"
-	AgentRuntimeWorkingStatusChangedEventStatusWorking  AgentRuntimeWorkingStatusChangedEventStatus = "working"
+	AgentRuntimeWorkingStatusChangedEventStatusQueued            AgentRuntimeWorkingStatusChangedEventStatus = "queued"
+	AgentRuntimeWorkingStatusChangedEventStatusThinking          AgentRuntimeWorkingStatusChangedEventStatus = "thinking"
+	AgentRuntimeWorkingStatusChangedEventStatusWaitingBackground AgentRuntimeWorkingStatusChangedEventStatus = "waiting_background"
+	AgentRuntimeWorkingStatusChangedEventStatusWorking           AgentRuntimeWorkingStatusChangedEventStatus = "working"
 )
 
 // Valid indicates whether the value is a known member of the AgentRuntimeWorkingStatusChangedEventStatus enum.
@@ -408,6 +409,8 @@ func (e AgentRuntimeWorkingStatusChangedEventStatus) Valid() bool {
 	case AgentRuntimeWorkingStatusChangedEventStatusQueued:
 		return true
 	case AgentRuntimeWorkingStatusChangedEventStatusThinking:
+		return true
+	case AgentRuntimeWorkingStatusChangedEventStatusWaitingBackground:
 		return true
 	case AgentRuntimeWorkingStatusChangedEventStatusWorking:
 		return true
@@ -5244,7 +5247,7 @@ type AgentRuntimeStoppedStatusChangedEventOutcome string
 type AgentRuntimeWorkingStatusChangedEvent struct {
 	Status AgentRuntimeWorkingStatusChangedEventStatus `json:"status"`
 
-	// Title Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working; raw reasoning is never allowed.
+	// Title Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working and waiting_background; raw reasoning is never allowed.
 	Title *string `json:"title,omitempty"`
 	Type  string  `json:"type"`
 }

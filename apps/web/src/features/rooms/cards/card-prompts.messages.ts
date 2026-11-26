@@ -14,8 +14,7 @@ export const cardPromptsMessages = defineMessages("cardPrompts", {
   connectionAuthAccount:
     "Please connect and authorize the {app} account {account} so I can continue.",
   providerKey: "Please add a Composio API key so I can use connected apps.",
-  providerKeyApp:
-    "Please add a Composio API key so I can connect {app}. Every connected app needs it.",
+  providerKeyApp: "Please add a Composio API key so I can connect {app}.",
   searchKeyMissing: "Please add a {backend} API key so I can search the web.",
   searchKeyRejected:
     "{backend} refused the saved API key. Please add a new key so I can search the web.",

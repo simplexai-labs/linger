@@ -71,25 +71,28 @@ export const chatMessages = defineMessages("chat", {
   viewInAgentInfo: "View in Agent Info",
   // Threads.
   replyCount: { one: "{count} reply", other: "{count} replies" },
+  // The same sentence for any count: the count does not change what to do.
   backgroundFailedIncompatible: {
-    one: "Background tasks failed {count} time in a row: your Runtime is incompatible, or its model isn't available to your account. Update your local CLI or Linger, or check its model setting.",
+    one: "Wiki, Memory and daily reports aren't updating: your AI app needs an update, or its model isn't available.",
     other:
-      "Background tasks failed {count} times in a row: your Runtime is incompatible, or its model isn't available to your account. Update your local CLI or Linger, or check its model setting.",
+      "Wiki, Memory and daily reports aren't updating: your AI app needs an update, or its model isn't available.",
   },
+  // The same sentence for any count: the count does not change what to do.
   backgroundFailedSignIn: {
-    one: "Background tasks failed {count} time in a row: your Runtime needs you to sign in again.",
+    one: "Wiki, Memory and daily reports aren't updating: sign in to your AI app again.",
     other:
-      "Background tasks failed {count} times in a row: your Runtime needs you to sign in again.",
+      "Wiki, Memory and daily reports aren't updating: sign in to your AI app again.",
   },
+  // The same sentence for any count: the count does not change what to do.
   backgroundFailedRuntimeUnavailable: {
-    one: "Background tasks failed {count} time in a row: the Runtime on your Computer isn't available.",
+    one: "Wiki, Memory and daily reports aren't updating: your AI app isn't available.",
     other:
-      "Background tasks failed {count} times in a row: the Runtime on your Computer isn't available.",
+      "Wiki, Memory and daily reports aren't updating: your AI app isn't available.",
   },
+  // The same sentence for any count: the count does not change what to do.
   backgroundFailedUnknown: {
-    one: "Background tasks failed {count} time in a row. Wiki, Memory and daily reports may be out of date until a task succeeds.",
-    other:
-      "Background tasks failed {count} times in a row. Wiki, Memory and daily reports may be out of date until a task succeeds.",
+    one: "Wiki, Memory and daily reports aren't updating right now.",
+    other: "Wiki, Memory and daily reports aren't updating right now.",
   },
   dismissBackgroundFailureNotice: "Dismiss background failure notice",
   openThread: "Open thread, {replies}",

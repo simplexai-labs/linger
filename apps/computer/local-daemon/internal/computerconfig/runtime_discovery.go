@@ -31,6 +31,7 @@ func SelectedRuntimePath(environment map[string]string, runtimeType string) stri
 // stateless `probe-runtimes` command.
 type RuntimeDiscoveryRequest struct {
 	ConfiguredPaths  map[string]string
+	BundledPaths     map[string]string
 	Environment      map[string]string
 	Runtimes         []string
 	SkipModelCatalog bool
@@ -67,6 +68,7 @@ func RuntimeDiscoveryOptions(request RuntimeDiscoveryRequest) (provider.Discover
 	}
 	return provider.DiscoveryOptions{
 		ConfiguredPaths:  selected,
+		BundledPaths:     request.BundledPaths,
 		Environment:      RuntimeEnvironment(request.Environment, ""),
 		Runtimes:         request.Runtimes,
 		SkipModelCatalog: request.SkipModelCatalog,

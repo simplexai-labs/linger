@@ -4,9 +4,9 @@ import type { StatusTone } from "./status.js";
 
 // Draws the tray icon for a status from the Linger logo at 16 and 32 px,
 // so there are no binary assets per state. macOS gets a monochrome template
-// image of the L and dot with a status badge cut into the corner. Other
-// platforms get the logo on its dark tile, which reads on both light and dark
-// panels, with a coloured status dot.
+// image of the L and dot, with an error badge cut into the corner only for
+// errors. Other platforms get the logo on its dark tile, which reads on both
+// light and dark panels, with a coloured status dot.
 
 export interface TrayArtwork {
   // The black L and dot on transparency, exported for template rendering.
@@ -63,9 +63,7 @@ const union =
 const BADGE_X = 12.6;
 const BADGE_Y = 12.6;
 const badgeClearance = circle(BADGE_X, BADGE_Y, 3.6);
-const badge = (tone: StatusTone, frame: number): Shape | undefined => {
-  if (tone === "busy")
-    return circle(BADGE_X, BADGE_Y, [1.6, 2.1, 2.6][frame % 3]!);
+const badge = (tone: StatusTone): Shape | undefined => {
   if (tone === "error") {
     const disc = circle(BADGE_X, BADGE_Y, 2.8);
     const mark = union(
@@ -104,7 +102,7 @@ export const renderTrayIcon = (spec: TrayIconSpec): Buffer => {
   if (template) {
     // Template images carry state in shape and alpha only.
     const mark = decodePng(artwork.mark, size);
-    const status = badge(tone, spec.frame ?? 0);
+    const status = badge(tone);
     const alpha = tone === "offline" || tone === "setup" ? 0.45 : 1;
     for (let y = 0; y < size; y++)
       for (let x = 0; x < size; x++) {

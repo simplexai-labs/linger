@@ -71,3 +71,27 @@ func TestRuntimeDiscoveryOptionsRejectsInvalidInputs(t *testing.T) {
 		t.Fatal("expected error for relative configured path when RequireAbsolutePaths is true")
 	}
 }
+
+func TestRuntimeDiscoveryOptionsForwardsBundledPaths(t *testing.T) {
+	bundledPi := filepath.Join(t.TempDir(), "bin", "pi")
+	options, err := RuntimeDiscoveryOptions(RuntimeDiscoveryRequest{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Runtimes:     []string{"pi"},
+	})
+	if err != nil {
+		t.Fatalf("RuntimeDiscoveryOptions failed: %v", err)
+	}
+	if options.BundledPaths["pi"] != bundledPi {
+		t.Fatalf("BundledPaths[pi] = %q, want %q", options.BundledPaths["pi"], bundledPi)
+	}
+
+	defaultOptions, err := RuntimeDiscoveryOptions(RuntimeDiscoveryRequest{
+		Runtimes: []string{"pi"},
+	})
+	if err != nil {
+		t.Fatalf("RuntimeDiscoveryOptions without bundled paths failed: %v", err)
+	}
+	if len(defaultOptions.BundledPaths) != 0 {
+		t.Fatalf("BundledPaths = %v, want empty", defaultOptions.BundledPaths)
+	}
+}

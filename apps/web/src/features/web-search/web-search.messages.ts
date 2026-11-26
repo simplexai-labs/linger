@@ -11,9 +11,6 @@ export const webSearchMessages = defineMessages("webSearch", {
   saveKey: "Save key",
   // {site} is the key page as host and path, such as tavily.com/keys.
   getKeyAt: "Get a key at <link>{site}</link>",
-  getKeyAtStored:
-    "Get a key at <link>{site}</link>. Stored encrypted and never shown again.",
-  storedEncrypted: "Stored encrypted and never shown again.",
   keyRejectedAt:
     "{backend} rejected this key. Check it at {site} and paste it again.",
   keyRejected: "{backend} rejected this key. Check it and paste it again.",

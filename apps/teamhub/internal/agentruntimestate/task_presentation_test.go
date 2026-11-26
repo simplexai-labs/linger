@@ -51,3 +51,22 @@ func TestTaskPresentationOmitsPrivateContentWithoutChangingLifecycle(t *testing.
 		}
 	}
 }
+
+func TestWaitingBackgroundStatusValidation(t *testing.T) {
+	event, err := normalizeOfferedPresentationEvent(json.RawMessage(`{"type":"status.changed","status":"waiting_background"}`))
+	if err != nil {
+		t.Fatalf("expected valid waiting_background payload: %v", err)
+	}
+	if event.EventType != "status.changed" {
+		t.Fatalf("event type = %q, want status.changed", event.EventType)
+	}
+
+	for _, invalid := range []string{
+		`{"type":"status.changed","status":"waiting_background","title":"Waiting for scheduled task"}`,
+		`{"type":"status.changed","status":"waiting_background","title":"   "}`,
+	} {
+		if _, err := normalizeOfferedPresentationEvent(json.RawMessage(invalid)); err == nil {
+			t.Fatalf("expected waiting_background title payload %s to be rejected", invalid)
+		}
+	}
+}

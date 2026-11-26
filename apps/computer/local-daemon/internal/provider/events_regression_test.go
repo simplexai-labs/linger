@@ -341,3 +341,52 @@ func TestEventProjectionReportsModelRequestsAndToolResultTimes(t *testing.T) {
 		t.Fatalf("tool result = %v", returned)
 	}
 }
+
+func TestEventProjectionBackgroundWaitEventsFollowFeatureGate(t *testing.T) {
+	at := time.UnixMilli(5_000)
+	waitEvent := native.Event{
+		Kind:       native.EventBackgroundWaiting,
+		ObservedAt: at,
+		BackgroundTools: []native.BackgroundTool{
+			{CallID: "call-1", ToolName: "schedule", StartedAt: time.UnixMilli(4_000)},
+		},
+	}
+	resumedEvent := native.Event{
+		Kind:              native.EventBackgroundResumed,
+		ObservedAt:        at.Add(time.Second),
+		BackgroundTrigger: "user_input",
+	}
+
+	disabled := eventProjection{operationID: "op-1"}
+	if got := disabled.project(waitEvent); len(got) != 0 {
+		t.Fatalf("gated-off background wait projected %v", got)
+	}
+	if got := disabled.project(resumedEvent); len(got) != 0 {
+		t.Fatalf("gated-off background resume projected %v", got)
+	}
+
+	enabled := eventProjection{operationID: "op-1", supportsBackgroundWait: true}
+	enabled.project(native.Event{Kind: native.EventReasoning, Title: "Thinking..."})
+	waiting := enabled.project(waitEvent)
+	if len(waiting) != 1 {
+		t.Fatalf("waiting=%v, want 1 event", waiting)
+	}
+	waitWire := waiting[0].(map[string]any)
+	tools := waitWire["tools"].([]map[string]any)
+	if waitWire["type"] != "run.background_waiting" || waitWire["observed_at_unix_ms"] != int64(5_000) ||
+		len(tools) != 1 || tools[0]["call_id"] != "call-1" || tools[0]["tool_name"] != "schedule" || tools[0]["started_at_unix_ms"] != int64(4_000) {
+		t.Fatalf("waitWire=%v", waitWire)
+	}
+	if enabled.thinking {
+		t.Fatal("background waiting should clear active thinking state")
+	}
+
+	resumed := enabled.project(resumedEvent)
+	if len(resumed) != 1 {
+		t.Fatalf("resumed=%v, want 1 event", resumed)
+	}
+	resumedWire := resumed[0].(map[string]any)
+	if resumedWire["type"] != "run.background_resumed" || resumedWire["observed_at_unix_ms"] != int64(6_000) || resumedWire["trigger"] != "user_input" {
+		t.Fatalf("resumedWire=%v", resumedWire)
+	}
+}

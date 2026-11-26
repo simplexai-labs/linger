@@ -1083,6 +1083,32 @@ describe("Runtime activity path", () => {
       },
     ]);
   });
+
+  it("marks an active thinking item inactive when entering waiting_background", () => {
+    const items = projectRuntimeActivityPath(
+      [
+        record("1", {
+          status: "thinking",
+          title: "Checking workspace",
+          type: "status.changed",
+        }),
+        record("2", {
+          status: "waiting_background",
+          type: "status.changed",
+        }),
+      ],
+      new Map(),
+      "active",
+    );
+    expect(items).toEqual([
+      {
+        active: false,
+        key: "thinking:1",
+        kind: "thinking",
+        title: "Checking workspace",
+      },
+    ]);
+  });
 });
 
 function record(

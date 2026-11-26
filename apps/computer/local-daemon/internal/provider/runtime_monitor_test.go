@@ -1251,3 +1251,61 @@ exec /bin/sh -c "$2"
 		t.Fatalf("published diagnostics = %+v, want ready codex at %s with PATH %q", published.Diagnostics, codex, resolvedEnv["PATH"])
 	}
 }
+
+func TestChangedInstallationsRespectsBundledPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	root := t.TempDir()
+	emptyPath := filepath.Join(root, "empty")
+	bundledBin := filepath.Join(root, "bundled")
+	for _, dir := range []string{emptyPath, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundledPi := filepath.Join(bundledBin, "pi")
+	missing := RuntimeDiagnostic{Type: "pi", Status: "not_installed", searchPath: emptyPath}
+	options := DiscoveryOptions{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"HOME": filepath.Join(root, "home")},
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+		t.Fatalf("changed = %v before bundled pi exists", changed)
+	}
+	if err := os.WriteFile(bundledPi, []byte("#!/bin/sh\necho 1.5.2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"pi"}) {
+		t.Fatalf("changed = %v after bundled pi appears, want [pi]", changed)
+	}
+}
+
+func TestChangedInstallationsRespectsManagedPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	root := t.TempDir()
+	emptyPath := filepath.Join(root, "empty")
+	managedBin := filepath.Join(root, "managed")
+	for _, dir := range []string{emptyPath, managedBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	managedPi := filepath.Join(managedBin, "pi")
+	missing := RuntimeDiagnostic{Type: "pi", Status: "not_installed", searchPath: emptyPath}
+	options := DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		Environment:  map[string]string{"HOME": filepath.Join(root, "home")},
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+		t.Fatalf("changed = %v before managed pi exists", changed)
+	}
+	if err := os.WriteFile(managedPi, []byte("#!/bin/sh\necho 1.7.0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"pi"}) {
+		t.Fatalf("changed = %v after managed pi appears, want [pi]", changed)
+	}
+}

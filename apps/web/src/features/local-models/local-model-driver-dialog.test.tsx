@@ -122,11 +122,6 @@ describe("UpdateDriverDialog", () => {
     expect(screen.getByText("NVIDIA GeForce RTX 5060")).toBeVisible();
     expect(screen.getByText("Driver 572.83 · CUDA 12.8")).toBeVisible();
     expect(screen.getByText("Driver 580+ · CUDA 13.0")).toBeVisible();
-    expect(
-      screen.getByText(
-        "Only the NVIDIA graphics driver needs an update — CUDA Toolkit is not required.",
-      ),
-    ).toBeVisible();
 
     const nvidiaAppButton = await screen.findByRole("button", {
       name: "Open NVIDIA App",

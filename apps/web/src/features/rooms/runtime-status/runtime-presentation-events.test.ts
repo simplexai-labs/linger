@@ -275,11 +275,34 @@ describe("Runtime presentation events", () => {
       ],
     });
   });
+
+  it("projects waiting_background status without inheriting stale status titles", () => {
+    const thinking = statusRecord("1", "thinking", "Checking workspace");
+    const waiting = statusRecord("2", "waiting_background");
+    expect(projectRuntimeChatPresentation([thinking, waiting]).items).toEqual([
+      {
+        key: "segment-1",
+        marks: [
+          {
+            key: "thinking:1",
+            title: "Checking workspace",
+            type: "thinking",
+          },
+        ],
+        segmentId: "segment-1",
+        status: "waiting_background",
+        type: "status",
+      },
+    ]);
+    expect(
+      projectRuntimeChatPresentation([thinking, waiting]).items[0],
+    ).not.toHaveProperty("title");
+  });
 });
 
 function statusRecord(
   eventOrdinal: string,
-  status: "queued" | "working" | "thinking",
+  status: "queued" | "working" | "thinking" | "waiting_background",
   title?: string,
   segmentId = "segment-1",
 ): TeamHubRuntimePresentationEventRecord {

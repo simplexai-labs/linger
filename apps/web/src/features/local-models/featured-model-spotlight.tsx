@@ -47,9 +47,6 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
           ) : null}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="inline-flex h-5 items-center rounded-sm bg-[var(--app-mention-surface)] px-1.5 text-2xs font-semibold tracking-wide text-app-info uppercase">
-                {t(m.featuredNew)}
-              </span>
               <span className="font-medium text-app-info">
                 {t(m.featuredByThinkingMachines)}
               </span>
@@ -59,9 +56,6 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
                 {INKLING_TITLE}
               </h2>
             ) : null}
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t(m.featuredInklingSummary)}
-            </p>
             {!hasEntry ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {t(m.featuredNotInCatalog)}

@@ -222,6 +222,19 @@ take precedence.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.
+- `operation_background_wait` in `runner.welcome`'s `service_features` is
+  advertised to every Computer (a Daemon ignores an unknown feature); only a
+  Daemon that sees it emits `run.background_waiting` and
+  `run.background_resumed` events. While an Antigravity turn enters
+  `waiting_background` (following `end_turn` or a `Stop` hook with
+  `fullyIdle: false` while native background tool calls remain open),
+  `RunnerOperation` tracks `phase: "waiting_background"` and active
+  `background_tools`, `ModelLease.suspend()` yields the `ModelQueue`
+  concurrency slot (`resume()` increments `active` immediately without waiting on
+  capacity, so a resumed Run may temporarily exceed the endpoint concurrency
+  limit), and incoming steers wake the session directly with `session/prompt`
+  while active turns receive steers via Antigravity's `PreInvocation` hook
+  (`injectSteps`).
 - Explicit model selection on `execute` `model_invoke` (`model`) is sent only
   to Computer 0.62.0 or later (`FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION`),
   because an older Computer rejects unknown envelope fields and closes the

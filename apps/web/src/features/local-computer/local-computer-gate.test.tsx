@@ -312,9 +312,7 @@ describe("Local Computer gate", () => {
     expect(
       within(gate).getByText("npm install -g @earendil-works/pi-coding-agent"),
     ).toBeVisible();
-    expect(
-      within(gate).getAllByText("The npm commands need Node.js."),
-    ).toHaveLength(1);
+    expect(within(gate).getAllByText("Needs Node.js.")).toHaveLength(1);
   });
 });
 
