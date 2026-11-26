@@ -126,30 +126,40 @@ function RoomSettingsContent({
             </div>
           ) : null}
           {owner || room.participation !== "left" ? (
-            <SettingsGroup ariaLabel={t(m.roomActions)}>
+            // Leaving and deleting are separate bars, so the destructive one
+            // is never a row away from the everyday one.
+            <div
+              aria-label={t(m.roomActions)}
+              className="flex flex-col gap-2"
+              role="group"
+            >
               {room.participation === "left" ? null : (
-                <PanelCommand
-                  data-voice-risk="never"
-                  onClick={() => {
-                    leave.reset();
-                    setLeaving(true);
-                  }}
-                >
-                  <Icon icon={Logout01Icon} size={16} />
-                  {t(m.leaveRoom)}
-                </PanelCommand>
+                <SettingsGroup>
+                  <PanelCommand
+                    data-voice-risk="never"
+                    onClick={() => {
+                      leave.reset();
+                      setLeaving(true);
+                    }}
+                  >
+                    <Icon icon={Logout01Icon} size={16} />
+                    {t(m.leaveRoom)}
+                  </PanelCommand>
+                </SettingsGroup>
               )}
               {owner ? (
-                <PanelCommand
-                  danger
-                  data-voice-risk="never"
-                  onClick={() => setDeleting(true)}
-                >
-                  <Icon icon={Delete02Icon} size={16} />
-                  {t(roomDialogMessages.deleteRoom)}
-                </PanelCommand>
+                <SettingsGroup>
+                  <PanelCommand
+                    danger
+                    data-voice-risk="never"
+                    onClick={() => setDeleting(true)}
+                  >
+                    <Icon icon={Delete02Icon} size={16} />
+                    {t(roomDialogMessages.deleteRoom)}
+                  </PanelCommand>
+                </SettingsGroup>
               ) : null}
-            </SettingsGroup>
+            </div>
           ) : null}
         </>
       ) : null}
