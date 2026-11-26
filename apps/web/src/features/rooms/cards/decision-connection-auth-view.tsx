@@ -18,6 +18,7 @@ import {
   externalConnectionsQueryOptions,
 } from "@/features/apps/connected-apps-queries";
 import {
+  canResumePendingExternalConnection,
   externalConnectionNeedsAttention,
   openPendingExternalConnection,
   reauthorizationConnectUrl,
@@ -307,11 +308,16 @@ function ConnectionAuthorizationActions({
         ["failed", "expired"].includes(connection.status)
       )
         connection = undefined;
-      // A pending authorization whose link expired starts over.
+      // A pending authorization whose link expired (or cannot be resumed in
+      // this environment) starts over.
       if (connection?.status === "pending") {
-        const detail = await client.getExternalConnection(connection.id);
-        connectUrl = usableConnectUrl(detail) ?? "";
-        if (!connectUrl) connection = undefined;
+        if (!canResumePendingExternalConnection(connection.provider)) {
+          connection = undefined;
+        } else {
+          const detail = await client.getExternalConnection(connection.id);
+          connectUrl = usableConnectUrl(detail) ?? "";
+          if (!connectUrl) connection = undefined;
+        }
       }
       if (!connection) {
         if (!app || !app.capabilities.includes("agent_tools"))

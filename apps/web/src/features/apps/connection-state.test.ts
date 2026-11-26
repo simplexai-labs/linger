@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TeamHubExternalConnection } from "@/features/teamhub/teamhub-types";
 
@@ -8,6 +8,7 @@ import {
   connectLinkOpen,
   establishedExternalConnections,
   externalConnectionUnconfirmed,
+  openPendingExternalConnection,
   usableConnectUrl,
 } from "./connection-state";
 
@@ -63,6 +64,8 @@ describe("external connection state projection", () => {
 });
 
 describe("Connect Link reuse", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   const connectUrl = "https://connect.example.test/link";
 
   it("reuses a pending link only until it expires", () => {
@@ -87,6 +90,36 @@ describe("Connect Link reuse", () => {
     expect(
       connectLinkOpen({ connect_expires_at: "2026-01-01T00:00:00Z" }),
     ).toBe(false);
+  });
+
+  it("reuses a pending connection in browser mode, skips Composio apps in desktop mode, and keeps feishu_mail resumable", () => {
+    const pendingGmail = connection("pending-gmail", "pending");
+    const pendingFeishu = {
+      ...connection("pending-feishu", "pending"),
+      provider: "feishu_mail" as const,
+    };
+    vi.stubGlobal("window", {});
+    expect(openPendingExternalConnection([pendingGmail], "gmail")).toEqual(
+      pendingGmail,
+    );
+    expect(
+      openPendingExternalConnection([pendingFeishu], "feishu_mail"),
+    ).toEqual(pendingFeishu);
+
+    vi.stubGlobal("window", {
+      lingerDesktop: {
+        connectorOAuth: {
+          prepare: vi.fn(),
+          onReturn: vi.fn(() => () => {}),
+        },
+      },
+    });
+    expect(
+      openPendingExternalConnection([pendingGmail], "gmail"),
+    ).toBeUndefined();
+    expect(
+      openPendingExternalConnection([pendingFeishu], "feishu_mail"),
+    ).toEqual(pendingFeishu);
   });
 });
 

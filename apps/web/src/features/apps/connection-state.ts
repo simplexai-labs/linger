@@ -3,6 +3,7 @@ import type { TeamHubExternalConnection } from "@/features/teamhub/teamhub-types
 import { type Translate, translate } from "@/i18n/language";
 
 import { connectorMessages as m } from "./connectors.messages";
+import { desktopConnectorOAuth } from "./desktop-connector-oauth";
 
 const NEEDS_ATTENTION = new Set<TeamHubExternalConnection["status"]>([
   "expired",
@@ -19,6 +20,17 @@ export function externalConnectionNeedsAttention(
 }
 
 /**
+ * Whether an app's pending authorization link can be resumed in the current
+ * environment. Composio-managed links bake in a single-use Desktop loopback
+ * callback bound to an ephemeral port, so Desktop starts a fresh connection
+ * instead of reusing an older link. Self-authorized apps such as Feishu Mail
+ * use a device-login page with no loopback callback.
+ */
+export function canResumePendingExternalConnection(appKey: string) {
+  return !desktopConnectorOAuth() || appKey === "feishu_mail";
+}
+
+/**
  * The pending connection of an app whose authorization can still be resumed,
  * so a new attempt reuses it instead of creating another row.
  */
@@ -26,6 +38,7 @@ export function openPendingExternalConnection(
   connections: TeamHubExternalConnection[],
   appKey: string,
 ) {
+  if (!canResumePendingExternalConnection(appKey)) return undefined;
   return connections.find(
     (connection) =>
       connection.provider === appKey &&

@@ -2140,12 +2140,16 @@
     "accountsNeedReconnecting": {
       "other": "{accounts} 个账号，{count} 个需要重新连接"
     },
+    "needReconnectingCount": {
+      "other": "{count} 个需要重新连接"
+    },
     "unavailable": "不可用",
     "authorizing": "正在授权…",
     "couldNotConfirm": "无法确认连接",
     "connect": "连接",
     "connectApp": "连接 {app}",
     "manage": "管理",
+    "manageApp": "管理 {app}",
     "disconnect": "断开连接",
     "actionsFor": "{app} 的操作",
     "appIcon": "{name} 图标",

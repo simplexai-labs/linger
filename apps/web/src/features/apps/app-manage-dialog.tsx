@@ -203,6 +203,22 @@ function ConnectionRow({
   const duplicateIdentity =
     connection.status_error_code === "duplicate_remote_principal";
   const unconfirmed = externalConnectionUnconfirmed(connection);
+  const reauthorizationError =
+    !connection.reauthorizing &&
+    connection.reauthorization_error_code &&
+    connection.reauthorization_error_code !== "stale_revision"
+      ? connection.reauthorization_error_code
+      : undefined;
+  const authFailureMessage = !needsReconnecting
+    ? null
+    : connection.status_error_code === "provider_auth_failed" ||
+        reauthorizationError === "provider_auth_failed"
+      ? m.insufficientPermission
+      : reauthorizationError === "duplicate_remote_principal"
+        ? m.accountAlreadyConnected
+        : connection.status === "failed" || Boolean(reauthorizationError)
+          ? m.authorizationFailed
+          : null;
   const account = connection.identity_label ?? connection.provider;
 
   return (
@@ -279,9 +295,9 @@ function ConnectionRow({
           )}
         </p>
       ) : null}
-      {connection.status_error_code === "provider_auth_failed" ? (
+      {authFailureMessage ? (
         <p className="basis-full text-xs text-app-danger" role="alert">
-          {t(m.insufficientPermission)}
+          {t(authFailureMessage)}
         </p>
       ) : null}
       {statusCheck.error ? (

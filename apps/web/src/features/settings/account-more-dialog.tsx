@@ -27,6 +27,7 @@ import { writeClipboardText } from "@/lib/clipboard";
 import { connectionAuthorizationError } from "@/features/apps/authorization-error";
 import {
   activeExternalConnections,
+  canResumePendingExternalConnection,
   connectLinkOpen,
   externalConnectionNeedsAttention,
   usableConnectUrl,
@@ -255,6 +256,8 @@ export function AccountMoreDialog({
 
   // Starting an app connects it only when its row would offer Add or Choose;
   // a pending or expired connection stays on its row's Continue or Open Apps.
+  // Desktop loopback callbacks are single-use, so a stale pending connection
+  // does not block starting a fresh authorization.
   useEffect(() => {
     if (!startWith || startedWith.current) return;
     if (!apps.data || !connections.data) return;
@@ -268,7 +271,8 @@ export function AccountMoreDialog({
       activeExternalConnections(own).length ||
       own.some(
         (connection) =>
-          connection.status === "pending" ||
+          (connection.status === "pending" &&
+            canResumePendingExternalConnection(connection.provider)) ||
           externalConnectionNeedsAttention(connection),
       )
     ) {
@@ -896,10 +900,13 @@ function AppConnectRow({
   const active = activeExternalConnections(connections);
   const needsAttention = connections.some(externalConnectionNeedsAttention);
   // A pending authorization whose Connect Link expired is over; connect again.
-  const pendingConnection = connections.find(
-    (connection) =>
-      connection.status === "pending" && connectLinkOpen(connection),
-  );
+  // Desktop loopback callbacks are single-use, so never resume an older link.
+  const pendingConnection = canResumePendingExternalConnection(app.key)
+    ? connections.find(
+        (connection) =>
+          connection.status === "pending" && connectLinkOpen(connection),
+      )
+    : undefined;
   const authorizationPending = Boolean(pendingConnection);
   const pendingDetail = useQuery({
     ...externalConnectionQueryOptions(client, pendingConnection?.id ?? ""),
