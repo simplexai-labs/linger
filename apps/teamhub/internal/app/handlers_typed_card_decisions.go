@@ -7,17 +7,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/collaboration"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/mobilegateway"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/workitem"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
-
-// phoneDecisionKinds are the decision kinds a Paired Phone may answer.
-var phoneDecisionKinds = []string{
-	typedcard.DecisionKindQuestion, typedcard.DecisionKindRuntimePermission,
-	typedcard.DecisionKindConnectorWrite, typedcard.DecisionKindAgentChange,
-}
 
 func (a *App) decideDecision(c *gin.Context) {
 	var request httpapi.DecisionRequest
@@ -45,11 +38,6 @@ func (a *App) decideDecision(c *gin.Context) {
 	}
 	if request.AttachmentUploadIds != nil {
 		command.AttachmentUploadIDs = *request.AttachmentUploadIds
-	}
-	// A phone answers only the kinds it shows in full; the rest open on the
-	// computer, whatever client sends the request.
-	if _, phone := mobilegateway.PhoneSession(c.Request.Context()); phone {
-		command.OnlyKinds = phoneDecisionKinds
 	}
 	result, err := a.typedCards.DecideDecision(c.Request.Context(), currentPrincipal(c).Session.AccountID,
 		c.Param("decisionId"), command)
@@ -79,8 +67,6 @@ func (a *App) writeTypedCardError(c *gin.Context, err error) bool {
 		a.writeError(c, http.StatusConflict, "CARD_CONFLICT", "typed card state conflicts with the request")
 	case errors.Is(err, typedcard.ErrInvalid), errors.Is(err, workitem.ErrInvalid):
 		a.writeError(c, http.StatusBadRequest, "INVALID_CARD", "typed card payload is invalid")
-	case errors.Is(err, typedcard.ErrDecideElsewhere):
-		a.writeError(c, http.StatusForbidden, "DECIDE_ON_COMPUTER", "this decision is answered on the computer")
 	case errors.Is(err, typedcard.ErrForbidden):
 		a.writeError(c, http.StatusForbidden, "CARD_FORBIDDEN", "the acting Actor cannot decide this card")
 	default:

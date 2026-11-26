@@ -210,37 +210,90 @@ export interface AgentLook {
   readonly avatarImageUrl?: string;
 }
 
-/** Each Agent's avatar by Actor ID, from the Tenant's Agent directory. */
-export function useAgentLooks(): ReadonlyMap<string, AgentLook> {
+interface DirectoryAgent extends AgentLook {
+  readonly actorId: string;
+  readonly displayName: string;
+  /** Visible to the whole workspace rather than only its owner. */
+  readonly workspace: boolean;
+}
+
+/** The Tenant's Agent directory, the few fields screens use. */
+function useAgentDirectory() {
   const teamHub = useTeamHub();
   const identity = useIdentity();
   const tenantId = identity.data?.tenantId;
-  const directory = useQuery({
+  return useQuery({
     queryKey: teamHubKey(teamHub.hostId, "agents", tenantId),
     enabled: teamHub.connected && !!tenantId,
     staleTime: 5 * 60_000,
-    queryFn: async () => {
-      const looks: [string, AgentLook][] = [];
+    queryFn: async (): Promise<DirectoryAgent[]> => {
+      const agents: DirectoryAgent[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < 5; page += 1) {
         const result = await teamHub.run((session) =>
           listTenantAgents(session, tenantId ?? "", cursor),
         );
         for (const agent of result.items)
-          looks.push([
-            agent.actor.id,
-            {
-              avatarKey: agent.avatar_key,
-              avatarImageUrl: agent.avatar_image_url,
-            },
-          ]);
+          agents.push({
+            actorId: agent.actor.id,
+            displayName: agent.actor.display_name,
+            avatarKey: agent.avatar_key,
+            avatarImageUrl: agent.avatar_image_url,
+            workspace: agent.visibility_scope === "workspace",
+          });
         if (!result.page.has_more || !result.page.next_cursor) break;
         cursor = result.page.next_cursor;
       }
-      return looks;
+      return agents;
     },
   });
-  return useMemo(() => new Map(directory.data ?? []), [directory.data]);
+}
+
+/** Each Agent's avatar by Actor ID, from the Tenant's Agent directory. */
+export function useAgentLooks(): ReadonlyMap<string, AgentLook> {
+  const directory = useAgentDirectory();
+  return useMemo(
+    () =>
+      new Map(
+        (directory.data ?? []).map((agent) => [
+          agent.actorId,
+          {
+            avatarKey: agent.avatarKey,
+            avatarImageUrl: agent.avatarImageUrl,
+          },
+        ]),
+      ),
+    [directory.data],
+  );
+}
+
+/** Each Agent's name by Actor ID, from the Tenant's Agent directory. */
+export function useAgentNames(): ReadonlyMap<string, string> {
+  const directory = useAgentDirectory();
+  return useMemo(
+    () =>
+      new Map(
+        (directory.data ?? []).map((agent) => [
+          agent.actorId,
+          agent.displayName,
+        ]),
+      ),
+    [directory.data],
+  );
+}
+
+/** The Actor IDs of Agents visible to the whole workspace. */
+export function useWorkspaceAgentIds(): ReadonlySet<string> {
+  const directory = useAgentDirectory();
+  return useMemo(
+    () =>
+      new Set(
+        (directory.data ?? [])
+          .filter((agent) => agent.workspace)
+          .map((agent) => agent.actorId),
+      ),
+    [directory.data],
+  );
 }
 
 /** A Room's current members, for @ mentions. */

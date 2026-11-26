@@ -140,17 +140,23 @@ never through the Web host. It accepts only method and path pairs on the
 Mobile API allowlist (`internal/mobilegateway/allowlist.go`), each one a
 public contract operation the Mobile App uses; everything else answers 404
 `NOT_AVAILABLE_ON_MOBILE` without reaching TeamHub. Sign-in, password,
-logout, local identity, Computer enrollment, provider keys, Document editing
-credentials, pairing administration, Agent Runtime, internal and Agent API
-routes are not on it. The Gateway removes `Cookie`, `Authorization`,
+logout, local identity, Computer enrollment, Document editing credentials,
+pairing administration, Agent Runtime, internal and Agent API routes are not
+on it. The Composio and web search keys are on it only as far as a decision
+card asks for one: saving that key answers the card. The Gateway removes `Cookie`, `Authorization`,
 `Origin`, `Referer`, `Accept-Encoding` and forwarding headers, then attaches
 the phone's device Session. `WEB_PUBLIC_ORIGIN`, cookies and CORS are
 untouched because no request leaves the process.
 
-Two operations narrow further for a phone. `POST /v0/decisions/{id}` answers
-only `question`, `runtime_permission`, `connector_write` and `agent_change`
-cards; any other kind answers 403 `DECIDE_ON_COMPUTER`, whatever client sends
-it. `POST /v0/mobile/relays` refuses a host that is, or resolves to, a
+A phone answers every decision card kind. Two can only be declined there,
+because what they ask happens on the computer itself: `browser_connection`
+(connecting that computer's Chrome) and `computer_permission` (granting a
+macOS permission on that Mac). A `connection_auth` card, and the Connect step
+of an AnotherMe apps card, open the app's OAuth page in the phone's browser;
+the page it returns to is the computer's own address, which the phone cannot
+load, so TeamHub's own checks of the pending Connection finish the card.
+
+One operation narrows further for a phone. `POST /v0/mobile/relays` refuses a host that is, or resolves to, a
 loopback, private or link-local address with 403
 `RELAY_PRIVATE_FROM_PHONE`; only the computer adds such a node. A push grant
 must name the Push Service the computer trusts,

@@ -14,7 +14,9 @@ import type {
   AnotherMe,
   ExternalAppList,
   ExternalConnectionAgentAccessList,
+  ExternalConnection,
   ExternalConnectionList,
+  ExternalProviderKeyStatus,
   MobileRelayNode,
   RoutinePage,
   MobileRelayNodeList,
@@ -45,6 +47,9 @@ import type {
   VoiceConnectionCredential,
   VoiceSession,
   VoiceSessionPurpose,
+  WebSearchBackend,
+  WebSearchBackendList,
+  WebSearchKeyBackend,
 } from "./types";
 
 /** Idempotency keys mark every write so a resend never applies twice. */
@@ -648,6 +653,96 @@ export function listExternalConnections(
   session: PhoneSession,
 ): Promise<ExternalConnectionList> {
   return requestJson(session, "GET", "/v0/external-connections");
+}
+
+/** Refreshes one Connection's status; a pending one carries its Connect Link. */
+export function getExternalConnection(
+  session: PhoneSession,
+  connectionId: string,
+): Promise<ExternalConnection> {
+  return requestJson(
+    session,
+    "GET",
+    `/v0/external-connections/${segment(connectionId)}`,
+  );
+}
+
+/**
+ * Starts a Connection with a Connect Link. No desktop callback: the phone
+ * opens the link in its in-app browser, and the OAuth return lands on TeamHub.
+ */
+export function createExternalConnection(
+  session: PhoneSession,
+  appKey: string,
+): Promise<ExternalConnection> {
+  return requestJson(session, "POST", "/v0/external-connections", {
+    body: { app_key: appKey },
+  });
+}
+
+export function reauthorizeExternalConnection(
+  session: PhoneSession,
+  connection: ExternalConnection,
+): Promise<ExternalConnection> {
+  return requestJson(
+    session,
+    "POST",
+    `/v0/external-connections/${segment(connection.id)}/reauthorizations`,
+    { body: { expected_revision: connection.revision } },
+  );
+}
+
+/** Asks TeamHub to check a Connection now rather than on its schedule. */
+export function checkExternalConnection(
+  session: PhoneSession,
+  connection: ExternalConnection,
+): Promise<ExternalConnection> {
+  return requestJson(
+    session,
+    "POST",
+    `/v0/external-connections/${segment(connection.id)}/status-checks`,
+    { body: { expected_revision: connection.revision } },
+  );
+}
+
+/** Saves the deployment's Composio API key; TeamHub checks it first. */
+export function saveExternalProviderKey(
+  session: PhoneSession,
+  apiKey: string,
+): Promise<ExternalProviderKeyStatus> {
+  return requestJson(session, "PUT", "/v0/external-apps/provider-key", {
+    body: { api_key: apiKey },
+  });
+}
+
+/** Without quota, so listing the backends never calls a provider. */
+export function listWebSearchBackends(
+  session: PhoneSession,
+): Promise<WebSearchBackendList> {
+  return requestJson(
+    session,
+    "GET",
+    `/v0/web-search/backends${query({ include_quota: "false" })}`,
+  );
+}
+
+/** A key added from a search_key card names it, and TeamHub runs its call. */
+export function saveWebSearchKey(
+  session: PhoneSession,
+  backend: WebSearchKeyBackend,
+  apiKey: string,
+  decisionId?: string,
+): Promise<WebSearchBackend> {
+  return requestJson(
+    session,
+    "PUT",
+    `/v0/web-search/backends/${segment(backend)}/key`,
+    {
+      body: decisionId
+        ? { api_key: apiKey, decision_id: decisionId }
+        : { api_key: apiKey },
+    },
+  );
 }
 
 export function listConnectionAgentAccess(

@@ -65,6 +65,16 @@ var mobileRoutes = []struct {
 	{"GET", "/v0/external-apps"},
 	{"GET", "/v0/external-connections"},
 	{"GET", "/v0/external-connections/:/agent-grants"},
+	// Decision cards answered on the phone: a connection_auth or AnotherMe
+	// apps card starts or resumes a Connection and checks its OAuth; a
+	// provider_key or search_key card saves the key it asks for.
+	{"GET", "/v0/external-connections/:"},
+	{"POST", "/v0/external-connections"},
+	{"POST", "/v0/external-connections/:/reauthorizations"},
+	{"POST", "/v0/external-connections/:/status-checks"},
+	{"PUT", "/v0/external-apps/provider-key"},
+	{"GET", "/v0/web-search/backends"},
+	{"PUT", "/v0/web-search/backends/:/key"},
 	{"POST", "/v0/mobile/relays"},
 }
 

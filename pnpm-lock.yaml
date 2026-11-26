@@ -326,6 +326,9 @@ importers:
       expo-video:
         specifier: 58.0.14
         version: 58.0.14(expo@58.0.26)(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0)
+      expo-web-browser:
+        specifier: 58.1.0
+        version: 58.1.0(expo@58.0.26)(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))
       fflate:
         specifier: 0.8.3
         version: 0.8.3
@@ -604,7 +607,7 @@ importers:
         version: link:../../contracts/generated/typescript
       '@livekit/agents':
         specifier: 1.7.1
-        version: 1.7.1(patch_hash=385866550b874ed2031bc8c42dee77e0640e895900484da8c2ee94b0a4f24332)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)
+        version: 1.7.1(patch_hash=c1651800465e39667c14c64075eeced2c5433543e71a59f7721aa72d5f72c895)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)
       '@livekit/local-inference':
         specifier: 0.2.7
         version: 0.2.7
@@ -6105,6 +6108,12 @@ packages:
     peerDependencies:
       expo: '*'
       react: '*'
+      react-native: '*'
+
+  expo-web-browser@58.1.0:
+    resolution: {integrity: sha512-WNMMTyrXkKQt6Id7u4GnwrWO8UFw/cVl7oSUUwyo1X14lKdc7uE+1poW9VCuXzOog7QOjmQytBclWdeDW75K1A==}
+    peerDependencies:
+      expo: '*'
       react-native: '*'
 
   expo@58.0.26:
@@ -12266,7 +12275,7 @@ snapshots:
 
   '@lifeomic/attempt@3.1.0': {}
 
-  '@livekit/agents@1.7.1(patch_hash=385866550b874ed2031bc8c42dee77e0640e895900484da8c2ee94b0a4f24332)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)':
+  '@livekit/agents@1.7.1(patch_hash=c1651800465e39667c14c64075eeced2c5433543e71a59f7721aa72d5f72c895)(@aws-sdk/credential-provider-node@3.972.85)(@livekit/rtc-node@0.13.34)(@smithy/signature-v4@5.7.4)(@types/node@26.0.1)(typescript@6.0.3)(zod@4.4.3)':
     dependencies:
       '@bufbuild/protobuf': 1.10.1
       '@livekit/av': 10.0.0
@@ -15926,6 +15935,11 @@ snapshots:
     dependencies:
       expo: 58.0.26(@babel/core@7.29.7)(@expo/metro-runtime@58.0.17)(expo-router@58.0.32)(react-dom@19.2.7(react@19.3.0))(react-native-webview@14.0.1(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0))(react-native-worklets@0.13.0(@babel/core@7.29.7)(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0))(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0)(supports-color@10.2.2)(typescript@6.0.3)
       react: 19.3.0
+      react-native: 0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2)
+
+  expo-web-browser@58.1.0(expo@58.0.26)(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2)):
+    dependencies:
+      expo: 58.0.26(@babel/core@7.29.7)(@expo/metro-runtime@58.0.17)(expo-router@58.0.32)(react-dom@19.2.7(react@19.3.0))(react-native-webview@14.0.1(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0))(react-native-worklets@0.13.0(@babel/core@7.29.7)(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0))(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0)(supports-color@10.2.2)(typescript@6.0.3)
       react-native: 0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2)
 
   expo@58.0.26(@babel/core@7.29.7)(@expo/metro-runtime@58.0.17)(expo-router@58.0.32)(react-dom@19.2.7(react@19.3.0))(react-native-webview@14.0.1(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0))(react-native-worklets@0.13.0(@babel/core@7.29.7)(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0))(react-native@0.88.1(@types/react@19.3.0)(react@19.3.0)(supports-color@10.2.2))(react@19.3.0)(supports-color@10.2.2)(typescript@6.0.3):

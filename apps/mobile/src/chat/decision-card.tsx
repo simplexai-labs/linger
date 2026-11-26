@@ -1,36 +1,42 @@
-// Decision cards answered on the phone with their full details: questions,
-// and the approve-or-deny kinds whose whole request fits on a screen. The
-// rest say to open the computer. A stale card version refetches the card.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+// Decision cards, answered on the phone for every kind as on the web: the
+// shell (who asks, the status, the title and the full request) and each
+// kind's answers. Kinds with their own flows live beside this file:
+// Connected App setup and authorization in decision-setup-views.tsx, API
+// keys in decision-key-views.tsx.
+import { useQuery } from "@tanstack/react-query";
+import { router } from "expo-router";
 import { useState } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 
-import { decide, decisionScreenshot, getMessage } from "../api/teamhub";
-import type {
-  DecisionCard as Card,
-  DecisionRequest,
-  Message,
-} from "../api/types";
+import { decisionScreenshot } from "../api/teamhub";
+import type { DecisionCard as Card, MessageSegment } from "../api/types";
+import { useComputer } from "../computer/computer-context";
 import { toBase64 } from "../lib/bytes";
-import { messagesKey } from "../realtime/realtime-context";
-import { HttpError } from "../session/http";
-import { teamHubKey, useTeamHub } from "../state/queries";
+import {
+  teamHubKey,
+  useAgentNames,
+  useRoomMembers,
+  useTeamHub,
+  useWorkspaceAgentIds,
+} from "../state/queries";
 import { colors, radius, shadow, space, touchTarget, type } from "../theme";
 import { ActorAvatar } from "../ui/avatar";
 import { Button } from "../ui/controls";
-import { replaceMessage, type MessagePages } from "./message-cache";
 import { Text, TextInput } from "../ui/text";
+import type { Translate } from "../i18n/language";
 import type { Message as UiMessage } from "../i18n/messages";
 import { useTranslation } from "../i18n/use-translation";
+import { useDecisionAnswer } from "./decision-answer";
 import { chatDecisionMessages as m } from "./decision-card.messages";
-
-/** Kinds whose details the phone shows in full and can answer. */
-const PHONE_KINDS = new Set<Card["kind"]>([
-  "question",
-  "runtime_permission",
-  "connector_write",
-  "agent_change",
-]);
+import { ProviderKey, SearchKey } from "./decision-key-views";
+import { ApprovalActions } from "./decision-parts";
+import { canDecide } from "./decision-rules";
+import {
+  ConnectionAuth,
+  ProfileSetupApps,
+  ProfileSetupSources,
+  type DecisionViewProps,
+} from "./decision-setup-views";
 
 const STATUS_LABELS: Record<Card["status"], UiMessage<string>> = {
   pending: m.statusPending,
@@ -119,9 +125,28 @@ function Screenshot(props: {
   );
 }
 
-function CardDetails(props: { readonly card: Card }) {
+function CardDetails(props: { readonly card: Card; readonly roomId: string }) {
   const { t } = useTranslation();
   const { card } = props;
+  if (card.room_creation)
+    return <RoomCreationDetails card={card} roomId={props.roomId} />;
+  if (card.computer_permission) {
+    const view = card.computer_permission;
+    return (
+      <>
+        <Text style={type.label}>
+          {view.permissions
+            .map((permission) =>
+              permission === "accessibility"
+                ? t(m.permissionAccessibility)
+                : t(m.permissionScreenRecording),
+            )
+            .join(t(m.listSeparator))}
+        </Text>
+        {view.reason ? <Text style={type.small}>{view.reason}</Text> : null}
+      </>
+    );
+  }
   if (card.runtime_permission) {
     const view = card.runtime_permission;
     return (
@@ -222,6 +247,75 @@ function CardDetails(props: { readonly card: Card }) {
     );
   }
   return null;
+}
+
+/** Text TeamHub adds for the Agent, not part of what the Human reads. */
+const TASK_OUTPUT_REQUIREMENTS = "[Task output requirements v1]";
+
+/**
+ * The Room an Agent asked to create, as TeamHub froze it: its name, members
+ * and first message, with the files and documents that message carries.
+ */
+function RoomCreationDetails(props: {
+  readonly card: Card;
+  readonly roomId: string;
+}) {
+  const { t } = useTranslation();
+  const members = useRoomMembers(props.roomId).data;
+  const agentNames = useAgentNames();
+  const view = props.card.room_creation;
+  if (!view) return null;
+  const names = new Map(agentNames);
+  for (const member of members ?? [])
+    names.set(member.actor.id, member.actor.display_name);
+  const text = view.initial_message_segments
+    .flatMap((segment) =>
+      segment.type === "text" &&
+      segment.content.startsWith(TASK_OUTPUT_REQUIREMENTS)
+        ? []
+        : [segment.content],
+    )
+    .join("");
+  const extras = view.initial_message_segments.flatMap((segment) => {
+    const line = segmentLine(segment, t);
+    return line ? [line] : [];
+  });
+  return (
+    <>
+      <Text style={type.label}>{t(m.newRoom, { name: view.name })}</Text>
+      <Detail
+        label={t(m.members)}
+        value={view.member_ids
+          .map((id) => names.get(id) ?? id)
+          .join(t(m.listSeparator))}
+      />
+      <Detail label={t(m.initialTaskInput)} value={text} />
+      {extras.length ? (
+        <Text style={type.small}>{extras.join("\n")}</Text>
+      ) : null}
+    </>
+  );
+}
+
+/** A first message's file, document or Skill, named on its own line. */
+function segmentLine(
+  segment: MessageSegment,
+  t: Translate,
+): string | undefined {
+  switch (segment.type) {
+    case "file":
+      return t(m.fileSegment, { name: segment.content });
+    case "document":
+      return t(m.documentSegment, { name: segment.content });
+    case "skill":
+      return t(m.skillSegment, { name: segment.content });
+    case "meeting_notes":
+      return t(m.meetingSummary);
+    case "artifact_tree":
+      return t(m.artifactDirectory, { path: segment.root_path });
+    default:
+      return undefined;
+  }
 }
 
 function Question(props: {
@@ -335,48 +429,20 @@ export function DecisionCard(props: {
   readonly myActorId: string | undefined;
 }) {
   const { t } = useTranslation();
-  const { card } = props;
-  const teamHub = useTeamHub();
-  const client = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | undefined>();
+  const { card, roomId } = props;
+  const decision = useDecisionAnswer(card, roomId, props.messageId);
+  const workspaceAgents = useWorkspaceAgentIds();
   const pending = card.status === "pending";
-  const mine = card.decision_owner.id === props.myActorId;
-  const supported = PHONE_KINDS.has(card.kind);
+  // A connection authorization stays open to its owner while the sign-in
+  // runs, so it can be reopened or cancelled.
+  const canAnswer =
+    canDecide(card, props.myActorId, workspaceAgents) ||
+    (card.kind === "connection_auth" &&
+      card.status === "authorizing" &&
+      card.decision_owner.id === props.myActorId);
   // A status a newer computer adds has no label here yet.
   const status = STATUS_LABELS[card.status] as UiMessage<string> | undefined;
-
-  const store = (message: Message) =>
-    client.setQueryData<MessagePages>(
-      messagesKey(teamHub.hostId, props.roomId),
-      (data) => replaceMessage(data, message),
-    );
-
-  const answer = async (request: Omit<DecisionRequest, "expected_version">) => {
-    setBusy(true);
-    setProblem(undefined);
-    try {
-      const message = await teamHub.run((session) =>
-        decide(session, card.decision_id, {
-          ...request,
-          expected_version: card.version,
-        }),
-      );
-      store(message);
-    } catch (error) {
-      if (error instanceof HttpError && error.status === 409) {
-        setProblem(t(m.cardChanged));
-        const fresh = await teamHub
-          .run((session) => getMessage(session, props.roomId, props.messageId))
-          .catch(() => undefined);
-        if (fresh) store(fresh);
-      } else {
-        setProblem(t(m.answerNotSent));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
+  const view: DecisionViewProps = { card, roomId, canAnswer, decision };
 
   return (
     <View
@@ -399,49 +465,137 @@ export function DecisionCard(props: {
         </View>
       </View>
       <Text style={styles.cardTitle}>{card.title}</Text>
-      {supported ? <CardDetails card={card} /> : null}
+      <CardDetails card={card} roomId={roomId} />
       {card.outcome ? <Text style={type.small}>{card.outcome}</Text> : null}
       {card.answer?.comment ? (
         <Text style={type.small}>“{card.answer.comment}”</Text>
       ) : null}
-      {pending && !mine ? (
+      {pending && !canAnswer ? (
         <Text style={type.small}>
           {t(m.waitingFor, { name: card.decision_owner.display_name })}
         </Text>
       ) : null}
-      {pending && mine && !supported ? (
-        <Text style={type.small}>{t(m.openOnComputer)}</Text>
-      ) : null}
-      {pending && mine && supported && card.kind === "question" ? (
-        <Question
-          card={card}
-          busy={busy}
-          onSubmit={(answers) => void answer({ decision: "submit", answers })}
-        />
-      ) : null}
-      {pending && mine && supported && card.kind !== "question" ? (
-        <View style={styles.actions}>
-          <Button
-            label={t(m.approve)}
-            onPress={() => void answer({ decision: "approve" })}
-            busy={busy}
-            style={styles.action}
-          />
-          <Button
-            label={t(m.deny)}
-            variant="secondary"
-            onPress={() => void answer({ decision: "deny" })}
-            disabled={busy}
-            style={styles.action}
-          />
-        </View>
-      ) : null}
-      {problem ? (
+      <KindView {...view} />
+      {decision.problem ? (
         <Text style={[type.small, styles.problem]} accessibilityRole="alert">
-          {problem}
+          {decision.problem}
         </Text>
       ) : null}
     </View>
+  );
+}
+
+/** What a card's kind adds: its answers, or what it shows once settled. */
+function KindView(props: DecisionViewProps) {
+  const { card, canAnswer, decision } = props;
+  switch (card.kind) {
+    case "question":
+      return canAnswer ? (
+        <Question
+          card={card}
+          busy={decision.busy}
+          onSubmit={(answers) =>
+            void decision.answer({ decision: "submit", answers })
+          }
+        />
+      ) : null;
+    case "profile_setup_apps":
+      return <ProfileSetupApps {...props} />;
+    case "profile_setup_sources":
+      return <ProfileSetupSources {...props} />;
+    case "connection_auth":
+      return <ConnectionAuth {...props} />;
+    case "provider_key":
+      return <ProviderKey {...props} />;
+    case "search_key":
+      return <SearchKey {...props} />;
+    case "browser_connection":
+    case "computer_permission":
+      return <OnComputer {...props} />;
+    case "room_creation":
+    case "runtime_permission":
+    case "connector_write":
+    case "agent_change":
+      return <Approval {...props} />;
+    default:
+      // A kind a newer computer adds is answered there.
+      return null;
+  }
+}
+
+/** The approve or deny kinds, in the words of what each approval does. */
+function Approval(props: DecisionViewProps) {
+  const { t } = useTranslation();
+  const { card, canAnswer, decision } = props;
+  const created = card.room_creation?.created_room_id;
+  if (!canAnswer)
+    return created ? (
+      <Button
+        compact
+        variant="secondary"
+        label={t(m.openRoom)}
+        onPress={() => router.navigate(`/rooms/${created}`)}
+        style={styles.openRoom}
+      />
+    ) : null;
+  const words = approvalWords(card);
+  return (
+    <ApprovalActions
+      approveLabel={t(words.approve)}
+      denyLabel={t(words.deny)}
+      reasonRequired={card.kind === "room_creation"}
+      busy={decision.busy}
+      onApprove={() => void decision.answer({ decision: "approve" })}
+      onDeny={(reason) =>
+        void decision.answer({
+          decision: "deny",
+          ...(reason ? { comment: reason } : {}),
+        })
+      }
+    />
+  );
+}
+
+/** The buttons in the words of what the approval does, as the web says. */
+function approvalWords(card: Card): {
+  readonly approve: UiMessage<string>;
+  readonly deny: UiMessage<string>;
+} {
+  if (card.room_creation) return { approve: m.createRoom, deny: m.dontCreate };
+  if (card.agent_change?.action === "create")
+    return { approve: m.create, deny: m.dontCreate };
+  if (card.agent_change) return { approve: m.apply, deny: m.dontApply };
+  if (card.runtime_permission)
+    return { approve: m.allowOnce, deny: m.dontAllow };
+  if (card.connector_write?.kind === "message")
+    return { approve: m.send, deny: m.dontSend };
+  return { approve: m.approve, deny: m.deny };
+}
+
+/**
+ * A browser connection or a macOS permission happens in that computer's
+ * Chrome or System Settings, so the phone only declines it.
+ */
+function OnComputer(props: DecisionViewProps) {
+  const { t } = useTranslation();
+  const { active } = useComputer();
+  const { card, canAnswer, decision } = props;
+  if (!canAnswer) return null;
+  const name = active?.name || t(m.yourComputer);
+  return (
+    <>
+      <Text style={type.small}>
+        {card.kind === "browser_connection"
+          ? t(m.browserOnComputer, { name })
+          : t(m.permissionsOnComputer, { name })}
+      </Text>
+      <Button
+        label={t(m.decline)}
+        variant="secondary"
+        onPress={() => void decision.answer({ decision: "deny" })}
+        busy={decision.busy}
+      />
+    </>
   );
 }
 
@@ -535,7 +689,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
   },
-  actions: { flexDirection: "row", gap: space.md },
-  action: { flex: 1 },
+  openRoom: { alignSelf: "flex-start" },
   problem: { color: colors.danger },
 });

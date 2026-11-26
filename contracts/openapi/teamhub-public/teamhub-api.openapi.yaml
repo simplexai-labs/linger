@@ -2070,9 +2070,7 @@ paths:
         Connection the Human chose and ends authorizing until its OAuth completes. An
         AnotherMe sources card's answer becomes the Human's own Message in the same request; its
         uploads fail as message creation does. A repeated submission carries a stale card version
-        and gets 409. Through a Paired Phone's session only question, runtime_permission,
-        connector_write and agent_change cards may be answered; any other kind gets 403
-        DECIDE_ON_COMPUTER.
+        and gets 409.
       requestBody:
         required: true
         content:

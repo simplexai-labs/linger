@@ -38,7 +38,11 @@ and reading rules; `docs/adr/0001` to `0004` record why.
 - `src/realtime`: the `/v0/events` stream, Room cursors and gap paging, and
   the projection of Room Events into the query cache.
 - `src/chat`: timeline, composer, outbox, run status with Stop, decision
-  cards.
+  cards. Every decision kind is answered as on the web: approvals in
+  `decision-card.tsx`, Connected App setup and authorization in
+  `decision-setup-views.tsx` (logic in `connections.ts`,
+  `setup-sources.ts`), API keys in `decision-key-views.tsx`; a browser
+  connection or macOS permission can only be declined here.
 - `src/library`: the Library's three tabs (Meetings, Documents, Wiki, with
   Wiki pages chosen as the web's Wiki tree does), meeting recordings, and
   read-only Markdown, text, images and audio. Generated knowledge pages hide
@@ -123,7 +127,9 @@ and reading rules; `docs/adr/0001` to `0004` record why.
   reaches the network. Text, Markdown, code, small images and audio render
   natively; files the viewer cannot show are handed to the system viewer
   (`modules/file-preview`: Quick Look on iOS, the app the system picks on
-  Android). The cache file is deleted when its screen closes.
+  Android). The cache file is deleted when its screen closes. A Connected
+  App's sign-in opens in the system's in-app browser (`expo-web-browser`),
+  which the app cannot read, never in a web view.
 - English source text, like the rest of the repository; other languages go
   only in `src/i18n/locales/`. Call `t()` when text is shown, never at
   module scope, because the language can change while the app runs.

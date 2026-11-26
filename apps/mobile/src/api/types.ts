@@ -77,3 +77,10 @@ export type ExternalAppList = Schemas["ExternalAppList"];
 export type ExternalConnectionList = Schemas["ExternalConnectionList"];
 export type ExternalConnectionAgentAccessList =
   Schemas["ExternalConnectionAgentAccessList"];
+export type ExternalApp = Schemas["ExternalApp"];
+export type ExternalConnection = Schemas["ExternalConnection"];
+export type ExternalProviderKeyStatus = Schemas["ExternalProviderKeyStatus"];
+export type WebSearchBackend = Schemas["WebSearchBackend"];
+export type WebSearchBackendList = Schemas["WebSearchBackendList"];
+export type WebSearchKeyBackend = Schemas["WebSearchKeyBackend"];
+export type MessageSegment = Schemas["MessageSegment"];

@@ -20,9 +20,6 @@ var (
 	ErrConflict             = errors.New("typed card state conflict")
 	ErrIdempotencyConflict  = errors.New("typed card idempotency key reused")
 	ErrRuntimeModelRequired = errors.New("typed card runtime model required")
-	// ErrDecideElsewhere refuses a decision kind the calling client may not
-	// answer, such as a phone answering what only the computer shows.
-	ErrDecideElsewhere = errors.New("typed card decision kind is not answerable here")
 	// ErrAssigneeNotMember is the ErrInvalid a caller can name: the card's
 	// assignee is not a human member of its Room.
 	ErrAssigneeNotMember = fmt.Errorf("%w: assignee is not a human Room member", ErrInvalid)

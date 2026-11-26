@@ -53,7 +53,7 @@ import { useOutbox } from "./outbox-context";
 import { Text, TextInput } from "../ui/text";
 
 /** The session buffers a whole upload in memory, so phones send modest files. */
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 interface Pending {
   readonly localId: string;

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -397,9 +396,6 @@ type DecisionAnswerCommand struct {
 	Answers             map[string]any
 	Links               []string
 	AttachmentUploadIDs []string
-	// OnlyKinds, when set, lists the decision kinds this caller may answer;
-	// any other kind gets ErrDecideElsewhere.
-	OnlyKinds []string
 }
 
 // decisionAnswer is the stored answer. Backend is the web search backend
@@ -526,9 +522,6 @@ func (d *decisionAnswerStep) authorize(ctx context.Context, queries *store.Queri
 	if authority.CallerActorID != authority.DeciderActorID &&
 		(authority.Kind != DecisionKindRoomCreation || authority.RequesterVisibilityScope != "workspace") {
 		return ErrForbidden
-	}
-	if d.command.OnlyKinds != nil && !slices.Contains(d.command.OnlyKinds, authority.Kind) {
-		return ErrDecideElsewhere
 	}
 	d.authority = authority
 	return nil
