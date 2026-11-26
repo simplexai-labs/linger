@@ -246,9 +246,20 @@ func retainReadyRuntimesDuringTransientFailures(current, published, next Discove
 		if previous == nil {
 			continue
 		}
-		if publishedReady(current, published, diagnostics[index].Type) && !runtimeExecutableChanged(*previous) && previous.ExecutablePath == diagnostics[index].ExecutablePath &&
-			(diagnostics[index].Status == "incompatible" || diagnostics[index].Status == "error") &&
-			(diagnostics[index].Type != "codex" || diagnostics[index].ModelCatalogError == "") {
+		transient := false
+		if publishedReady(current, published, diagnostics[index].Type) {
+			switch diagnostics[index].Status {
+			case "not_installed":
+				// A CLI self-update can briefly unlink the executable; wait for
+				// consecutive misses before publishing not_installed.
+				transient = true
+			case "incompatible", "error":
+				transient = !runtimeExecutableChanged(*previous) &&
+					previous.ExecutablePath == diagnostics[index].ExecutablePath &&
+					(diagnostics[index].Type != "codex" || diagnostics[index].ModelCatalogError == "")
+			}
+		}
+		if transient {
 			failures[diagnostics[index].Type]++
 			if failures[diagnostics[index].Type] < transientRuntimeFailureThreshold {
 				diagnostics[index] = *previous

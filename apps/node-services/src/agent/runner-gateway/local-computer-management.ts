@@ -124,14 +124,9 @@ export interface LocalComputerModel {
   readonly concurrency?: number;
 }
 
-export type LocalReasoningEffort =
-  | "none"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max"
-  | "ultra";
+export type LocalReasoningEffort = string;
+
+export const MAX_RUNTIME_MODEL_REASONING_EFFORTS = 32;
 
 export interface LocalRuntimeModelDefinition extends LocalComputerModel {
   /** Exact provider model sent over the Gateway; omitted selects the host Runtime default. */
@@ -495,15 +490,13 @@ export function resolveDefaultReasoningEffort(
 
 /**
  * Resolves the reasoning effort to run on a connected Computer's model.
- * Omitted efforts, fallback default "medium" when the model omits "medium",
- * and Pi local models whose advertised effort list does not contain the stored
- * value fall back to the model's default effort instead of failing with
- * `model_not_offered`.
+ * Models without advertised effort levels run without one; an omitted or
+ * unsupported effort falls back to the model's default effort instead of
+ * failing with `model_not_offered`.
  */
 export function resolveSupportedReasoningEffort(
   model: LocalRuntimeModelDefinition,
   reasoningEffort: LocalReasoningEffort | undefined,
-  runtimeType?: LocalRuntimeType,
 ): LocalReasoningEffort | undefined {
   const allowed = model.allowedReasoningEffort ?? [];
   // A model without effort levels runs without one.
@@ -511,17 +504,7 @@ export function resolveSupportedReasoningEffort(
   if (reasoningEffort !== undefined && allowed.includes(reasoningEffort)) {
     return reasoningEffort;
   }
-  if (
-    reasoningEffort === undefined ||
-    reasoningEffort === "medium" ||
-    runtimeType === "pi"
-  ) {
-    return resolveDefaultReasoningEffort(allowed, model.defaultReasoningEffort);
-  }
-  throw new LocalComputerModelError(
-    runtimeType ?? "codex",
-    "Local Computer model reasoning effort is unavailable",
-  );
+  return resolveDefaultReasoningEffort(allowed, model.defaultReasoningEffort);
 }
 
 export const resolveRuntimeModel = (
@@ -555,7 +538,6 @@ export const withSupportedReasoningEffort = <
   const resolved = resolveSupportedReasoningEffort(
     model,
     runtime.reasoning_effort,
-    runtime.type,
   );
   if (resolved === runtime.reasoning_effort) {
     return runtime;
@@ -586,8 +568,15 @@ export const findRuntimeModel = (
   catalog: LocalRuntimeModelCatalog,
   runtimeType: LocalRuntimeType,
   modelId: string,
-): LocalRuntimeModelDefinition | undefined =>
-  catalog[runtimeType].find(({ id }) => id === modelId);
+): LocalRuntimeModelDefinition | undefined => {
+  const models = catalog[runtimeType];
+  const exact = models.find(({ id }) => id === modelId);
+  if (exact) return exact;
+  if (modelId === `${runtimeType}-default` && models.length > 0) {
+    return models.find(({ isDefault }) => isDefault === true) ?? models[0];
+  }
+  return undefined;
+};
 
 /** Claude reports no context window. On the signed-in account a model runs
  * with Anthropic's standard window unless its id selects the 1M one. */
@@ -612,15 +601,29 @@ export const runtimeModelCatalogForComputer = (
     );
     const legacyDefaultIds = new Set(legacyDefaults.map(({ id }) => id));
     const discovered = (diagnostic?.models ?? []).map((model) => {
+      const seenEfforts = new Set<string>();
+      const allowedReasoningEffort: LocalReasoningEffort[] = [];
+      for (const effort of model.allowed_reasoning_effort ?? []) {
+        if (!isLocalReasoningEffort(effort) || seenEfforts.has(effort)) {
+          continue;
+        }
+        seenEfforts.add(effort);
+        allowedReasoningEffort.push(effort);
+        if (
+          allowedReasoningEffort.length >= MAX_RUNTIME_MODEL_REASONING_EFFORTS
+        ) {
+          break;
+        }
+      }
       const defaultReasoningEffort = resolveDefaultReasoningEffort(
-        model.allowed_reasoning_effort,
+        allowedReasoningEffort,
         model.default_reasoning_effort,
       );
       return {
         id: model.id,
         label: model.label,
         ...(legacyDefaultIds.has(model.id) ? {} : { runtimeModel: model.id }),
-        allowedReasoningEffort: model.allowed_reasoning_effort,
+        allowedReasoningEffort,
         ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
         ...(model.context_window !== undefined
           ? { contextWindow: model.context_window }
@@ -631,7 +634,11 @@ export const runtimeModelCatalogForComputer = (
         ...(model.link ? { link: model.link } : {}),
       };
     });
-    catalog[runtimeType] = diagnostic?.model_catalog_error ? [] : discovered;
+    catalog[runtimeType] = diagnostic?.model_catalog_error
+      ? []
+      : diagnostic && diagnostic.models === undefined
+        ? legacyDefaults
+        : discovered;
   }
   validateRuntimeModelCatalog(catalog);
 
@@ -691,6 +698,7 @@ export const validateRuntimeModelCatalog = (
       const allowedReasoningEffort = model.allowedReasoningEffort ?? [];
       if (
         !Array.isArray(allowedReasoningEffort) ||
+        allowedReasoningEffort.length > MAX_RUNTIME_MODEL_REASONING_EFFORTS ||
         allowedReasoningEffort.some(
           (effort, index) =>
             !isLocalReasoningEffort(effort) ||
@@ -712,8 +720,7 @@ export const validateRuntimeModelCatalog = (
 export const isLocalReasoningEffort = (
   value: unknown,
 ): value is LocalReasoningEffort =>
-  typeof value === "string" &&
-  ["none", "low", "medium", "high", "xhigh", "max", "ultra"].includes(value);
+  typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,19}$/.test(value);
 
 export const parseLocalPlacement = (
   value: unknown,

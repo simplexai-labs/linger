@@ -12,8 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/realtime"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 	"github.com/simplexai-labs/linger/contracts-go/nodeservicesinternal"
+	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
 const modelSourceTestAPIKey = "sk-model-source-never-stored"
@@ -125,7 +127,7 @@ func newModelSourceEnv(t *testing.T, management roomagent.AgentManagement, compu
 func TestLocalComputerModelSourceSwitchMovesAgentsAndEndsChosenWork(t *testing.T) {
 	allowParallelIntegrationTest(t)
 	management := &runStoppingAgentManagement{recordingAgentManagement: &recordingAgentManagement{}}
-	effort := nodeservicesinternal.AgentReasoningEffort("high")
+	effort := "high"
 	computers := &modelSourceComputers{status: nodeservicesinternal.ModelSourceStatus{
 		Mode: "byok", Runtime: "claude", RuntimeModel: "localmodels-byok", ReasoningEffort: &effort,
 		Byok: nodeservicesinternal.ByokSummary{Configured: true, KeySaved: true},
@@ -385,5 +387,74 @@ func TestLocalComputerModelSourceDetachesFromClientCancelAndRejectsInvalidStatus
 	}
 	if countRows(t, env, `SELECT count(*) FROM agent_registrations WHERE actor_id=$1 AND local_runtime_type='pi' AND runtime_model=$2`, agent.Actor.ID, localModel) != 1 {
 		t.Fatal("agent was not reconciled after client disconnected mid-switch")
+	}
+}
+
+// TestLocalComputerModelSourceByokReapplyClearsAnotherMeBackgroundFailures
+// proves that re-applying the same BYOK (runtime, model, effort) still clears
+// another_me_background_failures and emits the another-me invalidation hint
+// without bumping ConfigurationRevision.
+func TestLocalComputerModelSourceByokReapplyClearsAnotherMeBackgroundFailures(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	management := &runStoppingAgentManagement{recordingAgentManagement: &recordingAgentManagement{}}
+	effort := "high"
+	computers := &modelSourceComputers{status: nodeservicesinternal.ModelSourceStatus{
+		Mode: "byok", Runtime: "claude", RuntimeModel: "localmodels-byok", ReasoningEffort: &effort,
+		Byok: nodeservicesinternal.ByokSummary{Configured: true, KeySaved: true},
+	}}
+	env, alice := newModelSourceEnv(t, management, computers)
+	base := "/v0/tenants/" + acmeTenant + "/local-computers/" + fixtureComputerID + "/model-source"
+
+	const anotherMeID = "actor_byok_reapply_anotherme"
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO actors(id,tenant_id,kind,display_name,handle) VALUES($1,$2,'agent','Alice Another Me','@byok-reapply-anotherme')`, anotherMeID, acmeTenant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO agent_registrations(
+		actor_id,tenant_id,agent_management_id,status,description,instructions,runtime_model,runtime_reasoning_effort,
+		created_by_actor_id,visibility_scope,agent_type,represented_human_actor_id,computer_id,local_runtime_type,workspace_grant_id,configuration_revision
+	) VALUES($1,$2,'management-byok-reapply-anotherme','active','Background','Work safely','localmodels-byok','high','actor_acme_alice','sponsor','anotherme','actor_acme_alice',$3,'claude','grant_files',1)`,
+		anotherMeID, acmeTenant, fixtureComputerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `INSERT INTO another_me_background_failures(agent_actor_id,tenant_id,consecutive_failures,reason,last_failed_at) VALUES($1,$2,3,'runtime_unavailable',now())`, anotherMeID, acmeTenant); err != nil {
+		t.Fatal(err)
+	}
+
+	hints := listenTenantHints(t, env.pool)
+	const anotherMeHint = realtime.InvalidationKindPrefix + realtime.InvalidateAnotherMe
+
+	byokReapply := map[string]any{
+		"mode":    "byok",
+		"runtime": "claude",
+		"byok": map[string]any{
+			"base_url": "https://api.example.com",
+			"path":     "/api/v3",
+			"endpoint": "/messages",
+			"protocol": "anthropic",
+			"api_key":  modelSourceTestAPIKey,
+			"model_id": "vendor/model",
+		},
+	}
+	status, _, body := env.request(alice, http.MethodPost, base, byokReapply, "")
+	if status != http.StatusOK || !containsJSONText(body, `"updated_agent_count":0`) {
+		t.Fatalf("BYOK reapply: %d %s", status, body)
+	}
+	if countRows(t, env, `SELECT count(*) FROM agent_registrations WHERE actor_id=$1 AND configuration_revision=1`, anotherMeID) != 1 {
+		t.Fatal("BYOK reapply unexpectedly bumped configuration_revision")
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM another_me_background_failures WHERE agent_actor_id=$1`, anotherMeID); got != 0 {
+		t.Fatalf("another_me_background_failures count = %d, want 0", got)
+	}
+	if got := hints()[anotherMeHint]; got != 1 {
+		t.Fatalf("another-me invalidation hints = %d, want 1", got)
+	}
+	status, _, body = env.request(alice, http.MethodGet, "/v0/tenants/"+acmeTenant+"/another-me", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("GET another-me: %d %s", status, body)
+	}
+	var anotherMe httpapi.AnotherMe
+	decode(t, body, &anotherMe)
+	if anotherMe.BackgroundFailure != nil {
+		t.Fatalf("Another Me still shows background failure after BYOK reapply: %+v", anotherMe.BackgroundFailure)
 	}
 }

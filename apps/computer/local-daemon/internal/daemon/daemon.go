@@ -158,6 +158,9 @@ type Daemon struct {
 	// operationBackgroundWait holds whether the current Agent Service declared
 	// serviceFeatureOperationBackgroundWait in its welcome.
 	operationBackgroundWait atomic.Bool
+	// dynamicReasoningEfforts holds whether the current Agent Service declared
+	// serviceFeatureDynamicReasoningEfforts in its welcome.
+	dynamicReasoningEfforts atomic.Bool
 	// authorityRevision counts, under admissionMu, the commands that can change
 	// what an accepted Operation may start with: Registration snapshots, Agent
 	// Runner commands and Context commands. A start whose revision is unchanged

@@ -27,9 +27,8 @@ interface RuntimeModel {
 export function useAgentModelSelection(models: readonly RuntimeModel[]) {
   const t = useT();
   const [requestedModel, setRequestedModel] = useState("");
-  const [requestedReasoningEffort, setRequestedReasoningEffort] = useState<
-    TeamHubAgentReasoningEffort | ""
-  >("");
+  const [requestedReasoningEffort, setRequestedReasoningEffort] =
+    useState<TeamHubAgentReasoningEffort>("");
   const selectedModel =
     models.find(({ id }) => id === requestedModel) ?? models[0];
   const reasoningEfforts = [...(selectedModel?.allowed_reasoning_effort ?? [])];
@@ -38,10 +37,8 @@ export function useAgentModelSelection(models: readonly RuntimeModel[]) {
     reasoningEfforts.includes(selectedModel.default_reasoning_effort)
       ? selectedModel.default_reasoning_effort
       : reasoningEfforts[0];
-  const reasoningEffort = reasoningEfforts.includes(
-    requestedReasoningEffort as TeamHubAgentReasoningEffort,
-  )
-    ? (requestedReasoningEffort as TeamHubAgentReasoningEffort)
+  const reasoningEffort = reasoningEfforts.includes(requestedReasoningEffort)
+    ? requestedReasoningEffort
     : defaultReasoningEffort;
 
   return {
@@ -57,22 +54,29 @@ export function useAgentModelSelection(models: readonly RuntimeModel[]) {
   };
 }
 
-export const reasoningEffortMessages = {
+export const reasoningEffortMessages: Readonly<Record<string, Message>> = {
+  off: composerMessages.effortOff,
   none: composerMessages.effortNone,
+  minimal: composerMessages.effortMinimal,
   low: composerMessages.effortLow,
   medium: composerMessages.effortMedium,
   high: composerMessages.effortHigh,
   xhigh: composerMessages.effortExtraHigh,
   max: composerMessages.effortMaximum,
   ultra: composerMessages.effortUltra,
-} satisfies Record<TeamHubAgentReasoningEffort, Message>;
+};
 
 /** The effort's name; a component passes its own `t` to follow the language. */
 export function reasoningEffortLabel(
   value: TeamHubAgentReasoningEffort,
   t: Translate = translate,
 ) {
-  return t(reasoningEffortMessages[value]);
+  const message = Object.hasOwn(reasoningEffortMessages, value)
+    ? reasoningEffortMessages[value]
+    : undefined;
+  if (message) return t(message);
+  const words = value.replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : value;
 }
 
 /**

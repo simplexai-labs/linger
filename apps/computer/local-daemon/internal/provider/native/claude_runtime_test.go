@@ -221,12 +221,14 @@ func TestClaudeUsageTotals(t *testing.T) {
 func TestClaudeUnsupportedEffortNeverSpawns(t *testing.T) {
 	dir := t.TempDir()
 	backend, _ := Open("claude", claudeFakeProfile(t, "frames", map[string]string{"CLAUDE_FAKE_DIR": dir}))
-	_, err := backend.Start(t.Context(), "hello", claudeSpec(RunSpec{Effort: "ultra"}))
-	if err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "argv")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("the fake was spawned")
+	for _, invalid := range []string{"-low", "bad effort", "too_long_effort_token"} {
+		_, err := backend.Start(t.Context(), "hello", claudeSpec(RunSpec{Effort: invalid}))
+		if err == nil || !strings.Contains(err.Error(), "unsupported") {
+			t.Fatalf("Effort %q err = %v", invalid, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "argv")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the fake was spawned for invalid effort %q", invalid)
+		}
 	}
 	if _, err := backend.Start(t.Context(), "hello", RunSpec{}); err == nil || !strings.Contains(err.Error(), "policy is required") {
 		t.Fatalf("missing policy err = %v", err)
@@ -242,6 +244,26 @@ func TestClaudeUnsupportedEffortNeverSpawns(t *testing.T) {
 	}
 	if _, err := backend.Start(t.Context(), "hello", claudeSpec(RunSpec{AssignSessionID: "not-a-uuid"})); err == nil || !strings.Contains(err.Error(), "not a UUID") {
 		t.Fatalf("identity err = %v", err)
+	}
+}
+
+func TestClaudeDynamicReasoningEffortTokens(t *testing.T) {
+	logger := claudeQuietLogger()
+	for _, effort := range []string{"", "none", "minimal", "ultra", "custom_2"} {
+		if err := claudeCheckEffort(effort); err != nil {
+			t.Fatalf("claudeCheckEffort(%q) = %v, want nil", effort, err)
+		}
+	}
+	for _, invalid := range []string{"-low", "bad effort", "too_long_effort_token", "_leading"} {
+		if err := claudeCheckEffort(invalid); err == nil {
+			t.Fatalf("claudeCheckEffort(%q) = nil, want error", invalid)
+		}
+	}
+	for _, effort := range []string{"minimal", "ultra", "custom_2"} {
+		_, argv := claudeBuildArgv(logger, claudeSpec(RunSpec{Effort: effort}))
+		if v := claudeFlagValue(argv, "--effort"); len(v) != 1 || v[0] != effort || !slices.Contains(claudeFlagValue(argv, "--thinking"), "adaptive") {
+			t.Fatalf("effort %q argv = %v", effort, argv)
+		}
 	}
 }
 

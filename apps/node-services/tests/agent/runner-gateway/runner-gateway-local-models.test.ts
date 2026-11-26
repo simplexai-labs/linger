@@ -208,6 +208,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -224,6 +225,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -239,6 +241,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -254,6 +257,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -269,6 +273,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -283,6 +288,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -296,6 +302,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -309,6 +316,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -321,6 +329,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -333,6 +342,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -344,6 +354,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     [
@@ -355,6 +366,7 @@ describe("Runner Gateway local models", () => {
         "local_models_external_holders",
         "runtime_failure_detail",
         "operation_background_wait",
+        "dynamic_reasoning_efforts",
       ],
     ],
     ["0.51.0", undefined],

@@ -329,7 +329,7 @@ func TestInvalidRememberedEntriesAreDroppedAndLoggedOnce(t *testing.T) {
 	valid := provider.RuntimeModel{ID: "lib/valid", Label: "Valid", AllowedReasoningEffort: []string{"high"}, DefaultReasoningEffort: "high"}
 	catalog := rememberedCatalog(t,
 		valid,
-		provider.RuntimeModel{ID: "lib/effort", Label: "Effort", AllowedReasoningEffort: []string{"turbo"}},
+		provider.RuntimeModel{ID: "lib/effort", Label: "Effort", AllowedReasoningEffort: []string{"bad effort"}},
 		provider.RuntimeModel{ID: "lib/window", Label: "Window", AllowedReasoningEffort: []string{}, ContextWindow: provider.MaxRuntimeModelContextWindow + 1},
 	)
 	for range 3 {

@@ -42,6 +42,8 @@ import { logAgentEvent } from "../observability/agent-log.js";
 export class AgentRunnerLifecycle {
   readonly #agentRunners = new AgentRunnerDesiredState();
 
+  readonly #rawPlacements = new Map<string, Map<string, RunnerPlacement>>();
+
   readonly #agentRunnerStateWaiters = new Map<
     string,
     Set<AgentRunnerStateWaiter>
@@ -106,6 +108,18 @@ export class AgentRunnerLifecycle {
         options.agentId,
         options.placement.computerId,
       );
+      this.#setRawPlacement(options.placement.computerId, {
+        agentId: options.agentId,
+        tenantId: options.placement.tenantId,
+        ownerActorId: options.placement.ownerActorId,
+        runtimeType: options.placement.runtimeType,
+        model: options.modelId,
+        ...(options.reasoningEffort
+          ? { reasoningEffort: options.reasoningEffort }
+          : {}),
+        workspaceGrantId: options.placement.workspaceGrantId,
+        assignmentRevision: options.placement.assignmentRevision,
+      });
       const { changed, record } = this.#agentRunners.ensure(
         this.#runnerPlacement(options.agentId, options.placement, {
           type: options.placement.runtimeType,
@@ -127,9 +141,10 @@ export class AgentRunnerLifecycle {
    * connection otherwise; the new placement is ensured at the next Run.
    */
   async noteAgentPlacement(agentId: string, computerId: string): Promise<void> {
-    await this.runAgentMutation(agentId, () =>
-      this.#leaveOtherComputers(agentId, computerId),
-    );
+    await this.runAgentMutation(agentId, async () => {
+      this.#deleteRawPlacement(agentId, undefined);
+      await this.#leaveOtherComputers(agentId, computerId);
+    });
   }
 
   /** Removes every Runner of a revoked Agent from its connected Computers. */
@@ -143,6 +158,7 @@ export class AgentRunnerLifecycle {
     agentId: string,
     computerId: string | undefined,
   ): Promise<void> {
+    this.#deleteRawPlacement(agentId, computerId);
     for (const record of this.#agentRunners.recordsForAgent(agentId)) {
       if (record.computerId === computerId) continue;
       if (
@@ -166,38 +182,97 @@ export class AgentRunnerLifecycle {
     computerId: string,
     placements: readonly RunnerPlacement[],
   ): AgentRunnerPlacement[] {
+    if (placements.length === 0) {
+      this.#rawPlacements.delete(computerId);
+    } else {
+      this.#rawPlacements.set(
+        computerId,
+        new Map(placements.map((placement) => [placement.agentId, placement])),
+      );
+    }
     return placements.flatMap((placement) => {
-      try {
-        return [
-          this.#runnerPlacement(
-            placement.agentId,
-            {
-              type: "local",
-              tenantId: placement.tenantId,
-              ownerActorId: placement.ownerActorId,
-              computerId,
-              runtimeType: placement.runtimeType,
-              workspaceGrantId: placement.workspaceGrantId,
-              assignmentRevision: placement.assignmentRevision,
-            },
-            {
-              type: placement.runtimeType,
-              model: placement.model,
-              ...(placement.reasoningEffort
-                ? { reasoning_effort: placement.reasoningEffort }
-                : {}),
-            },
-          ),
-        ];
-      } catch (error) {
-        logAgentEvent("warn", "runner.placement.unavailable", {
-          computerId,
-          agentId: placement.agentId,
-          error,
-        });
-        return [];
-      }
+      const resolved = this.#tryResolveRawPlacement(computerId, placement);
+      return resolved ? [resolved] : [];
     });
+  }
+
+  /**
+   * Re-resolves tracked unresolved placements against a Computer's updated
+   * runtime model catalog and reconciles any Runner whose effective config
+   * changed (for example restoring dynamic reasoning efforts once post-welcome
+   * diagnostics replace the legacy-filtered runner.hello catalog).
+   */
+  async refreshComputerPlacements(computerId: string): Promise<void> {
+    const tracked = this.#rawPlacements.get(computerId);
+    if (!tracked || tracked.size === 0) return;
+    for (const [agentId, placement] of [...tracked.entries()]) {
+      if (this.#rawPlacements.get(computerId)?.get(agentId) !== placement) {
+        continue;
+      }
+      if (!this.owners.connections().getConnection(computerId)?.connected) {
+        return;
+      }
+      const resolved = this.#tryResolveRawPlacement(computerId, placement);
+      if (!resolved) continue;
+      const { changed, record } = this.#agentRunners.ensure(resolved);
+      if (changed) await this.#apply(record);
+    }
+  }
+
+  #setRawPlacement(computerId: string, placement: RunnerPlacement): void {
+    let placements = this.#rawPlacements.get(computerId);
+    if (!placements) {
+      placements = new Map();
+      this.#rawPlacements.set(computerId, placements);
+    }
+    placements.set(placement.agentId, placement);
+  }
+
+  #deleteRawPlacement(
+    agentId: string,
+    keepComputerId: string | undefined,
+  ): void {
+    for (const [trackedComputerId, placements] of this.#rawPlacements) {
+      if (trackedComputerId === keepComputerId) continue;
+      placements.delete(agentId);
+      if (placements.size === 0) {
+        this.#rawPlacements.delete(trackedComputerId);
+      }
+    }
+  }
+
+  #tryResolveRawPlacement(
+    computerId: string,
+    placement: RunnerPlacement,
+  ): AgentRunnerPlacement | undefined {
+    try {
+      return this.#runnerPlacement(
+        placement.agentId,
+        {
+          type: "local",
+          tenantId: placement.tenantId,
+          ownerActorId: placement.ownerActorId,
+          computerId,
+          runtimeType: placement.runtimeType,
+          workspaceGrantId: placement.workspaceGrantId,
+          assignmentRevision: placement.assignmentRevision,
+        },
+        {
+          type: placement.runtimeType,
+          model: placement.model,
+          ...(placement.reasoningEffort
+            ? { reasoning_effort: placement.reasoningEffort }
+            : {}),
+        },
+      );
+    } catch (error) {
+      logAgentEvent("warn", "runner.placement.unavailable", {
+        computerId,
+        agentId: placement.agentId,
+        error,
+      });
+      return undefined;
+    }
   }
 
   #runnerPlacement(
@@ -438,6 +513,7 @@ export class AgentRunnerLifecycle {
   }
 
   forgetComputer(computerId: string): void {
+    this.#rawPlacements.delete(computerId);
     this.#agentRunners.forgetComputer(computerId);
   }
 }
@@ -458,7 +534,6 @@ const resolveRuntimeConfig = (
   const reasoning_effort = resolveSupportedReasoningEffort(
     model,
     runtime.reasoning_effort,
-    runtime.type,
   );
   return {
     type: runtime.type,

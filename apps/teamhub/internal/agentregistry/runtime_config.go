@@ -92,8 +92,8 @@ func ProjectAgentRuntimeConfigSnapshot(
 	response.Agent.Instructions = registration.Instructions
 	var effort *teamhubinternal.AgentReasoningEffort
 	if registration.RuntimeReasoningEffort.Valid {
-		value := teamhubinternal.AgentReasoningEffort(registration.RuntimeReasoningEffort.String)
-		if !value.Valid() {
+		value := registration.RuntimeReasoningEffort.String
+		if !isValidReasoningEffortToken(value) {
 			return teamhubinternal.AgentRuntimeConfigSnapshot{}, agentruntimestate.ErrConflict
 		}
 		effort = &value

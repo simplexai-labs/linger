@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RunnerHello } from "@linger/wire-contracts/runner-gateway/types";
 import {
   DEFAULT_LOCAL_RUNTIME_MODELS,
+  findRuntimeModel,
   LocalComputerOfflineError,
   LocalComputerPlacementError,
   LocalRuntimeAdmissionUnavailableError,
@@ -659,9 +660,15 @@ describe("RunnerGateway", () => {
         );
         await acknowledgeEnsuredAgent(connection, peer);
         await expect(ensuring).resolves.toBe(1);
+        expect(gateway.runtimeModels("runner-local", "codex")).toHaveLength(
+          count,
+        );
+        await expect(
+          gateway.ensureReadyLocalAgentRunner(runner("missing-model")),
+        ).rejects.toThrow("unavailable");
         await expect(
           gateway.ensureReadyLocalAgentRunner(runner("codex-default")),
-        ).rejects.toThrow("unavailable");
+        ).resolves.toBe(1);
       } finally {
         connection.disconnect();
       }
@@ -824,7 +831,7 @@ describe("RunnerGateway", () => {
         },
         peer,
       );
-      expect(() =>
+      expect(
         gateway.requireLocalPlacement(
           {
             type: "local",
@@ -838,7 +845,10 @@ describe("RunnerGateway", () => {
           "gpt-6-astra",
           "ultra",
         ),
-      ).toThrow("reasoning effort is unavailable");
+      ).toMatchObject({
+        id: "gpt-6-astra",
+        defaultReasoningEffort: "low",
+      });
 
       const requirement = {
         placement: {
@@ -873,16 +883,29 @@ describe("RunnerGateway", () => {
         id: "gpt-6-astra",
         defaultReasoningEffort: "low",
       });
-      await expect(
-        gateway.ensureReadyLocalAgentRunner({
-          ...requirement,
-          reasoningEffort: "ultra",
+      const fallbackReadiness = gateway.ensureReadyLocalAgentRunner({
+        ...requirement,
+        agentId: "agent-fallback",
+        reasoningEffort: "ultra",
+      });
+      await vi.waitFor(() =>
+        expect(peer.sent.at(-1)).toMatchObject({
+          type: "agent_runner.ensure",
+          agent_id: "agent-fallback",
+          runtime: {
+            type: "codex",
+            model: "gpt-6-astra",
+            reasoning_effort: "low",
+          },
         }),
-      ).rejects.toThrow("reasoning effort is unavailable");
+      );
+      await acknowledgeEnsuredAgent(connection, peer);
+      await expect(fallbackReadiness).resolves.toBe(1);
       const readiness = gateway.ensureReadyLocalAgentRunner(requirement);
       await vi.waitFor(() =>
         expect(peer.sent.at(-1)).toMatchObject({
           type: "agent_runner.ensure",
+          agent_id: "agent-reviewer",
           runtime: {
             type: "codex",
             model: "gpt-6-astra",
@@ -1272,5 +1295,268 @@ describe("RunnerGateway", () => {
     expect(
       catalog.pi.find((model) => model.id === "pi-default"),
     ).not.toHaveProperty("runtimeModel");
+  });
+
+  it("accepts model-advertised custom reasoning efforts like minimal", async () => {
+    const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
+    const peer = new RecordingPeer();
+    const diagnostics = runtimeDiagnostics().map((diagnostic) =>
+      diagnostic.type === "codex"
+        ? {
+            ...diagnostic,
+            models: [
+              {
+                id: "gpt-5.4-mini",
+                label: "GPT-5.4 Mini",
+                allowed_reasoning_effort: ["minimal", "low", "high"],
+                default_reasoning_effort: "minimal",
+              },
+            ],
+          }
+        : { ...diagnostic, models: [] },
+    ) as unknown as RunnerHello["runtime_diagnostics"];
+    const connection = await gateway.acceptConnection(
+      authenticatedPrincipal(),
+      {
+        ...hello(),
+        runtime_diagnostics: diagnostics,
+        workspace_grants: [
+          {
+            grant_id: "grant-owner",
+            tenant_id: "tenant-acme",
+            label: "Linger workspace",
+            mode: "workspace-write",
+            scope: "owner",
+          },
+        ],
+      },
+      peer,
+    );
+    const placement = {
+      type: "local" as const,
+      assignmentRevision: 1,
+      tenantId: "tenant-acme",
+      ownerActorId: "actor-alice",
+      computerId: "runner-local",
+      runtimeType: "codex" as const,
+      workspaceGrantId: "grant-owner",
+    };
+    expect(
+      gateway.requireLocalPlacement(placement, "gpt-5.4-mini", "minimal"),
+    ).toMatchObject({
+      id: "gpt-5.4-mini",
+      allowedReasoningEffort: ["minimal", "low", "high"],
+      defaultReasoningEffort: "minimal",
+    });
+    const readiness = gateway.ensureReadyLocalAgentRunner({
+      placement,
+      agentId: "agent-minimal",
+      modelId: "gpt-5.4-mini",
+      reasoningEffort: "minimal",
+    });
+    await vi.waitFor(() =>
+      expect(peer.sent.at(-1)).toMatchObject({
+        type: "agent_runner.ensure",
+        agent_id: "agent-minimal",
+        runtime: {
+          type: "codex",
+          model: "gpt-5.4-mini",
+          reasoning_effort: "minimal",
+        },
+      }),
+    );
+    await acknowledgeEnsuredAgent(connection, peer);
+    await expect(readiness).resolves.toBe(1);
+    connection.disconnect();
+  });
+
+  it("maps legacy *-default model IDs and omitted diagnostic models safely", () => {
+    const catalog = runtimeModelCatalogForComputer(
+      {
+        ...hello(),
+        runtime_diagnostics: runtimeDiagnostics().map((entry) => {
+          if (entry.type === "codex") {
+            return {
+              ...entry,
+              models: [
+                {
+                  id: "gpt-5.4-mini",
+                  label: "GPT-5.4 Mini",
+                  allowed_reasoning_effort: ["minimal", "low"],
+                },
+                {
+                  id: "gpt-5.4",
+                  label: "GPT-5.4",
+                  allowed_reasoning_effort: ["low", "high"],
+                  is_default: true,
+                },
+              ],
+            };
+          }
+          if (entry.type === "claude") {
+            const { models: _omitted, ...withoutModels } = entry;
+            return withoutModels;
+          }
+          return { ...entry, models: [] };
+        }) as unknown as RunnerHello["runtime_diagnostics"],
+      },
+      DEFAULT_LOCAL_RUNTIME_MODELS,
+    );
+    expect(findRuntimeModel(catalog, "codex", "codex-default")).toMatchObject({
+      id: "gpt-5.4",
+      isDefault: true,
+    });
+    // Without an explicit isDefault entry, falls back to the first listed model.
+    const noExplicitDefault = {
+      ...catalog,
+      codex: catalog.codex.map(({ isDefault: _drop, ...rest }) => rest),
+    };
+    expect(
+      findRuntimeModel(noExplicitDefault, "codex", "codex-default"),
+    ).toMatchObject({
+      id: "gpt-5.4-mini",
+    });
+    // Omitted diagnostic.models falls back to legacy defaults.
+    expect(catalog.claude).toEqual(DEFAULT_LOCAL_RUNTIME_MODELS.claude);
+  });
+
+  it("re-reconciles placements when post-welcome runtime_diagnostics unlocks dynamic efforts", async () => {
+    const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
+    const registry = testRegistryOf(gateway);
+    registry.place("runner-local", {
+      agentId: "agent-minimal",
+      tenantId: "tenant-acme",
+      ownerActorId: "actor-alice",
+      runtimeType: "codex",
+      model: "gpt-5.4-mini",
+      reasoningEffort: "minimal",
+      workspaceGrantId: "grant-owner",
+      assignmentRevision: 1,
+    });
+    const peer = new RecordingPeer();
+    const filteredDiagnostics = runtimeDiagnostics().map((entry) =>
+      entry.type === "codex"
+        ? {
+            ...entry,
+            models: [
+              {
+                id: "gpt-5.4-mini",
+                label: "GPT-5.4 Mini",
+                allowed_reasoning_effort: ["low", "high"],
+                is_default: true,
+              },
+            ],
+          }
+        : { ...entry, models: [] },
+    ) as unknown as RunnerHello["runtime_diagnostics"];
+
+    const connection = await gateway.acceptConnection(
+      authenticatedPrincipal(),
+      {
+        ...hello(),
+        runtime_diagnostics: filteredDiagnostics,
+      },
+      peer,
+    );
+
+    const ensureCommands = () =>
+      peer.sent.filter((frame) => frame.type === "agent_runner.ensure");
+    await vi.waitFor(() => expect(ensureCommands()).toHaveLength(1));
+    expect(ensureCommands()[0]).toMatchObject({
+      type: "agent_runner.ensure",
+      agent_id: "agent-minimal",
+      runtime: {
+        type: "codex",
+        model: "gpt-5.4-mini",
+        reasoning_effort: "low",
+      },
+    });
+    await acknowledgeEnsuredAgent(connection, peer);
+
+    // Post-welcome runtime_diagnostics restores the dynamic "minimal" effort.
+    const fullDiagnostics = runtimeDiagnostics().map((entry) =>
+      entry.type === "codex"
+        ? {
+            ...entry,
+            models: [
+              {
+                id: "gpt-5.4-mini",
+                label: "GPT-5.4 Mini",
+                allowed_reasoning_effort: ["minimal", "low", "high"],
+                default_reasoning_effort: "minimal",
+                is_default: true,
+              },
+            ],
+          }
+        : { ...entry, models: [] },
+    ) as unknown as RunnerHello["runtime_diagnostics"];
+
+    await connection.receive({
+      type: "runner.runtime_diagnostics",
+      protocol_version: "2",
+      runner_id: "runner-local",
+      revision: 1,
+      sent_at: new Date().toISOString(),
+      runtime_diagnostics: fullDiagnostics,
+    });
+    await vi.waitFor(() => expect(ensureCommands()).toHaveLength(2));
+    expect(ensureCommands()[1]).toMatchObject({
+      type: "agent_runner.ensure",
+      agent_id: "agent-minimal",
+      runtime: {
+        type: "codex",
+        model: "gpt-5.4-mini",
+        reasoning_effort: "minimal",
+      },
+    });
+    await acknowledgeEnsuredAgent(connection, peer);
+
+    // A subsequent unchanged runtime_diagnostics must not emit another ensure.
+    await connection.receive({
+      type: "runner.runtime_diagnostics",
+      protocol_version: "2",
+      runner_id: "runner-local",
+      revision: 2,
+      sent_at: new Date().toISOString(),
+      runtime_diagnostics: fullDiagnostics,
+    });
+    expect(ensureCommands()).toHaveLength(2);
+    connection.disconnect();
+  });
+
+  it("caps runtime model allowed_reasoning_effort at 32 unique valid entries", () => {
+    const manyEfforts = Array.from(
+      { length: 40 },
+      (_, index) => `tier_${String(index).padStart(2, "0")}`,
+    );
+    const catalog = runtimeModelCatalogForComputer(
+      {
+        ...hello(),
+        runtime_diagnostics: runtimeDiagnostics().map((entry) =>
+          entry.type === "codex"
+            ? {
+                ...entry,
+                models: [
+                  {
+                    id: "gpt-many",
+                    label: "GPT Many",
+                    allowed_reasoning_effort: [
+                      "tier_00",
+                      "-invalid",
+                      ...manyEfforts,
+                    ],
+                    default_reasoning_effort: "tier_35",
+                  },
+                ],
+              }
+            : { ...entry, models: [] },
+        ) as unknown as RunnerHello["runtime_diagnostics"],
+      },
+      DEFAULT_LOCAL_RUNTIME_MODELS,
+    );
+    expect(catalog.codex[0]?.allowedReasoningEffort).toHaveLength(32);
+    expect(catalog.codex[0]?.allowedReasoningEffort?.[0]).toBe("tier_00");
+    expect(catalog.codex[0]?.allowedReasoningEffort?.[31]).toBe("tier_31");
+    expect(catalog.codex[0]?.defaultReasoningEffort).toBe("tier_00");
   });
 });

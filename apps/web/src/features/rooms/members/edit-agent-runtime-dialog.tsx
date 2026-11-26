@@ -118,7 +118,8 @@ export function EditAgentRuntimeDialog({
   const placementLocked = field === "model" || field === "reasoning";
   const noWritableGrant = moving && Boolean(computer) && !grant;
   const unavailable =
-    computers.isError || (!loading && (!computer || (!moving && !grant)));
+    (computers.isError && !computers.data) ||
+    (!loading && (!computer || (!moving && !grant)));
   const canSave = Boolean(modelIsAvailable && localReady && target);
 
   const modelsLink = (text: string) =>
@@ -659,7 +660,7 @@ function ReasoningField({
       <Select
         aria-label={t(agentRuntimeMessages.reasoningLabel)}
         className="ui-field-control w-full"
-        onValueChange={(next) => onChange(next as TeamHubAgentReasoningEffort)}
+        onValueChange={(next) => onChange(next)}
         value={value ?? ""}
       >
         {allowed.map((effort) => (

@@ -57,12 +57,12 @@ func chooseAnotherMeLocalPlacement(computers []httpapi.LocalComputer, preferredR
 // first allowed effort, because a model that offers efforts needs one.
 func placementReasoningEffort(model httpapi.AgentModel) string {
 	if model.DefaultReasoningEffort != nil {
-		return string(*model.DefaultReasoningEffort)
+		return *model.DefaultReasoningEffort
 	}
 	if model.AllowedReasoningEffort == nil || len(*model.AllowedReasoningEffort) == 0 {
 		return ""
 	}
-	return string((*model.AllowedReasoningEffort)[0])
+	return (*model.AllowedReasoningEffort)[0]
 }
 
 func writableWorkspaceGrant(grants []httpapi.LocalComputerWorkspaceGrant) string {

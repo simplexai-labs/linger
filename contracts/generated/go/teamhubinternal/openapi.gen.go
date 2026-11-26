@@ -173,39 +173,6 @@ func (e AgentMemoryDocumentPendingStage) Valid() bool {
 	}
 }
 
-// Defines values for AgentReasoningEffort.
-const (
-	AgentReasoningEffortHigh   AgentReasoningEffort = "high"
-	AgentReasoningEffortLow    AgentReasoningEffort = "low"
-	AgentReasoningEffortMax    AgentReasoningEffort = "max"
-	AgentReasoningEffortMedium AgentReasoningEffort = "medium"
-	AgentReasoningEffortNone   AgentReasoningEffort = "none"
-	AgentReasoningEffortUltra  AgentReasoningEffort = "ultra"
-	AgentReasoningEffortXhigh  AgentReasoningEffort = "xhigh"
-)
-
-// Valid indicates whether the value is a known member of the AgentReasoningEffort enum.
-func (e AgentReasoningEffort) Valid() bool {
-	switch e {
-	case AgentReasoningEffortHigh:
-		return true
-	case AgentReasoningEffortLow:
-		return true
-	case AgentReasoningEffortMax:
-		return true
-	case AgentReasoningEffortMedium:
-		return true
-	case AgentReasoningEffortNone:
-		return true
-	case AgentReasoningEffortUltra:
-		return true
-	case AgentReasoningEffortXhigh:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AgentRuntimeAcceptedContextStateTargetResidency.
 const (
 	AgentRuntimeAcceptedContextStateTargetResidencyActive    AgentRuntimeAcceptedContextStateTargetResidency = "active"
@@ -2200,22 +2167,22 @@ func (e WorkItemKind) Valid() bool {
 
 // Defines values for WorkItemPriority.
 const (
-	WorkItemPriorityHigh   WorkItemPriority = "high"
-	WorkItemPriorityLow    WorkItemPriority = "low"
-	WorkItemPriorityMedium WorkItemPriority = "medium"
-	WorkItemPriorityUrgent WorkItemPriority = "urgent"
+	High   WorkItemPriority = "high"
+	Low    WorkItemPriority = "low"
+	Medium WorkItemPriority = "medium"
+	Urgent WorkItemPriority = "urgent"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemPriority enum.
 func (e WorkItemPriority) Valid() bool {
 	switch e {
-	case WorkItemPriorityHigh:
+	case High:
 		return true
-	case WorkItemPriorityLow:
+	case Low:
 		return true
-	case WorkItemPriorityMedium:
+	case Medium:
 		return true
-	case WorkItemPriorityUrgent:
+	case Urgent:
 		return true
 	default:
 		return false
@@ -2498,7 +2465,7 @@ type AgentProfileUpdate struct {
 }
 
 // AgentReasoningEffort defines model for AgentReasoningEffort.
-type AgentReasoningEffort string
+type AgentReasoningEffort = string
 
 // AgentRepresentedHumanRef Human represented by this AnotherMe. Present only for an authorized active AnotherMe identity.
 type AgentRepresentedHumanRef struct {

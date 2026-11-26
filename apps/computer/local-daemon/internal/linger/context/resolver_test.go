@@ -10,6 +10,7 @@ import (
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
 
 func TestAuthorizedClaudeSkillsUseOnlyPublishedSkillRoots(t *testing.T) {
@@ -644,5 +645,38 @@ func TestShellToolGuideAndWindowsPiStaticPrefixPlacement(t *testing.T) {
 	wantDev := wantPrefix + "\n\nDynamicTail"
 	if spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != wantDev {
 		t.Fatalf("DeveloperInstructions = %v, want %q", spec.DeveloperInstructions, wantDev)
+	}
+}
+
+func TestValidReasoningEffortAcceptsDynamicTokens(t *testing.T) {
+	for _, value := range []string{"minimal", "off", "low", "xhigh", "custom_effort-2"} {
+		if !provider.ValidRuntimeReasoningEffort(value) {
+			t.Fatalf("provider.ValidRuntimeReasoningEffort(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"", "-minimal", "with space", "too_long_effort_token"} {
+		if provider.ValidRuntimeReasoningEffort(value) {
+			t.Fatalf("provider.ValidRuntimeReasoningEffort(%q) = true, want false", value)
+		}
+	}
+
+	resolver := ExecutionResolver{
+		Providers:       map[string]ProviderInstallation{"codex": {Type: "codex", ExecutablePath: "/local/bin/codex"}},
+		WorkspaceGrants: map[string]WorkspaceGrant{"grant-local": {GrantID: "grant-local", TenantID: "tenant-acme", Path: "/local/workspace"}},
+		Views:           testContextViews{root: "/local/workspace"},
+		Registrations: map[string]RegistrationBinding{
+			"registration-codex": {RegistrationID: "registration-codex", TenantID: "tenant-acme", OwnerActorID: "actor-alice", ProviderType: "codex", Status: registration.StatusOnline},
+		},
+	}
+	command := protocol.Command{
+		TenantID: "tenant-acme", RegistrationID: "registration-codex", AssignmentRevision: 1,
+		WorkspaceGrantID: "grant-local", RuntimeType: "codex", ContextViewRef: json.RawMessage(`{"receipt_ref":"receipt-1"}`),
+	}
+	spec, err := resolver.Resolve(context.Background(), command, json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex","model":"gpt-5","reasoning_effort":"minimal"},"session":{"thread_id":"thread-1"},"input":{"type":"text","text":"Go"}}`))
+	if err != nil || spec.ThinkingLevel != "minimal" {
+		t.Fatalf("Resolve(minimal) = %+v, err=%v", spec, err)
+	}
+	if _, err := resolver.Resolve(context.Background(), command, json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex","model":"gpt-5","reasoning_effort":"-minimal"},"session":{"thread_id":"thread-1"},"input":{"type":"text","text":"Go"}}`)); err == nil {
+		t.Fatal("Resolve(-minimal) succeeded, want error")
 	}
 }

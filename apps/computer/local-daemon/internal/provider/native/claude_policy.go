@@ -124,13 +124,11 @@ var claudeReservedFlags = map[string]flagArity{
 	"--strict-mcp-config": flagStandalone, "--replay-user-messages": flagStandalone,
 }
 
-var claudeEfforts = map[string]bool{"": true, "none": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
-
 func claudeCheckEffort(effort string) error {
-	if !claudeEfforts[effort] {
-		return fmt.Errorf("Claude effort %q is unsupported", effort)
+	if effort == "" || ValidEffortToken(effort) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("Claude effort %q is unsupported", effort)
 }
 
 func claudeManagedSettings(policy *ClaudeToolPolicy) string {

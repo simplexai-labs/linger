@@ -67,6 +67,11 @@ const serviceFeatureRuntimeFailureDetail = "runtime_failure_detail"
 // run.background_resumed Operation events.
 const serviceFeatureOperationBackgroundWait = "operation_background_wait"
 
+// serviceFeatureDynamicReasoningEfforts in runner.welcome's service_features
+// says the Agent Service accepts reasoning effort tokens beyond the legacy
+// seven-value set in runtime diagnostics and model source status.
+const serviceFeatureDynamicReasoningEfforts = "dynamic_reasoning_efforts"
+
 // LocalModelLibrary runs the actions a Computer owner chooses on this
 // Computer's localmodels library. The Daemon never picks a model: on its
 // own it loads only the downloaded model a Run's Agent already names, and it

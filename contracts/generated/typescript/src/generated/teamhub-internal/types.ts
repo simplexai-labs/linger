@@ -1858,15 +1858,7 @@ export interface components {
       };
     };
     AgentRuntimePositiveInt64: string;
-    /** @enum {string} */
-    AgentReasoningEffort:
-      | "none"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | "max"
-      | "ultra";
+    AgentReasoningEffort: string;
     /** @enum {string} */
     LocalRuntimeType: "codex" | "claude" | "pi" | "antigravity";
     AgentRuntimeSettingsSnapshot: {

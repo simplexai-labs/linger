@@ -118,14 +118,18 @@ Progress and outcomes travel back only as snapshots:
    `local_models_external_holders` (to every Computer, which ignores unknown
    features); otherwise the Daemon strips it. `[]` means localmodels found no
    closeable app, while an absent field means not reported.
-   `service_features` also declares `local_model_unavailable` and
-   `model_gateway_unavailable` to every Computer that receives the field: a
-   Daemon ignores a feature it does not know, one that knows
-   `local_model_unavailable` reports a Pi Run whose local model it could not
-   load with that Run failure code instead of `model_unavailable`, and one that
-   knows `model_gateway_unavailable` reports a Run whose local model gateway it
-   could not start or reach with `model_gateway_unavailable` instead of
-   `execution_failed`.
+   `service_features` also declares `local_model_unavailable`,
+   `model_gateway_unavailable`, and `dynamic_reasoning_efforts` to every
+   Computer that receives the field: a Daemon ignores a feature it does not
+   know, one that knows `local_model_unavailable` reports a Pi Run whose local
+   model it could not load with that Run failure code instead of
+   `model_unavailable`, one that knows `model_gateway_unavailable` reports a
+   Run whose local model gateway it could not start or reach with
+   `model_gateway_unavailable` instead of `execution_failed`, and one that
+   knows `dynamic_reasoning_efforts` publishes model-advertised reasoning
+   efforts beyond the legacy 7-value set in `runner.runtime_diagnostics` (and
+   `ModelSourceStatus`) after filtering `runner.hello` to legacy values for
+   older Agent Services.
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last

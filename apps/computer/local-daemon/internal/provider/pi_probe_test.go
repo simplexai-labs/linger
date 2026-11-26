@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -110,7 +111,8 @@ done
 		t.Fatal(err)
 	}
 	d := refreshed.Diagnostics[2]
-	if d.Status != "ready" || len(d.Models) != 1 || d.Models[0].ID != "fixture/model" || d.Models[0].DefaultReasoningEffort != "none" || len(d.Models[0].AllowedReasoningEffort) != 4 {
+	if d.Status != "ready" || len(d.Models) != 1 || d.Models[0].ID != "fixture/model" || d.Models[0].DefaultReasoningEffort != "none" ||
+		!slices.Equal(d.Models[0].AllowedReasoningEffort, []string{"none", "minimal", "low", "medium", "high"}) {
 		t.Fatalf("login did not refresh exact model capabilities: %+v", d)
 	}
 	if err := os.WriteFile(filepath.Join(root, "broken"), []byte("fixture"), 0600); err != nil {

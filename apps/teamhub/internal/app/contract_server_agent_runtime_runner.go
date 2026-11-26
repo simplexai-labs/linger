@@ -70,7 +70,7 @@ func (a *App) connectAgentRuntimeLocalComputer(c *gin.Context) {
 			AssignmentRevision: strconv.FormatInt(placement.AssignmentRevision, 10),
 		}
 		if placement.ReasoningEffort != "" {
-			effort := teamhubinternal.AgentReasoningEffort(placement.ReasoningEffort)
+			effort := placement.ReasoningEffort
 			placements[index].ReasoningEffort = &effort
 		}
 	}

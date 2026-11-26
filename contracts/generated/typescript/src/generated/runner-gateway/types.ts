@@ -43,7 +43,8 @@ export type ServiceFeature =
   | "model_gateway_unavailable"
   | "local_models_external_holders"
   | "runtime_failure_detail"
-  | "operation_background_wait";
+  | "operation_background_wait"
+  | "dynamic_reasoning_efforts";
 export type JsonValue =
   | null
   | boolean
@@ -60,6 +61,7 @@ export type AgentRunnerEnsure = AgentRunnerWireIdentity & {
   registration_id: Id;
   assignment_revision: PositiveInteger;
 };
+export type ReasoningEffort = string;
 export type AgentRunnerRemove = AgentRunnerWireIdentity & {
   type: "agent_runner.remove";
 };
@@ -921,14 +923,7 @@ export interface AgentRunnerWireIdentity {
 export interface RuntimeConfig {
   type: "codex" | "claude" | "pi" | "antigravity";
   model?: string;
-  reasoning_effort?:
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra";
+  reasoning_effort?: ReasoningEffort;
 }
 export interface AgentCliProfile {
   url: string;
@@ -1254,23 +1249,11 @@ export interface RuntimeDiagnostic {
 export interface RuntimeModel {
   id: string;
   label: string;
-  allowed_reasoning_effort: (
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra"
-  )[];
-  default_reasoning_effort?:
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra";
+  /**
+   * @maxItems 32
+   */
+  allowed_reasoning_effort: ReasoningEffort[];
+  default_reasoning_effort?: ReasoningEffort;
   /**
    * Context length in tokens, from the gateway on the Runtime's API link, the window declared to Claude on its API link, or the Runtime's own catalog; absent when unknown.
    */
@@ -2158,14 +2141,7 @@ export interface ModelSourceStatus {
   /**
    * After apply, the reasoning effort runtime_model needs; absent when it offers none.
    */
-  reasoning_effort?:
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra";
+  reasoning_effort?: string;
   gateway_url?: string;
   byok: ByokSummary;
 }

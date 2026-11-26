@@ -92,39 +92,6 @@ func (e AgentNoticeFieldChangeField) Valid() bool {
 	}
 }
 
-// Defines values for AgentReasoningEffort.
-const (
-	AgentReasoningEffortHigh   AgentReasoningEffort = "high"
-	AgentReasoningEffortLow    AgentReasoningEffort = "low"
-	AgentReasoningEffortMax    AgentReasoningEffort = "max"
-	AgentReasoningEffortMedium AgentReasoningEffort = "medium"
-	AgentReasoningEffortNone   AgentReasoningEffort = "none"
-	AgentReasoningEffortUltra  AgentReasoningEffort = "ultra"
-	AgentReasoningEffortXhigh  AgentReasoningEffort = "xhigh"
-)
-
-// Valid indicates whether the value is a known member of the AgentReasoningEffort enum.
-func (e AgentReasoningEffort) Valid() bool {
-	switch e {
-	case AgentReasoningEffortHigh:
-		return true
-	case AgentReasoningEffortLow:
-		return true
-	case AgentReasoningEffortMax:
-		return true
-	case AgentReasoningEffortMedium:
-		return true
-	case AgentReasoningEffortNone:
-		return true
-	case AgentReasoningEffortUltra:
-		return true
-	case AgentReasoningEffortXhigh:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AgentRuntimeActivityContentBlockFormat.
 const (
 	AgentRuntimeActivityContentBlockFormatCode AgentRuntimeActivityContentBlockFormat = "code"
@@ -3628,22 +3595,22 @@ func (e RoutineCadenceKind) Valid() bool {
 
 // Defines values for RoutineChangedPayloadChangeKind.
 const (
-	Created RoutineChangedPayloadChangeKind = "created"
-	Deleted RoutineChangedPayloadChangeKind = "deleted"
-	Fired   RoutineChangedPayloadChangeKind = "fired"
-	Updated RoutineChangedPayloadChangeKind = "updated"
+	RoutineChangedPayloadChangeKindCreated RoutineChangedPayloadChangeKind = "created"
+	RoutineChangedPayloadChangeKindDeleted RoutineChangedPayloadChangeKind = "deleted"
+	RoutineChangedPayloadChangeKindFired   RoutineChangedPayloadChangeKind = "fired"
+	RoutineChangedPayloadChangeKindUpdated RoutineChangedPayloadChangeKind = "updated"
 )
 
 // Valid indicates whether the value is a known member of the RoutineChangedPayloadChangeKind enum.
 func (e RoutineChangedPayloadChangeKind) Valid() bool {
 	switch e {
-	case Created:
+	case RoutineChangedPayloadChangeKindCreated:
 		return true
-	case Deleted:
+	case RoutineChangedPayloadChangeKindDeleted:
 		return true
-	case Fired:
+	case RoutineChangedPayloadChangeKindFired:
 		return true
-	case Updated:
+	case RoutineChangedPayloadChangeKindUpdated:
 		return true
 	default:
 		return false
@@ -5021,7 +4988,7 @@ type AgentProfileChangedNotice struct {
 }
 
 // AgentReasoningEffort defines model for AgentReasoningEffort.
-type AgentReasoningEffort string
+type AgentReasoningEffort = string
 
 // AgentRunStatusChangedPayload An Agent Run shown in this Room changed status or committed Runtime presentation events. Clients fetch events after their last ordinal up to run.event_ordinal.
 type AgentRunStatusChangedPayload struct {

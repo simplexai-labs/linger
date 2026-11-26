@@ -88,6 +88,11 @@ info:
     service sends a BYOK input only to a Computer release that decodes it.
     The Computer's BYOK summary carries path and endpoint only after a
     runner.welcome whose service_features names byok_endpoint.
+    Reasoning efforts beyond the legacy 7-value set travel in
+    runner.runtime_diagnostics and ModelSourceStatus only after a
+    runner.welcome whose service_features names dynamic_reasoning_efforts;
+    runner.hello always filters to legacy efforts so older Agent Services can
+    accept the connection.
 x-frame-limits:
   maxBytes: 4194304
   maxDepth: 32

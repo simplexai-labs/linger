@@ -33,7 +33,6 @@ import type {
   TeamHubLocalComputerPage,
   TeamHubLocalRuntimeType,
 } from "@/features/teamhub/teamhub-types";
-import type { Message } from "@/i18n/messages";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
 import {
@@ -43,22 +42,13 @@ import {
 import { AgentCreationProgress } from "./agent-creation-progress";
 import { createAgentMessages } from "./create-agent.messages";
 import { runtimeModelLabel } from "./members/runtime-model-label";
+import { reasoningEffortLabel } from "./members/use-agent-model-selection";
 
 const localRuntimeLabels: Record<TeamHubLocalRuntimeType, string> = {
   claude: "Claude Code",
   codex: "Codex",
   pi: "Pi",
   antigravity: "Antigravity",
-};
-
-const effortLabels: Record<TeamHubAgentReasoningEffort, Message<string>> = {
-  none: createAgentMessages.effortNone,
-  low: createAgentMessages.effortLow,
-  medium: createAgentMessages.effortMedium,
-  high: createAgentMessages.effortHigh,
-  xhigh: createAgentMessages.effortExtraHigh,
-  max: createAgentMessages.effortMaximum,
-  ultra: createAgentMessages.effortUltra,
 };
 
 export function QuickCreateLocalAgentDialog({
@@ -451,13 +441,11 @@ export function QuickCreateLocalAgentDialog({
                     disabled={!allowedEfforts.length}
                     placeholder={t(createAgentMessages.effortNotSupported)}
                     value={selectedEffort ?? ""}
-                    onValueChange={(value) =>
-                      setEffort(value as TeamHubAgentReasoningEffort)
-                    }
+                    onValueChange={(value) => setEffort(value)}
                   >
                     {allowedEfforts.map((value) => (
                       <SelectItem key={value} value={value}>
-                        {t(effortLabels[value])}
+                        {reasoningEffortLabel(value, t)}
                       </SelectItem>
                     ))}
                   </Select>

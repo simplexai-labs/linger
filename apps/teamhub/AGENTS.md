@@ -105,7 +105,8 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 
 - `another_me_background_failures` counts an Another Me's background model
   calls that failed in a row, as the Agent Service reports them; a completed
-  call or a change to the Another Me's Computer, Runtime, or model deletes the
+  call, a change to the Another Me's Computer, workspace grant, Runtime, model,
+  or reasoning effort, or a model-source reapply on its Computer deletes the
   row. `GET /v0/tenants/{tenantId}/another-me` carries `background_failure`
   from the third failure on. The `another-me` hint goes out when it appears,
   when its reason changes and when it clears; a higher count alone shows on the

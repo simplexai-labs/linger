@@ -193,7 +193,7 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 	if request.Runtime.Type != command.RuntimeType {
 		return provider.OperationSpec{}, errors.New("semantic Runtime does not match Operation identity")
 	}
-	if request.Runtime.ReasoningEffort != "" && !validReasoningEffort(request.Runtime.ReasoningEffort) {
+	if request.Runtime.ReasoningEffort != "" && !provider.ValidRuntimeReasoningEffort(request.Runtime.ReasoningEffort) {
 		return provider.OperationSpec{}, errors.New("semantic Runtime reasoning effort is invalid")
 	}
 	if request.Kind != "run.start" {
@@ -502,15 +502,6 @@ func instructionValue(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func validReasoningEffort(value string) bool {
-	switch value {
-	case "none", "low", "medium", "high", "xhigh", "max", "ultra":
-		return true
-	default:
-		return false
-	}
 }
 
 func firstNonEmpty(values ...string) string {

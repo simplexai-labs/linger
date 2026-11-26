@@ -7,7 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,15 +15,18 @@ import type {
   TeamHubMessage,
   TeamHubRunStatus,
   TeamHubRuntimePresentationEventRecord,
+  TeamHubTenantAgent,
 } from "@/features/teamhub/teamhub-types";
 import { translate } from "@/i18n/language";
 
+import { tenantAgentsQueryKey } from "../room-queries";
 import {
   AgentStreamingStatusDock,
   buildRuntimeTimelineViews,
   MessageTimeline,
 } from "./message-timeline";
 import { AGENT_STATUS_LINE_TIMING } from "./agent-status-line";
+import { useAgentRuntimeUpdatedAtByActorId } from "./use-room-conversation";
 import {
   createDocumentTestRuntime,
   seedRoomUpload,
@@ -2403,6 +2406,483 @@ describe("Room Message timeline cards", () => {
       expect(cancelRoomRun).toHaveBeenCalledWith("run-a", expect.any(String)),
     );
     expect(cancelRoomRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides stale Failed and Stopped dock entries after a runtime update while keeping Needs attention and live Runs visible", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrap = (node: ReactNode) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{node}</MemoryRouter>
+      </QueryClientProvider>
+    );
+    const failed = runStatus({
+      id: "run-status-failed",
+      run_id: "run-failed",
+      status: "aborted",
+      updated_at: "2026-09-01T15:40:00Z",
+    });
+    const failedEvents: Record<
+      string,
+      readonly TeamHubRuntimePresentationEventRecord[]
+    > = {
+      "run-status-failed": [
+        {
+          ...runtimeTerminalStatusRecord("2", "failed"),
+          event: {
+            type: "status.changed",
+            status: "stopped",
+            outcome: "failed",
+            failure: { code: "model_unavailable" },
+          },
+        },
+      ],
+    };
+    const { rerender } = render(
+      wrap(
+        <AgentStreamingStatusDock
+          agentRuntimeUpdatedAtByActorId={{ "agent-1": "2026-09-01T15:39:00Z" }}
+          runStatuses={[failed]}
+          runtimePresentationEventsByRunStatusId={failedEvents}
+        />,
+      ),
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+
+    // Updating the Agent runtime after the Failed Run hides the stale failure.
+    rerender(
+      wrap(
+        <AgentStreamingStatusDock
+          agentRuntimeUpdatedAtByActorId={{ "agent-1": "2026-09-01T15:41:00Z" }}
+          runStatuses={[failed]}
+          runtimePresentationEventsByRunStatusId={failedEvents}
+        />,
+      ),
+    );
+    expect(
+      screen.queryByTestId("agent-streaming-status-dock"),
+    ).not.toBeInTheDocument();
+
+    // A Stopped Run older than the runtime change is also hidden.
+    const stopped = runStatus({
+      id: "run-status-stopped",
+      run_id: "run-stopped",
+      status: "aborted",
+      updated_at: "2026-09-01T15:40:00Z",
+    });
+    rerender(
+      wrap(
+        <AgentStreamingStatusDock
+          agentRuntimeUpdatedAtByActorId={{ "agent-1": "2026-09-01T15:41:00Z" }}
+          runStatuses={[stopped]}
+        />,
+      ),
+    );
+    expect(
+      screen.queryByTestId("agent-streaming-status-dock"),
+    ).not.toBeInTheDocument();
+
+    // Needs attention is never auto-hidden so Resend stays reachable, while manual Dismiss still works.
+    const needsAttention = runStatus({
+      id: "run-status-attention",
+      run_id: "run-attention",
+      status: "completed",
+      updated_at: "2026-09-01T15:40:00Z",
+    });
+    const attentionEvents: Record<
+      string,
+      readonly TeamHubRuntimePresentationEventRecord[]
+    > = {
+      "run-status-attention": [
+        {
+          ...runtimeTerminalStatusRecord("2", "completed"),
+          event: {
+            type: "status.changed",
+            status: "stopped",
+            outcome: "completed",
+            unconfirmed_input_ids: ["follow-up-1"],
+          },
+        },
+      ],
+    };
+    const redeliverRoomRun = vi.fn();
+    rerender(
+      wrap(
+        <AgentStreamingStatusDock
+          agentRuntimeUpdatedAtByActorId={{ "agent-1": "2026-09-01T15:45:00Z" }}
+          redeliverRoomRun={redeliverRoomRun}
+          runStatuses={[needsAttention]}
+          runtimePresentationEventsByRunStatusId={attentionEvents}
+        />,
+      ),
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Resend unconfirmed follow-up to Codex",
+      }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Dismiss Codex's status" }),
+    );
+    expect(
+      screen.queryByTestId("agent-streaming-status-dock"),
+    ).not.toBeInTheDocument();
+
+    // A live Run is never hidden by a runtime update timestamp.
+    rerender(
+      wrap(
+        <AgentStreamingStatusDock
+          agentRuntimeUpdatedAtByActorId={{ "agent-1": "2026-09-01T15:45:00Z" }}
+          runStatuses={[
+            runStatus({
+              id: "run-status-live",
+              run_id: "run-live",
+              status: "active",
+              updated_at: "2026-09-01T15:40:00Z",
+            }),
+          ]}
+        />,
+      ),
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss Codex's status" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("tracks only runtime changes (not avatar or description edits) for stale dock hiding", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const makeAgent = (
+      overrides: Partial<TeamHubTenantAgent> = {},
+    ): TeamHubTenantAgent => ({
+      actor: {
+        created_at: "2026-09-01T15:00:00Z",
+        display_name: "Codex",
+        id: "agent-1",
+        kind: "agent",
+        tenant_id: "tenant-1",
+      },
+      agent_management_id: "mgmt-1",
+      agent_type: "general",
+      avatar_key: "figure:fox:E8F0FE",
+      configuration_revision: 1,
+      created_at: "2026-09-01T15:00:00Z",
+      created_by: {
+        display_name: "Alice",
+        id: "human-1",
+        kind: "human",
+        tenant_id: "tenant-1",
+      },
+      description: "Initial description",
+      instructions: "Initial instructions",
+      runtime: {
+        model: "gpt-5.4",
+        reasoning_effort: "medium",
+        placement: {
+          type: "local",
+          computer_id: "computer-1",
+          runtime_type: "codex",
+          workspace_grant_id: "grant-1",
+        },
+      },
+      skill_bindings: [],
+      updated_at: "2026-09-01T15:30:00Z",
+      visibility_scope: "workspace",
+      ...overrides,
+    });
+
+    function TrackedDock({
+      redeliverRoomRun,
+      runStatuses,
+      runtimePresentationEventsByRunStatusId,
+    }: {
+      redeliverRoomRun?: ComponentProps<
+        typeof AgentStreamingStatusDock
+      >["redeliverRoomRun"];
+      runStatuses: readonly TeamHubRunStatus[];
+      runtimePresentationEventsByRunStatusId?: ComponentProps<
+        typeof AgentStreamingStatusDock
+      >["runtimePresentationEventsByRunStatusId"];
+    }) {
+      const agentRuntimeUpdatedAtByActorId =
+        useAgentRuntimeUpdatedAtByActorId("tenant-1");
+      return (
+        <AgentStreamingStatusDock
+          agentRuntimeUpdatedAtByActorId={agentRuntimeUpdatedAtByActorId}
+          redeliverRoomRun={redeliverRoomRun}
+          runStatuses={runStatuses}
+          runtimePresentationEventsByRunStatusId={
+            runtimePresentationEventsByRunStatusId
+          }
+        />
+      );
+    }
+
+    const failed = runStatus({
+      id: "run-status-failed-tracked",
+      run_id: "run-failed-tracked",
+      status: "aborted",
+      updated_at: "2026-09-01T15:40:00Z",
+    });
+    const attention = runStatus({
+      agent: { display_name: "Codex", id: "agent-1", kind: "agent" },
+      id: "run-status-attention-tracked",
+      run_id: "run-attention-tracked",
+      status: "completed",
+      updated_at: "2026-09-01T15:40:00Z",
+    });
+    const attentionEvents: Record<
+      string,
+      readonly TeamHubRuntimePresentationEventRecord[]
+    > = {
+      "run-status-attention-tracked": [
+        {
+          ...runtimeTerminalStatusRecord("2", "completed"),
+          event: {
+            type: "status.changed",
+            status: "stopped",
+            outcome: "completed",
+            unconfirmed_input_ids: ["follow-up-2"],
+          },
+        },
+      ],
+    };
+
+    queryClient.setQueryData(tenantAgentsQueryKey("tenant-1"), {
+      items: [makeAgent()],
+      page: { has_more: false },
+    });
+
+    const view = render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <TrackedDock runStatuses={[failed]} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+
+    // Editing avatar, description, and instructions bumps updated_at without changing runtime.
+    act(() => {
+      queryClient.setQueryData(tenantAgentsQueryKey("tenant-1"), {
+        items: [
+          makeAgent({
+            avatar_key: "figure:owl:FFE4E6",
+            description: "Updated bio",
+            instructions: "Updated instructions",
+            updated_at: "2026-09-01T15:42:00Z",
+          }),
+        ],
+        page: { has_more: false },
+      });
+    });
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+
+    // Unmount (e.g. navigating to Settings) and change runtime config; remounting hides stale Failed.
+    view.unmount();
+    queryClient.setQueryData(tenantAgentsQueryKey("tenant-1"), {
+      items: [
+        makeAgent({
+          avatar_key: "figure:owl:FFE4E6",
+          runtime: {
+            model: "gpt-5.4",
+            reasoning_effort: "high",
+            placement: {
+              type: "local",
+              computer_id: "computer-1",
+              runtime_type: "codex",
+              workspace_grant_id: "grant-1",
+            },
+          },
+          updated_at: "2026-09-01T15:45:00Z",
+        }),
+      ],
+      page: { has_more: false },
+    });
+
+    const remounted = render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <TrackedDock runStatuses={[failed]} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    expect(
+      screen.queryByTestId("agent-streaming-status-dock"),
+    ).not.toBeInTheDocument();
+
+    // Needs attention remains visible with Resend even after the runtime change.
+    remounted.rerender(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <TrackedDock
+            redeliverRoomRun={vi.fn()}
+            runStatuses={[attention]}
+            runtimePresentationEventsByRunStatusId={attentionEvents}
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Resend unconfirmed follow-up to Codex",
+      }),
+    ).toBeVisible();
+
+    // A later profile edit does not advance the runtime-change timestamp over a newer failure.
+    const newerFailed = runStatus({
+      id: "run-status-failed-newer",
+      run_id: "run-failed-newer",
+      status: "aborted",
+      updated_at: "2026-09-01T15:46:00Z",
+    });
+    remounted.rerender(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <TrackedDock runStatuses={[newerFailed]} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(tenantAgentsQueryKey("tenant-1"), {
+        items: [
+          makeAgent({
+            avatar_key: "figure:bear:DCFCE7",
+            runtime: {
+              model: "gpt-5.4",
+              reasoning_effort: "high",
+              placement: {
+                type: "local",
+                computer_id: "computer-1",
+                runtime_type: "codex",
+                workspace_grant_id: "grant-1",
+              },
+            },
+            updated_at: "2026-09-01T15:50:00Z",
+          }),
+        ],
+        page: { has_more: false },
+      });
+    });
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+  });
+
+  it("dismisses a terminal dock entry and shows subsequent Runs normally", () => {
+    const firstFailed = runStatus({
+      id: "run-status-failed-1",
+      run_id: "run-failed-1",
+      status: "aborted",
+      created_at: "2026-09-01T15:40:00Z",
+      updated_at: "2026-09-01T15:40:05Z",
+    });
+    const { rerender } = render(
+      <MemoryRouter>
+        <AgentStreamingStatusDock runStatuses={[firstFailed]} />
+      </MemoryRouter>,
+    );
+    const dismiss = screen.getByRole("button", {
+      name: "Dismiss Codex's status",
+    });
+    expect(dismiss).toHaveAttribute("data-voice-close");
+    fireEvent.click(dismiss);
+    expect(
+      screen.queryByTestId("agent-streaming-status-dock"),
+    ).not.toBeInTheDocument();
+
+    const nextFailed = runStatus({
+      id: "run-status-failed-2",
+      run_id: "run-failed-2",
+      status: "aborted",
+      created_at: "2026-09-01T15:42:00Z",
+      updated_at: "2026-09-01T15:42:05Z",
+    });
+    rerender(
+      <MemoryRouter>
+        <AgentStreamingStatusDock runStatuses={[firstFailed, nextFailed]} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("agent-streaming-status-dock")).toBeVisible();
+  });
+
+  it("resets hover pause when dismissing the last terminal entry so later Runs rotate", () => {
+    vi.useFakeTimers();
+    const failed = runStatus({
+      id: "run-status-failed-hover",
+      run_id: "run-failed-hover",
+      status: "aborted",
+      created_at: "2026-09-01T15:40:00Z",
+      updated_at: "2026-09-01T15:40:05Z",
+    });
+    const { rerender } = render(
+      <MemoryRouter>
+        <AgentStreamingStatusDock runStatuses={[failed]} />
+      </MemoryRouter>,
+    );
+    const dock = screen.getByTestId("agent-streaming-status-dock");
+    fireEvent.pointerEnter(dock);
+    const dismiss = screen.getByRole("button", {
+      name: "Dismiss Codex's status",
+    });
+    fireEvent.focus(dismiss);
+    fireEvent.click(dismiss);
+    expect(
+      screen.queryByTestId("agent-streaming-status-dock"),
+    ).not.toBeInTheDocument();
+
+    const firstLive = runStatus({
+      agent: { display_name: "Codex", id: "agent-1", kind: "agent" },
+      id: "run-status-live-1",
+      run_id: "run-live-1",
+      status: "active",
+      created_at: "2026-09-01T15:42:00Z",
+      updated_at: "2026-09-01T15:42:01Z",
+    });
+    const secondLive = runStatus({
+      agent: { display_name: "Claude", id: "agent-2", kind: "agent" },
+      id: "run-status-live-2",
+      run_id: "run-live-2",
+      status: "active",
+      created_at: "2026-09-01T15:42:02Z",
+      updated_at: "2026-09-01T15:42:03Z",
+    });
+    rerender(
+      <MemoryRouter>
+        <AgentStreamingStatusDock
+          runStatuses={[failed, firstLive, secondLive]}
+          runtimePresentationEventsByRunStatusId={{
+            "run-status-live-1": [
+              runtimeStatusRecord("1", "working", "Checking Codex"),
+            ],
+            "run-status-live-2": [
+              runtimeStatusRecord("1", "working", "Checking Claude"),
+            ],
+          }}
+        />
+      </MemoryRouter>,
+    );
+    const statusButton = screen.getByRole("button", {
+      name: "Open Agents working activity",
+    });
+    expect(statusButton).toHaveAttribute(
+      "title",
+      expect.stringContaining("Codex"),
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(
+        AGENT_STATUS_LINE_TIMING.turnMs + AGENT_STATUS_LINE_TIMING.tickMs,
+      );
+    });
+    expect(statusButton).toHaveAttribute(
+      "title",
+      expect.stringContaining("Claude"),
+    );
   });
 
   it("marks a working Agent's avatar live and keeps its activity out of the timeline", () => {

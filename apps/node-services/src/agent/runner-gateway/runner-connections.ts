@@ -503,6 +503,7 @@ export class RunnerConnections {
               "local_models_external_holders",
               "runtime_failure_detail",
               "operation_background_wait",
+              "dynamic_reasoning_efforts",
             ],
           }
         : {}),
@@ -710,6 +711,9 @@ export class RunnerConnections {
           connection.hello,
         ),
       });
+      await this.owners
+        .lifecycle()
+        .refreshComputerPlacements(connection.runnerId);
       return;
     }
     if (envelope.type === "runtime.registration.observed") {
@@ -1038,7 +1042,6 @@ export class RunnerConnections {
     const resolvedEffort = resolveSupportedReasoningEffort(
       model,
       reasoningEffort,
-      requirement.runtimeType,
     );
     if (
       reasoningEffort !== undefined &&

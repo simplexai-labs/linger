@@ -242,6 +242,11 @@ take precedence.
   limit), and incoming steers wake the session directly with `session/prompt`
   while active turns receive steers via Antigravity's `PreInvocation` hook
   (`injectSteps`).
+- `dynamic_reasoning_efforts` is advertised to every Computer (a Daemon
+  ignores an unknown feature); a Daemon filters `runner.hello` to the legacy
+  seven-value set so older Agent Services accept it, and publishes the full
+  model-advertised efforts in `runner.runtime_diagnostics` once welcome names
+  `dynamic_reasoning_efforts`.
 - Explicit model selection on `execute` `model_invoke` (`model`) is sent only
   to Computer 0.62.0 or later (`FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION`),
   because an older Computer rejects unknown envelope fields and closes the

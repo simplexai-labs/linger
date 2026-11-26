@@ -40,9 +40,11 @@ import { formatLocale, translate } from "@/i18n/language";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
 import {
+  anotherMeQueryKey,
   teamHubIdentityQueryOptions,
   teamHubQueryRoot,
   tenantActorsQueryKey,
+  tenantAgentAvailabilityQueryKey,
   tenantAgentAvailabilityQueryOptions,
   tenantAgentsQueryKey,
   tenantAgentsQueryOptions,
@@ -302,6 +304,12 @@ export function AgentProfileContent({
         }),
         queryClient.invalidateQueries({
           queryKey: tenantAgentsQueryKey(tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: tenantAgentAvailabilityQueryKey(tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: anotherMeQueryKey(tenantId),
         }),
         queryClient.invalidateQueries({
           queryKey: tenantLocalModelsQueryKey(tenantId),

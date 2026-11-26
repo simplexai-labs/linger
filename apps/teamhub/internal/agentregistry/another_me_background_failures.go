@@ -52,14 +52,24 @@ func (s *Service) RecordAnotherMeBackgroundCall(ctx context.Context, tenantID, a
 	return tx.Commit(ctx)
 }
 
-// shouldClearAnotherMeBackgroundFailures reports whether a Runtime placement or
-// model change for an Another Me invalidates any recorded failure streak from
-// its prior execution target.
-func shouldClearAnotherMeBackgroundFailures(agentType, currentComputerID, currentRuntimeType, currentModel, nextComputerID, nextRuntimeType, nextModel string) bool {
+// anotherMeRuntimeTarget is the persisted or requested execution target of an
+// Agent whose change invalidates a recorded Another Me background failure streak.
+type anotherMeRuntimeTarget struct {
+	computerID       string
+	runtimeType      string
+	workspaceGrantID string
+	model            string
+	reasoningEffort  string
+}
+
+// shouldClearAnotherMeBackgroundFailures reports whether a Runtime placement,
+// workspace grant, model, or reasoning-effort change for an Another Me
+// invalidates any recorded failure streak from its prior execution target.
+func shouldClearAnotherMeBackgroundFailures(agentType string, current, next anotherMeRuntimeTarget) bool {
 	if agentType != "anotherme" {
 		return false
 	}
-	return currentComputerID != nextComputerID || currentRuntimeType != nextRuntimeType || currentModel != nextModel
+	return current != next
 }
 
 // clearAnotherMeBackgroundFailuresTx deletes any recorded background failure
