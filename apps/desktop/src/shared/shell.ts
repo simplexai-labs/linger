@@ -3,23 +3,14 @@
 
 export type ShellPlatform = "darwin" | "win32" | "linux";
 
+// The title bar shows only the app name and, on Linux, the window controls.
 export interface TitlebarState {
   readonly platform: ShellPlatform;
-  readonly title: string;
-  readonly canGoBack: boolean;
-  readonly canGoForward: boolean;
-  readonly loading: boolean;
   readonly maximized: boolean;
   readonly focused: boolean;
 }
 
-export type ShellCommand =
-  | "back"
-  | "forward"
-  | "reload"
-  | "minimize"
-  | "maximize"
-  | "close";
+export type ShellCommand = "minimize" | "maximize" | "close";
 
 export interface LingerShellApi {
   getState(): Promise<TitlebarState>;

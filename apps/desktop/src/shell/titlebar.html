@@ -12,7 +12,6 @@
         --canvas: #f6f6f6;
         --ink: #202020;
         --body: #404040;
-        --muted: #737373;
         --border: #e5e5e5;
         --hover: rgba(0, 0, 0, 0.06);
         --active: rgba(0, 0, 0, 0.1);
@@ -76,9 +75,6 @@
       button:active:not(:disabled) {
         background: var(--active);
       }
-      button:disabled {
-        color: #c4c4c4;
-      }
       button:focus-visible {
         outline: 2px solid var(--ink);
         outline-offset: -2px;
@@ -92,26 +88,15 @@
         stroke-linecap: round;
         stroke-linejoin: round;
       }
-      .nav {
-        display: flex;
-        gap: 2px;
-      }
-      .spinning svg {
-        animation: spin 0.9s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
+      /* Only the app name, centred on the whole window whatever sits at
+         the right edge (the Windows caption buttons or the Linux controls). */
       .title {
-        flex: 1;
-        min-width: 0;
+        position: absolute;
+        inset: 0;
         display: flex;
         justify-content: center;
-        align-items: baseline;
-        gap: 8px;
-        padding: 0 12px;
+        align-items: center;
+        pointer-events: none;
         white-space: nowrap;
       }
       .title strong {
@@ -119,15 +104,10 @@
         font-weight: 600;
         letter-spacing: -0.01em;
       }
-      .title span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        color: var(--muted);
-        font-size: 12px;
-      }
       .controls {
+        position: relative;
         display: none;
-        margin-left: 6px;
+        margin-left: auto;
         gap: 2px;
       }
       body[data-platform="linux"] .controls {
@@ -149,22 +129,8 @@
     </style>
   </head>
   <body data-platform="linux">
-    <div class="nav dim-when-blurred">
-      <button id="back" data-t-title="back" data-t-aria-label="back">
-        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg>
-      </button>
-      <button id="forward" data-t-title="forward" data-t-aria-label="forward">
-        <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></svg>
-      </button>
-      <button id="reload" data-t-title="reload" data-t-aria-label="reload">
-        <svg viewBox="0 0 24 24">
-          <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-          <path d="M21 3v5h-5" />
-        </svg>
-      </button>
-    </div>
     <div class="title dim-when-blurred">
-      <strong>Linger</strong><span id="host"></span>
+      <strong>Linger</strong>
     </div>
     <div class="controls">
       <button
@@ -204,10 +170,6 @@
         const body = document.body;
         body.dataset.platform = state.platform;
         body.classList.toggle("blurred", !state.focused);
-        $("host").textContent = state.title;
-        $("back").disabled = !state.canGoBack;
-        $("forward").disabled = !state.canGoForward;
-        $("reload").classList.toggle("spinning", state.loading);
         const maximize = t(state.maximized ? "restore" : "maximize");
         $("maximize").title = maximize;
         $("maximize").setAttribute("aria-label", maximize);
@@ -215,13 +177,15 @@
           ? restoreIcon
           : maximizeIcon;
       };
-      for (const name of ["back", "forward", "reload", "minimize", "close"])
+      for (const name of ["minimize", "close"])
         $(name).addEventListener("click", () => shell.command(name));
       $("maximize").addEventListener("click", () => shell.command("maximize"));
       document.body.addEventListener("dblclick", (event) => {
-        if (event.target === document.body || event.target.closest(".title"))
-          if (document.body.dataset.platform === "linux")
-            shell.command("maximize");
+        if (
+          event.target === document.body &&
+          document.body.dataset.platform === "linux"
+        )
+          shell.command("maximize");
       });
       shell.onState(render);
       shell.getState().then(render);

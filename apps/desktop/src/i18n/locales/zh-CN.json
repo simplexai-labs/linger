@@ -1,8 +1,5 @@
 {
   "titlebar": {
-    "back": "返回",
-    "forward": "前进",
-    "reload": "重新加载",
     "minimize": "最小化",
     "maximize": "最大化",
     "restore": "还原",

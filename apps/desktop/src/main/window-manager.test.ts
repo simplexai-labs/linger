@@ -136,9 +136,10 @@ vi.mock("../shell/messages.html", () => ({
   default: "<script>/* messages */</script>",
 }));
 
-import { protocol, session } from "electron";
+import { ipcMain, protocol, session } from "electron";
 
 import { IPC } from "../shared/api.js";
+import { SHELL_IPC } from "../shared/shell.js";
 import { ConfigStore } from "./config.js";
 import zhCN from "../i18n/locales/zh-CN.json" with { type: "json" };
 import { LanguageModule } from "./language.js";
@@ -270,7 +271,7 @@ describe("WindowManagerModule", () => {
     await host.stop("quit");
   });
 
-  it("leaves app://offline/?starting=1, syncs the titlebar to the new port, and ignores stale old-port load failures", async () => {
+  it("leaves app://offline/?starting=1 for the new port and ignores stale old-port load failures", async () => {
     const previousPort = "http://localhost:62986";
     const movedPort = "http://localhost:63009";
     let resolveResumable!: (value: boolean) => void;
@@ -286,7 +287,6 @@ describe("WindowManagerModule", () => {
     await host.start();
 
     const content = contentView().webContents;
-    const titlebar = titlebarView()?.webContents;
     // Simulate boot failing on the old port while resume moves it to 63009.
     content.emit(
       "did-fail-load",
@@ -302,14 +302,7 @@ describe("WindowManagerModule", () => {
     );
 
     manager.setServer(movedPort, previousPort, { reason: "resume_ready" });
-    // Titlebar updates immediately on serverUrl change before setImmediate.
     expect(config.get().serverUrl).toBe(movedPort);
-    if (titlebar) {
-      expect(titlebar.send).toHaveBeenLastCalledWith(
-        expect.any(String),
-        expect.objectContaining({ title: "localhost:63009" }),
-      );
-    }
 
     // Late resolution of the old port's resumable check and a late
     // did-fail-load for the superseded port must not trap the window on
@@ -710,6 +703,42 @@ describe("WindowManagerModule", () => {
       expect(await page("app://offline/")).toContain(
         zhCN.offline.unreachableTitle,
       );
+      await host.stop("quit");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
+  it("gives the title bar only the window state and window commands", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux" });
+    try {
+      const { host } = setup({ serverUrl: "http://localhost:3000" });
+      await host.start();
+      const titlebar = titlebarView()!.webContents;
+      const content = contentView().webContents;
+      const window = state.windows.at(-1)!;
+      const sender = { sender: titlebar };
+      titlebar.getURL = () => "app://shell/titlebar";
+      const getState = vi
+        .mocked(ipcMain.handle)
+        .mock.calls.filter(([channel]) => channel === SHELL_IPC.state)
+        .at(-1)![1];
+      expect(await getState(sender as never)).toEqual({
+        platform: "linux",
+        maximized: false,
+        focused: true,
+      });
+      const command = vi
+        .mocked(ipcMain.on)
+        .mock.calls.filter(([channel]) => channel === SHELL_IPC.command)
+        .at(-1)![1];
+      const reloads = vi.mocked(content.reload).mock.calls.length;
+      for (const name of ["back", "forward", "reload"])
+        command(sender as never, name);
+      expect(content.reload).toHaveBeenCalledTimes(reloads);
+      command(sender as never, "minimize");
+      expect(window.minimize).toHaveBeenCalledOnce();
       await host.stop("quit");
     } finally {
       Object.defineProperty(process, "platform", platform);

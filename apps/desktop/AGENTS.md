@@ -413,7 +413,9 @@ Gateway and runs Agents. The daemon exits with the app.
   start failure page use native dialogs (`diagnostics-dialogs.ts`).
 - `src/main/window-manager.ts`: one `BaseWindow` with two views, the title bar
   (`app://shell/titlebar`) and the SPA. macOS keeps native traffic lights,
-  Windows uses `titleBarOverlay`, Linux draws its own controls. Closing hides
+  Windows uses `titleBarOverlay`, Linux draws its own controls. The title bar
+  shows only the name Linger: no navigation buttons and no server address.
+  Closing hides
   the window to the tray. Closing the setup window does not quit either: an
   installation keeps running, and opening Linger again (a second launch, the
   Dock, the tray) shows setup until the computer is enrolled
@@ -434,8 +436,7 @@ Gateway and runs Agents. The daemon exits with the app.
   `localServer.isStarting(serverUrl)` sees an active resume (or a valid
   matching `local-server.json` before `LocalServer.start()` runs), it shows the
   Starting page instead of `offline.html`; stale failures from an older port
-  are ignored, and `setServer` pushes the updated origin to the title bar right
-  away. `window.did_finish_load` logs
+  are ignored. `window.did_finish_load` logs
   `{ reason, duration_ms, target }` with origin + pathname only (never query or
   hash), and `LocalServer` resume emits `local_server.resume_started`,
   `local_server.resume_stage` (`stage`, `ms`), `local_server.resume_succeeded`
