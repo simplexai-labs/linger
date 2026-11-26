@@ -186,15 +186,15 @@ describe("TeamHub Agent API contract", () => {
 
     expect(schemas.AgentCreationApprovalResponse).toMatchObject({
       additionalProperties: false,
-      required: [
-        "accepted",
-        "status",
-        "creation_approval_request_id",
-        "message_id",
-      ],
+      required: ["accepted", "status"],
       properties: {
         accepted: { const: true },
-        status: { const: "pending_approval" },
+        status: { enum: ["created", "pending_approval"] },
+        skipped_artifacts: {
+          items: {
+            $ref: "#/components/schemas/AgentRoomCreationSkippedArtifact",
+          },
+        },
       },
     });
     expect(
@@ -205,6 +205,8 @@ describe("TeamHub Agent API contract", () => {
       [
         "accepted",
         "status",
+        "room_id",
+        "skipped_artifacts",
         "creation_approval_request_id",
         "message_id",
       ].sort(),

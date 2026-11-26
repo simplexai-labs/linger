@@ -65,38 +65,56 @@ func createWorkRoomFixture(t *testing.T, env *testEnv, owner *http.Client, workI
 // request in originRoomID; key keeps its submission distinct.
 func roomCreationApprovalInput(t *testing.T, originRoomID, key string) typedcard.CreationApprovalInTxInput {
 	t.Helper()
-	proposal := typedcard.RoomCreationSnapshot{OriginRoomID: originRoomID, Name: "Acceptance file release",
+	return roomCreationApprovalInputFor(t, typedcard.RoomCreationSnapshot{OriginRoomID: originRoomID, Name: "Acceptance file release",
 		MemberIDs:              []string{"actor_acme_alice", "actor_acme_official"},
 		InitialMessageSegments: []messagecreation.Segment{{Type: "text", Content: "Review after generating the report"}},
-	}
+	}, key)
+}
+
+// roomCreationApprovalInputFor is the official Agent's request for the Room
+// that proposal freezes, as TeamHub froze it for an approval card.
+func roomCreationApprovalInputFor(t *testing.T, proposal typedcard.RoomCreationSnapshot, key string) typedcard.CreationApprovalInTxInput {
+	t.Helper()
 	encoded, err := json.Marshal(proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(encoded)
 	return typedcard.CreationApprovalInTxInput{
-		RoomID: originRoomID, AgentManagementID: acmeOfficialAgentManagementID, IdempotencyOperation: "test-room-creation:" + key, CallerInputHash: hash[:],
+		RoomID: proposal.OriginRoomID, AgentManagementID: acmeOfficialAgentManagementID, IdempotencyOperation: "test-room-creation:" + key, CallerInputHash: hash[:],
 		Submission: typedcard.CreationApprovalSubmission{SubmissionID: "room-creation-" + key, CallerInput: encoded, EffectivePayload: encoded, FulfillmentSnapshot: encoded},
 	}
 }
 
-// createPendingRoomCreationApproval submits the official Agent's create_room
-// request in originRoomID and returns its pending creation approval.
+// createPendingRoomCreationApproval posts a pending Room creation card for
+// the official Agent in originRoomID and returns its decision.
 func createPendingRoomCreationApproval(t *testing.T, env *testEnv, originRoomID, suffix string) string {
+	t.Helper()
+	return pendingRoomCreationCard(t, env, originRoomID, suffix).DecisionID
+}
+
+// pendingRoomCreationCard posts a pending Room creation card, as Agents did
+// before TeamHub created their Rooms at once; such cards can still be decided.
+func pendingRoomCreationCard(t *testing.T, env *testEnv, originRoomID, suffix string) typedcard.CreateResult {
+	t.Helper()
+	return postRoomCreationCard(t, env, roomCreationApprovalInput(t, originRoomID, suffix))
+}
+
+func postRoomCreationCard(t *testing.T, env *testEnv, input typedcard.CreationApprovalInTxInput) typedcard.CreateResult {
 	t.Helper()
 	tx, err := env.pool.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	created, err := typedcard.New(env.pool).CreateCreationApprovalRequestInTx(t.Context(), tx, roomCreationApprovalInput(t, originRoomID, suffix))
+	created, err := typedcard.New(env.pool).CreateCreationApprovalRequestInTx(t.Context(), tx, input)
 	if err != nil {
 		t.Fatalf("request Room creation: %v", err)
 	}
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return created.DecisionID
+	return created
 }
 
 // denyRoomCreationApproval denies a pending creation approval as decider.

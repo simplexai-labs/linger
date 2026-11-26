@@ -70,87 +70,16 @@ type roomCreationApproval struct {
 // share, posts its initial message and handoff, and reports the result in
 // the origin Room. It returns those Messages and the created Room.
 func (a roomCreationApproval) approve(ctx context.Context, tx pgx.Tx, queries *store.Queries) (decisionOutcome, string, error) {
-	decisionOwner, accountID := a.owner, a.accountID
-	var snapshot RoomCreationSnapshot
-	if err := json.Unmarshal(a.snapshot, &snapshot); err != nil || snapshot.OriginRoomID != a.originRoomID {
-		return decisionOutcome{}, "", ErrConflict
-	}
-	if _, _, err := roomCreationArtifactReferences(snapshot.Artifacts); err != nil {
-		return decisionOutcome{}, "", err
-	}
-	delivered := make([]RoomCreationArtifactSnapshot, 0, len(snapshot.Artifacts))
-	skipped := make([]roomCreationSkippedArtifact, 0)
-	// Lock shared Documents in a stable order across simultaneous approvals,
-	// while preserving the frozen order in the delivery result and attachments.
-	artifactsToReview := append([]RoomCreationArtifactSnapshot(nil), snapshot.Artifacts...)
-	sort.Slice(artifactsToReview, func(i, j int) bool { return artifactsToReview[i].DocumentID < artifactsToReview[j].DocumentID })
-	reasons := make(map[string]string, len(artifactsToReview))
-	reviews := make(map[string]*document.RoomCreationArtifactReview, len(artifactsToReview))
-	for _, artifact := range artifactsToReview {
-		review, reason, err := document.LockRoomCreationArtifactInTransaction(ctx, tx,
-			accountID, a.tenantID, artifact.DocumentID, artifact.DocumentVersionID, artifact.DocumentRevisionID)
-		if err != nil {
-			return decisionOutcome{}, "", err
-		}
-		reasons[artifact.DocumentID] = reason
-		reviews[artifact.DocumentID] = review
-	}
-	// Canonical order: the artifact Documents lock after the review's row locks
-	// and before the Room creation takes the new members' delivery Accounts.
-	artifactDocumentIDs := make([]string, 0, len(artifactsToReview))
-	for _, artifact := range artifactsToReview {
-		artifactDocumentIDs = append(artifactDocumentIDs, artifact.DocumentID)
-	}
-	if err := document.Lock(ctx, tx, artifactDocumentIDs); err != nil {
-		return decisionOutcome{}, "", err
-	}
-	agent, err := creationDecisionAgent(ctx, queries, a.tenantID, a.agentActorID)
-	if err != nil {
-		return decisionOutcome{}, "", err
-	}
-	created, err := roomcreation.Create(ctx, queries, roomcreation.Spec{
-		TenantID: a.tenantID, Name: snapshot.Name, Description: snapshot.Description,
-		Creator: agent, Owner: decisionOwner,
-		MemberActorIDs:   creationRoomMemberIDs(snapshot.MemberIDs, agent.ID, decisionOwner.ID),
-		AgentsAuthorized: true,
+	decisionOwner := a.owner
+	room, err := createSnapshotRoom(ctx, tx, queries, snapshotRoomSpec{
+		tenantID: a.tenantID, originRoomID: a.originRoomID, agentActorID: a.agentActorID, accountID: a.accountID,
+		owner: decisionOwner, snapshot: a.snapshot, bindingKey: "room-create-artifacts:" + a.decisionID,
 	})
 	if err != nil {
-		return decisionOutcome{}, "", mapCreationDecisionError(err)
-	}
-	for _, artifact := range artifactsToReview {
-		if reasons[artifact.DocumentID] != "" {
-			continue
-		}
-		reason, err := reviews[artifact.DocumentID].BindToRoom(ctx, document.EnsureRoomBindingsInTransactionInput{
-			AccountID: accountID, TenantID: a.tenantID, RoomID: created.Room.ID, InitiatedByActorID: decisionOwner.ID,
-			IdempotencyKey: "room-create-artifacts:" + a.decisionID, Role: "manager",
-		})
-		if err != nil {
-			return decisionOutcome{}, "", mapCreationDecisionError(err)
-		}
-		reasons[artifact.DocumentID] = reason
-	}
-	for _, artifact := range snapshot.Artifacts {
-		if reason := reasons[artifact.DocumentID]; reason != "" {
-			skipped = append(skipped, roomCreationSkippedArtifact{DocumentID: artifact.DocumentID, Reason: reason})
-		} else {
-			delivered = append(delivered, artifact)
-		}
-	}
-	_, artifactVersionIDs, err := roomCreationArtifactReferences(delivered)
-	if err != nil {
 		return decisionOutcome{}, "", err
 	}
-	content, err := messagecreation.Normalize(roomCreationInitialSegments(snapshot.InitialMessageSegments, skipped))
-	if err != nil {
-		return decisionOutcome{}, "", ErrConflict
-	}
-	if _, err := messagecreation.Create(ctx, queries, messagecreation.Draft{
-		TenantID: a.tenantID, RoomID: created.Room.ID, Author: agent, Content: content,
-		AttachmentVersionIDs: artifactVersionIDs, AttachmentRule: messagecreation.DocumentCardAttachments,
-	}); err != nil {
-		return decisionOutcome{}, "", mapCreationDecisionError(err)
-	}
+	snapshot, agent, delivered, skipped := room.snapshot, room.agent, room.delivered, room.skipped
+	created := room.created
 	// The decision recorded decided_at in this transaction; the handoff carries it.
 	var decidedAt time.Time
 	if err := tx.QueryRow(ctx, `SELECT decided_at FROM decisions WHERE id=$1`, a.decisionID).Scan(&decidedAt); err != nil {
@@ -183,6 +112,113 @@ func (a roomCreationApproval) approve(ctx context.Context, tx pgx.Tx, queries *s
 		return decisionOutcome{}, "", err
 	}
 	return decisionOutcome{messages: []messagecreation.Persisted{resultMessage, runtimeMessage}}, created.Room.ID, nil
+}
+
+// snapshotRoomSpec names a frozen Room creation and who creates it: the
+// requesting Agent as creator and owner as the new Room's owner.
+type snapshotRoomSpec struct {
+	tenantID, originRoomID, agentActorID, accountID string
+	owner                                           store.Actor
+	snapshot                                        json.RawMessage
+	// bindingKey makes the Documents' Room bindings idempotent.
+	bindingKey string
+}
+
+// snapshotRoom is a Room created from a frozen snapshot, with the Documents
+// it received and those it skipped.
+type snapshotRoom struct {
+	created   roomcreation.Result
+	snapshot  RoomCreationSnapshot
+	agent     store.Actor
+	delivered []RoomCreationArtifactSnapshot
+	skipped   []roomCreationSkippedArtifact
+}
+
+// createSnapshotRoom creates the frozen Room with the Documents its owner may
+// still share and posts its initial message as the requesting Agent.
+func createSnapshotRoom(ctx context.Context, tx pgx.Tx, queries *store.Queries, spec snapshotRoomSpec) (snapshotRoom, error) {
+	owner, accountID := spec.owner, spec.accountID
+	var snapshot RoomCreationSnapshot
+	if err := json.Unmarshal(spec.snapshot, &snapshot); err != nil || snapshot.OriginRoomID != spec.originRoomID {
+		return snapshotRoom{}, ErrConflict
+	}
+	if _, _, err := roomCreationArtifactReferences(snapshot.Artifacts); err != nil {
+		return snapshotRoom{}, err
+	}
+	delivered := make([]RoomCreationArtifactSnapshot, 0, len(snapshot.Artifacts))
+	skipped := make([]roomCreationSkippedArtifact, 0)
+	// Lock shared Documents in a stable order across simultaneous approvals,
+	// while preserving the frozen order in the delivery result and attachments.
+	artifactsToReview := append([]RoomCreationArtifactSnapshot(nil), snapshot.Artifacts...)
+	sort.Slice(artifactsToReview, func(i, j int) bool { return artifactsToReview[i].DocumentID < artifactsToReview[j].DocumentID })
+	reasons := make(map[string]string, len(artifactsToReview))
+	reviews := make(map[string]*document.RoomCreationArtifactReview, len(artifactsToReview))
+	for _, artifact := range artifactsToReview {
+		review, reason, err := document.LockRoomCreationArtifactInTransaction(ctx, tx,
+			accountID, spec.tenantID, artifact.DocumentID, artifact.DocumentVersionID, artifact.DocumentRevisionID)
+		if err != nil {
+			return snapshotRoom{}, err
+		}
+		reasons[artifact.DocumentID] = reason
+		reviews[artifact.DocumentID] = review
+	}
+	// Canonical order: the artifact Documents lock after the review's row locks
+	// and before the Room creation takes the new members' delivery Accounts.
+	artifactDocumentIDs := make([]string, 0, len(artifactsToReview))
+	for _, artifact := range artifactsToReview {
+		artifactDocumentIDs = append(artifactDocumentIDs, artifact.DocumentID)
+	}
+	if err := document.Lock(ctx, tx, artifactDocumentIDs); err != nil {
+		return snapshotRoom{}, err
+	}
+	agent, err := creationDecisionAgent(ctx, queries, spec.tenantID, spec.agentActorID)
+	if err != nil {
+		return snapshotRoom{}, err
+	}
+	created, err := roomcreation.Create(ctx, queries, roomcreation.Spec{
+		TenantID: spec.tenantID, Name: snapshot.Name, Description: snapshot.Description,
+		Creator: agent, Owner: owner,
+		MemberActorIDs:   creationRoomMemberIDs(snapshot.MemberIDs, agent.ID, owner.ID),
+		AgentsAuthorized: true,
+	})
+	if err != nil {
+		return snapshotRoom{}, mapCreationDecisionError(err)
+	}
+	for _, artifact := range artifactsToReview {
+		if reasons[artifact.DocumentID] != "" {
+			continue
+		}
+		reason, err := reviews[artifact.DocumentID].BindToRoom(ctx, document.EnsureRoomBindingsInTransactionInput{
+			AccountID: accountID, TenantID: spec.tenantID, RoomID: created.Room.ID, InitiatedByActorID: owner.ID,
+			IdempotencyKey: spec.bindingKey, Role: "manager",
+		})
+		if err != nil {
+			return snapshotRoom{}, mapCreationDecisionError(err)
+		}
+		reasons[artifact.DocumentID] = reason
+	}
+	for _, artifact := range snapshot.Artifacts {
+		if reason := reasons[artifact.DocumentID]; reason != "" {
+			skipped = append(skipped, roomCreationSkippedArtifact{DocumentID: artifact.DocumentID, Reason: reason})
+		} else {
+			delivered = append(delivered, artifact)
+		}
+	}
+	_, artifactVersionIDs, err := roomCreationArtifactReferences(delivered)
+	if err != nil {
+		return snapshotRoom{}, err
+	}
+	content, err := messagecreation.Normalize(roomCreationInitialSegments(snapshot.InitialMessageSegments, skipped))
+	if err != nil {
+		return snapshotRoom{}, ErrConflict
+	}
+	if _, err := messagecreation.Create(ctx, queries, messagecreation.Draft{
+		TenantID: spec.tenantID, RoomID: created.Room.ID, Author: agent, Content: content,
+		AttachmentVersionIDs: artifactVersionIDs, AttachmentRule: messagecreation.DocumentCardAttachments,
+	}); err != nil {
+		return snapshotRoom{}, mapCreationDecisionError(err)
+	}
+	return snapshotRoom{created: created, snapshot: snapshot, agent: agent, delivered: delivered, skipped: skipped}, nil
 }
 
 func persistCreationApprovalRuntimeMessage(

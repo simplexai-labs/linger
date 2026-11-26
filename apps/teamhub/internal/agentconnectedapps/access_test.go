@@ -206,8 +206,22 @@ var cardTools = []string{
 	"GMAIL_SEND_EMAIL", "GMAIL_SEND_DRAFT", "GMAIL_REPLY_TO_THREAD",
 	"OUTLOOK_SEND_EMAIL", "OUTLOOK_SEND_DRAFT",
 	"SLACK_SEND_MESSAGE", "SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK",
-	"NOTION_CREATE_NOTION_PAGE", "NOTION_ADD_MULTIPLE_PAGE_CONTENT", "NOTION_UPDATE_PAGE_MARKDOWN",
+	"NOTION_UPDATE_PAGE_MARKDOWN",
 	"GITHUB_CREATE_AN_ISSUE", "GITHUB_CREATE_AN_ISSUE_COMMENT",
+}
+
+// Creating or appending to a Notion page adds content that page history can
+// undo, so it runs at once and the host's reviewer judges it; an edit
+// replaces content and still waits for the card.
+func TestAccessRunsAdditiveNotionWritesAtOnce(t *testing.T) {
+	for _, slug := range []string{"NOTION_CREATE_NOTION_PAGE", "NOTION_ADD_MULTIPLE_PAGE_CONTENT"} {
+		if accessOf(slug, nil) != accessWrite {
+			t.Errorf("%s must run at once", slug)
+		}
+	}
+	if accessOf("NOTION_UPDATE_PAGE_MARKDOWN", nil) != accessConfirm {
+		t.Error("NOTION_UPDATE_PAGE_MARKDOWN replaces content and must wait for confirmation")
+	}
 }
 
 func TestAccessListsKeepConfirmedWritesHeld(t *testing.T) {

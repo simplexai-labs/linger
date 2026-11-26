@@ -10,11 +10,9 @@ import (
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentcreationapproval"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentsendmessage"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 )
 
 // An Agent's Thread reply refreshes the parent timeline's Thread summary, as a
@@ -146,20 +144,11 @@ func TestMessageCreatedPayloadIsOneShapeForEveryWriter(t *testing.T) {
 		t.Fatalf("Agent Message result=%+v err=%v", sent, err)
 	}
 
-	// An AnotherMe asks its Human to approve a Room: a typed card Message.
+	// A pending Room creation card is a typed card Message.
 	if _, err := env.pool.Exec(ctx, `UPDATE agent_registrations SET agent_type='anotherme',receives_all_messages=true,represented_human_actor_id='actor_acme_alice' WHERE actor_id='actor_acme_official'`); err != nil {
 		t.Fatal(err)
 	}
-	segments := []messagecreation.Segment{{Type: "text", Content: "Payload Room approval"}}
-	members := []string{"actor_acme_alice", "actor_acme_official"}
-	approval, err := agentcreationapproval.New(env.pool, contexts, typedcard.New(env.pool)).Submit(ctx, issued.AccessToken, agentcreationapproval.Input{
-		RequestKind: "room_creation", InvocationID: "agent-invocation-sha256:" + strings.Repeat("d", 64),
-		RoomCaller:    &agentcreationapproval.RoomCallerInput{Name: "Payload room " + suffix, MemberIDs: members, InitialMessageSegments: segments},
-		RoomEffective: &agentcreationapproval.RoomEffectivePayload{Name: "Payload room " + suffix, MemberIDs: members, InitialMessageSegments: segments},
-	})
-	if err != nil || approval.CreationApprovalRequestID == "" {
-		t.Fatalf("Room approval result=%+v err=%v", approval, err)
-	}
+	pendingRoomCreationCard(t, env, roomID, "payload-"+suffix)
 
 	events, _ := humanRoomEventsAfter(t, env, alice, roomID, start.LatestRoomSeq)
 	announced := map[string]map[string]any{}

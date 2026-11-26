@@ -695,6 +695,42 @@ describe("agent commands", () => {
     );
   });
 
+  it("creates a Room at once and names the Documents it did not deliver", async () => {
+    const result = await run(
+      [
+        "room",
+        "create",
+        "--name",
+        "Launch",
+        "--member-id",
+        "actor_two",
+        "--content",
+        "Plan the launch.",
+      ],
+      {
+        accepted: true,
+        status: "created",
+        room_id: "room_new",
+        skipped_artifacts: [
+          { document_id: "document_gone", reason: "deleted" },
+        ],
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.path()).toBe("/api/agent/v1/creation-approval-requests");
+    expect(result.stdout).toBe(
+      "Created Room room_new. Continue the work there; its handoff wakes you in that Room.\nNot delivered: document_gone (deleted)\n",
+    );
+    expect(
+      renderBusinessResult("room create", {
+        accepted: true,
+        status: "pending_approval",
+        creation_approval_request_id: "approval_one",
+        message_id: "message_one",
+      }),
+    ).toContain("Room creation approval requested");
+  });
+
   it("changes only the given fields and reports a pending card without failing", async () => {
     const result = await run(
       ["agent", "update", "--prompt", "Line one\\nLine two"],

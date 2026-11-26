@@ -111,14 +111,21 @@ func ValidAgentProfileChange(change AgentProfileChange) bool {
 // CreateSponsorAgent registers a General Agent of the Sponsor with the
 // caller's Runtime, exactly like a Web creation. key makes it idempotent.
 func (s *Service) CreateSponsorAgent(ctx context.Context, accountID, tenantID, callerActorID string, change AgentProfileChange, key string) (string, error) {
+	actorID, _, err := s.createSponsorAgent(ctx, accountID, tenantID, callerActorID, change, key)
+	return actorID, err
+}
+
+// createSponsorAgent is CreateSponsorAgent that also reports whether key
+// replayed an earlier creation.
+func (s *Service) createSponsorAgent(ctx context.Context, accountID, tenantID, callerActorID string, change AgentProfileChange, key string) (string, bool, error) {
 	caller, err := s.queries.GetAgentRegistrationByActor(ctx, store.GetAgentRegistrationByActorParams{
 		ActorID: callerActorID, TenantID: tenantID,
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if caller.Status != "active" {
-		return "", collaboration.ErrAgentSponsorRequired
+		return "", false, collaboration.ErrAgentSponsorRequired
 	}
 	agentType, visibility := httpapi.CreatableAgentTypeGeneral, httpapi.AgentVisibilityScopeSponsor
 	result, err := s.ExecuteTenantAgentRegistration(ctx, accountID, tenantID, httpapi.TenantAgentCreateRequest{
@@ -126,16 +133,16 @@ func (s *Service) CreateSponsorAgent(ctx context.Context, accountID, tenantID, c
 		Runtime: agentRuntimeConfig(agentRegistrationFromRow(caller)), AgentType: &agentType, VisibilityScope: &visibility,
 	}, key)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var created httpapi.TenantAgent
 	if err := json.Unmarshal(result.Body, &created); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if created.Actor.Id == "" {
-		return "", errors.New("created Agent has no Actor")
+		return "", false, errors.New("created Agent has no Actor")
 	}
-	return created.Actor.Id, nil
+	return created.Actor.Id, result.Replay, nil
 }
 
 // AgentChangeRequest is the stored change a decision runs.
