@@ -2,6 +2,7 @@ import {
   AiChipIcon,
   Alert02Icon,
   ArrowDown01Icon,
+  ArrowRight01Icon,
   InformationCircleIcon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
@@ -342,6 +343,7 @@ function MemorySummaryCard({
   onRecheck,
   rechecking,
   summary,
+  systemHref,
   view,
 }: {
   canRecheck: boolean;
@@ -349,6 +351,7 @@ function MemorySummaryCard({
   onRecheck: () => void;
   rechecking: boolean;
   summary: ReturnType<typeof memorySummary>;
+  systemHref?: string;
   view: LocalModelsView;
 }) {
   const translation = useTranslation();
@@ -391,6 +394,15 @@ function MemorySummaryCard({
           <Button onClick={onDetails} size="compact">
             {t(m.details)}
           </Button>
+          {systemHref ? (
+            <Link
+              className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              to={systemHref}
+            >
+              <span>{t(m.systemMonitor)}</span>
+              <Icon icon={ArrowRight01Icon} size={12} />
+            </Link>
+          ) : null}
         </div>
       </div>
       <div
@@ -833,6 +845,11 @@ function ComputerModels({
               onRecheck={recheckMemory}
               rechecking={refresh.isPending}
               summary={summary}
+              systemHref={
+                view.viewer_is_owner
+                  ? `/t/${encodeURIComponent(tenantId)}/settings/system?computer=${encodeURIComponent(computerId)}`
+                  : undefined
+              }
               view={view}
             />
           ) : null}

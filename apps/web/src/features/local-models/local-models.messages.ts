@@ -31,6 +31,7 @@ export const localModelsMessages = defineMessages("localModels", {
   memoryFreeChecked: "{free} free · Checked {time}",
   recheckMemory: "Recheck memory",
   details: "Details",
+  systemMonitor: "System",
   retrying: "Retrying…",
   switchingComputer:
     "Switching {computer}. This can take a few minutes the first time.",

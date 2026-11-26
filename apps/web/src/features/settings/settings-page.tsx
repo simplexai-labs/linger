@@ -1,4 +1,5 @@
 import {
+  Activity01Icon,
   AiChipIcon,
   Key01Icon,
   LanguageSkillIcon,
@@ -51,6 +52,11 @@ export function SettingsLayout() {
             icon={<Icon icon={AiChipIcon} size={14} />}
             label={t(settingsMessages.models)}
             to="models"
+          />
+          <SettingsLink
+            icon={<Icon icon={Activity01Icon} size={14} />}
+            label={t(settingsMessages.system)}
+            to="system"
           />
           <SettingsLink
             icon={<Icon icon={LanguageSkillIcon} size={14} />}

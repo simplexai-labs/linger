@@ -256,6 +256,7 @@ export function ComputersPage() {
               computer={selectedComputer}
               key={selectedComputer.computer_id}
               localModelsHref={`/t/${tenantId}/settings/models?computer=${encodeURIComponent(selectedComputer.computer_id)}`}
+              systemTelemetryHref={`/t/${tenantId}/settings/system?computer=${encodeURIComponent(selectedComputer.computer_id)}`}
               onConnect={cliInstallAvailable ? openSetup : undefined}
               onOpenAgent={(actorId) => {
                 if (!openAgent.isPending) openAgent.mutate(actorId);

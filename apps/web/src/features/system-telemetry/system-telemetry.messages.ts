@@ -1,0 +1,240 @@
+import { defineMessages } from "@/i18n/messages";
+
+/** Settings › System: live local-model and Pi routing telemetry. */
+export const systemTelemetryMessages = defineMessages("systemTelemetry", {
+  // Header, status pill, and controls.
+  title: "System",
+  liveBadge: "Live · 1 Hz",
+  pausedBadge: "Paused",
+  connectingBadge: "Connecting…",
+  offlineBadge: "Offline",
+  unsupportedBadge: "Update needed",
+  errorBadge: "Unavailable",
+  pauseStream: "Pause",
+  resumeStream: "Resume",
+  retry: "Retry",
+  provenanceButtonTitle: "Inspect local telemetry provenance and collectors",
+  provenanceTitle: "Local Telemetry Provenance",
+  provenanceTitleWithOs: "Local Telemetry Provenance · {os}",
+  provenanceClose: "Close provenance details",
+  provenanceSummary:
+    "Collector: {collector}. Scope: local Pi runtime and Bifrost gateway only. Unavailable sensors display “—”.",
+  provenanceSummaryDefault:
+    "Scope: local Pi runtime and Bifrost gateway only. Unavailable sensors display “—”.",
+  provenanceMetricMemory: "VRAM / Unified pool bytes",
+  provenanceMetricDecodeBw: "Effective decode bandwidth",
+  provenanceMetricGpuCompute: "GPU compute utilization",
+  provenanceMetricThermals: "Die temperature & power",
+  provenanceMetricGateway: "Bifrost timings & engine /slots",
+  provenanceMetricCpuDisk: "Host CPU & disk read I/O",
+  provenanceMetricWhatIf: "What-If capacity roofline",
+  basisLive: "live",
+  basisMeasured: "measured",
+  basisEstimate: "estimate",
+  basisDemo: "demo",
+  basisNone: "none",
+  unavailableSensorTooltip: "Sensor unavailable on this host (basis: none)",
+
+  // Status summary line.
+  summaryIdle: {
+    one: "{models} local model warm for Pi Agents · {free} free in {pool}.",
+    other: "{models} local models warm for Pi Agents · {free} free in {pool}.",
+  },
+  summaryIdleNoModels:
+    "No local models loaded yet. Open Settings › Models to load a model for Pi Agents.",
+  summaryServing: {
+    one: "Serving {streams} local Pi stream at {tokS} · {bottleneck}.",
+    other: "Serving {streams} local Pi streams at {tokS} · {bottleneck}.",
+  },
+  summaryServingWithCeiling: {
+    one: "Serving {streams} local Pi stream at {tokS} · {bottleneck} at {pct}% of {ceiling} GB/s ceiling.",
+    other:
+      "Serving {streams} local Pi streams at {tokS} · {bottleneck} at {pct}% of {ceiling} GB/s ceiling.",
+  },
+  summaryPressure:
+    "{pool} tight at {pct}% — open Models to recheck memory or make room.",
+  summaryOffline:
+    "{computer} is offline. Reconnect it in Computers to resume live telemetry.",
+  summaryUnsupported:
+    "Update Local Computer on {computer} to enable live System telemetry.",
+  summaryLoading: "Connecting to {computer} for live local telemetry…",
+  bottleneckMemoryBw: "memory-bw bound",
+  bottleneckCompute: "compute bound",
+  bottleneckIo: "I/O bound",
+  bottleneckBalanced: "balanced",
+  bottleneckIdle: "idle",
+
+  // Empty, offline, unsupported, forbidden, and error states.
+  noComputersTitle: "No computers yet",
+  noComputersBody:
+    "Connect a computer in <link>Computers</link> to inspect live local-model and Pi routing telemetry.",
+  loadingRegion: "Loading system telemetry",
+  offlineBannerTitle: "{computer} is offline",
+  offlineBannerBody:
+    "Reconnect it in <link>Computers</link> to resume live 1 Hz telemetry.",
+  offlinePreservedNote:
+    "Showing the last captured snapshot while this computer is offline.",
+  unsupportedTitle: "Update Local Computer to enable live System telemetry",
+  unsupportedBody:
+    "{computer} is running an older Local Computer daemon or local-models kit that does not support live telemetry snapshots. Update it in <link>Computers</link>, or manage models in <models>Models</models>.",
+  forbiddenTitle: "System telemetry is owner-only",
+  forbiddenBody:
+    "Only the person who connected {computer} can inspect its live hardware and Pi routing telemetry.",
+  errorTitle: "Couldn't read live telemetry from {computer}",
+  errorBody:
+    "The telemetry stream was interrupted or timed out. Check that the computer is reachable and try again.",
+  openComputers: "Open Computers",
+  openModels: "Manage in Models",
+
+  // Optical routing stage.
+  routingRegion: "Pi local routing optical stage",
+  routingHeading: "Pi local routing",
+  routingMeta: "{agents} active Pi agents · {inFlight}/{maxSlots} slots",
+  spotlightLabel: "Spotlight: {name}",
+  clearSpotlight: "Clear spotlight",
+  legendPrompt: "Prompt / Prefill →",
+  legendDecode: "← Decode Stream",
+  columnPiAgents: "Pi Agents · Local Runtime",
+  columnGateway: "Local Gateway · {addr}",
+  columnGatewayDefault: "Local Gateway · Bifrost",
+  columnModels: "Loaded Local Models",
+  clientRuntimeLabel: "Pi · Local Runtime",
+  clientStandby: "Standby",
+  clientStreams: {
+    one: "{count} stream",
+    other: "{count} streams",
+  },
+  clientStreamsWithRate: {
+    one: "{count} stream · {rate}",
+    other: "{count} streams · {rate}",
+  },
+  clientRecentReqs: "{count} req",
+  noActivePiClients: "Pi Agents on standby",
+  noActivePiClientsHint:
+    "Start a chat or task with a local Pi Agent to watch live optical routing here.",
+  noLoadedModelsTitle: "No local models loaded",
+  noLoadedModelsHint:
+    "Load a local model in Models to serve Pi Agents on this computer.",
+  gatewayName: "Bifrost · Pi",
+  gatewayLocalAddress: "Localhost gateway",
+  gatewayInFlight: "In-Flight",
+  gatewayP50Ttft: "p50 TTFT",
+  gatewayPrefixHit: "Prefix Hit",
+  gatewayDeferred: "Deferred",
+  gatewayMemBus: "Mem Bus",
+  gatewayCeilingPct: "{pct}% ceiling",
+  gatewayCeilingMax: "{gbS} GB/s",
+  modelWarm: "Warm",
+  modelLoading: "Loading",
+
+  // Hardware & bandwidth instruments.
+  hardwareHeading: "Hardware & bandwidth instruments",
+  hardwareMeta: "{gpu} · Watchdog {watchdog}",
+  hardwareMetaNoGpu: "Watchdog {watchdog}",
+  watchdogClean: "clean",
+  watchdogOom: "OOM",
+  watchdogMemoryStarved: "memory starved",
+  watchdogCrashed: "crashed",
+  watchdogUnknown: "unknown",
+  poolUnified: "Unified Memory",
+  poolVram: "GPU VRAM",
+  poolFree: "{free} free",
+  hostRamFooter: "Host RAM {used} / {total}",
+  unifiedFooter: "Unified pool {total}",
+  memoryBandwidthLabel: "Memory bandwidth",
+  memoryBandwidthSub: "tok/s × {gb}G active",
+  memoryBandwidthSubDefault: "Effective decode throughput",
+  effDecodeFooter: "Eff. decode {value}",
+  bwCeilingRight: "{pct}% ceiling",
+  gpuComputeLabel: "GPU compute",
+  gpuComputeSubDefault: "Local accelerator",
+  dieTemp: "{temp}°C die",
+  powerFraction: "{used} / {limit} W",
+  powerOnly: "{used} W",
+  cpuDiskLabel: "CPU & disk read",
+  cpuCoresLabel: "{count}-core host CPU",
+  cpuLabelDefault: "Host CPU",
+  modelDiskRead: "Model read",
+  diskReadValue: "{mbS} MB/s",
+  pressureBannerHolders:
+    "Memory pressure detected · external GPU holders: {holders}.",
+  pressureBannerGeneric:
+    "Memory pressure detected on this pool. Recheck memory or unload unused models in Models.",
+  recheckInModels: "Recheck in Models",
+
+  // Inspect & plan disclosures.
+  inspectHeading: "Inspect & plan",
+  waterfallTitle: "Recent Pi requests waterfall",
+  waterfallBadgeFiltered: "Filtered: {name}",
+  waterfallBadgeSummary: {
+    one: "{count} Pi request · p50 TTFT {ttft}",
+    other: "{count} Pi requests · p50 TTFT {ttft}",
+  },
+  waterfallHint:
+    "Click a row to inspect Bifrost Gateway → Prefill/TTFT → Decode",
+  waterfallLegendGateway: "Gateway",
+  waterfallLegendPrefill: "Prefill / TTFT",
+  waterfallLegendDecode: "Decode",
+  waterfallEmpty: "No recent Pi requests recorded on this computer yet.",
+  waterfallStatusStreaming: "streaming",
+  waterfallStatusCompleted: "completed",
+  waterfallStatusDeferred: "deferred",
+  waterfallDetailGateway: "Gateway",
+  waterfallDetailPrefill: "Prefill",
+  waterfallDetailDecode: "Decode",
+  waterfallDetailTokens: "Tokens",
+  waterfallDetailPrefixHit: "Prefix hit",
+
+  deepTitle: "Deep telemetry · Oscilloscope & /slots",
+  deepBadge: "{inFlight}/{maxSlots} active slots · KV {kv}",
+  deepTracesHeading: "Synchronized live traces",
+  deepTraceDecode: "Decode",
+  deepTraceTtft: "TTFT",
+  deepTraceMemBw: "Mem BW",
+  deepOscilloscopeLabel: "Dual-track live oscilloscope",
+  deepOscilloscopeCaptionLeft:
+    "Top: Decode / Prefill tok/s · Bottom: Mem BW / TTFT ms",
+  deepOscilloscopeCaptionRight: "Hover to scrub · 80% BW threshold dashed",
+  deepOscilloscopeWaiting: "Collecting live 1 Hz samples…",
+  deepSlotsHeading: "Live /slots KV occupancy",
+  deepPrefixHit: "Prefix hit {pct}",
+  deepSlotsEmpty: "No engine /slots reported by the active model runtime.",
+  slotPhaseQueued: "Queued",
+  slotPhaseReady: "Ready",
+  slotRateCompact: "{rate} t/s",
+
+  whatIfTitle: "What-If capacity sandbox",
+  whatIfBadge: "{slots} slots · {ctx}K · {quant} → {verdict}",
+  whatIfBadgeUnavailable: "Load a local model to forecast capacity",
+  whatIfUnavailableBody:
+    "What-If capacity forecasting requires roofline coefficients from a loaded local model. Load a model in Models to inspect concurrency and KV memory headroom.",
+  whatIfHeading: "Forecast Pi slot capacity on {computer}",
+  whatIfMatchLive: "Match live",
+  whatIfConcurrency: "Target concurrency",
+  whatIfSlotCount: {
+    one: "{count} slot",
+    other: "{count} slots",
+  },
+  whatIfContextLength: "Context length",
+  whatIfKvQuant: "KV quantization",
+  whatIfProjectedPool: "Projected {pool}",
+  whatIfSegmentWeights: "Weights",
+  whatIfSegmentKv: "KV",
+  whatIfSegmentCompute: "Compute",
+  whatIfSegmentFixed: "Reserve",
+  whatIfSegmentFree: "Free",
+  whatIfVerdictFits: "Fits GPU",
+  whatIfVerdictHybrid: "Hybrid Offload",
+  whatIfVerdictOom: "OOM Risk",
+  whatIfDetailFits: "{free} headroom remaining in {pool}.",
+  whatIfDetailHybrid:
+    "Spills {offload} into host RAM across PCIe; decode throughput slows proportionally.",
+  whatIfDetailOom:
+    "Exceeds {pool} budget by {offload}. Lower concurrency, context length, or KV precision.",
+  whatIfEstDecode: "Est. Decode",
+  whatIfBwCeiling: "BW Ceiling",
+  whatIfEstTtft: "Est. TTFT",
+  whatIfOffload: "Offload",
+  whatIfOffloadNone: "None",
+  whatIfApplyInModels: "Apply in Models",
+});

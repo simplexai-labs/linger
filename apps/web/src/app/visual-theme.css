@@ -181,4 +181,82 @@
   --composer-shadow-color: rgba(0, 0, 0, 0.06);
   --composer-shadow-focus-color: rgba(0, 0, 0, 0.07);
   --app-scrollbar: hsl(var(--town-muted-foreground) / 0.4);
+  /* System Telemetry optical routing stage tokens (Town Light defaults). */
+  --telemetry-stage-bg: hsl(45 28% 96.8%);
+  --telemetry-stage-dot: hsl(45 12% 76% / 0.55);
+  --telemetry-stage-inset:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 28px rgba(26, 25, 22, 0.025);
+  --telemetry-node-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.92) 0%,
+    rgba(255, 255, 255, 0) 36%
+  );
+  --telemetry-lamp-color: rgba(78, 155, 162, 0.14);
+}
+
+:root[data-theme="dark"],
+.dark {
+  color-scheme: dark;
+  --town-background: 40 8% 7.5%;
+  --town-foreground: 45 18% 93%;
+  --town-card: 40 7% 11.5%;
+  --town-popover: 40 7% 14%;
+  --town-primary: 45 18% 93%;
+  --town-primary-foreground: 40 8% 9%;
+  --town-secondary: 40 6% 17.5%;
+  --town-secondary-foreground: 44 10% 80%;
+  --town-muted: 40 6% 16.5%;
+  --town-muted-foreground: 44 8% 66%;
+  --town-accent: 40 6% 19.5%;
+  --town-accent-foreground: 45 18% 93%;
+  --town-destructive: 14 85% 60%;
+  --town-destructive-foreground: 40 8% 9%;
+  --town-info: 196 68% 62%;
+  --town-success: 100 45% 58%;
+  --town-warning: 38 92% 58%;
+  --town-border: 40 6% 21%;
+  --town-border-hover: 40 6% 31%;
+  --town-border-heavy: 45 18% 93%;
+  --town-input: 40 6% 21%;
+  --town-input-hover: 40 6% 31%;
+  --town-sidebar: 40 7% 9.5%;
+  --town-sidebar-foreground: 45 18% 93%;
+  --town-sidebar-muted: 40 6% 16%;
+  --town-sidebar-border: 40 6% 19%;
+  --town-shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --town-shadow-sm:
+    0 0 0 1px rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --town-shadow-md:
+    0 0 0 1px rgba(255, 255, 255, 0.1), 0 6px 18px rgba(0, 0, 0, 0.52);
+  --town-shadow-lg:
+    0 0 0 1px rgba(255, 255, 255, 0.11), 0 10px 26px rgba(0, 0, 0, 0.58);
+  --town-shadow-xl:
+    0 0 0 1px rgba(255, 255, 255, 0.13), 0 12px 32px rgba(0, 0, 0, 0.65);
+  --color-rain-500: #5db8c0;
+  --color-rain-700: #8ad8df;
+  --color-lichen-500: #a6b93c;
+  --color-lichen-700: #c7d968;
+  --color-lake-500: #5eb592;
+  --color-lake-700: #8cd8ba;
+  --color-sun-500: #ec7851;
+  --color-sun-700: #f9a487;
+  --color-acorn-500: #dca03c;
+  --color-acorn-700: #f0c372;
+  --color-lavender-500: #be98d6;
+  --color-lavender-700: #d9c0eb;
+  --color-bluebell-500: #82a7e0;
+  --color-bluebell-700: #acc7f0;
+  --color-fawn-500: #c99991;
+  --color-fawn-700: #e2bcb6;
+  --telemetry-stage-bg: hsl(40 8% 9.2%);
+  --telemetry-stage-dot: hsl(44 10% 34% / 0.55);
+  --telemetry-stage-inset:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 36px rgba(0, 0, 0, 0.45);
+  --telemetry-node-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0) 38%
+  );
+  --telemetry-lamp-color: rgba(138, 216, 223, 0.16);
 }

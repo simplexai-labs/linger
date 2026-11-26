@@ -35,6 +35,7 @@ export const computersMessages = defineMessages("computers", {
   aiAppsHint: "One ready app is enough.",
   localModels: "Local models",
   manageLocalModels: "Manage local models",
+  systemTelemetry: "System telemetry",
   power: "Power",
   preventSleep: "Prevent sleep",
   preventSleepHint:
