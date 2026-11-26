@@ -3,8 +3,8 @@ import { encodeExecutionContextRef } from "../../executor/context-ref.js";
 import {
   awaitedReplyInboxIds,
   awaitsReply,
-  isTaskReport,
 } from "../../executor/reply-delivery.js";
+import { isTaskCallbackInput } from "../../executor/run-kind.js";
 import type { AgentLogger } from "../../observability/agent-log.js";
 
 export const ROOM_REPLY_GUARD_FEATURE_ID = "room-reply-guard";
@@ -72,7 +72,7 @@ export function createRoomReplyGuardFeature(
             // A Human's mention decides the reminder; a Task report alone
             // only needs some visible result.
             const mentioned = input.inputs.some(awaitsReply);
-            if (!mentioned && !input.inputs.some(isTaskReport)) {
+            if (!mentioned && !input.inputs.some(isTaskCallbackInput)) {
               return { action: "allow" };
             }
             const awaited = awaitedReplyInboxIds(input.inputs);

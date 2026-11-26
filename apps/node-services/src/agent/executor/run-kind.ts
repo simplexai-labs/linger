@@ -21,16 +21,26 @@ function messageRunKind(origin: QueuedMessageOrigin): RunKind {
   return origin.authorType === "agent" ? "agent_message" : "chat";
 }
 
+/**
+ * Whether TeamHub queued this input from a Task's callback Inbox: the Task's
+ * private report to the Agent that created it.
+ */
+export function isTaskCallbackInput(message: Message): boolean {
+  const notification = (message as unknown as Record<string, unknown>)
+    .acceptedNotification;
+  return (
+    isRecord(notification) &&
+    typeof notification.inboxId === "string" &&
+    notification.inboxId.startsWith("taskmeta:")
+  );
+}
+
 function inputRunKinds(message: Message): readonly RunKind[] {
   const notification = (message as unknown as Record<string, unknown>)
     .acceptedNotification;
   // Only a feature's follow-up turn has no Inbox notification in a Meta Context.
   if (!isRecord(notification)) return ["follow_up"];
-  if (
-    typeof notification.inboxId === "string" &&
-    notification.inboxId.startsWith("taskmeta:")
-  )
-    return ["task_callback"];
+  if (isTaskCallbackInput(message)) return ["task_callback"];
   return Array.isArray(notification.messages)
     ? (notification.messages as readonly QueuedMessageOrigin[]).map(
         messageRunKind,

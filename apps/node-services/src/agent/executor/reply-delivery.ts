@@ -110,20 +110,6 @@ export function awaitsReply(message: Message): boolean {
   );
 }
 
-/**
- * Whether this input is a Task's report to the Agent that created it. The
- * report is private, so the result reaches people only if the Agent sends it.
- */
-export function isTaskReport(message: Message): boolean {
-  const notification = (message as unknown as Record<string, unknown>)
-    .acceptedNotification;
-  return (
-    isRecord(notification) &&
-    typeof notification.inboxId === "string" &&
-    notification.inboxId.startsWith("taskmeta:")
-  );
-}
-
 /** The Inboxes in which these inputs await a reply, in input order. */
 export function awaitedReplyInboxIds(
   messages: readonly Message[],
