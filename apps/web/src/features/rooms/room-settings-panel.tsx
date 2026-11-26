@@ -4,14 +4,12 @@ import {
   Delete02Icon,
   Link01Icon,
   Logout01Icon,
-  PencilEdit02Icon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SettingsGroup } from "@/components/ui/settings-group";
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { Hint } from "@/features/local-computer/computer-hint";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-client";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -29,6 +27,7 @@ import {
   tenantRoomsQueryKey,
 } from "./room-queries";
 import { RoomSettingsDialog } from "./room-settings-dialog";
+import { AvatarEditButton } from "./members/avatar-edit-button";
 import { RoomAvatar } from "./members/room-avatar";
 import { RoomMembersSection } from "./members/room-members-section";
 import { RoomDeleteDialog } from "./room-delete-dialog";
@@ -330,19 +329,9 @@ function RoomHeader({
         </div>
       ) : null}
       {onEditDetails ? (
-        <Hint placement="bottom" text={t(m.editDetails)}>
-          <button
-            aria-label={t(m.editDetails)}
-            className="relative rounded-[20%] outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-app-focus"
-            onClick={onEditDetails}
-            type="button"
-          >
-            {avatar}
-            <span className="absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full bg-card text-muted-foreground shadow-outline">
-              <Icon icon={PencilEdit02Icon} size={12} />
-            </span>
-          </button>
-        </Hint>
+        <AvatarEditButton label={t(m.editDetails)} onClick={onEditDetails}>
+          {avatar}
+        </AvatarEditButton>
       ) : (
         avatar
       )}
