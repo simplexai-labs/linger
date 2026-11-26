@@ -168,6 +168,22 @@ const agentFrames = [
     },
   },
   {
+    type: "capability.system_telemetry.subscribe",
+    protocol_version: "2",
+    command_id: "telemetry-sub-1",
+    runner_id: assignment.runner_id,
+    connection_epoch: 1,
+    lease_ttl_ms: 30_000,
+    interval_ms: 1_000,
+  },
+  {
+    type: "capability.system_telemetry.unsubscribe",
+    protocol_version: "2",
+    command_id: "telemetry-unsub-1",
+    runner_id: assignment.runner_id,
+    connection_epoch: 1,
+  },
+  {
     type: "prepare",
     target: "operation",
     ...operation,

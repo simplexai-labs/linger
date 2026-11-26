@@ -244,6 +244,70 @@ paths:
           $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
       security:
         - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/system-telemetry:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    get:
+      summary: Read one live system telemetry snapshot from an owned Local Computer
+      description: >-
+        Returns the latest cached snapshot when a telemetry lease is active on
+        the Computer, or acquires a brief lease to wait for one live tick.
+      operationId: getLocalComputerSystemTelemetry
+      responses:
+        "200":
+          description: Latest live system telemetry snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: ../components/system-telemetry.yaml#/components/schemas/SystemTelemetryEnvelope
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+        "504":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
+  /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/system-telemetry/stream:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/OwnerActorId"
+      - $ref: "#/components/parameters/ComputerId"
+    get:
+      summary: Stream live system telemetry snapshots from an owned Local Computer via SSE
+      description: >-
+        Multiplexes concurrent viewers of the same Computer onto one renewable
+        Daemon subscription lease, coalescing to the latest snapshot per viewer
+        and unsubscribing immediately when the last viewer closes.
+      operationId: streamLocalComputerSystemTelemetry
+      responses:
+        "200":
+          description: Server-Sent Events stream of telemetry.snapshot and telemetry.status events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              x-sse-events:
+                telemetry.snapshot:
+                  $ref: ../components/system-telemetry.yaml#/components/schemas/SystemTelemetryEnvelope
+                telemetry.status:
+                  $ref: ../components/system-telemetry.yaml#/components/schemas/SystemTelemetryStreamStatus
+        "401":
+          $ref: ../components/common.yaml#/components/responses/Unauthenticated
+        "404":
+          $ref: ../components/common.yaml#/components/responses/NotFound
+        "409":
+          $ref: ../components/common.yaml#/components/responses/Conflict
+        "503":
+          $ref: ../components/common.yaml#/components/responses/ServiceUnavailable
+      security:
+        - agentManagementBearer: []
   /v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/model-source:
     parameters:
       - $ref: "#/components/parameters/TenantId"

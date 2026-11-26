@@ -3812,6 +3812,231 @@ func (e SlackConversationKind) Valid() bool {
 	}
 }
 
+// Defines values for SystemTelemetryBottleneck.
+const (
+	SystemTelemetryBottleneckBalanced      SystemTelemetryBottleneck = "balanced"
+	SystemTelemetryBottleneckComputeBound  SystemTelemetryBottleneck = "compute_bound"
+	SystemTelemetryBottleneckIdle          SystemTelemetryBottleneck = "idle"
+	SystemTelemetryBottleneckIoBound       SystemTelemetryBottleneck = "io_bound"
+	SystemTelemetryBottleneckMemoryBwBound SystemTelemetryBottleneck = "memory_bw_bound"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryBottleneck enum.
+func (e SystemTelemetryBottleneck) Valid() bool {
+	switch e {
+	case SystemTelemetryBottleneckBalanced:
+		return true
+	case SystemTelemetryBottleneckComputeBound:
+		return true
+	case SystemTelemetryBottleneckIdle:
+		return true
+	case SystemTelemetryBottleneckIoBound:
+		return true
+	case SystemTelemetryBottleneckMemoryBwBound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryComputerStatus.
+const (
+	SystemTelemetryComputerOffline SystemTelemetryComputerStatus = "offline"
+	SystemTelemetryComputerOnline  SystemTelemetryComputerStatus = "online"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryComputerStatus enum.
+func (e SystemTelemetryComputerStatus) Valid() bool {
+	switch e {
+	case SystemTelemetryComputerOffline:
+		return true
+	case SystemTelemetryComputerOnline:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryErrorCode.
+const (
+	SystemTelemetryErrorCodeForbidden            SystemTelemetryErrorCode = "SYSTEM_TELEMETRY_FORBIDDEN"
+	SystemTelemetryErrorCodeLocalComputerOffline SystemTelemetryErrorCode = "LOCAL_COMPUTER_OFFLINE"
+	SystemTelemetryErrorCodeTimeout              SystemTelemetryErrorCode = "SYSTEM_TELEMETRY_TIMEOUT"
+	SystemTelemetryErrorCodeUnavailable          SystemTelemetryErrorCode = "SYSTEM_TELEMETRY_UNAVAILABLE"
+	SystemTelemetryErrorCodeUnsupported          SystemTelemetryErrorCode = "SYSTEM_TELEMETRY_UNSUPPORTED"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryErrorCode enum.
+func (e SystemTelemetryErrorCode) Valid() bool {
+	switch e {
+	case SystemTelemetryErrorCodeForbidden:
+		return true
+	case SystemTelemetryErrorCodeLocalComputerOffline:
+		return true
+	case SystemTelemetryErrorCodeTimeout:
+		return true
+	case SystemTelemetryErrorCodeUnavailable:
+		return true
+	case SystemTelemetryErrorCodeUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryMeasuredMemory.
+const (
+	SystemTelemetryMeasuredMemoryRam  SystemTelemetryMeasuredMemory = "ram"
+	SystemTelemetryMeasuredMemoryVram SystemTelemetryMeasuredMemory = "vram"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryMeasuredMemory enum.
+func (e SystemTelemetryMeasuredMemory) Valid() bool {
+	switch e {
+	case SystemTelemetryMeasuredMemoryRam:
+		return true
+	case SystemTelemetryMeasuredMemoryVram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryMemoryPressureLevel.
+const (
+	SystemTelemetryMemoryPressureCritical SystemTelemetryMemoryPressureLevel = "critical"
+	SystemTelemetryMemoryPressureElevated SystemTelemetryMemoryPressureLevel = "elevated"
+	SystemTelemetryMemoryPressureNominal  SystemTelemetryMemoryPressureLevel = "nominal"
+	SystemTelemetryMemoryPressureUnknown  SystemTelemetryMemoryPressureLevel = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryMemoryPressureLevel enum.
+func (e SystemTelemetryMemoryPressureLevel) Valid() bool {
+	switch e {
+	case SystemTelemetryMemoryPressureCritical:
+		return true
+	case SystemTelemetryMemoryPressureElevated:
+		return true
+	case SystemTelemetryMemoryPressureNominal:
+		return true
+	case SystemTelemetryMemoryPressureUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryPoolKind.
+const (
+	SystemTelemetryPoolKindDiscrete SystemTelemetryPoolKind = "discrete"
+	SystemTelemetryPoolKindUnified  SystemTelemetryPoolKind = "unified"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryPoolKind enum.
+func (e SystemTelemetryPoolKind) Valid() bool {
+	switch e {
+	case SystemTelemetryPoolKindDiscrete:
+		return true
+	case SystemTelemetryPoolKindUnified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetrySlotPhase.
+const (
+	SystemTelemetrySlotPhaseDecoding SystemTelemetrySlotPhase = "decoding"
+	SystemTelemetrySlotPhaseIdle     SystemTelemetrySlotPhase = "idle"
+	SystemTelemetrySlotPhasePrefill  SystemTelemetrySlotPhase = "prefill"
+	SystemTelemetrySlotPhaseQueued   SystemTelemetrySlotPhase = "queued"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetrySlotPhase enum.
+func (e SystemTelemetrySlotPhase) Valid() bool {
+	switch e {
+	case SystemTelemetrySlotPhaseDecoding:
+		return true
+	case SystemTelemetrySlotPhaseIdle:
+		return true
+	case SystemTelemetrySlotPhasePrefill:
+		return true
+	case SystemTelemetrySlotPhaseQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetrySource.
+const (
+	SystemTelemetrySourceDemo  SystemTelemetrySource = "demo"
+	SystemTelemetrySourceEmpty SystemTelemetrySource = "empty"
+	SystemTelemetrySourceLive  SystemTelemetrySource = "live"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetrySource enum.
+func (e SystemTelemetrySource) Valid() bool {
+	switch e {
+	case SystemTelemetrySourceDemo:
+		return true
+	case SystemTelemetrySourceEmpty:
+		return true
+	case SystemTelemetrySourceLive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryWatchdogStatus.
+const (
+	SystemTelemetryWatchdogClean         SystemTelemetryWatchdogStatus = "clean"
+	SystemTelemetryWatchdogCrashed       SystemTelemetryWatchdogStatus = "crashed"
+	SystemTelemetryWatchdogMemoryStarved SystemTelemetryWatchdogStatus = "memory_starved"
+	SystemTelemetryWatchdogOom           SystemTelemetryWatchdogStatus = "oom"
+	SystemTelemetryWatchdogUnknown       SystemTelemetryWatchdogStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryWatchdogStatus enum.
+func (e SystemTelemetryWatchdogStatus) Valid() bool {
+	switch e {
+	case SystemTelemetryWatchdogClean:
+		return true
+	case SystemTelemetryWatchdogCrashed:
+		return true
+	case SystemTelemetryWatchdogMemoryStarved:
+		return true
+	case SystemTelemetryWatchdogOom:
+		return true
+	case SystemTelemetryWatchdogUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryWaterfallStatus.
+const (
+	SystemTelemetryWaterfallCompleted SystemTelemetryWaterfallStatus = "completed"
+	SystemTelemetryWaterfallDeferred  SystemTelemetryWaterfallStatus = "deferred"
+	SystemTelemetryWaterfallStreaming SystemTelemetryWaterfallStatus = "streaming"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryWaterfallStatus enum.
+func (e SystemTelemetryWaterfallStatus) Valid() bool {
+	switch e {
+	case SystemTelemetryWaterfallCompleted:
+		return true
+	case SystemTelemetryWaterfallDeferred:
+		return true
+	case SystemTelemetryWaterfallStreaming:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TaskAttemptSummaryStatus.
 const (
 	TaskAttemptSummaryStatusPassed  TaskAttemptSummaryStatus = "passed"
@@ -3914,6 +4139,33 @@ func (e TeamMdPattern) Valid() bool {
 	case LoopUntilDone:
 		return true
 	case Tournament:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TelemetryBasis.
+const (
+	TelemetryBasisDemo     TelemetryBasis = "demo"
+	TelemetryBasisEstimate TelemetryBasis = "estimate"
+	TelemetryBasisLive     TelemetryBasis = "live"
+	TelemetryBasisMeasured TelemetryBasis = "measured"
+	TelemetryBasisNone     TelemetryBasis = "none"
+)
+
+// Valid indicates whether the value is a known member of the TelemetryBasis enum.
+func (e TelemetryBasis) Valid() bool {
+	switch e {
+	case TelemetryBasisDemo:
+		return true
+	case TelemetryBasisEstimate:
+		return true
+	case TelemetryBasisLive:
+		return true
+	case TelemetryBasisMeasured:
+		return true
+	case TelemetryBasisNone:
 		return true
 	default:
 		return false
@@ -9297,6 +9549,398 @@ type SlackConversationPage struct {
 // StateVector defines model for StateVector.
 type StateVector = string
 
+// SystemTelemetryApply defines model for SystemTelemetryApply.
+type SystemTelemetryApply struct {
+	PlanId    string                    `json:"plan_id"`
+	Rollback  bool                      `json:"rollback"`
+	Rows      []SystemTelemetryApplyRow `json:"rows"`
+	StartedAt string                    `json:"started_at"`
+	UpdatedAt string                    `json:"updated_at"`
+}
+
+// SystemTelemetryApplyRow defines model for SystemTelemetryApplyRow.
+type SystemTelemetryApplyRow struct {
+	Detail *string `json:"detail,omitempty"`
+	Done   *int64  `json:"done,omitempty"`
+	Id     string  `json:"id"`
+	Label  string  `json:"label"`
+	Phase  *string `json:"phase,omitempty"`
+	State  string  `json:"state"`
+	Step   *string `json:"step,omitempty"`
+	Total  *int64  `json:"total,omitempty"`
+}
+
+// SystemTelemetryBottleneck Deterministic bottleneck classification computed from measured bandwidth, GPU utilization, and disk read throughput.
+type SystemTelemetryBottleneck string
+
+// SystemTelemetryClient defines model for SystemTelemetryClient.
+type SystemTelemetryClient struct {
+	Id    string `json:"id"`
+	Model string `json:"model"`
+	Name  string `json:"name"`
+}
+
+// SystemTelemetryComponent defines model for SystemTelemetryComponent.
+type SystemTelemetryComponent struct {
+	Device    *string                `json:"device,omitempty"`
+	Endpoint  *string                `json:"endpoint,omitempty"`
+	Explain   *string                `json:"explain,omitempty"`
+	Gpu       *int                   `json:"gpu,omitempty"`
+	Health    *string                `json:"health,omitempty"`
+	Id        string                 `json:"id"`
+	KvTypes   *string                `json:"kv_types,omitempty"`
+	LiveSlots *[]SystemTelemetrySlot `json:"live_slots,omitempty"`
+	Model     *string                `json:"model,omitempty"`
+	Perf      *SystemTelemetryPerf   `json:"perf,omitempty"`
+	Quant     *string                `json:"quant,omitempty"`
+	RamBytes  *int64                 `json:"ram_bytes,omitempty"`
+	Role      *string                `json:"role,omitempty"`
+	Slots     *int                   `json:"slots,omitempty"`
+	State     *string                `json:"state,omitempty"`
+	Title     *string                `json:"title,omitempty"`
+	VramBytes *int64                 `json:"vram_bytes,omitempty"`
+	Window    *int                   `json:"window,omitempty"`
+}
+
+// SystemTelemetryComputer defines model for SystemTelemetryComputer.
+type SystemTelemetryComputer struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId  Id     `json:"computer_id"`
+	DisplayName string `json:"display_name"`
+
+	// LastSeenAt UTC timestamp in RFC 3339 format with an explicit offset.
+	LastSeenAt *Timestamp                    `json:"last_seen_at,omitempty"`
+	Status     SystemTelemetryComputerStatus `json:"status"`
+}
+
+// SystemTelemetryComputerStatus defines model for SystemTelemetryComputerStatus.
+type SystemTelemetryComputerStatus string
+
+// SystemTelemetryCoreUsage defines model for SystemTelemetryCoreUsage.
+type SystemTelemetryCoreUsage struct {
+	Core    int     `json:"core"`
+	UtilPct float32 `json:"util_pct"`
+}
+
+// SystemTelemetryCounters defines model for SystemTelemetryCounters.
+type SystemTelemetryCounters struct {
+	KvCacheUsageRatio      *float32 `json:"kv_cache_usage_ratio,omitempty"`
+	PredictedSeconds       *float32 `json:"predicted_seconds,omitempty"`
+	PredictedTokens        *float32 `json:"predicted_tokens,omitempty"`
+	PredictedTokensSeconds *float32 `json:"predicted_tokens_seconds,omitempty"`
+	Processing             *float32 `json:"processing,omitempty"`
+	PromptSeconds          *float32 `json:"prompt_seconds,omitempty"`
+	PromptTokens           *float32 `json:"prompt_tokens,omitempty"`
+	PromptTokensSeconds    *float32 `json:"prompt_tokens_seconds,omitempty"`
+	RequestsDeferred       *float32 `json:"requests_deferred,omitempty"`
+}
+
+// SystemTelemetryCpuSensors defines model for SystemTelemetryCpuSensors.
+type SystemTelemetryCpuSensors struct {
+	LogicalCores *int                        `json:"logical_cores,omitempty"`
+	OverallPct   SystemTelemetryFigure       `json:"overall_pct"`
+	PerCore      *[]SystemTelemetryCoreUsage `json:"per_core,omitempty"`
+}
+
+// SystemTelemetryDiskSensors defines model for SystemTelemetryDiskSensors.
+type SystemTelemetryDiskSensors struct {
+	ReadMbS  SystemTelemetryFigure `json:"read_mb_s"`
+	WriteMbS SystemTelemetryFigure `json:"write_mb_s"`
+}
+
+// SystemTelemetryError defines model for SystemTelemetryError.
+type SystemTelemetryError struct {
+	// Code Closed error code set for system telemetry endpoints. LOCAL_COMPUTER_OFFLINE: the Computer is not connected (503). SYSTEM_TELEMETRY_UNSUPPORTED: the Computer Daemon or its localmodels kit does not support live-tick system telemetry (409). SYSTEM_TELEMETRY_FORBIDDEN: only the Computer's owner can read live system telemetry (403). SYSTEM_TELEMETRY_TIMEOUT: the Computer did not emit a live snapshot before the request deadline (504). SYSTEM_TELEMETRY_UNAVAILABLE: Agent Service or collector is temporarily unavailable (503).
+	Code      SystemTelemetryErrorCode `json:"code"`
+	Details   *[]ErrorDetail           `json:"details,omitempty"`
+	Message   string                   `json:"message"`
+	RequestId string                   `json:"request_id"`
+	Retryable *bool                    `json:"retryable,omitempty"`
+}
+
+// SystemTelemetryErrorCode Closed error code set for system telemetry endpoints. LOCAL_COMPUTER_OFFLINE: the Computer is not connected (503). SYSTEM_TELEMETRY_UNSUPPORTED: the Computer Daemon or its localmodels kit does not support live-tick system telemetry (409). SYSTEM_TELEMETRY_FORBIDDEN: only the Computer's owner can read live system telemetry (403). SYSTEM_TELEMETRY_TIMEOUT: the Computer did not emit a live snapshot before the request deadline (504). SYSTEM_TELEMETRY_UNAVAILABLE: Agent Service or collector is temporarily unavailable (503).
+type SystemTelemetryErrorCode string
+
+// SystemTelemetryErrorResponse defines model for SystemTelemetryErrorResponse.
+type SystemTelemetryErrorResponse struct {
+	Error SystemTelemetryError `json:"error"`
+}
+
+// SystemTelemetryEvent defines model for SystemTelemetryEvent.
+type SystemTelemetryEvent struct {
+	At        string   `json:"at"`
+	Component *string  `json:"component,omitempty"`
+	GatewayMs *float32 `json:"gateway_ms,omitempty"`
+	Id        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	LatencyMs *float32 `json:"latency_ms,omitempty"`
+	Ok        bool     `json:"ok"`
+	Tier      *string  `json:"tier,omitempty"`
+	TokensIn  *int     `json:"tokens_in,omitempty"`
+	TokensOut *int     `json:"tokens_out,omitempty"`
+	TtftMs    *float32 `json:"ttft_ms,omitempty"`
+}
+
+// SystemTelemetryFigure defines model for SystemTelemetryFigure.
+type SystemTelemetryFigure struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis TelemetryBasis `json:"basis"`
+	Note  *string        `json:"note,omitempty"`
+	Value *float32       `json:"value,omitempty"`
+}
+
+// SystemTelemetryFit defines model for SystemTelemetryFit.
+type SystemTelemetryFit struct {
+	DecodeTokS *float32 `json:"decode_tok_s,omitempty"`
+	Id         string   `json:"id"`
+	Quant      string   `json:"quant"`
+}
+
+// SystemTelemetryGateway defines model for SystemTelemetryGateway.
+type SystemTelemetryGateway struct {
+	Addr        string                 `json:"addr"`
+	ClientLanes *map[string]int        `json:"client_lanes,omitempty"`
+	InFlight    *int                   `json:"in_flight,omitempty"`
+	Kind        string                 `json:"kind"`
+	P50TtftMs   *SystemTelemetryFigure `json:"p50_ttft_ms,omitempty"`
+	Route       string                 `json:"route"`
+}
+
+// SystemTelemetryGpu defines model for SystemTelemetryGpu.
+type SystemTelemetryGpu struct {
+	BandwidthGbS *float32                  `json:"bandwidth_gb_s,omitempty"`
+	Fits         *[]SystemTelemetryFit     `json:"fits,omitempty"`
+	Holders      *[]string                 `json:"holders,omitempty"`
+	Index        int                       `json:"index"`
+	Name         string                    `json:"name"`
+	Segments     *[]SystemTelemetrySegment `json:"segments,omitempty"`
+	TotalBytes   int64                     `json:"total_bytes"`
+	UsedBytes    int64                     `json:"used_bytes"`
+}
+
+// SystemTelemetryGpuLoad defines model for SystemTelemetryGpuLoad.
+type SystemTelemetryGpuLoad struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis          TelemetryBasis `json:"basis"`
+	Index          int            `json:"index"`
+	MemCtrlUtilPct *float32       `json:"mem_ctrl_util_pct,omitempty"`
+	PowerLimitW    *float32       `json:"power_limit_w,omitempty"`
+	PowerW         *float32       `json:"power_w,omitempty"`
+	Source         *string        `json:"source,omitempty"`
+	TempC          *float32       `json:"temp_c,omitempty"`
+	UtilPct        *float32       `json:"util_pct,omitempty"`
+	VramFreeBytes  *int64         `json:"vram_free_bytes,omitempty"`
+	VramTotalBytes *int64         `json:"vram_total_bytes,omitempty"`
+	VramUsedBytes  *int64         `json:"vram_used_bytes,omitempty"`
+}
+
+// SystemTelemetryHost defines model for SystemTelemetryHost.
+type SystemTelemetryHost struct {
+	Hostname string `json:"hostname"`
+	System   string `json:"system"`
+	Tier     string `json:"tier"`
+}
+
+// SystemTelemetryHostSensors defines model for SystemTelemetryHostSensors.
+type SystemTelemetryHostSensors struct {
+	Collector      *string                       `json:"collector,omitempty"`
+	Cpu            SystemTelemetryCpuSensors     `json:"cpu"`
+	Disk           SystemTelemetryDiskSensors    `json:"disk"`
+	MemoryPressure SystemTelemetryMemoryPressure `json:"memory_pressure"`
+	Watchdog       SystemTelemetryWatchdogHealth `json:"watchdog"`
+}
+
+// SystemTelemetryMeasuredMemory defines model for SystemTelemetryMeasuredMemory.
+type SystemTelemetryMeasuredMemory string
+
+// SystemTelemetryMeasuredRow defines model for SystemTelemetryMeasuredRow.
+type SystemTelemetryMeasuredRow struct {
+	Gpu           *int                          `json:"gpu,omitempty"`
+	Id            string                        `json:"id"`
+	MeasuredBytes *int64                        `json:"measured_bytes,omitempty"`
+	Memory        SystemTelemetryMeasuredMemory `json:"memory"`
+	Over          bool                          `json:"over"`
+	PlannedBytes  int64                         `json:"planned_bytes"`
+}
+
+// SystemTelemetryMemory defines model for SystemTelemetryMemory.
+type SystemTelemetryMemory struct {
+	AvailableBytes int64                     `json:"available_bytes"`
+	Segments       *[]SystemTelemetrySegment `json:"segments,omitempty"`
+	TotalBytes     int64                     `json:"total_bytes"`
+}
+
+// SystemTelemetryMemoryPressure defines model for SystemTelemetryMemoryPressure.
+type SystemTelemetryMemoryPressure struct {
+	AvailableRatio *float32 `json:"available_ratio,omitempty"`
+
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis         TelemetryBasis                     `json:"basis"`
+	Level         SystemTelemetryMemoryPressureLevel `json:"level"`
+	PsiSomeAvg10  *float32                           `json:"psi_some_avg10,omitempty"`
+	SwapUsedBytes *int64                             `json:"swap_used_bytes,omitempty"`
+}
+
+// SystemTelemetryMemoryPressureLevel defines model for SystemTelemetryMemoryPressureLevel.
+type SystemTelemetryMemoryPressureLevel string
+
+// SystemTelemetryPerf defines model for SystemTelemetryPerf.
+type SystemTelemetryPerf struct {
+	Calls       *int                     `json:"calls,omitempty"`
+	Counters    *SystemTelemetryCounters `json:"counters,omitempty"`
+	DecodeBound *SystemTelemetryFigure   `json:"decode_bound,omitempty"`
+	DecodeTokS  *SystemTelemetryFigure   `json:"decode_tok_s,omitempty"`
+	Failed      *int                     `json:"failed,omitempty"`
+	LatencyMs   *SystemTelemetryFigure   `json:"latency_ms,omitempty"`
+	PrefillTokS *SystemTelemetryFigure   `json:"prefill_tok_s,omitempty"`
+	Tiers       *map[string]int          `json:"tiers,omitempty"`
+}
+
+// SystemTelemetryPoolKind defines model for SystemTelemetryPoolKind.
+type SystemTelemetryPoolKind string
+
+// SystemTelemetrySegment defines model for SystemTelemetrySegment.
+type SystemTelemetrySegment struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis     TelemetryBasis `json:"basis"`
+	Bytes     int64          `json:"bytes"`
+	Component *string        `json:"component,omitempty"`
+	Kind      string         `json:"kind"`
+	Label     string         `json:"label"`
+	Note      *string        `json:"note,omitempty"`
+}
+
+// SystemTelemetrySlot Numeric and phase counters of one inference engine slot. Prompt and completion text are stripped before serialization and never carried.
+type SystemTelemetrySlot struct {
+	Busy               bool                      `json:"busy"`
+	Cached             *int                      `json:"cached,omitempty"`
+	CachedPrefixTokens *int                      `json:"cached_prefix_tokens,omitempty"`
+	Decoded            *int                      `json:"decoded,omitempty"`
+	Id                 int                       `json:"id"`
+	NCtx               *int                      `json:"n_ctx,omitempty"`
+	NDecoded           *int                      `json:"n_decoded,omitempty"`
+	NPrompt            *int                      `json:"n_prompt,omitempty"`
+	Phase              *SystemTelemetrySlotPhase `json:"phase,omitempty"`
+	PromptDone         *int                      `json:"prompt_done,omitempty"`
+	PromptTokens       *int                      `json:"prompt_tokens,omitempty"`
+	TokS               *float32                  `json:"tok_s,omitempty"`
+	TtftMs             *float32                  `json:"ttft_ms,omitempty"`
+}
+
+// SystemTelemetrySlotPhase defines model for SystemTelemetrySlotPhase.
+type SystemTelemetrySlotPhase string
+
+// SystemTelemetrySnapshot Structured live telemetry snapshot matching localmodels.stack-view/v1 (v1.1). Fields beyond schema, generated_at, and source are additive and optional so schema evolution never breaks older daemons or viewers.
+type SystemTelemetrySnapshot struct {
+	Apply *SystemTelemetryApply `json:"apply,omitempty"`
+
+	// Bottleneck Deterministic bottleneck classification computed from measured bandwidth, GPU utilization, and disk read throughput.
+	Bottleneck           *SystemTelemetryBottleneck       `json:"bottleneck,omitempty"`
+	ClientLanes          *map[string]int                  `json:"client_lanes,omitempty"`
+	Clients              *[]SystemTelemetryClient         `json:"clients,omitempty"`
+	Components           *[]SystemTelemetryComponent      `json:"components,omitempty"`
+	EffectiveDecodeBwGbS *SystemTelemetryFigure           `json:"effective_decode_bw_gb_s,omitempty"`
+	Events               *[]SystemTelemetryEvent          `json:"events,omitempty"`
+	Gateway              *SystemTelemetryGateway          `json:"gateway,omitempty"`
+	GeneratedAt          string                           `json:"generated_at"`
+	GpuLoad              *[]SystemTelemetryGpuLoad        `json:"gpu_load,omitempty"`
+	Gpus                 *[]SystemTelemetryGpu            `json:"gpus,omitempty"`
+	Host                 *SystemTelemetryHost             `json:"host,omitempty"`
+	InFlight             *int                             `json:"in_flight,omitempty"`
+	KvCacheUsageRatio    *SystemTelemetryFigure           `json:"kv_cache_usage_ratio,omitempty"`
+	Lang                 *string                          `json:"lang,omitempty"`
+	Measured             *[]SystemTelemetryMeasuredRow    `json:"measured,omitempty"`
+	MemoryBwCeilingGbS   *SystemTelemetryFigure           `json:"memory_bw_ceiling_gb_s,omitempty"`
+	NextSteps            *[]SystemTelemetryStep           `json:"next_steps,omitempty"`
+	Notes                *[]string                        `json:"notes,omitempty"`
+	P50TtftMs            *SystemTelemetryFigure           `json:"p50_ttft_ms,omitempty"`
+	PlanId               *string                          `json:"plan_id,omitempty"`
+	PrefixHitPct         *SystemTelemetryFigure           `json:"prefix_hit_pct,omitempty"`
+	Ram                  *SystemTelemetryMemory           `json:"ram,omitempty"`
+	RequestsDeferred     *SystemTelemetryFigure           `json:"requests_deferred,omitempty"`
+	Schema               string                           `json:"schema"`
+	SchemaVersion        *string                          `json:"schema_version,omitempty"`
+	Sensors              *SystemTelemetryHostSensors      `json:"sensors,omitempty"`
+	Source               SystemTelemetrySource            `json:"source"`
+	Waterfall            *[]SystemTelemetryWaterfallEntry `json:"waterfall,omitempty"`
+
+	// WhatIf Authoritative memory and roofline coefficients from localmodels so the client can compute What-If capacity forecasts with zero round trips.
+	WhatIf *SystemTelemetryWhatIf `json:"what_if,omitempty"`
+}
+
+// SystemTelemetrySource defines model for SystemTelemetrySource.
+type SystemTelemetrySource string
+
+// SystemTelemetryStep defines model for SystemTelemetryStep.
+type SystemTelemetryStep struct {
+	Command string `json:"command"`
+	Why     string `json:"why"`
+}
+
+// SystemTelemetryView One live system telemetry snapshot paired with TeamHub's Computer metadata for GET .../system-telemetry and SSE telemetry.snapshot events.
+type SystemTelemetryView struct {
+	Computer SystemTelemetryComputer `json:"computer"`
+
+	// ObservedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ObservedAt Timestamp `json:"observed_at"`
+	Revision   int64     `json:"revision"`
+
+	// Snapshot Structured live telemetry snapshot matching localmodels.stack-view/v1 (v1.1). Fields beyond schema, generated_at, and source are additive and optional so schema evolution never breaks older daemons or viewers.
+	Snapshot      SystemTelemetrySnapshot `json:"snapshot"`
+	ViewerIsOwner bool                    `json:"viewer_is_owner"`
+}
+
+// SystemTelemetryWatchdogHealth defines model for SystemTelemetryWatchdogHealth.
+type SystemTelemetryWatchdogHealth struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis  TelemetryBasis                `json:"basis"`
+	Detail *string                       `json:"detail,omitempty"`
+	Status SystemTelemetryWatchdogStatus `json:"status"`
+}
+
+// SystemTelemetryWatchdogStatus defines model for SystemTelemetryWatchdogStatus.
+type SystemTelemetryWatchdogStatus string
+
+// SystemTelemetryWaterfallEntry defines model for SystemTelemetryWaterfallEntry.
+type SystemTelemetryWaterfallEntry struct {
+	At string `json:"at"`
+
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis            TelemetryBasis                 `json:"basis"`
+	CachedPrefixPct  *float32                       `json:"cached_prefix_pct,omitempty"`
+	ClientId         string                         `json:"client_id"`
+	CompletionTokens *int                           `json:"completion_tokens,omitempty"`
+	DecodeMs         *float32                       `json:"decode_ms,omitempty"`
+	DecodeTokS       *float32                       `json:"decode_tok_s,omitempty"`
+	GatewayMs        *float32                       `json:"gateway_ms,omitempty"`
+	ModelId          string                         `json:"model_id"`
+	PromptTokens     *int                           `json:"prompt_tokens,omitempty"`
+	RequestId        string                         `json:"request_id"`
+	Status           SystemTelemetryWaterfallStatus `json:"status"`
+	TtftMs           *float32                       `json:"ttft_ms,omitempty"`
+}
+
+// SystemTelemetryWaterfallStatus defines model for SystemTelemetryWaterfallStatus.
+type SystemTelemetryWaterfallStatus string
+
+// SystemTelemetryWhatIf Authoritative memory and roofline coefficients from localmodels so the client can compute What-If capacity forecasts with zero round trips.
+type SystemTelemetryWhatIf struct {
+	ActiveWeightBytes     *int64                   `json:"active_weight_bytes,omitempty"`
+	ComputeBytesPerToken  float32                  `json:"compute_bytes_per_token"`
+	FixedBytes            int64                    `json:"fixed_bytes"`
+	Gpu                   int                      `json:"gpu"`
+	HostRamAvailableBytes *int64                   `json:"host_ram_available_bytes,omitempty"`
+	KvBytesPerToken       float32                  `json:"kv_bytes_per_token"`
+	KvDtypeFactors        *map[string]float32      `json:"kv_dtype_factors,omitempty"`
+	MemoryBwCeilingGbS    *float32                 `json:"memory_bw_ceiling_gb_s,omitempty"`
+	PcieBandwidthGbS      *float32                 `json:"pcie_bandwidth_gb_s,omitempty"`
+	PoolKind              *SystemTelemetryPoolKind `json:"pool_kind,omitempty"`
+	RoomBytes             int64                    `json:"room_bytes"`
+	Slots                 int                      `json:"slots"`
+	WeightsBytes          *int64                   `json:"weights_bytes,omitempty"`
+	Window                int                      `json:"window"`
+}
+
 // TaskAttemptPolicyV1 defines model for TaskAttemptPolicyV1.
 type TaskAttemptPolicyV1 struct {
 	MaxRetries          int  `json:"max_retries"`
@@ -9464,6 +10108,9 @@ type TeamMdPublishedPayload struct {
 	Kind     interface{} `json:"kind"`
 	Revision int64       `json:"revision"`
 }
+
+// TelemetryBasis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+type TelemetryBasis string
 
 // Tenant The deployment's Space. It has no row of its own; its name follows the Human's display name.
 type Tenant struct {
@@ -10522,6 +11169,9 @@ type PayloadTooLarge = ErrorResponse
 
 // ServiceUnavailable defines model for ServiceUnavailable.
 type ServiceUnavailable = ErrorResponse
+
+// SystemTelemetryRefused defines model for SystemTelemetryRefused.
+type SystemTelemetryRefused = SystemTelemetryErrorResponse
 
 // TooManyRequests defines model for TooManyRequests.
 type TooManyRequests = ErrorResponse

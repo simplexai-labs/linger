@@ -20,13 +20,19 @@ import {
   LocalModelsActionTimeoutError,
   type LocalModelActionCommand,
 } from "../../runner-gateway/runner-local-models.js";
+import {
+  SystemTelemetryTimeoutError,
+  SystemTelemetryUnavailableError,
+  SystemTelemetryUnsupportedError,
+  type LocalSystemTelemetrySnapshotEnvelope,
+} from "../../runner-gateway/runner-system-telemetry.js";
 import { isRecord } from "@linger/service-kit";
 import {
   isByokProtocol,
   validByokPath,
 } from "@linger/service-kit/byok-endpoint";
 
-type LocalComputerHttpStatus = 400 | 404 | 405 | 409 | 410 | 502 | 503;
+type LocalComputerHttpStatus = 400 | 404 | 405 | 409 | 410 | 502 | 503 | 504;
 
 export class LocalComputerHttpError extends Error {
   constructor(
@@ -58,6 +64,12 @@ export interface LocalComputerRouteHandlers {
   applyLocalComputerModelSource(context: Context): Promise<Response> | Response;
   testLocalComputerByok(context: Context): Promise<Response> | Response;
   listLocalComputerByokModels(context: Context): Promise<Response> | Response;
+  getLocalComputerSystemTelemetry(
+    context: Context,
+  ): Promise<Response> | Response;
+  streamLocalComputerSystemTelemetry(
+    context: Context,
+  ): Promise<Response> | Response;
 }
 
 export const createLocalComputerRouteHandlers = (options: {
@@ -334,7 +346,215 @@ export const createLocalComputerRouteHandlers = (options: {
       throw modelSourceRequestError(error);
     }
   },
+  getLocalComputerSystemTelemetry: async (context) => {
+    const management = requireSystemTelemetryManagement(
+      options.localComputerManagement,
+    );
+    try {
+      const envelope = await management.getSystemTelemetrySnapshot({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, wireSystemTelemetryEnvelope(envelope));
+    } catch (error) {
+      throw systemTelemetryRequestError(error);
+    }
+  },
+  streamLocalComputerSystemTelemetry: async (context) => {
+    const management = requireSystemTelemetryManagement(
+      options.localComputerManagement,
+    );
+    let subscription;
+    try {
+      subscription = await management.subscribeSystemTelemetry({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        signal: context.req.raw.signal,
+      });
+    } catch (error) {
+      throw systemTelemetryRequestError(error);
+    }
+
+    const encoder = new TextEncoder();
+    const signal = context.req.raw.signal;
+    let keepalive: ReturnType<typeof setInterval> | undefined;
+    const stopAll = (): void => {
+      if (keepalive) {
+        clearInterval(keepalive);
+        keepalive = undefined;
+      }
+      signal.removeEventListener("abort", stopAll);
+      subscription.close();
+    };
+    signal.addEventListener("abort", stopAll, { once: true });
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enqueue = (chunk: string): boolean => {
+          try {
+            controller.enqueue(encoder.encode(chunk));
+            return true;
+          } catch {
+            stopAll();
+            return false;
+          }
+        };
+        keepalive = setInterval(() => {
+          enqueue(": keepalive\n\n");
+        }, SYSTEM_TELEMETRY_SSE_KEEPALIVE_MS);
+        keepalive.unref();
+
+        void (async () => {
+          try {
+            for await (const event of subscription.events) {
+              if (signal.aborted) break;
+              if (event.type === "snapshot") {
+                const payload = JSON.stringify(
+                  wireSystemTelemetryEnvelope(event.envelope),
+                );
+                if (
+                  !enqueue(`event: telemetry.snapshot\ndata: ${payload}\n\n`)
+                ) {
+                  break;
+                }
+              } else {
+                const payload = JSON.stringify({
+                  computer_id: event.computerId,
+                  status: event.status,
+                  code: event.code,
+                  message: event.message,
+                });
+                if (!enqueue(`event: telemetry.status\ndata: ${payload}\n\n`)) {
+                  break;
+                }
+              }
+            }
+          } finally {
+            stopAll();
+            try {
+              controller.close();
+            } catch {
+              // Stream already closed or cancelled by client disconnect.
+            }
+          }
+        })();
+      },
+      cancel() {
+        stopAll();
+      },
+    });
+
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      },
+    });
+  },
 });
+
+const SYSTEM_TELEMETRY_SSE_KEEPALIVE_MS = 15_000;
+
+const wireSystemTelemetryEnvelope = (
+  envelope: LocalSystemTelemetrySnapshotEnvelope,
+) => ({
+  computer_id: envelope.computerId,
+  revision: envelope.revision,
+  observed_at: envelope.observedAt,
+  snapshot: envelope.snapshot,
+});
+
+const requireSystemTelemetryManagement = (
+  management: LocalComputerManagement | undefined,
+): LocalComputerManagement &
+  Required<
+    Pick<
+      LocalComputerManagement,
+      "getSystemTelemetrySnapshot" | "subscribeSystemTelemetry"
+    >
+  > => {
+  const available = requireLocalComputerManagement(management);
+  if (
+    !available.getSystemTelemetrySnapshot ||
+    !available.subscribeSystemTelemetry
+  ) {
+    throw new LocalComputerHttpError(
+      503,
+      "SYSTEM_TELEMETRY_UNAVAILABLE",
+      "System telemetry is unavailable",
+    );
+  }
+  return available as LocalComputerManagement &
+    Required<
+      Pick<
+        LocalComputerManagement,
+        "getSystemTelemetrySnapshot" | "subscribeSystemTelemetry"
+      >
+    >;
+};
+
+const systemTelemetryRequestError = (error: unknown): Error => {
+  if (error instanceof LocalComputerNotFoundError) {
+    return new LocalComputerHttpError(
+      404,
+      "LOCAL_COMPUTER_NOT_FOUND",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerOfflineError) {
+    return new LocalComputerHttpError(
+      503,
+      "LOCAL_COMPUTER_OFFLINE",
+      error.message,
+    );
+  }
+  if (error instanceof SystemTelemetryUnsupportedError) {
+    return new LocalComputerHttpError(
+      409,
+      "SYSTEM_TELEMETRY_UNSUPPORTED",
+      error.message,
+    );
+  }
+  if (error instanceof SystemTelemetryUnavailableError) {
+    return new LocalComputerHttpError(
+      503,
+      "SYSTEM_TELEMETRY_UNAVAILABLE",
+      error.message,
+    );
+  }
+  if (error instanceof SystemTelemetryTimeoutError) {
+    return new LocalComputerHttpError(
+      504,
+      "SYSTEM_TELEMETRY_TIMEOUT",
+      error.message,
+    );
+  }
+  return error instanceof Error
+    ? error
+    : new Error("System telemetry request failed");
+};
+
+export function registerLocalComputerSystemTelemetryRoutes(
+  app: Hono,
+  handlers: Pick<
+    LocalComputerRouteHandlers,
+    "getLocalComputerSystemTelemetry" | "streamLocalComputerSystemTelemetry"
+  >,
+): void {
+  const basePath =
+    "/v1/tenants/:tenantId/owners/:ownerActorId/local-computers/:computerId/system-telemetry";
+  const streamPath = `${basePath}/stream`;
+  app.get(basePath, handlers.getLocalComputerSystemTelemetry);
+  app.all(basePath, (context) => methodNotAllowed(context, "GET"));
+  app.get(streamPath, handlers.streamLocalComputerSystemTelemetry);
+  app.all(streamPath, (context) => methodNotAllowed(context, "GET"));
+}
 
 const requireModelSourceManagement = (
   management: LocalComputerManagement | undefined,

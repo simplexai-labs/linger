@@ -7,6 +7,11 @@ import type {
   LocalModelActionCommand,
 } from "./runner-local-models.js";
 import type {
+  LocalSystemTelemetrySnapshotEnvelope,
+  LocalSystemTelemetrySubscription,
+  LocalSystemTelemetryTarget,
+} from "./runner-system-telemetry.js";
+import type {
   BrowserConnectionStatus,
   ByokConfigInput,
   ByokModelList,
@@ -92,6 +97,11 @@ export const FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION = "0.65.0";
 // The first release that decodes `"antigravity"` in `SessionCompact.runtime_type`.
 // Computers on 0.65.0 and earlier reject `"antigravity"` and close the connection.
 export const FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION = "0.66.0";
+
+// The first release that decodes `capability.system_telemetry.subscribe` and
+// `capability.system_telemetry.unsubscribe` and emits `runner.system_telemetry`
+// when `runner.welcome`'s `service_features` names `system_telemetry`.
+export const FIRST_SYSTEM_TELEMETRY_COMPUTER_VERSION = "0.67.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
@@ -211,6 +221,14 @@ export interface LocalComputerManagement {
     readonly testResult?: ByokTestResult;
     readonly modelList?: ByokModelList;
   }>;
+
+  getSystemTelemetrySnapshot?(
+    target: LocalSystemTelemetryTarget,
+  ): Promise<LocalSystemTelemetrySnapshotEnvelope>;
+
+  subscribeSystemTelemetry?(
+    target: LocalSystemTelemetryTarget,
+  ): Promise<LocalSystemTelemetrySubscription>;
 
   /** Returns the placed model as the connected Computer reports it. */
   requireLocalPlacement(

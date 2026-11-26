@@ -118,7 +118,9 @@ func TestRunnerWireContractFixtures(t *testing.T) {
 		for _, kind := range []string{protocol.CommandRunnerWelcome, protocol.CommandRunnerReconciled, protocol.CommandRegistrationSnapshot,
 			protocol.CommandAgentRunnerEnsure, protocol.CommandAgentRunnerRemove, protocol.CommandAgentCLICredentialPut,
 			protocol.CommandDebugInspect, protocol.CommandCapabilitySkillsScan, protocol.CommandCapabilityBrowserConnect,
-			protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels, protocol.CommandCapabilityModelSource, protocol.CommandOperationPrepare, protocol.CommandOperationStart, protocol.CommandOperationInput,
+			protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels, protocol.CommandCapabilityModelSource,
+			protocol.CommandCapabilitySystemTelemetrySubscribe, protocol.CommandCapabilitySystemTelemetryUnsubscribe,
+			protocol.CommandOperationPrepare, protocol.CommandOperationStart, protocol.CommandOperationInput,
 			protocol.CommandOperationCancel, protocol.CommandOperationAck, protocol.CommandProviderPrepare,
 			protocol.CommandSessionCompact, protocol.CommandModelInvoke, protocol.CommandModelInvokeCancel,
 			protocol.CommandComputerToolCall} {
@@ -239,6 +241,7 @@ func runnerWireDaemonEvents(t *testing.T) []protocol.Event {
 	capability(protocol.EventCapabilityModelSourceSucceeded, "model_source", "succeeded", map[string]any{"action": "test", "test_result": map[string]any{"ok": true, "protocol": "anthropic", "url": "https://api.example.com/v1/messages", "model_id": "vendor/model", "context_window": 200000}})
 	capability(protocol.EventCapabilityModelSourceFailed, "model_source", "failed", map[string]any{"action": "apply", "error": failure})
 	appendEvent(protocol.EventLocalModels, map[string]any{"type": "runner.local_models", "protocol_version": "2", "runner_id": "computer-1", "sent_at": "2026-10-28T00:00:00Z", "revision": 1, "local_models": map[string]any{"available": false, "reason": map[string]any{"code": "TOOL_NOT_INSTALLED"}, "observed_at": "2026-10-28T00:00:00Z", "pools": []any{}, "models": []any{}}})
+	appendEvent(protocol.EventSystemTelemetry, map[string]any{"type": "runner.system_telemetry", "protocol_version": "2", "runner_id": "computer-1", "connection_epoch": 1, "sent_at": "2026-10-28T00:00:00Z", "revision": 1, "status": "ok", "snapshot": map[string]any{"schema": "localmodels.stack-view/v1", "schema_version": "1.1", "generated_at": "2026-10-28T00:00:00Z", "source": "live", "bottleneck": "idle", "in_flight": 0}})
 	appendEvent(protocol.EventOperationPrepared, map[string]any{"prepare_command_id": "prepare-1", "prepared": true, "outcome": "ready", "duration_ms": 1})
 	appendEvent(protocol.EventOperationAccepted, map[string]any{"runner_pid": 123})
 	appendEvent(protocol.EventOperationEvent, map[string]any{"type": "status.changed", "status": "working"})

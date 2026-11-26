@@ -72,6 +72,8 @@ type Options struct {
 	LocalModels LocalModelLibrary
 	// ModelSource inspects, tests and switches the Computer's active model source.
 	ModelSource ModelSourceManager
+	// SystemTelemetry collects on-demand live hardware and inference telemetry.
+	SystemTelemetry SystemTelemetryProvider
 }
 
 type OperationResolver interface {
@@ -182,12 +184,16 @@ type Daemon struct {
 	modelInvokes       map[string]*modelInvoke
 	localModels        LocalModelLibrary
 	modelSource        ModelSourceManager
+	systemTelemetry    SystemTelemetryProvider
 	// dialNetwork opens and closes one connection for the reachability check
 	// after a failed model call; nil dials for real.
 	dialNetwork func(ctx context.Context, network, address string) error
 	// localModelsMu orders runner.local_models sends with their revision.
-	localModelsMu           sync.Mutex
-	localModelsRevision     uint64
+	localModelsMu       sync.Mutex
+	localModelsRevision uint64
+	// systemTelemetryMu orders runner.system_telemetry sends with their revision.
+	systemTelemetryMu       sync.Mutex
+	systemTelemetryRevision uint64
 	operationWG             sync.WaitGroup
 	inputWG                 sync.WaitGroup
 	preparationWG           sync.WaitGroup
@@ -213,7 +219,11 @@ type Daemon struct {
 	// localModelsStream is the live connection when its Agent Service
 	// accepts runner.local_models; nil otherwise.
 	localModelsStream transport.Stream
-	operationStream   transport.Stream
+	// systemTelemetryStream is the live connection when its Agent Service
+	// accepts runner.system_telemetry; nil otherwise.
+	systemTelemetryStream transport.Stream
+	systemTelemetryEpoch  uint64
+	operationStream       transport.Stream
 	// dispatcher is the live connection's command dispatcher. It is atomic so
 	// DrainIfIdle can read it under admissionMu without taking connectionMu.
 	dispatcher           atomic.Pointer[commandDispatcher]
@@ -282,6 +292,7 @@ func New(options Options) (*Daemon, error) {
 		modelInvokes:         make(map[string]*modelInvoke),
 		localModels:          options.LocalModels,
 		modelSource:          options.ModelSource,
+		systemTelemetry:      options.SystemTelemetry,
 		contextDispatchLimit: defaultContextDispatchLimit,
 		retryDelay:           defaultRetryDelay(options.RetryDelay),
 		stableConnection:     stableGatewayConnection,

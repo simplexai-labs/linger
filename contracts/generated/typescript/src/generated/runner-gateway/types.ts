@@ -16,6 +16,8 @@ export type AgentToDaemonEnvelope =
   | CapabilityComputerPermission
   | CapabilityLocalModelsExecute
   | CapabilityModelSource
+  | CapabilitySystemTelemetrySubscribe
+  | CapabilitySystemTelemetryUnsubscribe
   | OperationPrepare
   | ProviderPrepare
   | SessionCompact
@@ -44,7 +46,8 @@ export type ServiceFeature =
   | "local_models_external_holders"
   | "runtime_failure_detail"
   | "operation_background_wait"
-  | "dynamic_reasoning_efforts";
+  | "dynamic_reasoning_efforts"
+  | "system_telemetry";
 export type JsonValue =
   | null
   | boolean
@@ -221,6 +224,7 @@ export type DaemonToAgentEnvelope =
   | RunnerHeartbeat
   | RunnerRuntimeDiagnostics
   | RunnerLocalModels
+  | RunnerSystemTelemetry
   | RuntimeRegistrationObserved
   | AgentRunnerReady
   | AgentRunnerRemoved
@@ -391,6 +395,13 @@ export type LocalModelCapability =
   | "reasoning"
   | "coding"
   | "multilingual";
+export type TelemetryBasis = "live" | "measured" | "estimate" | "demo" | "none";
+export type SystemTelemetryBottleneck =
+  | "memory_bw_bound"
+  | "compute_bound"
+  | "io_bound"
+  | "balanced"
+  | "idle";
 export type AgentRunnerReady = AgentRunnerWireIdentity & {
   type: "agent_runner.state";
   runner_pid: PositiveInteger;
@@ -979,6 +990,28 @@ export interface ByokConfigInput {
   model_id?: string;
   context_window?: number;
   reuse_saved_key?: boolean;
+}
+/**
+ * Start or renew an on-demand system telemetry collection lease on Computer 0.67.0 or later. The Daemon stops collecting immediately when the lease expires, when unsubscribed, or when the connection closes.
+ */
+export interface CapabilitySystemTelemetrySubscribe {
+  type: "capability.system_telemetry.subscribe";
+  protocol_version: ProtocolVersion;
+  command_id: Id;
+  runner_id: Id;
+  connection_epoch: PositiveInteger;
+  lease_ttl_ms: number;
+  interval_ms?: number;
+}
+/**
+ * Cancel the active system telemetry lease on the Computer immediately so zero background collection runs when no viewer is attached.
+ */
+export interface CapabilitySystemTelemetryUnsubscribe {
+  type: "capability.system_telemetry.unsubscribe";
+  protocol_version: ProtocolVersion;
+  command_id: Id;
+  runner_id: Id;
+  connection_epoch: PositiveInteger;
 }
 export interface OperationScope {
   protocol_version: ProtocolVersion;
@@ -1730,6 +1763,340 @@ export interface LocalModelsDebugInfo {
    * Local config file path when source is state_config or user_config; stripped for non-owners in the public view.
    */
   config_path?: string;
+}
+/**
+ * One revision-stamped live system telemetry frame emitted by the Computer while a telemetry lease is active and runner.welcome service_features names system_telemetry.
+ */
+export interface RunnerSystemTelemetry {
+  type: "runner.system_telemetry";
+  protocol_version: ProtocolVersion;
+  runner_id: Id;
+  connection_epoch: PositiveInteger;
+  sent_at: Timestamp;
+  revision: PositiveInteger;
+  status: "ok" | "unsupported" | "unavailable";
+  snapshot?: SystemTelemetrySnapshot;
+  reason?: SystemTelemetryUnavailableReason;
+}
+/**
+ * Allowlisted live telemetry snapshot mapped from localmodels.stack-view/v1 (v1.1). Additive fields remain optional for forward and backward compatibility.
+ */
+export interface SystemTelemetrySnapshot {
+  schema: string;
+  schema_version?: string;
+  generated_at: string;
+  source: "live" | "demo" | "empty";
+  lang?: string;
+  plan_id?: string;
+  host?: SystemTelemetryHost;
+  gateway?: SystemTelemetryGateway;
+  /**
+   * @maxItems 64
+   */
+  clients?: SystemTelemetryClient[];
+  /**
+   * @maxItems 64
+   */
+  components?: SystemTelemetryComponent[];
+  /**
+   * @maxItems 64
+   */
+  gpus?: SystemTelemetryGpu[];
+  /**
+   * @maxItems 64
+   */
+  gpu_load?: SystemTelemetryGpuLoad[];
+  ram?: SystemTelemetryMemory;
+  what_if?: SystemTelemetryWhatIf;
+  /**
+   * @maxItems 100
+   */
+  events?: SystemTelemetryEvent[];
+  /**
+   * @maxItems 64
+   */
+  measured?: SystemTelemetryMeasuredRow[];
+  /**
+   * @maxItems 64
+   */
+  notes?: string[];
+  /**
+   * @maxItems 32
+   */
+  next_steps?: SystemTelemetryStep[];
+  apply?: SystemTelemetryApply;
+  sensors?: SystemTelemetryHostSensors;
+  effective_decode_bw_gb_s?: SystemTelemetryFigure;
+  memory_bw_ceiling_gb_s?: SystemTelemetryFigure;
+  bottleneck?: SystemTelemetryBottleneck;
+  /**
+   * @maxItems 64
+   */
+  waterfall?: SystemTelemetryWaterfallEntry[];
+  p50_ttft_ms?: SystemTelemetryFigure;
+  prefix_hit_pct?: SystemTelemetryFigure;
+  requests_deferred?: SystemTelemetryFigure;
+  kv_cache_usage_ratio?: SystemTelemetryFigure;
+  in_flight?: NonNegativeInteger;
+  client_lanes?: {
+    [k: string]: NonNegativeInteger;
+  };
+}
+export interface SystemTelemetryHost {
+  hostname: string;
+  system: string;
+  tier: string;
+}
+export interface SystemTelemetryGateway {
+  kind: string;
+  addr: string;
+  route: string;
+  in_flight?: NonNegativeInteger;
+  client_lanes?: {
+    [k: string]: NonNegativeInteger;
+  };
+  p50_ttft_ms?: SystemTelemetryFigure;
+}
+export interface SystemTelemetryFigure {
+  value?: number;
+  basis: TelemetryBasis;
+  note?: string;
+}
+export interface SystemTelemetryClient {
+  id: string;
+  name: string;
+  model: string;
+}
+export interface SystemTelemetryComponent {
+  id: string;
+  role?: string;
+  title?: string;
+  model?: string;
+  quant?: string;
+  device?: string;
+  gpu?: NonNegativeInteger;
+  endpoint?: string;
+  state?: string;
+  health?: string;
+  window?: NonNegativeInteger;
+  slots?: NonNegativeInteger;
+  kv_types?: string;
+  vram_bytes?: NonNegativeInteger;
+  ram_bytes?: NonNegativeInteger;
+  perf?: SystemTelemetryPerf;
+  explain?: string;
+  /**
+   * @maxItems 256
+   */
+  live_slots?: SystemTelemetrySlot[];
+}
+export interface SystemTelemetryPerf {
+  prefill_tok_s?: SystemTelemetryFigure;
+  decode_tok_s?: SystemTelemetryFigure;
+  decode_bound?: SystemTelemetryFigure;
+  latency_ms?: SystemTelemetryFigure;
+  calls?: NonNegativeInteger;
+  failed?: NonNegativeInteger;
+  tiers?: {
+    [k: string]: NonNegativeInteger;
+  };
+  counters?: SystemTelemetryCounters;
+}
+export interface SystemTelemetryCounters {
+  prompt_tokens?: number;
+  prompt_seconds?: number;
+  predicted_tokens?: number;
+  predicted_seconds?: number;
+  processing?: number;
+  requests_deferred?: number;
+  kv_cache_usage_ratio?: number;
+  prompt_tokens_seconds?: number;
+  predicted_tokens_seconds?: number;
+}
+export interface SystemTelemetrySlot {
+  id: NonNegativeInteger;
+  n_ctx?: NonNegativeInteger;
+  busy: boolean;
+  phase?: "idle" | "prefill" | "decoding" | "queued";
+  prompt_tokens?: NonNegativeInteger;
+  prompt_done?: NonNegativeInteger;
+  cached?: NonNegativeInteger;
+  decoded?: NonNegativeInteger;
+  n_prompt?: NonNegativeInteger;
+  cached_prefix_tokens?: NonNegativeInteger;
+  n_decoded?: NonNegativeInteger;
+  tok_s?: number;
+  ttft_ms?: number;
+}
+export interface SystemTelemetryGpu {
+  index: NonNegativeInteger;
+  name: string;
+  total_bytes: NonNegativeInteger;
+  used_bytes: NonNegativeInteger;
+  bandwidth_gb_s?: number;
+  /**
+   * @maxItems 128
+   */
+  holders?: string[];
+  /**
+   * @maxItems 128
+   */
+  segments?: SystemTelemetrySegment[];
+  /**
+   * @maxItems 128
+   */
+  fits?: SystemTelemetryFit[];
+}
+export interface SystemTelemetrySegment {
+  kind: string;
+  label: string;
+  bytes: NonNegativeInteger;
+  basis: TelemetryBasis;
+  component?: string;
+  note?: string;
+}
+export interface SystemTelemetryFit {
+  id: string;
+  quant: string;
+  decode_tok_s?: number;
+}
+export interface SystemTelemetryGpuLoad {
+  index: NonNegativeInteger;
+  util_pct?: number;
+  mem_ctrl_util_pct?: number;
+  vram_total_bytes?: NonNegativeInteger;
+  vram_used_bytes?: NonNegativeInteger;
+  vram_free_bytes?: NonNegativeInteger;
+  power_w?: number;
+  power_limit_w?: number;
+  temp_c?: number;
+  basis: TelemetryBasis;
+  source?: string;
+}
+export interface SystemTelemetryMemory {
+  total_bytes: NonNegativeInteger;
+  available_bytes: NonNegativeInteger;
+  /**
+   * @maxItems 128
+   */
+  segments?: SystemTelemetrySegment[];
+}
+export interface SystemTelemetryWhatIf {
+  gpu: NonNegativeInteger;
+  window: NonNegativeInteger;
+  slots: NonNegativeInteger;
+  kv_bytes_per_token: number;
+  compute_bytes_per_token: number;
+  fixed_bytes: NonNegativeInteger;
+  room_bytes: NonNegativeInteger;
+  active_weight_bytes?: NonNegativeInteger;
+  weights_bytes?: NonNegativeInteger;
+  memory_bw_ceiling_gb_s?: number;
+  pcie_bandwidth_gb_s?: number;
+  kv_dtype_factors?: {
+    [k: string]: number;
+  };
+  pool_kind?: "unified" | "discrete";
+  host_ram_available_bytes?: NonNegativeInteger;
+}
+export interface SystemTelemetryEvent {
+  id: string;
+  at: string;
+  kind: string;
+  component?: string;
+  ok: boolean;
+  latency_ms?: number;
+  gateway_ms?: number;
+  tier?: string;
+  tokens_in?: NonNegativeInteger;
+  tokens_out?: NonNegativeInteger;
+  ttft_ms?: number;
+}
+export interface SystemTelemetryMeasuredRow {
+  id: string;
+  memory: "vram" | "ram";
+  gpu?: NonNegativeInteger;
+  planned_bytes: NonNegativeInteger;
+  measured_bytes?: NonNegativeInteger;
+  over: boolean;
+}
+export interface SystemTelemetryStep {
+  command: string;
+  why: string;
+}
+export interface SystemTelemetryApply {
+  plan_id: string;
+  started_at: string;
+  updated_at: string;
+  rollback: boolean;
+  /**
+   * @maxItems 64
+   */
+  rows: SystemTelemetryApplyRow[];
+}
+export interface SystemTelemetryApplyRow {
+  id: string;
+  label: string;
+  detail?: string;
+  state: string;
+  step?: string;
+  phase?: string;
+  done?: NonNegativeInteger;
+  total?: NonNegativeInteger;
+}
+export interface SystemTelemetryHostSensors {
+  cpu: SystemTelemetryCpuSensors;
+  disk: SystemTelemetryDiskSensors;
+  memory_pressure: SystemTelemetryMemoryPressure;
+  watchdog: SystemTelemetryWatchdogHealth;
+  collector?: string;
+}
+export interface SystemTelemetryCpuSensors {
+  overall_pct: SystemTelemetryFigure;
+  /**
+   * @maxItems 512
+   */
+  per_core?: SystemTelemetryCoreUsage[];
+  logical_cores?: NonNegativeInteger;
+}
+export interface SystemTelemetryCoreUsage {
+  core: NonNegativeInteger;
+  util_pct: number;
+}
+export interface SystemTelemetryDiskSensors {
+  read_mb_s: SystemTelemetryFigure;
+  write_mb_s: SystemTelemetryFigure;
+}
+export interface SystemTelemetryMemoryPressure {
+  level: "nominal" | "elevated" | "critical" | "unknown";
+  basis: TelemetryBasis;
+  available_ratio?: number;
+  psi_some_avg10?: number;
+  swap_used_bytes?: NonNegativeInteger;
+}
+export interface SystemTelemetryWatchdogHealth {
+  status: "clean" | "oom" | "memory_starved" | "crashed" | "unknown";
+  basis: TelemetryBasis;
+  detail?: string;
+}
+export interface SystemTelemetryWaterfallEntry {
+  request_id: string;
+  at: string;
+  client_id: string;
+  model_id: string;
+  status: "streaming" | "completed" | "deferred";
+  gateway_ms?: number;
+  ttft_ms?: number;
+  decode_ms?: number;
+  prompt_tokens?: NonNegativeInteger;
+  completion_tokens?: NonNegativeInteger;
+  cached_prefix_pct?: number;
+  decode_tok_s?: number;
+  basis: TelemetryBasis;
+}
+export interface SystemTelemetryUnavailableReason {
+  code: "TOOL_NOT_INSTALLED" | "LIVE_TICK_UNSUPPORTED" | "COLLECTOR_FAILED";
+  detail?: string;
 }
 export interface RuntimeRegistrationObserved {
   type: "runtime.registration.observed";

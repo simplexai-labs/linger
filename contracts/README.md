@@ -230,3 +230,35 @@ or later (`FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION`) and
 (`FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION`), because older
 Computers reject those `SessionCompact.runtime_type` values and close the
 connection.
+
+## System telemetry flow
+
+Live hardware and inference telemetry is strictly on-demand and lease-driven so
+an idle Computer incurs zero background polling overhead. Schemas live in
+`openapi/components/system-telemetry.yaml`,
+`openapi/paths/teamhub-public-system-telemetry.yaml`, and the
+`SystemTelemetry*` / `CapabilitySystemTelemetry*` / `RunnerSystemTelemetry`
+definitions of `runner-gateway/envelope.schema.json`.
+
+Web → TeamHub → Agent Service → Computer → `localmodels stack view`:
+
+1. The Computer owner reads a single snapshot via
+   `GET /v0/tenants/{tenantId}/local-computers/{computerId}/system-telemetry`
+   (`getLocalComputerSystemTelemetry`) or subscribes to a 1 Hz SSE stream via
+   `GET /v0/tenants/{tenantId}/local-computers/{computerId}/system-telemetry/stream`
+   (`streamLocalComputerSystemTelemetry`).
+2. TeamHub verifies session, tenant membership, and Computer ownership, then
+   proxies the snapshot or SSE stream to Agent Service's
+   `/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/system-telemetry[/stream]`.
+3. Agent Service sends `capability.system_telemetry.subscribe` (with renewable
+   lease TTL) only to Computer `0.67.0` or later
+   (`FIRST_SYSTEM_TELEMETRY_COMPUTER_VERSION`) and declares `system_telemetry`
+   in `runner.welcome`'s `service_features` to the same releases. Multiple
+   concurrent viewers multiplex onto one Daemon lease; when the last viewer
+   disconnects, Agent Service sends `capability.system_telemetry.unsubscribe`
+   immediately.
+4. The Daemon runs `localmodels stack view --json --live-tick --stream` only
+   while its lease is active, emits revision-stamped `runner.system_telemetry`
+   frames (or `status: "unsupported"` when `localmodels` is absent or predates
+   `--live-tick`), and stops the child process group immediately on unsubscribe,
+   disconnect, or lease expiry.

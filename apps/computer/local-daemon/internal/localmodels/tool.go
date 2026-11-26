@@ -426,7 +426,7 @@ func isReadOnlyOrStopSubcommand(args []string) bool {
 	case "harness", "debug":
 		return true
 	case "stack":
-		return verb == "down" || verb == "remove"
+		return verb == "down" || verb == "remove" || verb == "view"
 	case "library":
 		return verb == "status" || verb == "unload" || verb == "remove" || verb == "cancel"
 	case "foundations":

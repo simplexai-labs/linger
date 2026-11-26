@@ -21,31 +21,34 @@ const (
 
 // Message types.
 const (
-	TypeRunnerWelcome               = "runner.welcome"
-	TypeRunnerReconciled            = "runner.reconciled"
-	TypeRuntimeRegistrationSnapshot = "runtime.registration.snapshot"
-	TypeAgentRunnerEnsure           = "agent_runner.ensure"
-	TypeAgentRunnerRemove           = "agent_runner.remove"
-	TypeExecute                     = "execute"
-	TypePrepare                     = "prepare"
-	TypeOperationStart              = "operation.start"
-	TypeOperationInput              = "operation.input"
-	TypeCancel                      = "cancel"
-	TypeOperationAck                = "operation.ack"
-	TypeRunnerHello                 = "runner.hello"
-	TypeRunnerHeartbeat             = "runner.heartbeat"
-	TypeRunnerRuntimeDiagnostics    = "runner.runtime_diagnostics"
-	TypeRunnerLocalModels           = "runner.local_models"
-	TypeRuntimeRegistrationObserved = "runtime.registration.observed"
-	TypeAgentRunnerState            = "agent_runner.state"
-	TypeExecuted                    = "executed"
-	TypePrepared                    = "prepared"
-	TypeOperationAccepted           = "operation.accepted"
-	TypeOperationEvent              = "operation.event"
-	TypeOperationInputResult        = "operation.input_result"
-	TypeOperationCompleted          = "operation.completed"
-	TypeOperationFailed             = "operation.failed"
-	TypeOperationCancelled          = "operation.cancelled"
+	TypeRunnerWelcome                        = "runner.welcome"
+	TypeRunnerReconciled                     = "runner.reconciled"
+	TypeRuntimeRegistrationSnapshot          = "runtime.registration.snapshot"
+	TypeAgentRunnerEnsure                    = "agent_runner.ensure"
+	TypeAgentRunnerRemove                    = "agent_runner.remove"
+	TypeExecute                              = "execute"
+	TypeCapabilitySystemTelemetrySubscribe   = "capability.system_telemetry.subscribe"
+	TypeCapabilitySystemTelemetryUnsubscribe = "capability.system_telemetry.unsubscribe"
+	TypePrepare                              = "prepare"
+	TypeOperationStart                       = "operation.start"
+	TypeOperationInput                       = "operation.input"
+	TypeCancel                               = "cancel"
+	TypeOperationAck                         = "operation.ack"
+	TypeRunnerHello                          = "runner.hello"
+	TypeRunnerHeartbeat                      = "runner.heartbeat"
+	TypeRunnerRuntimeDiagnostics             = "runner.runtime_diagnostics"
+	TypeRunnerLocalModels                    = "runner.local_models"
+	TypeRunnerSystemTelemetry                = "runner.system_telemetry"
+	TypeRuntimeRegistrationObserved          = "runtime.registration.observed"
+	TypeAgentRunnerState                     = "agent_runner.state"
+	TypeExecuted                             = "executed"
+	TypePrepared                             = "prepared"
+	TypeOperationAccepted                    = "operation.accepted"
+	TypeOperationEvent                       = "operation.event"
+	TypeOperationInputResult                 = "operation.input_result"
+	TypeOperationCompleted                   = "operation.completed"
+	TypeOperationFailed                      = "operation.failed"
+	TypeOperationCancelled                   = "operation.cancelled"
 )
 
 // Message discriminators within one type.
@@ -96,6 +99,8 @@ var AgentToDaemonMessages = []Message{
 	{Name: "CapabilityComputerPermission", Type: "execute", Match: map[string]string{"kind": "computer_permission"}},
 	{Name: "CapabilityLocalModelsExecute", Type: "execute", Match: map[string]string{"kind": "local_models"}},
 	{Name: "CapabilityModelSource", Type: "execute", Match: map[string]string{"kind": "model_source"}},
+	{Name: "CapabilitySystemTelemetrySubscribe", Type: "capability.system_telemetry.subscribe", Match: nil},
+	{Name: "CapabilitySystemTelemetryUnsubscribe", Type: "capability.system_telemetry.unsubscribe", Match: nil},
 	{Name: "OperationPrepare", Type: "prepare", Match: map[string]string{"target": "operation"}},
 	{Name: "ProviderPrepare", Type: "prepare", Match: map[string]string{"target": "provider"}},
 	{Name: "SessionCompact", Type: "execute", Match: map[string]string{"kind": "session_compact"}},
@@ -114,6 +119,7 @@ var DaemonToAgentMessages = []Message{
 	{Name: "RunnerHeartbeat", Type: "runner.heartbeat", Match: nil},
 	{Name: "RunnerRuntimeDiagnostics", Type: "runner.runtime_diagnostics", Match: nil},
 	{Name: "RunnerLocalModels", Type: "runner.local_models", Match: nil},
+	{Name: "RunnerSystemTelemetry", Type: "runner.system_telemetry", Match: nil},
 	{Name: "RuntimeRegistrationObserved", Type: "runtime.registration.observed", Match: nil},
 	{Name: "AgentRunnerReady", Type: "agent_runner.state", Match: map[string]string{"state": "ready"}},
 	{Name: "AgentRunnerRemoved", Type: "agent_runner.state", Match: map[string]string{"state": "removed"}},
@@ -1566,6 +1572,574 @@ func (RunnerLocalModels) FixedFields() map[string]string {
 // RequiredFields lists the keys a RunnerLocalModels must carry.
 func (RunnerLocalModels) RequiredFields() []string {
 	return []string{"type", "protocol_version", "runner_id", "sent_at", "revision", "local_models"}
+}
+
+// SystemTelemetryFigure mirrors the SystemTelemetryFigure schema shape.
+type SystemTelemetryFigure struct {
+	Value *float64 `json:"value,omitempty"`
+	Basis string   `json:"basis"`
+	Note  string   `json:"note,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryFigure.
+func (SystemTelemetryFigure) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryFigure must carry.
+func (SystemTelemetryFigure) RequiredFields() []string { return []string{"basis"} }
+
+// SystemTelemetrySegment mirrors the SystemTelemetrySegment schema shape.
+type SystemTelemetrySegment struct {
+	Kind      string `json:"kind"`
+	Label     string `json:"label"`
+	Bytes     uint64 `json:"bytes"`
+	Basis     string `json:"basis"`
+	Component string `json:"component,omitempty"`
+	Note      string `json:"note,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetrySegment.
+func (SystemTelemetrySegment) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetrySegment must carry.
+func (SystemTelemetrySegment) RequiredFields() []string {
+	return []string{"kind", "label", "bytes", "basis"}
+}
+
+// SystemTelemetryFit mirrors the SystemTelemetryFit schema shape.
+type SystemTelemetryFit struct {
+	ID         string   `json:"id"`
+	Quant      string   `json:"quant"`
+	DecodeTokS *float64 `json:"decode_tok_s,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryFit.
+func (SystemTelemetryFit) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryFit must carry.
+func (SystemTelemetryFit) RequiredFields() []string { return []string{"id", "quant"} }
+
+// SystemTelemetryGpu mirrors the SystemTelemetryGpu schema shape.
+type SystemTelemetryGpu struct {
+	Index        uint64                   `json:"index"`
+	Name         string                   `json:"name"`
+	TotalBytes   uint64                   `json:"total_bytes"`
+	UsedBytes    uint64                   `json:"used_bytes"`
+	BandwidthGbS *float64                 `json:"bandwidth_gb_s,omitempty"`
+	Holders      []string                 `json:"holders,omitempty"`
+	Segments     []SystemTelemetrySegment `json:"segments,omitempty"`
+	Fits         []SystemTelemetryFit     `json:"fits,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryGpu.
+func (SystemTelemetryGpu) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryGpu must carry.
+func (SystemTelemetryGpu) RequiredFields() []string {
+	return []string{"index", "name", "total_bytes", "used_bytes"}
+}
+
+// SystemTelemetryGpuLoad mirrors the SystemTelemetryGpuLoad schema shape.
+type SystemTelemetryGpuLoad struct {
+	Index          uint64   `json:"index"`
+	UtilPct        *float64 `json:"util_pct,omitempty"`
+	MemCtrlUtilPct *float64 `json:"mem_ctrl_util_pct,omitempty"`
+	VramTotalBytes *uint64  `json:"vram_total_bytes,omitempty"`
+	VramUsedBytes  *uint64  `json:"vram_used_bytes,omitempty"`
+	VramFreeBytes  *uint64  `json:"vram_free_bytes,omitempty"`
+	PowerW         *float64 `json:"power_w,omitempty"`
+	PowerLimitW    *float64 `json:"power_limit_w,omitempty"`
+	TempC          *float64 `json:"temp_c,omitempty"`
+	Basis          string   `json:"basis"`
+	Source         string   `json:"source,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryGpuLoad.
+func (SystemTelemetryGpuLoad) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryGpuLoad must carry.
+func (SystemTelemetryGpuLoad) RequiredFields() []string { return []string{"index", "basis"} }
+
+// SystemTelemetryMemory mirrors the SystemTelemetryMemory schema shape.
+type SystemTelemetryMemory struct {
+	TotalBytes     uint64                   `json:"total_bytes"`
+	AvailableBytes uint64                   `json:"available_bytes"`
+	Segments       []SystemTelemetrySegment `json:"segments,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryMemory.
+func (SystemTelemetryMemory) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryMemory must carry.
+func (SystemTelemetryMemory) RequiredFields() []string {
+	return []string{"total_bytes", "available_bytes"}
+}
+
+// SystemTelemetryCounters mirrors the SystemTelemetryCounters schema shape.
+type SystemTelemetryCounters struct {
+	PromptTokens           *float64 `json:"prompt_tokens,omitempty"`
+	PromptSeconds          *float64 `json:"prompt_seconds,omitempty"`
+	PredictedTokens        *float64 `json:"predicted_tokens,omitempty"`
+	PredictedSeconds       *float64 `json:"predicted_seconds,omitempty"`
+	Processing             *float64 `json:"processing,omitempty"`
+	RequestsDeferred       *float64 `json:"requests_deferred,omitempty"`
+	KvCacheUsageRatio      *float64 `json:"kv_cache_usage_ratio,omitempty"`
+	PromptTokensSeconds    *float64 `json:"prompt_tokens_seconds,omitempty"`
+	PredictedTokensSeconds *float64 `json:"predicted_tokens_seconds,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryCounters.
+func (SystemTelemetryCounters) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryCounters must carry.
+func (SystemTelemetryCounters) RequiredFields() []string { return nil }
+
+// SystemTelemetrySlot mirrors the SystemTelemetrySlot schema shape.
+type SystemTelemetrySlot struct {
+	ID                 uint64   `json:"id"`
+	NCtx               *uint64  `json:"n_ctx,omitempty"`
+	Busy               bool     `json:"busy"`
+	Phase              string   `json:"phase,omitempty"`
+	PromptTokens       *uint64  `json:"prompt_tokens,omitempty"`
+	PromptDone         *uint64  `json:"prompt_done,omitempty"`
+	Cached             *uint64  `json:"cached,omitempty"`
+	Decoded            *uint64  `json:"decoded,omitempty"`
+	NPrompt            *uint64  `json:"n_prompt,omitempty"`
+	CachedPrefixTokens *uint64  `json:"cached_prefix_tokens,omitempty"`
+	NDecoded           *uint64  `json:"n_decoded,omitempty"`
+	TokS               *float64 `json:"tok_s,omitempty"`
+	TtftMs             *float64 `json:"ttft_ms,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetrySlot.
+func (SystemTelemetrySlot) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetrySlot must carry.
+func (SystemTelemetrySlot) RequiredFields() []string { return []string{"id", "busy"} }
+
+// SystemTelemetryPerf mirrors the SystemTelemetryPerf schema shape.
+type SystemTelemetryPerf struct {
+	PrefillTokS *SystemTelemetryFigure   `json:"prefill_tok_s,omitempty"`
+	DecodeTokS  *SystemTelemetryFigure   `json:"decode_tok_s,omitempty"`
+	DecodeBound *SystemTelemetryFigure   `json:"decode_bound,omitempty"`
+	LatencyMs   *SystemTelemetryFigure   `json:"latency_ms,omitempty"`
+	Calls       *uint64                  `json:"calls,omitempty"`
+	Failed      *uint64                  `json:"failed,omitempty"`
+	Tiers       json.RawMessage          `json:"tiers,omitempty"`
+	Counters    *SystemTelemetryCounters `json:"counters,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryPerf.
+func (SystemTelemetryPerf) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryPerf must carry.
+func (SystemTelemetryPerf) RequiredFields() []string { return nil }
+
+// SystemTelemetryComponent mirrors the SystemTelemetryComponent schema shape.
+type SystemTelemetryComponent struct {
+	ID        string                `json:"id"`
+	Role      string                `json:"role,omitempty"`
+	Title     string                `json:"title,omitempty"`
+	Model     string                `json:"model,omitempty"`
+	Quant     string                `json:"quant,omitempty"`
+	Device    string                `json:"device,omitempty"`
+	Gpu       *uint64               `json:"gpu,omitempty"`
+	Endpoint  string                `json:"endpoint,omitempty"`
+	State     string                `json:"state,omitempty"`
+	Health    string                `json:"health,omitempty"`
+	Window    *uint64               `json:"window,omitempty"`
+	Slots     *uint64               `json:"slots,omitempty"`
+	KvTypes   string                `json:"kv_types,omitempty"`
+	VramBytes *uint64               `json:"vram_bytes,omitempty"`
+	RamBytes  *uint64               `json:"ram_bytes,omitempty"`
+	Perf      *SystemTelemetryPerf  `json:"perf,omitempty"`
+	Explain   string                `json:"explain,omitempty"`
+	LiveSlots []SystemTelemetrySlot `json:"live_slots,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryComponent.
+func (SystemTelemetryComponent) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryComponent must carry.
+func (SystemTelemetryComponent) RequiredFields() []string { return []string{"id"} }
+
+// SystemTelemetryClient mirrors the SystemTelemetryClient schema shape.
+type SystemTelemetryClient struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Model string `json:"model"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryClient.
+func (SystemTelemetryClient) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryClient must carry.
+func (SystemTelemetryClient) RequiredFields() []string { return []string{"id", "name", "model"} }
+
+// SystemTelemetryGateway mirrors the SystemTelemetryGateway schema shape.
+type SystemTelemetryGateway struct {
+	Kind        string                 `json:"kind"`
+	Addr        string                 `json:"addr"`
+	Route       string                 `json:"route"`
+	InFlight    *uint64                `json:"in_flight,omitempty"`
+	ClientLanes json.RawMessage        `json:"client_lanes,omitempty"`
+	P50TtftMs   *SystemTelemetryFigure `json:"p50_ttft_ms,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryGateway.
+func (SystemTelemetryGateway) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryGateway must carry.
+func (SystemTelemetryGateway) RequiredFields() []string { return []string{"kind", "addr", "route"} }
+
+// SystemTelemetryWhatIf mirrors the SystemTelemetryWhatIf schema shape.
+type SystemTelemetryWhatIf struct {
+	Gpu                   uint64          `json:"gpu"`
+	Window                uint64          `json:"window"`
+	Slots                 uint64          `json:"slots"`
+	KvBytesPerToken       float64         `json:"kv_bytes_per_token"`
+	ComputeBytesPerToken  float64         `json:"compute_bytes_per_token"`
+	FixedBytes            uint64          `json:"fixed_bytes"`
+	RoomBytes             uint64          `json:"room_bytes"`
+	ActiveWeightBytes     *uint64         `json:"active_weight_bytes,omitempty"`
+	WeightsBytes          *uint64         `json:"weights_bytes,omitempty"`
+	MemoryBwCeilingGbS    *float64        `json:"memory_bw_ceiling_gb_s,omitempty"`
+	PcieBandwidthGbS      *float64        `json:"pcie_bandwidth_gb_s,omitempty"`
+	KvDtypeFactors        json.RawMessage `json:"kv_dtype_factors,omitempty"`
+	PoolKind              string          `json:"pool_kind,omitempty"`
+	HostRamAvailableBytes *uint64         `json:"host_ram_available_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryWhatIf.
+func (SystemTelemetryWhatIf) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryWhatIf must carry.
+func (SystemTelemetryWhatIf) RequiredFields() []string {
+	return []string{"gpu", "window", "slots", "kv_bytes_per_token", "compute_bytes_per_token", "fixed_bytes", "room_bytes"}
+}
+
+// SystemTelemetryHost mirrors the SystemTelemetryHost schema shape.
+type SystemTelemetryHost struct {
+	Hostname string `json:"hostname"`
+	System   string `json:"system"`
+	Tier     string `json:"tier"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryHost.
+func (SystemTelemetryHost) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryHost must carry.
+func (SystemTelemetryHost) RequiredFields() []string { return []string{"hostname", "system", "tier"} }
+
+// SystemTelemetryCoreUsage mirrors the SystemTelemetryCoreUsage schema shape.
+type SystemTelemetryCoreUsage struct {
+	Core    uint64  `json:"core"`
+	UtilPct float64 `json:"util_pct"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryCoreUsage.
+func (SystemTelemetryCoreUsage) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryCoreUsage must carry.
+func (SystemTelemetryCoreUsage) RequiredFields() []string { return []string{"core", "util_pct"} }
+
+// SystemTelemetryCpuSensors mirrors the SystemTelemetryCpuSensors schema shape.
+type SystemTelemetryCpuSensors struct {
+	OverallPct   SystemTelemetryFigure      `json:"overall_pct"`
+	PerCore      []SystemTelemetryCoreUsage `json:"per_core,omitempty"`
+	LogicalCores *uint64                    `json:"logical_cores,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryCpuSensors.
+func (SystemTelemetryCpuSensors) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryCpuSensors must carry.
+func (SystemTelemetryCpuSensors) RequiredFields() []string { return []string{"overall_pct"} }
+
+// SystemTelemetryDiskSensors mirrors the SystemTelemetryDiskSensors schema shape.
+type SystemTelemetryDiskSensors struct {
+	ReadMbS  SystemTelemetryFigure `json:"read_mb_s"`
+	WriteMbS SystemTelemetryFigure `json:"write_mb_s"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryDiskSensors.
+func (SystemTelemetryDiskSensors) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryDiskSensors must carry.
+func (SystemTelemetryDiskSensors) RequiredFields() []string {
+	return []string{"read_mb_s", "write_mb_s"}
+}
+
+// SystemTelemetryMemoryPressure mirrors the SystemTelemetryMemoryPressure schema shape.
+type SystemTelemetryMemoryPressure struct {
+	Level          string   `json:"level"`
+	Basis          string   `json:"basis"`
+	AvailableRatio *float64 `json:"available_ratio,omitempty"`
+	PsiSomeAvg10   *float64 `json:"psi_some_avg10,omitempty"`
+	SwapUsedBytes  *uint64  `json:"swap_used_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryMemoryPressure.
+func (SystemTelemetryMemoryPressure) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryMemoryPressure must carry.
+func (SystemTelemetryMemoryPressure) RequiredFields() []string { return []string{"level", "basis"} }
+
+// SystemTelemetryWatchdogHealth mirrors the SystemTelemetryWatchdogHealth schema shape.
+type SystemTelemetryWatchdogHealth struct {
+	Status string `json:"status"`
+	Basis  string `json:"basis"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryWatchdogHealth.
+func (SystemTelemetryWatchdogHealth) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryWatchdogHealth must carry.
+func (SystemTelemetryWatchdogHealth) RequiredFields() []string { return []string{"status", "basis"} }
+
+// SystemTelemetryHostSensors mirrors the SystemTelemetryHostSensors schema shape.
+type SystemTelemetryHostSensors struct {
+	Cpu            SystemTelemetryCpuSensors     `json:"cpu"`
+	Disk           SystemTelemetryDiskSensors    `json:"disk"`
+	MemoryPressure SystemTelemetryMemoryPressure `json:"memory_pressure"`
+	Watchdog       SystemTelemetryWatchdogHealth `json:"watchdog"`
+	Collector      string                        `json:"collector,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryHostSensors.
+func (SystemTelemetryHostSensors) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryHostSensors must carry.
+func (SystemTelemetryHostSensors) RequiredFields() []string {
+	return []string{"cpu", "disk", "memory_pressure", "watchdog"}
+}
+
+// SystemTelemetryWaterfallEntry mirrors the SystemTelemetryWaterfallEntry schema shape.
+type SystemTelemetryWaterfallEntry struct {
+	RequestID        string   `json:"request_id"`
+	At               string   `json:"at"`
+	ClientID         string   `json:"client_id"`
+	ModelID          string   `json:"model_id"`
+	Status           string   `json:"status"`
+	GatewayMs        *float64 `json:"gateway_ms,omitempty"`
+	TtftMs           *float64 `json:"ttft_ms,omitempty"`
+	DecodeMs         *float64 `json:"decode_ms,omitempty"`
+	PromptTokens     *uint64  `json:"prompt_tokens,omitempty"`
+	CompletionTokens *uint64  `json:"completion_tokens,omitempty"`
+	CachedPrefixPct  *float64 `json:"cached_prefix_pct,omitempty"`
+	DecodeTokS       *float64 `json:"decode_tok_s,omitempty"`
+	Basis            string   `json:"basis"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryWaterfallEntry.
+func (SystemTelemetryWaterfallEntry) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryWaterfallEntry must carry.
+func (SystemTelemetryWaterfallEntry) RequiredFields() []string {
+	return []string{"request_id", "at", "client_id", "model_id", "status", "basis"}
+}
+
+// SystemTelemetryEvent mirrors the SystemTelemetryEvent schema shape.
+type SystemTelemetryEvent struct {
+	ID        string   `json:"id"`
+	At        string   `json:"at"`
+	Kind      string   `json:"kind"`
+	Component string   `json:"component,omitempty"`
+	Ok        bool     `json:"ok"`
+	LatencyMs *float64 `json:"latency_ms,omitempty"`
+	GatewayMs *float64 `json:"gateway_ms,omitempty"`
+	Tier      string   `json:"tier,omitempty"`
+	TokensIn  *uint64  `json:"tokens_in,omitempty"`
+	TokensOut *uint64  `json:"tokens_out,omitempty"`
+	TtftMs    *float64 `json:"ttft_ms,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryEvent.
+func (SystemTelemetryEvent) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryEvent must carry.
+func (SystemTelemetryEvent) RequiredFields() []string { return []string{"id", "at", "kind", "ok"} }
+
+// SystemTelemetryMeasuredRow mirrors the SystemTelemetryMeasuredRow schema shape.
+type SystemTelemetryMeasuredRow struct {
+	ID            string  `json:"id"`
+	Memory        string  `json:"memory"`
+	Gpu           *uint64 `json:"gpu,omitempty"`
+	PlannedBytes  uint64  `json:"planned_bytes"`
+	MeasuredBytes *uint64 `json:"measured_bytes,omitempty"`
+	Over          bool    `json:"over"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryMeasuredRow.
+func (SystemTelemetryMeasuredRow) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryMeasuredRow must carry.
+func (SystemTelemetryMeasuredRow) RequiredFields() []string {
+	return []string{"id", "memory", "planned_bytes", "over"}
+}
+
+// SystemTelemetryApplyRow mirrors the SystemTelemetryApplyRow schema shape.
+type SystemTelemetryApplyRow struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Detail string  `json:"detail,omitempty"`
+	State  string  `json:"state"`
+	Step   string  `json:"step,omitempty"`
+	Phase  string  `json:"phase,omitempty"`
+	Done   *uint64 `json:"done,omitempty"`
+	Total  *uint64 `json:"total,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryApplyRow.
+func (SystemTelemetryApplyRow) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryApplyRow must carry.
+func (SystemTelemetryApplyRow) RequiredFields() []string { return []string{"id", "label", "state"} }
+
+// SystemTelemetryApply mirrors the SystemTelemetryApply schema shape.
+type SystemTelemetryApply struct {
+	PlanID    string                    `json:"plan_id"`
+	StartedAt string                    `json:"started_at"`
+	UpdatedAt string                    `json:"updated_at"`
+	Rollback  bool                      `json:"rollback"`
+	Rows      []SystemTelemetryApplyRow `json:"rows"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryApply.
+func (SystemTelemetryApply) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryApply must carry.
+func (SystemTelemetryApply) RequiredFields() []string {
+	return []string{"plan_id", "started_at", "updated_at", "rollback", "rows"}
+}
+
+// SystemTelemetryStep mirrors the SystemTelemetryStep schema shape.
+type SystemTelemetryStep struct {
+	Command string `json:"command"`
+	Why     string `json:"why"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryStep.
+func (SystemTelemetryStep) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryStep must carry.
+func (SystemTelemetryStep) RequiredFields() []string { return []string{"command", "why"} }
+
+// SystemTelemetrySnapshot mirrors the SystemTelemetrySnapshot schema shape.
+type SystemTelemetrySnapshot struct {
+	Schema               string                          `json:"schema"`
+	SchemaVersion        string                          `json:"schema_version,omitempty"`
+	GeneratedAt          string                          `json:"generated_at"`
+	Source               string                          `json:"source"`
+	Lang                 string                          `json:"lang,omitempty"`
+	PlanID               string                          `json:"plan_id,omitempty"`
+	Host                 *SystemTelemetryHost            `json:"host,omitempty"`
+	Gateway              *SystemTelemetryGateway         `json:"gateway,omitempty"`
+	Clients              []SystemTelemetryClient         `json:"clients,omitempty"`
+	Components           []SystemTelemetryComponent      `json:"components,omitempty"`
+	Gpus                 []SystemTelemetryGpu            `json:"gpus,omitempty"`
+	GpuLoad              []SystemTelemetryGpuLoad        `json:"gpu_load,omitempty"`
+	Ram                  *SystemTelemetryMemory          `json:"ram,omitempty"`
+	WhatIf               *SystemTelemetryWhatIf          `json:"what_if,omitempty"`
+	Events               []SystemTelemetryEvent          `json:"events,omitempty"`
+	Measured             []SystemTelemetryMeasuredRow    `json:"measured,omitempty"`
+	Notes                []string                        `json:"notes,omitempty"`
+	NextSteps            []SystemTelemetryStep           `json:"next_steps,omitempty"`
+	Apply                *SystemTelemetryApply           `json:"apply,omitempty"`
+	Sensors              *SystemTelemetryHostSensors     `json:"sensors,omitempty"`
+	EffectiveDecodeBwGbS *SystemTelemetryFigure          `json:"effective_decode_bw_gb_s,omitempty"`
+	MemoryBwCeilingGbS   *SystemTelemetryFigure          `json:"memory_bw_ceiling_gb_s,omitempty"`
+	Bottleneck           string                          `json:"bottleneck,omitempty"`
+	Waterfall            []SystemTelemetryWaterfallEntry `json:"waterfall,omitempty"`
+	P50TtftMs            *SystemTelemetryFigure          `json:"p50_ttft_ms,omitempty"`
+	PrefixHitPct         *SystemTelemetryFigure          `json:"prefix_hit_pct,omitempty"`
+	RequestsDeferred     *SystemTelemetryFigure          `json:"requests_deferred,omitempty"`
+	KvCacheUsageRatio    *SystemTelemetryFigure          `json:"kv_cache_usage_ratio,omitempty"`
+	InFlight             *uint64                         `json:"in_flight,omitempty"`
+	ClientLanes          json.RawMessage                 `json:"client_lanes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetrySnapshot.
+func (SystemTelemetrySnapshot) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetrySnapshot must carry.
+func (SystemTelemetrySnapshot) RequiredFields() []string {
+	return []string{"schema", "generated_at", "source"}
+}
+
+// SystemTelemetryUnavailableReason mirrors the SystemTelemetryUnavailableReason schema shape.
+type SystemTelemetryUnavailableReason struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a SystemTelemetryUnavailableReason.
+func (SystemTelemetryUnavailableReason) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a SystemTelemetryUnavailableReason must carry.
+func (SystemTelemetryUnavailableReason) RequiredFields() []string { return []string{"code"} }
+
+// CapabilitySystemTelemetrySubscribe mirrors the CapabilitySystemTelemetrySubscribe schema shape.
+type CapabilitySystemTelemetrySubscribe struct {
+	Type            string  `json:"type"`
+	ProtocolVersion string  `json:"protocol_version"`
+	CommandID       string  `json:"command_id"`
+	RunnerID        string  `json:"runner_id"`
+	ConnectionEpoch uint64  `json:"connection_epoch"`
+	LeaseTtlMs      uint64  `json:"lease_ttl_ms"`
+	IntervalMs      *uint64 `json:"interval_ms,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilitySystemTelemetrySubscribe.
+func (CapabilitySystemTelemetrySubscribe) FixedFields() map[string]string {
+	return map[string]string{"type": "capability.system_telemetry.subscribe", "protocol_version": "2"}
+}
+
+// RequiredFields lists the keys a CapabilitySystemTelemetrySubscribe must carry.
+func (CapabilitySystemTelemetrySubscribe) RequiredFields() []string {
+	return []string{"type", "protocol_version", "command_id", "runner_id", "connection_epoch", "lease_ttl_ms"}
+}
+
+// CapabilitySystemTelemetryUnsubscribe mirrors the CapabilitySystemTelemetryUnsubscribe schema shape.
+type CapabilitySystemTelemetryUnsubscribe struct {
+	Type            string `json:"type"`
+	ProtocolVersion string `json:"protocol_version"`
+	CommandID       string `json:"command_id"`
+	RunnerID        string `json:"runner_id"`
+	ConnectionEpoch uint64 `json:"connection_epoch"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilitySystemTelemetryUnsubscribe.
+func (CapabilitySystemTelemetryUnsubscribe) FixedFields() map[string]string {
+	return map[string]string{"type": "capability.system_telemetry.unsubscribe", "protocol_version": "2"}
+}
+
+// RequiredFields lists the keys a CapabilitySystemTelemetryUnsubscribe must carry.
+func (CapabilitySystemTelemetryUnsubscribe) RequiredFields() []string {
+	return []string{"type", "protocol_version", "command_id", "runner_id", "connection_epoch"}
+}
+
+// RunnerSystemTelemetry mirrors the RunnerSystemTelemetry schema shape.
+type RunnerSystemTelemetry struct {
+	Type            string                            `json:"type"`
+	ProtocolVersion string                            `json:"protocol_version"`
+	RunnerID        string                            `json:"runner_id"`
+	ConnectionEpoch uint64                            `json:"connection_epoch"`
+	SentAt          string                            `json:"sent_at"`
+	Revision        uint64                            `json:"revision"`
+	Status          string                            `json:"status"`
+	Snapshot        *SystemTelemetrySnapshot          `json:"snapshot,omitempty"`
+	Reason          *SystemTelemetryUnavailableReason `json:"reason,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a RunnerSystemTelemetry.
+func (RunnerSystemTelemetry) FixedFields() map[string]string {
+	return map[string]string{"type": "runner.system_telemetry", "protocol_version": "2"}
+}
+
+// RequiredFields lists the keys a RunnerSystemTelemetry must carry.
+func (RunnerSystemTelemetry) RequiredFields() []string {
+	return []string{"type", "protocol_version", "runner_id", "connection_epoch", "sent_at", "revision", "status"}
 }
 
 // RunnerHelloDaemonIdentity mirrors the RunnerHelloDaemonIdentity schema shape.

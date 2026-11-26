@@ -1,0 +1,70 @@
+snapshot:
+  parameters:
+    - $ref: "../teamhub-public/teamhub-api.openapi.yaml#/components/parameters/TenantId"
+    - $ref: "../teamhub-public/teamhub-api.openapi.yaml#/components/parameters/ComputerId"
+  get:
+    tags: [Local Computers]
+    operationId: getLocalComputerSystemTelemetry
+    summary: Read one live system and inference telemetry snapshot from an owned Local Computer.
+    description: >-
+      Returns the latest live localmodels.stack-view/v1.1 snapshot when a stream
+      is active on the Computer, or acquires a brief on-demand lease for one
+      live tick. Only the Computer's owner may read live telemetry. Older
+      Daemons or older localmodels kits without --live-tick answer 409
+      SYSTEM_TELEMETRY_UNSUPPORTED.
+    responses:
+      "200":
+        description: Current live system telemetry snapshot with Computer metadata.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/system-telemetry.yaml#/components/schemas/SystemTelemetryView"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "403":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"
+      "404":
+        $ref: "../components/common.yaml#/components/responses/NotFound"
+      "409":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"
+      "503":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"
+      "504":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"
+stream:
+  parameters:
+    - $ref: "../teamhub-public/teamhub-api.openapi.yaml#/components/parameters/TenantId"
+    - $ref: "../teamhub-public/teamhub-api.openapi.yaml#/components/parameters/ComputerId"
+  get:
+    tags: [Local Computers]
+    operationId: streamLocalComputerSystemTelemetry
+    summary: Stream live system and inference telemetry snapshots from an owned Local Computer via SSE.
+    description: >-
+      Opens an on-demand 1 Hz Server-Sent Events stream multiplexed onto a
+      single renewable Daemon lease per Computer. When the last viewer closes,
+      Agent Service unsubscribes immediately so the Computer has zero idle
+      telemetry overhead. Periodic keepalive comments keep idle proxies open.
+    responses:
+      "200":
+        description: Live telemetry snapshots, status transitions, keepalive comments, and session expiry notices.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+            x-sse-events:
+              telemetry.snapshot:
+                $ref: "../components/system-telemetry.yaml#/components/schemas/SystemTelemetryView"
+              telemetry.status:
+                $ref: "../components/system-telemetry.yaml#/components/schemas/SystemTelemetryStreamStatus"
+              session.expired:
+                $ref: "../components/room-events.yaml#/components/schemas/SessionExpiredSseEvent"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "403":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"
+      "404":
+        $ref: "../components/common.yaml#/components/responses/NotFound"
+      "409":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"
+      "503":
+        $ref: "../components/system-telemetry.yaml#/components/responses/SystemTelemetryRefused"

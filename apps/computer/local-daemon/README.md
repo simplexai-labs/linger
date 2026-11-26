@@ -366,6 +366,14 @@ downloaded model that Run's Agent names.
   rereads the status first so pool use, placement, and unloaded models appear
   atomically before publishing. Later lines of the phase update that snapshot
   without another read.
+- System telemetry. When `runner.welcome`'s `service_features` names
+  `system_telemetry` (Computer 0.67.0 or later), `capability.system_telemetry.subscribe`
+  starts or renews a bounded lease that runs `localmodels stack view --json --live-tick --stream`
+  and emits monotonic `runner.system_telemetry` frames. `capability.system_telemetry.unsubscribe`,
+  connection loss, or lease expiry stops the collector subprocess group
+  immediately so idle Computers run zero background polling. Older `localmodels`
+  kits that reject `--live-tick` (exit status 2) report `status: "unsupported"`
+  (`LIVE_TICK_UNSUPPORTED`) without retry storms.
 - Error causes. `library status` keeps only a failed row's `code` and
   `detail`; the `cause` and `path` of a `GATEWAY_REGISTRATION_FAILED` reach
   the Daemon only on the job's error line (`GATEWAY_HOME_NOT_PRIVATE`: the
