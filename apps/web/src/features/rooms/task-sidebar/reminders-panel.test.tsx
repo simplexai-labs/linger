@@ -621,8 +621,27 @@ describe("minute-interval routines", () => {
       enabled: true,
     });
     expect(await screen.findByText("Every 10 min")).toBeVisible();
-    // Delete works directly from the row.
+    // Delete requires confirmation in a modal dialog before deleting.
     fireEvent.click(screen.getByRole("button", { name: "Delete routine" }));
+    const confirmDialog = screen.getByRole("dialog", {
+      name: "Delete routine?",
+    });
+    expect(deleteRoutine).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(confirmDialog).getByRole("button", { name: "Cancel" }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Delete routine?" }),
+    ).not.toBeInTheDocument();
+    expect(deleteRoutine).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete routine" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete routine?" })).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
     await waitFor(() =>
       expect(deletedRoutines(deleteRoutine)).toContainEqual([
         "routine_min_10",
@@ -662,6 +681,12 @@ describe("minute-interval routines", () => {
     });
     expect(await screen.findByText("Check build")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Delete routine" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete routine?" })).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /revision is out of date/i,
     );

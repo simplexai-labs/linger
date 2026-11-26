@@ -12,6 +12,11 @@ export const cardsMessages = defineMessages("cards", {
   decisionMismatch:
     "Card decision response does not match the active Room command.",
   expired: "Expired",
+  expiresInSeconds: "Expires in {seconds}s",
+  expiresInMinutesSeconds: "Expires in {minutes}m {seconds}s",
+  expiresInMinutes: "Expires in {minutes}m",
+  waitingForDecision: "Waiting for {name} to decide",
+  waitingForAnswer: "Waiting for {name} to answer",
   connected: "Connected",
   notConnected: "Not connected",
   connect: "Connect",

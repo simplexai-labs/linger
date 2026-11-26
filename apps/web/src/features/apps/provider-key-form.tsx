@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Field } from "@/components/ui/field";
+import { SecretField } from "@/components/ui/secret-field";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { useT } from "@/i18n/use-translation";
 
@@ -47,14 +47,13 @@ export function ProviderKeyForm({
         if (apiKey.trim()) mutation.mutate();
       }}
     >
-      <Field
+      <SecretField
         autoComplete="off"
         error={mutation.error ? describeError(mutation.error) : undefined}
         hint={hint}
         label={label}
         onChange={(event) => setApiKey(event.target.value)}
         spellCheck={false}
-        type="password"
         value={apiKey}
       />
       <Button

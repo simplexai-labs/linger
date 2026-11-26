@@ -165,8 +165,10 @@ describe("Connected apps", () => {
     renderPage(runtime);
 
     const card = await screen.findByRole("button", { name: "Gmail" });
-    expect(within(card).getByText("Email")).toHaveClass("truncate");
-    expect(within(card).getByText("Email")).toHaveAttribute("title", "Email");
+    const summary = within(card).getByText("Email");
+    expect(summary).toHaveClass("line-clamp-2");
+    expect(summary).not.toHaveClass("block");
+    expect(summary).toHaveAttribute("title", "Email");
     expect(within(card).queryByText(description)).toBeNull();
     // A saved provider key is not managed from this page.
     expect(screen.queryByRole("button", { name: "Composio key" })).toBeNull();
@@ -213,7 +215,8 @@ describe("Connected apps", () => {
 
     expect(await screen.findByRole("button", { name: "Gmail" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Connectors" })).toBeVisible();
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    const search = screen.getByRole("searchbox", { name: "Search connectors" });
+    expect(search).toBeVisible();
     expect(
       screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent),
     ).toEqual([
@@ -223,6 +226,17 @@ describe("Connected apps", () => {
       "Messaging",
       "Web search",
     ]);
+    // Instant search filters connectors across groups and offers a clear control.
+    fireEvent.change(search, { target: { value: "notion" } });
+    expect(screen.getByRole("button", { name: "Notion" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Gmail" })).toBeNull();
+    fireEvent.change(search, { target: { value: "does-not-exist" } });
+    expect(
+      screen.getByText('No connectors match "does-not-exist".'),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Gmail" })).toBeVisible();
     const sectionApps = (name: string) =>
       within(screen.getByRole("region", { name }))
         .getAllByRole("article")

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 
 import { browserRoomMessageOutbox } from "@/features/rooms/chat/room-message-outbox";
@@ -11,11 +11,11 @@ import { teamHubIdentityQueryOptions } from "@/features/rooms/room-queries";
 import { teamHubDone } from "@/features/teamhub/teamhub-api";
 import { announceTeamHubAuthenticationRequired } from "@/features/teamhub/teamhub-authentication";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
-import { translate } from "@/i18n/language";
 
 import { authMessages } from "./auth.messages";
 import { safeAuthenticationReturnTo } from "./authentication-return-to";
 import { clearLocalAuthenticatedState } from "./local-authenticated-state";
+import { openLogoutConfirmDialog } from "./logout-confirm-dialog";
 
 /** The English source; the confirmation itself follows the language on screen. */
 export const LOGOUT_UNSAVED_DOCUMENT_MESSAGE =
@@ -26,6 +26,7 @@ export function useLogout({ returnTo }: { returnTo?: string } = {}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pending = useRef(false);
+  const cancelConfirmRef = useRef<(() => void) | null>(null);
   const mutation = useMutation({
     retry: false,
     mutationFn: async () => {
@@ -57,16 +58,32 @@ export function useLogout({ returnTo }: { returnTo?: string } = {}) {
     },
   });
 
+  useEffect(
+    () => () => {
+      cancelConfirmRef.current?.();
+      cancelConfirmRef.current = null;
+    },
+    [],
+  );
+
   return {
     error: mutation.error,
     isPending: mutation.isPending,
     mutate: () => {
-      if (pending.current) return;
-      if (
-        hasUnsavedRoomDocumentChanges() &&
-        !window.confirm(translate(authMessages.logoutUnsavedDocuments))
-      )
+      if (pending.current || cancelConfirmRef.current) return;
+      if (hasUnsavedRoomDocumentChanges()) {
+        const dialog = openLogoutConfirmDialog();
+        cancelConfirmRef.current = dialog.cancel;
+        void dialog.promise.then((confirmed) => {
+          if (cancelConfirmRef.current === dialog.cancel) {
+            cancelConfirmRef.current = null;
+          }
+          if (!confirmed || pending.current) return;
+          pending.current = true;
+          mutation.mutate();
+        });
         return;
+      }
       pending.current = true;
       mutation.mutate();
     },

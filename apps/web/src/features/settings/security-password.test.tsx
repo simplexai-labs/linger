@@ -38,6 +38,15 @@ describe("Security password through the live HTTP client", () => {
       </QueryClientProvider>,
     );
     const dialog = screen.getByRole("dialog", { name: "Change password" });
+    expect(within(dialog).getByText("At least 8 characters.")).toBeVisible();
+    const newPasswordInput = within(dialog).getByLabelText("New password");
+    expect(newPasswordInput).toHaveAttribute("type", "password");
+    const showButtons = within(dialog).getAllByRole("button", {
+      name: "Show value",
+    });
+    expect(showButtons).toHaveLength(3);
+    fireEvent.click(showButtons[1]!);
+    expect(newPasswordInput).toHaveAttribute("type", "text");
     for (const label of [
       "Current password",
       "New password",

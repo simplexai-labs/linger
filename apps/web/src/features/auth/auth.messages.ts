@@ -33,6 +33,8 @@ export const authMessages = defineMessages("auth", {
     "This computer's account could not be used. Log in with your email and password.",
   teamHubUnreachable: "TeamHub could not be reached. Try again.",
   logoutUnconfirmed: "Could not confirm logout. Please retry.",
+  logoutUnsavedDocumentsTitle: "Log out with unsaved edits?",
   logoutUnsavedDocuments:
     "Some Document edits are not saved yet. Log out and discard them?",
+  logoutAndDiscard: "Log out and discard",
 });

@@ -45,6 +45,10 @@ import {
   EmailDecisionView,
 } from "./decision-connector-write-view";
 import {
+  formatExpiryCountdown,
+  useDecisionExpiryClock,
+} from "./decision-expiry";
+import {
   OpenCreatedRoomLink,
   RoomCreationDecisionView,
 } from "./decision-room-creation-view";
@@ -189,11 +193,20 @@ function ApprovalDecision({
 }: DecisionCardProps) {
   const translation = useTranslation();
   const { t } = translation;
-  const [now] = useState(Date.now);
-  const [open, setOpen] = useState(false);
+  const tracksExpiry =
+    card.status === "pending" ||
+    (card.kind === "runtime_permission" && card.status === "approved");
+  const now = useDecisionExpiryClock(card.expires_at, tracksExpiry);
+  // Expand high-risk runtime permission details by default while pending so
+  // users inspect the command/diff before clicking Allow once.
+  const [open, setOpen] = useState(
+    card.kind === "runtime_permission" && card.status === "pending",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const state = decisionState(card, now);
+  const countdown =
+    state === "pending" ? formatExpiryCountdown(card.expires_at, now, t) : null;
   const roomCreation = card.kind === "room_creation";
   const write = card.connector_write;
   const email =
@@ -296,45 +309,53 @@ function ApprovalDecision({
           <div className="pb-2">{screenshot}</div>
         ) : null}
         {canDecide ? (
-          <CardActions>
-            {email ? (
-              <div
-                aria-label={t(cardsMessages.approvalActions)}
-                className="flex gap-2"
-                role="group"
-              >
-                <Button
-                  data-voice-risk={words.approveRisk}
-                  disabled={submitting}
-                  onClick={() => void decide("approve")}
-                  size="large"
-                  tone="primary"
+          <>
+            {countdown ? (
+              <p className="flex items-center gap-1.5 pt-1 text-xs tabular-nums text-app-muted">
+                <Icon className="shrink-0" icon={Clock01Icon} size={13} />
+                <span>{countdown}</span>
+              </p>
+            ) : null}
+            <CardActions>
+              {email ? (
+                <div
+                  aria-label={t(cardsMessages.approvalActions)}
+                  className="flex gap-2"
+                  role="group"
                 >
-                  {t(words.approve)}
-                </Button>
-                <Button
-                  data-voice-risk={words.denyRisk}
+                  <Button
+                    data-voice-risk={words.approveRisk}
+                    disabled={submitting}
+                    onClick={() => void decide("approve")}
+                    size="large"
+                    tone="primary"
+                  >
+                    {t(words.approve)}
+                  </Button>
+                  <Button
+                    data-voice-risk={words.denyRisk}
+                    disabled={submitting}
+                    onClick={() => void decide("deny")}
+                    size="large"
+                    tone="ghost"
+                  >
+                    {t(words.deny)}
+                  </Button>
+                </div>
+              ) : (
+                <DecisionActions
+                  approveLabel={t(words.approve)}
+                  approveRisk={words.approveRisk}
+                  denyLabel={t(words.deny)}
+                  denyRisk={words.denyRisk}
                   disabled={submitting}
-                  onClick={() => void decide("deny")}
-                  size="large"
-                  tone="ghost"
-                >
-                  {t(words.deny)}
-                </Button>
-              </div>
-            ) : (
-              <DecisionActions
-                approveLabel={t(words.approve)}
-                approveRisk={words.approveRisk}
-                denyLabel={t(words.deny)}
-                denyRisk={words.denyRisk}
-                disabled={submitting}
-                onApprove={() => void decide("approve")}
-                onDeny={(reason) => void decide("deny", reason)}
-                reasonRequired={roomCreation}
-              />
-            )}
-          </CardActions>
+                  onApprove={() => void decide("approve")}
+                  onDeny={(reason) => void decide("deny", reason)}
+                  reasonRequired={roomCreation}
+                />
+              )}
+            </CardActions>
+          </>
         ) : done ? (
           <div className="flex min-w-0 items-center justify-between gap-2">
             <CardDone icon={done.icon} text={done.text} tone={done.tone} />
@@ -345,6 +366,21 @@ function ApprovalDecision({
                   tenantId={tenantId}
                 />
               </div>
+            ) : null}
+          </div>
+        ) : state === "pending" ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardDone
+              icon={Clock01Icon}
+              text={t(cardsMessages.waitingForDecision, {
+                name: card.decision_owner.display_name,
+              })}
+              tone="muted"
+            />
+            {countdown ? (
+              <span className="pb-0.5 text-xs tabular-nums text-app-muted">
+                {countdown}
+              </span>
             ) : null}
           </div>
         ) : null}

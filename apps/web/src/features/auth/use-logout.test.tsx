@@ -216,24 +216,40 @@ describe("useLogout", () => {
     expect(revoke).toHaveBeenCalledOnce();
   });
 
-  it("asks before discarding unsaved Document edits", async () => {
+  it("asks in an in-app modal before discarding unsaved Document edits without calling window.confirm", async () => {
     const runtime = await testRuntime();
     const identity = runtime.seed.identity;
     vi.spyOn(browserRoomMessageOutbox, "clearAccount").mockResolvedValue();
     const revoke = vi.fn(() => undefined);
     runtime.server.on("POST", "/v0/auth/logout", revoke);
     documentEditsUnsaved = true;
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const confirm = vi.spyOn(window, "confirm");
     renderLogout(runtime);
 
     fireEvent.click(screen.getByRole("button", { name: "Log out" }));
-    expect(confirm).toHaveBeenCalledWith(LOGOUT_UNSAVED_DOCUMENT_MESSAGE);
+    expect(confirm).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", {
+      name: "Log out with unsaved edits?",
+    });
+    expect(dialog).toHaveTextContent(LOGOUT_UNSAVED_DOCUMENT_MESSAGE);
+    expect(revoke).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Log out with unsaved edits?" }),
+      ).not.toBeInTheDocument(),
+    );
     expect(revoke).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled();
 
-    confirm.mockClear().mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "Log out" }));
-    expect(confirm).toHaveBeenCalledOnce();
+    await screen.findByRole("dialog", {
+      name: "Log out with unsaved edits?",
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Log out and discard" }),
+    );
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(/^\/login$/),
     );

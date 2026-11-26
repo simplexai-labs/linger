@@ -1,9 +1,10 @@
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
+  Clock01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
-import { useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -12,10 +13,14 @@ import { useT } from "@/i18n/use-translation";
 
 import { AutoHeight } from "@/components/ui/auto-height";
 
-import { CardBox, CardHeading } from "./card-shell";
+import { CardBox, CardDone, CardHeading } from "./card-shell";
 import { cardsMessages } from "./cards.messages";
 
 import type { DecisionMessageCard } from "./decision-card";
+import {
+  formatExpiryCountdown,
+  useDecisionExpiryClock,
+} from "./decision-expiry";
 import type { RoomCardDecision } from "./room-message-card-contract";
 
 type InteractionQuestion = NonNullable<
@@ -51,13 +56,48 @@ export function QuestionDecision({
   // Fade a step in only once the card has moved, not when it first shows.
   const [stepped, setStepped] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const advanceTimerRef = useRef<number | null>(null);
+  const advancingRef = useRef(false);
+  const submittingRef = useRef(false);
   const pending = card.status === "pending";
-  const canDecide = pending && currentActorId === card.decision_owner.id;
+  const now = useDecisionExpiryClock(card.expires_at, pending);
+  const expired =
+    pending &&
+    card.expires_at !== undefined &&
+    Date.parse(card.expires_at) <= now;
+  const canDecide =
+    pending && !expired && currentActorId === card.decision_owner.id;
+  const countdown =
+    pending && !expired ? formatExpiryCountdown(card.expires_at, now, t) : null;
   const questions: InteractionQuestion[] = card.question?.questions ?? [];
   const activeQuestion = questions[stepIndex];
   const isFinalStep = stepIndex >= questions.length - 1;
+  const locked = submitting || advancing;
+
+  function clearAdvanceTimer() {
+    if (advanceTimerRef.current !== null) {
+      window.clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    advancingRef.current = false;
+    setAdvancing(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current !== null) {
+        window.clearTimeout(advanceTimerRef.current);
+        advanceTimerRef.current = null;
+      }
+      advancingRef.current = false;
+    };
+  }, []);
 
   async function submit(nextAnswers: AnswerMap = answers) {
+    if (submittingRef.current) return;
+    clearAdvanceTimer();
+    submittingRef.current = true;
     setDecisionError(null);
     setSubmitting(true);
     try {
@@ -75,29 +115,41 @@ export function QuestionDecision({
           : translate(cardsMessages.cardDecisionFailed),
       );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
-  // The chosen row lights up for a beat before the card moves on.
+  // The chosen row lights up for a beat before the card moves on. Lock input
+  // during that beat so rapid double-clicks cannot skip a step or double-submit.
   function selectRadio(question: InteractionQuestion, optionId: string) {
+    if (advancingRef.current || submittingRef.current) return;
     const nextAnswers = { ...answers, [question.id]: optionId };
     setAnswers(nextAnswers);
-    window.setTimeout(() => {
-      if (isFinalStep) {
+    advancingRef.current = true;
+    setAdvancing(true);
+    const currentStep = stepIndex;
+    const finalStep = isFinalStep;
+    advanceTimerRef.current = window.setTimeout(() => {
+      advanceTimerRef.current = null;
+      advancingRef.current = false;
+      setAdvancing(false);
+      if (finalStep) {
         void submit(nextAnswers);
         return;
       }
-      goToStep(stepIndex + 1);
+      goToStep(currentStep + 1);
     }, choiceBeatMs);
   }
 
   function goToStep(next: number) {
+    clearAdvanceTimer();
     setStepped(true);
     setStepIndex(Math.max(0, Math.min(next, questions.length - 1)));
   }
 
   function toggleCheckbox(question: InteractionQuestion, optionId: string) {
+    if (advancingRef.current || submittingRef.current) return;
     const current = Array.isArray(answers[question.id])
       ? (answers[question.id] as string[])
       : [];
@@ -111,6 +163,7 @@ export function QuestionDecision({
 
   // A written answer replaces a radio choice and joins checkbox choices.
   function writeAnswer(question: InteractionQuestion, text: string) {
+    if (advancingRef.current || submittingRef.current) return;
     if (question.input !== "checkbox") {
       setAnswers({ ...answers, [question.id]: text });
       return;
@@ -129,6 +182,16 @@ export function QuestionDecision({
   const value = answers[activeQuestion.id];
   const checkbox = activeQuestion.input === "checkbox";
   const written = writtenAnswer(activeQuestion, value).trim() !== "";
+  const stepAnswered = hasAnswer(activeQuestion, value);
+
+  function advanceOrSubmit() {
+    if (locked || !stepAnswered) return;
+    if (isFinalStep) {
+      void submit();
+      return;
+    }
+    goToStep(stepIndex + 1);
+  }
 
   return (
     <CardBox label={t(cardsMessages.labelHumanInteraction)}>
@@ -141,7 +204,7 @@ export function QuestionDecision({
                 // A single choice moves on at once, so only multiple choices
                 // keep a check.
                 check={checkbox}
-                disabled={submitting || !canDecide}
+                disabled={locked || !canDecide}
                 key={option.id}
                 onSelect={
                   canDecide
@@ -162,8 +225,10 @@ export function QuestionDecision({
             ))}
             {canDecide ? (
               <OtherRow
-                disabled={submitting}
+                canSubmit={stepAnswered}
+                disabled={locked}
                 key={activeQuestion.id}
+                onSubmit={advanceOrSubmit}
                 onWrite={(text) => writeAnswer(activeQuestion, text)}
                 question={activeQuestion}
                 value={writtenAnswer(activeQuestion, value)}
@@ -171,60 +236,81 @@ export function QuestionDecision({
             ) : null}
           </div>
         </div>
-        {canDecide && (questions.length > 1 || checkbox || written) ? (
-          <div className="flex items-center justify-between gap-2 pt-1 pb-1.5">
-            <div className="flex items-center gap-0.5 text-xs text-app-muted">
-              {questions.length > 1 ? (
-                <>
-                  <button
-                    aria-label={t(cardsMessages.previousQuestion)}
-                    className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted hover:text-app-ink disabled:opacity-35"
-                    disabled={stepIndex === 0 || submitting}
-                    onClick={() => goToStep(stepIndex - 1)}
-                    type="button"
+        {expired ? (
+          <CardDone
+            icon={Clock01Icon}
+            text={t(cardsMessages.expired)}
+            tone="muted"
+          />
+        ) : canDecide ? (
+          <>
+            {countdown ? (
+              <p className="flex items-center gap-1.5 pt-1 text-xs tabular-nums text-app-muted">
+                <Icon className="shrink-0" icon={Clock01Icon} size={13} />
+                <span>{countdown}</span>
+              </p>
+            ) : null}
+            {questions.length > 1 || checkbox || written ? (
+              <div className="flex items-center justify-between gap-2 pt-1 pb-1.5">
+                <div className="flex items-center gap-0.5 text-xs text-app-muted">
+                  {questions.length > 1 ? (
+                    <>
+                      <button
+                        aria-label={t(cardsMessages.previousQuestion)}
+                        className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted hover:text-app-ink disabled:opacity-35"
+                        disabled={stepIndex === 0 || locked}
+                        onClick={() => goToStep(stepIndex - 1)}
+                        type="button"
+                      >
+                        <Icon icon={ArrowLeft01Icon} size={14} />
+                      </button>
+                      <span className="tabular-nums">
+                        {stepIndex + 1} / {questions.length}
+                      </span>
+                      <button
+                        aria-label={t(cardsMessages.nextQuestion)}
+                        className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted hover:text-app-ink disabled:opacity-35"
+                        disabled={locked || isFinalStep || !stepAnswered}
+                        onClick={() => goToStep(stepIndex + 1)}
+                        type="button"
+                      >
+                        <Icon icon={ArrowRight01Icon} size={14} />
+                      </button>
+                    </>
+                  ) : checkbox ? (
+                    <span>{t(cardsMessages.chooseAny)}</span>
+                  ) : null}
+                </div>
+                {checkbox || written ? (
+                  <Button
+                    data-voice-risk={isFinalStep ? "never" : undefined}
+                    disabled={locked || !stepAnswered}
+                    onClick={advanceOrSubmit}
+                    size="large"
+                    tone="primary"
                   >
-                    <Icon icon={ArrowLeft01Icon} size={14} />
-                  </button>
-                  <span className="tabular-nums">
-                    {stepIndex + 1} / {questions.length}
-                  </span>
-                  <button
-                    aria-label={t(cardsMessages.nextQuestion)}
-                    className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted hover:text-app-ink disabled:opacity-35"
-                    disabled={
-                      submitting ||
-                      isFinalStep ||
-                      !hasAnswer(activeQuestion, value)
-                    }
-                    onClick={() => goToStep(stepIndex + 1)}
-                    type="button"
-                  >
-                    <Icon icon={ArrowRight01Icon} size={14} />
-                  </button>
-                </>
-              ) : checkbox ? (
-                <span>{t(cardsMessages.chooseAny)}</span>
-              ) : null}
-            </div>
-            {checkbox || written ? (
-              <Button
-                data-voice-risk={isFinalStep ? "never" : undefined}
-                disabled={submitting || !hasAnswer(activeQuestion, value)}
-                onClick={() => {
-                  if (isFinalStep) {
-                    void submit();
-                    return;
-                  }
-                  goToStep(stepIndex + 1);
-                }}
-                size="large"
-                tone="primary"
-              >
-                {t(isFinalStep ? cardsMessages.send : cardsMessages.next)}
-              </Button>
+                    {t(isFinalStep ? cardsMessages.send : cardsMessages.next)}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardDone
+              icon={Clock01Icon}
+              text={t(cardsMessages.waitingForAnswer, {
+                name: card.decision_owner.display_name,
+              })}
+              tone="muted"
+            />
+            {countdown ? (
+              <span className="pb-0.5 text-xs tabular-nums text-app-muted">
+                {countdown}
+              </span>
             ) : null}
           </div>
-        ) : null}
+        )}
         {decisionError ? (
           <p className="pb-1.5 text-xs text-app-danger">{decisionError}</p>
         ) : null}
@@ -238,12 +324,16 @@ export function QuestionDecision({
  * answer once clicked, in place of a radio choice or beside checkbox picks.
  */
 function OtherRow({
+  canSubmit,
   disabled,
+  onSubmit,
   onWrite,
   question,
   value,
 }: {
+  canSubmit: boolean;
   disabled?: boolean;
+  onSubmit: () => void;
   onWrite: (text: string) => void;
   question: InteractionQuestion;
   value: string;
@@ -254,6 +344,23 @@ function OtherRow({
   useEffect(() => {
     if (writing) field.current?.focus();
   }, [writing]);
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (
+      event.key === "Enter" &&
+      !event.nativeEvent.isComposing &&
+      event.keyCode !== 229
+    ) {
+      event.preventDefault();
+      if (!disabled && canSubmit) {
+        onSubmit();
+      }
+    } else if (event.key === "Escape" && value.trim() === "") {
+      event.preventDefault();
+      setWriting(false);
+    }
+  }
+
   if (!writing) {
     return (
       <button
@@ -276,6 +383,7 @@ function OtherRow({
         disabled={disabled}
         maxLength={question.input === "checkbox" ? 200 : 10000}
         onChange={(event) => onWrite(event.target.value)}
+        onKeyDown={onKeyDown}
         placeholder={t(cardsMessages.ownAnswer)}
         ref={field}
         value={value}

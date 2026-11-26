@@ -376,13 +376,36 @@ describe("Computer permission card", () => {
     );
   });
 
-  it("gives other members no buttons", async () => {
+  it("gives other members no buttons and says who needs to decide", async () => {
     desktopOn("computer-mac");
     const { requests } = setup({ actorId: "bob" });
     expect(await screen.findByText("Linger · Screen Recording")).toBeVisible();
-    expect(screen.queryByText(/Waiting for Alice/)).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for Alice to decide")).toBeVisible();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(requests).toEqual([]);
+  });
+
+  it("transitions to Expired automatically when expires_at elapses", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T10:00:00Z"));
+      desktopOn("computer-mac");
+      setup({
+        next: {
+          ...card,
+          expires_at: "2026-11-26T10:00:04Z",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByText("Expires in 4s")).toBeVisible();
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(screen.getByText("Expired")).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "Don't allow" }),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

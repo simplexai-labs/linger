@@ -416,7 +416,7 @@ describe("Wiki Profile sources", () => {
     expect(
       await within(dialog).findByRole("button", { name: "Add Gmail" }),
     ).toBeVisible();
-    expect(within(dialog).queryByText("Open Apps")).toBeNull();
+    expect(within(dialog).queryByText("Open Connectors")).toBeNull();
   });
 
   it("waits for an explicit GitHub content choice after a new connection", async () => {
@@ -644,7 +644,7 @@ describe("Wiki Profile sources", () => {
       name: "Add profile sources",
     });
     expect(
-      await within(dialog).findByRole("link", { name: "Open Apps" }),
+      await within(dialog).findByRole("link", { name: "Open Connectors" }),
     ).toHaveAttribute("href", "/t/tenant-northstar/apps?app=slack");
     expect(create).not.toHaveBeenCalled();
   });

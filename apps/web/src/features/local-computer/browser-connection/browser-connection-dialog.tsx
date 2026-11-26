@@ -1,12 +1,12 @@
 import { Cancel01Icon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fieldControlClassName } from "@/components/ui/field";
 import { FormFeedback } from "@/components/ui/form-feedback";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import { SecretInput } from "@/components/ui/secret-field";
 import { Select, SelectItem } from "@/components/ui/select";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -97,6 +97,9 @@ export function BrowserConnectionDialog({
         browserConnectionQueryKey(tenantId, computerId),
         next,
       );
+      if (action === "configure") {
+        setPastedToken("");
+      }
       setEditing(false);
     } catch (error) {
       setFailure({ error });
@@ -109,8 +112,8 @@ export function BrowserConnectionDialog({
     event.preventDefault();
     if (!computer || pending || !pastedToken.trim()) return;
     const token = pastedToken;
-    // Clear the field before the request so the token does not stay in state.
-    setPastedToken("");
+    // Keep the token in local form state until configure succeeds so transient
+    // failures can be retried without re-copying from Chrome.
     void run("configure", () =>
       configureBrowserConnection(client, tenantId, computer.computer_id, token),
     );
@@ -243,33 +246,27 @@ export function BrowserConnectionDialog({
               {showForm ? (
                 <form className="space-y-3" onSubmit={submit}>
                   <div>
-                    <div className="ui-field-frame">
-                      <input
-                        aria-describedby={
-                          failureText ? "browser-token-error" : undefined
-                        }
-                        aria-invalid={failureText ? true : undefined}
-                        aria-label={t(computersMessages.extensionToken)}
-                        autoCapitalize="off"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        className={fieldControlClassName}
-                        data-1p-ignore=""
-                        data-lpignore="true"
-                        disabled={pending !== null}
-                        name="playwright-extension-token"
-                        onChange={(event) => {
-                          setFailure(null);
-                          setPastedToken(event.target.value);
-                        }}
-                        placeholder={t(
-                          computersMessages.pasteTokenFromExtension,
-                        )}
-                        spellCheck={false}
-                        type="password"
-                        value={pastedToken}
-                      />
-                    </div>
+                    <SecretInput
+                      aria-describedby={
+                        failureText ? "browser-token-error" : undefined
+                      }
+                      aria-invalid={failureText ? true : undefined}
+                      aria-label={t(computersMessages.extensionToken)}
+                      autoCapitalize="off"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      data-1p-ignore=""
+                      data-lpignore="true"
+                      disabled={pending !== null}
+                      name="playwright-extension-token"
+                      onChange={(event) => {
+                        setFailure(null);
+                        setPastedToken(event.target.value);
+                      }}
+                      placeholder={t(computersMessages.pasteTokenFromExtension)}
+                      spellCheck={false}
+                      value={pastedToken}
+                    />
                     {failureText ? (
                       <p
                         className="mt-1.5 text-xs text-destructive"
@@ -402,8 +399,19 @@ function LinkedBrowser({
   status: TeamHubBrowserConnectionStatus;
 }) {
   const t = useT();
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  const confirmBoxRef = useRef<HTMLDivElement>(null);
   const copy = browserConnectionStateCopy(status.state, t);
   const healthy = copy.tone === "success";
+
+  useEffect(() => {
+    if (confirmingDisconnect) {
+      confirmBoxRef.current
+        ?.querySelector<HTMLButtonElement>("button")
+        ?.focus();
+    }
+  }, [confirmingDisconnect]);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 rounded-lg bg-muted py-1.5 pr-1.5 pl-3">
@@ -416,7 +424,7 @@ function LinkedBrowser({
         </span>
         <span className="flex gap-1">
           <Button
-            disabled={disabled}
+            disabled={disabled || confirmingDisconnect}
             onClick={onReplace}
             size="compact"
             tone="ghost"
@@ -424,8 +432,8 @@ function LinkedBrowser({
             {t(computersMessages.replaceToken)}
           </Button>
           <Button
-            disabled={disabled}
-            onClick={onDisconnect}
+            disabled={disabled || confirmingDisconnect}
+            onClick={() => setConfirmingDisconnect(true)}
             size="compact"
             tone="ghost"
           >
@@ -435,6 +443,39 @@ function LinkedBrowser({
           </Button>
         </span>
       </div>
+      {confirmingDisconnect ? (
+        <div
+          className="rounded-lg border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] p-3"
+          ref={confirmBoxRef}
+          role="group"
+        >
+          <p className="text-xs text-foreground">
+            {t(computersMessages.disconnectChromeConfirm)}
+          </p>
+          <div className="mt-2.5 flex justify-end gap-2">
+            <Button
+              disabled={disabled}
+              onClick={() => setConfirmingDisconnect(false)}
+              size="compact"
+            >
+              {t(commonMessages.cancel)}
+            </Button>
+            <Button
+              data-voice-risk="never"
+              disabled={disabled}
+              loading={disconnecting}
+              onClick={() => {
+                setConfirmingDisconnect(false);
+                onDisconnect();
+              }}
+              size="compact"
+              tone="danger"
+            >
+              {t(computersMessages.disconnect)}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {/* A healthy connection needs no explanation; a broken one says what to do. */}
       {healthy ? null : (
         <p className="text-sm text-muted-foreground">{copy.label}</p>

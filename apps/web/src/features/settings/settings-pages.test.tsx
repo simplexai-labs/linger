@@ -121,13 +121,41 @@ describe("Settings surfaces", () => {
       }),
     );
 
+    const confirmDialog = screen.getByRole("dialog", {
+      name: "Delete insight?",
+    });
+    expect(
+      within(confirmDialog).getByRole("button", { name: "Cancel" }),
+    ).toBeVisible();
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(confirmDialog).getByRole("button", { name: "Cancel" }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Delete insight?" }),
+    ).not.toBeInTheDocument();
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Delete Communication style insight",
+      }),
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete insight?" })).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
+
     await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("No insights yet.")).toBeVisible();
   });
 
-  it("switches Settings sections through their own addresses", async () => {
+  it("switches Settings sections through their own addresses and preserves browser Back history", async () => {
     const runtime = await testRuntime();
-    renderSettings(runtime);
+    const { router } = renderSettings(runtime);
 
     fireEvent.click(
       within(
@@ -144,6 +172,65 @@ describe("Settings surfaces", () => {
     expect(screen.getByRole("link", { name: "Security" })).toHaveAttribute(
       "aria-current",
       "page",
+    );
+    expect(
+      screen.getByText("Manage your sign-in password and server API keys."),
+    ).toBeVisible();
+
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/t/tenant-northstar/settings/account",
+    );
+  });
+
+  it("blocks navigating away from unsaved Profile edits until confirmed", async () => {
+    const runtime = await testRuntime();
+    renderSettings(runtime);
+
+    const organization = await screen.findByLabelText("Organization");
+    fireEvent.change(organization, { target: { value: "Unsaved Org" } });
+
+    fireEvent.click(
+      within(
+        screen.getByRole("navigation", { name: "Settings sections" }),
+      ).getByRole("link", { name: "Security" }),
+    );
+
+    const blockerDialog = await screen.findByRole("dialog", {
+      name: "Discard unsaved changes?",
+    });
+    fireEvent.click(
+      within(blockerDialog).getByRole("button", { name: "Cancel" }),
+    );
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/t/tenant-northstar/settings/account",
+    );
+    expect(organization).toHaveValue("Unsaved Org");
+
+    // Discard button inside the form resets edits cleanly.
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(organization).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    // Edit again and confirm discarding on navigation.
+    fireEvent.change(organization, { target: { value: "Another Draft" } });
+    fireEvent.click(
+      within(
+        screen.getByRole("navigation", { name: "Settings sections" }),
+      ).getByRole("link", { name: "Security" }),
+    );
+    fireEvent.click(
+      within(
+        await screen.findByRole("dialog", { name: "Discard unsaved changes?" }),
+      ).getByRole("button", { name: "Discard" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Change password" }),
+    ).toBeVisible();
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/t/tenant-northstar/settings/security",
     );
   });
 
@@ -179,12 +266,11 @@ describe("Settings surfaces", () => {
     // The display name is edited on the profile card, not in this form.
     expect(screen.queryByLabelText("Name")).toBeNull();
     const organization = await screen.findByLabelText("Organization");
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument();
+    const saveProfile = screen.getByRole("button", { name: "Save changes" });
+    expect(saveProfile).toBeDisabled();
     fireEvent.change(organization, { target: { value: "Northstar Labs" } });
-    const saveProfile = screen.getByRole("button", { name: "Save" });
     expect(saveProfile).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeVisible();
     runtime.server.on(
       "GET",
       "/v0/tenants/{tenantId}/account-profile",
@@ -193,9 +279,7 @@ describe("Settings surfaces", () => {
     fireEvent.click(saveProfile);
 
     expect(await screen.findByText("Account saved")).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(patch).toHaveBeenCalledWith(
       expect.objectContaining({
         body: { bio: "", organization: "Northstar Labs" },
@@ -227,7 +311,7 @@ describe("Settings surfaces", () => {
 
     const organization = await screen.findByLabelText("Organization");
     fireEvent.change(organization, { target: { value: "Northstar Labs" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(organization).toBeDisabled());
     await waitFor(() => expect(save).toHaveBeenCalled());
@@ -332,19 +416,25 @@ describe("Settings surfaces", () => {
 
     expect(await screen.findByLabelText("Bio")).toBeVisible();
     expect(screen.getByLabelText("Organization")).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(
       screen.queryByRole("button", { name: "Log out" }),
     ).not.toBeInTheDocument();
   });
 
-  it("shows the hero, Account form, and Insights only", async () => {
+  it("shows the hero, Account form, and Insights only, with Connectors link and hidden file inputs", async () => {
     const runtime = await testRuntime();
     renderSettings(runtime);
 
     expect(await screen.findByLabelText("Organization")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Connectors" })).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/apps",
+    );
+    for (const fileInput of document.querySelectorAll('input[type="file"]')) {
+      expect(fileInput).toHaveAttribute("aria-hidden", "true");
+      expect(fileInput).toHaveAttribute("tabindex", "-1");
+    }
     expect(screen.queryByText("Connected accounts")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Insights" })).toBeVisible();
@@ -454,35 +544,34 @@ function renderSettings(
     defaultOptions: { queries: { retry: false } },
   }),
 ) {
+  const router = createMemoryRouter(
+    [
+      { element: <p>Signed out</p>, path: "/login" },
+      {
+        children: [
+          { element: <AccountSettingsPage />, path: "account" },
+          { element: <SecuritySettingsPage />, path: "security" },
+        ],
+        element: (
+          <>
+            <SettingsLayout />
+            <LocationProbe />
+          </>
+        ),
+        path: "/t/:tenantId/settings",
+      },
+    ],
+    { initialEntries: [initialEntry] },
+  );
   const view = render(
     <QueryClientProvider client={queryClient}>
       <TeamHubRuntimeProvider runtime={runtime}>
-        <RouterProvider
-          router={createMemoryRouter(
-            [
-              { element: <p>Signed out</p>, path: "/login" },
-              {
-                children: [
-                  { element: <AccountSettingsPage />, path: "account" },
-                  { element: <SecuritySettingsPage />, path: "security" },
-                ],
-                element: (
-                  <>
-                    <SettingsLayout />
-                    <LocationProbe />
-                  </>
-                ),
-                path: "/t/:tenantId/settings",
-              },
-            ],
-            { initialEntries: [initialEntry] },
-          )}
-        />
+        <RouterProvider router={router} />
       </TeamHubRuntimeProvider>
     </QueryClientProvider>,
   );
 
-  return { queryClient, unmount: view.unmount };
+  return { queryClient, router, unmount: view.unmount };
 }
 
 function LocationProbe() {

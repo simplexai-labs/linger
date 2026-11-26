@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
+
 export function SettingsPageHeading({
   description,
   title,
 }: {
-  description?: string;
+  description?: ReactNode;
   title: string;
 }) {
   return (

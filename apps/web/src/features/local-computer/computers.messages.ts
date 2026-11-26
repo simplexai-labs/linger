@@ -229,6 +229,8 @@ export const computersMessages = defineMessages("computers", {
   replaceToken: "Replace token",
   disconnect: "Disconnect",
   disconnecting: "Disconnecting…",
+  disconnectChromeConfirm:
+    "Disconnect Chrome? Agents will stop using your browser and its sign-ins.",
   extensionToken: "Extension token",
   pasteTokenFromExtension: "Paste the token from Playwright Extension",
   noExtensionYet: "No extension yet? <link>Install Playwright Extension</link>",

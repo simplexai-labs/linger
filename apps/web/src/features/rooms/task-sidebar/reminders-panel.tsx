@@ -9,7 +9,10 @@ import {
 } from "@hugeicons/core-free-icons";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { ModalDialog } from "@/components/ui/modal-dialog";
+import { commonMessages } from "@/i18n/common.messages";
 import {
   SettingsGroup,
   SettingsRow,
@@ -520,30 +523,70 @@ function RoutineDeleteButton({
 }) {
   const t = useT();
   const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const remove = useMutation({
     mutationFn: () => deleteRoomRoutine(client, routine),
     onMutate: () => onError(null),
     onSuccess: async () => {
+      setConfirmOpen(false);
       onDeleted();
       await queryClient.invalidateQueries({
         queryKey: roomRoutinesQueryKey(tenantId, routine.room_id),
       });
     },
-    onError: (cause) =>
-      onError(cause instanceof Error ? cause.message : t(m.deleteFailed)),
+    onError: (cause) => {
+      setConfirmOpen(false);
+      onError(cause instanceof Error ? cause.message : t(m.deleteFailed));
+    },
   });
   return (
-    <button
-      data-voice-risk="never"
-      aria-label={t(m.deleteRoutine)}
-      className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-      disabled={remove.isPending}
-      onClick={() => remove.mutate()}
-      title={t(m.deleteRoutine)}
-      type="button"
-    >
-      <Icon icon={Delete02Icon} size={14} />
-    </button>
+    <>
+      <button
+        data-voice-risk="never"
+        aria-label={t(m.deleteRoutine)}
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        disabled={remove.isPending}
+        onClick={() => setConfirmOpen(true)}
+        title={t(m.deleteRoutine)}
+        type="button"
+      >
+        <Icon icon={Delete02Icon} size={14} />
+      </button>
+      {confirmOpen ? (
+        <ModalDialog
+          description={t(m.deleteRoutineConfirmDescription, {
+            name: routine.name,
+          })}
+          footer={
+            <>
+              <Button
+                disabled={remove.isPending}
+                onClick={() => setConfirmOpen(false)}
+                size="compact"
+              >
+                {t(commonMessages.cancel)}
+              </Button>
+              <Button
+                data-voice-risk="never"
+                loading={remove.isPending}
+                onClick={() => remove.mutate()}
+                size="compact"
+                tone="danger"
+              >
+                {t(commonMessages.delete)}
+              </Button>
+            </>
+          }
+          onClose={() => {
+            if (!remove.isPending) setConfirmOpen(false);
+          }}
+          size="sm"
+          title={t(m.deleteRoutineConfirmTitle)}
+        >
+          {null}
+        </ModalDialog>
+      ) : null}
+    </>
   );
 }
 

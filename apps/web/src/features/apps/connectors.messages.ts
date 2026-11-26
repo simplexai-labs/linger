@@ -14,8 +14,13 @@ export const connectorMessages = defineMessages("connectors", {
   filterAll: "All",
   connectorCategories: "Connector categories",
   connectedOnly: "Connected only",
+  searchConnectors: "Search connectors",
+  searchConnectorsPlaceholder: "Search connectors…",
+  clearConnectorSearch: "Clear connector search",
+  noMatchingConnectors: 'No connectors match "{query}".',
+  clearSearch: "Clear search",
   applicationConnections: "Application connections",
-  noConnectedApps: "No connected apps yet.",
+  noConnectedApps: "No connected connectors yet.",
 
   // Groups of the catalog
   groupMailCalendar: "Mail & Calendar",
@@ -106,7 +111,7 @@ export const connectorMessages = defineMessages("connectors", {
   insufficientPermission:
     "This app did not grant enough permission. Reconnect and approve all requested access.",
   discordUnconfirmedFromApps:
-    "Discord is authorized, but the Server couldn't be confirmed. Check it again from Apps.",
+    "Discord is authorized, but the Server couldn't be confirmed. Check it again from Connectors.",
   authorizationFailed:
     "Authorization failed. Reconnect this app and approve the requested access.",
 
@@ -183,6 +188,8 @@ export const connectorMessages = defineMessages("connectors", {
   apiKey: "API key",
   replaceKey: "Replace key",
   removeKey: "Remove key",
+  removeKeyConfirm:
+    "Remove the {backend} key? Everyone on this server will stop using it for web search.",
   savedKeyRefused: "{backend} refused the saved key. Paste a new one.",
   savedKeyUnverified:
     "A key is saved. {backend} has no key check, so the first search proves it.",
