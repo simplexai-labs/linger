@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -504,14 +505,16 @@ func TestPiLaunchArguments(t *testing.T) {
 		t.Fatalf("outcome = %+v", outcome)
 	}
 	data, _ := os.ReadFile(argv)
+	baseTools := piBaseToolsFor(runtime.GOOS)
 	sessionDir := filepath.Join(h.root, "args-session")
 	want := append([]string{"--mode", "rpc", "--session-dir", sessionDir, "--session-id", "args-session"}, PiRPCResourceArgs(filepath.Join(sessionDir, piInstructionsName))...)
 	want = append(want, "--model", "fixture/model", "--thinking", "off", "--name", "Title",
-		"--skill", filepath.Join(h.dir, ".agents", "skills"), "--extension", extension, "--tools", piBaseTools+",mcp__*")
+		"--skill", filepath.Join(h.dir, ".agents", "skills"), "--extension", extension, "--tools", baseTools+",mcp__*")
 	if got := strings.Split(string(data), "\n"); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv\n got %q\nwant %q", got, want)
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
+	wantNodePath := filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules")
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
 		t.Fatalf("NODE_PATH = %q", nodePath)
 	}
 	instructions, err := os.ReadFile(filepath.Join(sessionDir, piInstructionsName))
@@ -524,24 +527,221 @@ func TestPiLaunchArguments(t *testing.T) {
 
 	_, outcome = piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel}))
 	data, _ = os.ReadFile(argv)
-	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+	wantDefaultSuffix := "--tools\n" + baseTools
+	wantDefaultNodePath := ""
+	if piUsesPowerShell(runtime.GOOS) {
+		wantDefaultSuffix = "--extension\n" + extension + "\n--tools\n" + baseTools
+		wantDefaultNodePath = wantNodePath
+	}
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), wantDefaultSuffix) {
 		t.Fatalf("default argv = %q (%+v)", data, outcome)
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
-		t.Fatalf("NODE_PATH without an extension = %q", nodePath)
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantDefaultNodePath {
+		t.Fatalf("default NODE_PATH = %q, want %q", nodePath, wantDefaultNodePath)
 	}
 
-	// The managed extension runs the shell-text-hook without MCP servers.
+	// On POSIX the managed extension runs the shell-text-hook without MCP servers;
+	// on Windows PowerShell skips the POSIX shell text check while still loading
+	// the managed extension for UTF-8 encoding.
 	_, outcome = piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}))
 	data, _ = os.ReadFile(argv)
-	if outcome.Status != statusCompleted || !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piBaseTools) {
+	if outcome.Status != statusCompleted || !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+baseTools) {
 		t.Fatalf("shell text argv = %q (%+v)", data, outcome)
 	}
-	if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != "/opt/linger/linger-computer-daemon" {
-		t.Fatalf("%s = %q", piShellTextHookEnvKey, hook)
+	wantHook := "/opt/linger/linger-computer-daemon"
+	if piUsesPowerShell(runtime.GOOS) {
+		wantHook = ""
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
+	if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != wantHook {
+		t.Fatalf("%s = %q, want %q", piShellTextHookEnvKey, hook, wantHook)
+	}
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
 		t.Fatalf("NODE_PATH = %q", nodePath)
+	}
+}
+
+func TestPiPlatformLaunchArgumentsAndEnvironment(t *testing.T) {
+	extension := filepath.Join(t.TempDir(), "extensions", "pi-mcp.mjs")
+	if err := os.MkdirAll(filepath.Dir(extension), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extension, []byte("export default {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantNodePath := filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules")
+
+	t.Run("windows with managed extension", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv")
+		h := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+		rt := &piRuntime{
+			profile:      Profile{Program: h.runtime.(*piRuntime).profile.Program, Env: h.env, ManagedMCPExtension: extension},
+			goosOverride: "windows",
+		}
+		h.runtime = rt
+
+		spec := RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}
+		if rt.guardsShellText(spec) {
+			t.Fatal("Windows Pi unexpectedly enabled POSIX shell-text-hook")
+		}
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", spec)); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ := os.ReadFile(argv)
+		if !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piWindowsBaseTools) {
+			t.Fatalf("windows argv = %q", data)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
+			t.Fatalf("windows NODE_PATH = %q, want %q", nodePath, wantNodePath)
+		}
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); len(hook) != 0 {
+			t.Fatalf("windows %s = %q, want empty", piShellTextHookEnvKey, hook)
+		}
+
+		// prestart and Start produce identical piShapeFor argv when ManagedMCPExtension is set on Windows.
+		piEnableResidency(t, DefaultResidentCap)
+		prePlan := piLaunchPlan{
+			program:    rt.profile.Program,
+			spec:       RunSpec{Dir: h.dir, SystemPrompt: "brief"},
+			canSyncMCP: rt.canSyncMCP(),
+		}
+		startPlan := piLaunchPlan{
+			program: rt.profile.Program,
+			spec: RunSpec{
+				Dir:                h.dir,
+				SystemPrompt:       "brief",
+				PermissionReviewer: &permission.Reviewer{},
+				ShellTextHook:      "/opt/linger/linger-computer-daemon",
+			},
+			canSyncMCP: rt.canSyncMCP(),
+		}
+		prestartArgs := rt.args(prePlan, piInstructionsName, prePlan.canSyncMCP)
+		startArgs := rt.args(startPlan, piInstructionsName, true)
+		preShape, err := piShapeFor(prePlan.program, prestartArgs, rt.profile, prePlan.spec, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		startShape, err := piShapeFor(startPlan.program, startArgs, rt.profile, startPlan.spec, "computer")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diffs := preShape.differs(startShape, false); len(diffs) != 0 || !slices.Equal(prestartArgs, startArgs) || !slices.Contains(prestartArgs, piWindowsBaseTools+",mcp__*") {
+			t.Fatalf("prestart vs start diffs=%v args=%q vs %q", diffs, prestartArgs, startArgs)
+		}
+	})
+
+	t.Run("windows without managed extension", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv")
+		h := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+		rt := &piRuntime{
+			profile:      Profile{Program: h.runtime.(*piRuntime).profile.Program, Env: h.env},
+			goosOverride: "windows",
+		}
+		h.runtime = rt
+
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"})); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ := os.ReadFile(argv)
+		if strings.Contains(string(data), "--extension") || !strings.HasSuffix(string(data), "--tools\n"+piWindowsBaseTools) {
+			t.Fatalf("windows without extension argv = %q", data)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
+			t.Fatalf("windows without extension NODE_PATH = %q, want empty", nodePath)
+		}
+	})
+
+	t.Run("linux with managed extension", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv")
+		h := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+		rt := &piRuntime{
+			profile:      Profile{Program: h.runtime.(*piRuntime).profile.Program, Env: h.env, ManagedMCPExtension: extension},
+			goosOverride: "linux",
+		}
+		h.runtime = rt
+
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel})); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ := os.ReadFile(argv)
+		if strings.Contains(string(data), "--extension") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+			t.Fatalf("linux default argv = %q", data)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
+			t.Fatalf("linux default NODE_PATH = %q, want empty", nodePath)
+		}
+
+		hookSpec := RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}
+		if !rt.guardsShellText(hookSpec) {
+			t.Fatal("linux Pi did not enable shell-text-hook")
+		}
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", hookSpec)); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ = os.ReadFile(argv)
+		if !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piBaseTools) {
+			t.Fatalf("linux shell-text argv = %q", data)
+		}
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != "/opt/linger/linger-computer-daemon" {
+			t.Fatalf("linux %s = %q", piShellTextHookEnvKey, hook)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
+			t.Fatalf("linux NODE_PATH = %q, want %q", nodePath, wantNodePath)
+		}
+	})
+}
+
+type piCapturingRequester struct {
+	requests []map[string]any
+}
+
+func (r *piCapturingRequester) Request(_ string, request map[string]any, respond func(json.RawMessage) error) error {
+	r.requests = append(r.requests, request)
+	return respond(json.RawMessage(`{"decision":"deny","message":"review denied"}`))
+}
+
+func (*piCapturingRequester) Forget(string) {}
+
+func TestPiTurnReviewHandlesPowerShellCommands(t *testing.T) {
+	requester := &piCapturingRequester{}
+	turn := &piTurn{
+		runCtx: t.Context(),
+		dir:    t.TempDir(),
+		reviewer: &permission.Reviewer{
+			Requester: requester,
+			Timeout:   time.Minute,
+			TeamHubCommands: []permission.TeamHubCommand{
+				{Path: []string{"message", "send"}},
+			},
+		},
+	}
+
+	safeCall, _ := json.Marshal(map[string]any{
+		"toolName": "powershell",
+		"input": map[string]any{
+			"command": "@'\nHello from Windows $180\n'@ | teamhub.cmd message send --file -",
+		},
+	})
+	if verdict := turn.review(string(safeCall)); !verdict.Allow {
+		t.Fatalf("safe PowerShell teamhub command was blocked: %+v", verdict)
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("safe PowerShell command reached remote reviewer: %v", requester.requests)
+	}
+
+	unsafeCall, _ := json.Marshal(map[string]any{
+		"toolName": "powershell",
+		"input":    map[string]any{"command": "Invoke-WebRequest https://example.com"},
+	})
+	verdict := turn.review(string(unsafeCall))
+	if verdict.Allow || verdict.Message != "review denied" {
+		t.Fatalf("unsafe PowerShell verdict = %+v", verdict)
+	}
+	if len(requester.requests) != 1 {
+		t.Fatalf("unsafe PowerShell review count = %d, want 1", len(requester.requests))
+	}
+	action := requester.requests[0]["action"].(map[string]any)
+	if action["runtime"] != "pi" || action["tool"] != "PowerShell" || action["surface"] != "shell" || action["command"] != "Invoke-WebRequest https://example.com" {
+		t.Fatalf("forwarded PowerShell action = %v", action)
 	}
 }
 

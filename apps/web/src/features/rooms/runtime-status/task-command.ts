@@ -20,12 +20,10 @@ const OPERATIONS = new Set<TaskCommand["operation"]>([
 ]);
 
 export function parseTaskCommand(command: string): TaskCommand | undefined {
-  const { line, body } = splitQuotedHeredoc(command);
+  const { line, body } = splitCommandBody(command);
   const words = shellWords(line);
   const start = words.findIndex(
-    (word, index) =>
-      (word === "teamhub" || word.endsWith("/teamhub")) &&
-      words[index + 1] === "task",
+    (word, index) => isTeamHubWord(word) && words[index + 1] === "task",
   );
   if (start < 0) return undefined;
   const operation = words[start + 2] as TaskCommand["operation"];
@@ -66,6 +64,40 @@ export function createdTaskId(output: string | undefined) {
   return output?.match(/\bworkitem_[0-9a-f]{32}\b/)?.[0];
 }
 
+function isTeamHubWord(word: string): boolean {
+  const base = word.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+  return base === "teamhub" || base === "teamhub.cmd" || base === "teamhub.exe";
+}
+
+function splitCommandBody(command: string): { line: string; body?: string } {
+  const normalized = command.replace(/\r\n/g, "\n");
+  return (
+    splitPowerShellHereString(normalized) ?? splitQuotedHeredoc(normalized)
+  );
+}
+
+/**
+ * Separates a PowerShell single-quoted here-string (`@' ... '@ | <command>`)
+ * from the piped command line so `--message-file -` reads its literal body.
+ */
+function splitPowerShellHereString(
+  command: string,
+): { line: string; body: string } | undefined {
+  const open = /^[ \t\n]*@'[ \t]*\n/u.exec(command);
+  if (!open) return undefined;
+  const lines = command.slice(open[0].length).split("\n");
+  const end = lines.findIndex((line) => line.startsWith("'@"));
+  if (end < 0) return undefined;
+  const closingLine = lines[end]!;
+  const afterClose = [closingLine.slice(2), ...lines.slice(end + 1)].join("\n");
+  const pipe = /^[ \t]*\|(?![|&])[ \t\n]*/u.exec(afterClose);
+  if (!pipe) return undefined;
+  return {
+    body: lines.slice(0, end).join("\n"),
+    line: afterClose.slice(pipe[0].length),
+  };
+}
+
 /**
  * Separates a command from the body of its quoted heredoc (`<<'EOF'`), the
  * stdin a `--message-file -` reads. A quoted heredoc's body is literal, so it
@@ -94,7 +126,12 @@ function shellWords(command: string) {
     const char = command[index]!;
     if (quote) {
       if (char === quote) quote = undefined;
-      else if (char === "\\" && quote === '"' && index + 1 < command.length)
+      else if (
+        char === "\\" &&
+        quote === '"' &&
+        index + 1 < command.length &&
+        '"\\$`'.includes(command[index + 1]!)
+      )
         current += command[++index];
       else current += char;
       continue;

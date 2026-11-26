@@ -47,3 +47,28 @@ func TestCodexContextCLIArgsEscapeSpecialCharacters(t *testing.T) {
 		t.Fatalf("round trip = %q, %v, want %q", parsed.V, err, value)
 	}
 }
+
+func TestCodexContextCLIArgsForwardWSLENVWhenSet(t *testing.T) {
+	withWSLENV := CodexContextCLIArgs(map[string]string{
+		"TEAMHUB_CONFIG":  `C:\work\.teamhub\cli\config.json`,
+		"TEAMHUB_PROFILE": "runtime",
+		"WSLENV":          "FOO/u:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE",
+		"PATH":            `C:\cli;C:\Windows`,
+	})
+	want := []string{
+		"-c", `shell_environment_policy.set.TEAMHUB_CONFIG="C:\\work\\.teamhub\\cli\\config.json"`,
+		"-c", `shell_environment_policy.set.TEAMHUB_PROFILE="runtime"`,
+		"-c", `shell_environment_policy.set.WSLENV="FOO/u:TEAMHUB_CONFIG/p:TEAMHUB_PROFILE"`,
+		"-c", `shell_environment_policy.set.PATH="C:\\cli;C:\\Windows"`,
+	}
+	if !slices.Equal(withWSLENV, want) {
+		t.Fatalf("with WSLENV = %q, want %q", withWSLENV, want)
+	}
+	withoutWSLENV := CodexContextCLIArgs(map[string]string{
+		"TEAMHUB_CONFIG":  "/private/config.json",
+		"TEAMHUB_PROFILE": "runtime",
+	})
+	if strings.Contains(strings.Join(withoutWSLENV, " "), "WSLENV") {
+		t.Fatalf("empty WSLENV was emitted: %q", withoutWSLENV)
+	}
+}

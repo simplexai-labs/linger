@@ -514,9 +514,12 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
 - Codex runs `linger-computer-daemon shell-text-hook` as a
   PreToolUse hook for every shell command. Codex on Windows runs PowerShell,
   so it gets no hook.
-- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run. It
-  runs the same hook before a `bash` call that names `teamhub` and holds `$` or
-  a backquote.
+- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every POSIX Run
+  that guards shell text and for every Windows Run. On POSIX, it runs
+  `shell-text-hook` before a `bash` call that names `teamhub` and holds `$` or
+  a backquote. On Windows, Pi uses the built-in `powershell` tool instead of
+  `bash`, so it skips the POSIX `shell-text-hook` and the managed extension
+  overrides `powershell` to set UTF-8 `$OutputEncoding` and console encodings.
 - Antigravity is not checked: its permission request can only allow or reject
   a call, with no reason the Agent would read.
 
@@ -1165,22 +1168,26 @@ with its dependencies resolves its own jiti first. Node reads `NODE_PATH` at
 startup, so the extension then restores the value Pi inherited, and the
 commands Pi starts never resolve a package from the bundle.
 
-The same extension carries Pi's permission review and dynamic MCP attachment, so
-resident Pi processes and provider pre-starts load it with an empty managed MCP
-config file and `mcp__*` in `--tools`. On Room-presence `provider.prepare`, Pi
-starts with a 40-second timeout, verifies `get_state` and applies any clamped
-thinking level, then parks without submitting a prompt. When a Run adopts a
-parked Pi process whose MCP server set changed, the Daemon writes the new
-front-rewritten `linger-mcp.json`, verifies `get_commands` exposes
-`linger-sync-mcp`, runs `/linger-sync-mcp` and reads the structured verdict from
-its `linger.mcp_sync` RPC dialog before submitting the prompt; an attachment
-failure recycles the process and falls back to a cold spawn. Its `tool_call`
-hook opens an RPC `input` dialog titled `linger.permission_review` for each
-`bash` and `mcp__*` call, with the call as JSON. The Daemon answers it with a
-JSON verdict from the Run's permission review, with `bash` reviewed as a shell
-command. A Run without review gets an allow verdict, because a resident Pi
-process may serve both kinds of Run. A missing or unreadable verdict blocks the
-call. The Daemon cancels any other extension dialog.
+The same extension carries Pi's permission review, dynamic MCP attachment, and
+the Windows PowerShell UTF-8 override, so resident Pi processes, provider
+pre-starts, and Windows Runs load it with `NODE_PATH` pointing at the tools'
+`node_modules` (and `mcp__*` in `--tools` when MCP is wired or syncable;
+Windows Pi passes `powershell` in `--tools` instead of `bash`). On Room-presence
+`provider.prepare`, Pi starts with a 40-second timeout, verifies `get_state`
+and applies any clamped thinking level, then parks without submitting a prompt.
+When a Run adopts a parked Pi process whose MCP server set changed, the Daemon
+writes the new front-rewritten `linger-mcp.json`, verifies `get_commands`
+exposes `linger-sync-mcp`, runs `/linger-sync-mcp` and reads the structured
+verdict from its `linger.mcp_sync` RPC dialog before submitting the prompt; an
+attachment failure recycles the process and falls back to a cold spawn. Its
+`tool_call` hook opens an RPC `input` dialog titled `linger.permission_review`
+for each `bash`, `powershell`, and `mcp__*` call, with the call as JSON. The
+Daemon answers it with a JSON verdict from the Run's permission review: `bash`
+is evaluated by the POSIX shell allowlist (`Shell`), while `powershell` is
+evaluated separately as `PowerShell` by `ShellPowerShell`. A Run without review
+gets an allow verdict, because a resident Pi process may serve both kinds of
+Run. A missing or unreadable verdict blocks the call. The Daemon cancels any
+other extension dialog.
 
 The compatibility probe of the pinned Playwright catalog is
 `TestPinnedPlaywrightCatalog`; it needs `LINGER_PLAYWRIGHT_COMPAT_ENTRY` and

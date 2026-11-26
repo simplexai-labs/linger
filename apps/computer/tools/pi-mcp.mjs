@@ -16,12 +16,46 @@ const shellTextHook = process.env.LINGER_PI_SHELL_TEXT_HOOK;
 delete process.env.LINGER_PI_SHELL_TEXT_HOOK;
 // An installed Pi may alias bare package imports to its own version. Resolve
 // the pinned public entry by URL so this adapter keeps its shipped API.
-const { createMcpExtension } = await import(
+const { createMcpExtension, createPowerShellToolDefinition } = await import(
   new URL(
     "../node_modules/@earendil-works/pi-coding-agent/dist/index.js",
     import.meta.url,
   ).href
 );
+
+// Pi's built-in powershell tool sets [Console]::OutputEncoding but omits
+// $OutputEncoding, so Windows PowerShell 5.1 encodes piped native-command
+// stdin as US-ASCII and corrupts non-ASCII text. UTF8Encoding($false) avoids
+// a leading BOM on piped stdin.
+export const POWERSHELL_UTF8_PREFIX =
+  "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); try { [Console]::OutputEncoding = $OutputEncoding } catch {}; try { if (-not [Console]::IsInputRedirected) { [Console]::InputEncoding = $OutputEncoding } } catch {}";
+
+// Overrides Pi's built-in powershell tool on Windows so every PowerShell
+// invocation runs with UTF-8 stdin and stdout encoding.
+export function registerWindowsPowerShellTool(
+  pi,
+  {
+    platform = process.platform,
+    cwd = process.cwd(),
+    createToolDefinition = createPowerShellToolDefinition,
+    operations,
+  } = {},
+) {
+  if (
+    platform !== "win32" ||
+    typeof pi?.registerTool !== "function" ||
+    typeof createToolDefinition !== "function"
+  ) {
+    return false;
+  }
+  pi.registerTool(
+    createToolDefinition(cwd, {
+      commandPrefix: POWERSHELL_UTF8_PREFIX,
+      ...(operations ? { operations } : {}),
+    }),
+  );
+  return true;
+}
 
 // This explicit extension uses Pi's public MCP implementation. It does not
 // discover ambient configuration or create another Agent execution loop.
@@ -144,9 +178,13 @@ export const MCP_SYNC_COMMAND = "linger-sync-mcp";
 export const MCP_SYNC_DIALOG = "linger.mcp_sync";
 
 // reviewedTool reports whether a call goes to the Daemon's permission review:
-// commands and MCP tools.
+// shell commands and MCP tools.
 export function reviewedTool(toolName) {
-  return toolName === "bash" || toolName.startsWith("mcp__");
+  return (
+    toolName === "bash" ||
+    toolName === "powershell" ||
+    toolName.startsWith("mcp__")
+  );
 }
 
 // reviewToolCall asks the Daemon about one call and blocks it unless the
@@ -297,10 +335,12 @@ export async function mountManagedMcp(
 }
 
 // The Daemon loads this extension for the shell text check, permission
-// review, MCP servers, or any of them. The review hook is always on, because
-// a resident Pi process may serve a reviewed Run after one without review.
-// A call the shell text check refuses never reaches review.
+// review, MCP servers, the Windows PowerShell UTF-8 override, or any of them.
+// The review hook is always on, because a resident Pi process may serve a
+// reviewed Run after one without review. A call the shell text check refuses
+// never reaches review.
 export default async function managedExtension(pi) {
+  registerWindowsPowerShellTool(pi);
   pi.on("before_agent_start", () => {
     if (
       typeof pi.getActiveTools !== "function" ||

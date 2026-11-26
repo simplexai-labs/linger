@@ -93,6 +93,7 @@ process.stdin.on("end", () => {
       assert.equal(await refuseRewrittenShellText(bash('teamhub message send --content "Total $TOTAL"'), hook), undefined);
       assert.equal(await refuseRewrittenShellText(bash('teamhub message send --content "Done."'), hook), undefined);
       assert.equal(await refuseRewrittenShellText({ toolName: "read", input: { path: "$1" } }, hook), undefined);
+      assert.equal(await refuseRewrittenShellText({ toolName: "powershell", input: { command: 'teamhub message send --content "Quote: $180"' } }, hook), undefined);
       assert.equal(await refuseRewrittenShellText(bash('teamhub message send --content "$180"'), ${JSON.stringify(path.join(root, "missing"))}), undefined);
       assert.equal(await refuseRewrittenShellText(bash('teamhub message send --content "$180"'), undefined), undefined);
       console.log("shell text check passed");
@@ -110,8 +111,11 @@ process.stdin.on("end", () => {
 
 it("asks the Daemon about Pi commands and MCP calls and blocks unless allowed", async () => {
   const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
-  const { PERMISSION_REVIEW, reviewToolCall } = (await import(entry)) as {
+  const { PERMISSION_REVIEW, reviewToolCall, reviewedTool } = (await import(
+    entry
+  )) as {
     PERMISSION_REVIEW: string;
+    reviewedTool: (toolName: string) => boolean;
     reviewToolCall: (
       event: { toolName: string; input: Record<string, unknown> },
       ui: { input: (title: string, placeholder: string) => Promise<unknown> },
@@ -125,6 +129,15 @@ it("asks the Daemon about Pi commands and MCP calls and blocks unless allowed", 
     },
   });
   const bash = { toolName: "bash", input: { command: "git push" } };
+  const powershell = {
+    toolName: "powershell",
+    input: { command: "Invoke-WebRequest https://example.com" },
+  };
+
+  expect(reviewedTool("bash")).toBe(true);
+  expect(reviewedTool("powershell")).toBe(true);
+  expect(reviewedTool("mcp__computer__click")).toBe(true);
+  expect(reviewedTool("read")).toBe(false);
 
   expect(
     await reviewToolCall({ toolName: "read", input: {} }, ui("")),
@@ -133,7 +146,19 @@ it("asks the Daemon about Pi commands and MCP calls and blocks unless allowed", 
   expect(
     await reviewToolCall(bash, ui(JSON.stringify({ allow: true }))),
   ).toBeUndefined();
-  expect(asked).toEqual([{ title: PERMISSION_REVIEW, call: bash }]);
+  expect(
+    await reviewToolCall(powershell, ui(JSON.stringify({ allow: true }))),
+  ).toBeUndefined();
+  expect(asked).toEqual([
+    { title: PERMISSION_REVIEW, call: bash },
+    { title: PERMISSION_REVIEW, call: powershell },
+  ]);
+  expect(
+    await reviewToolCall(
+      powershell,
+      ui(JSON.stringify({ allow: false, message: "denied" })),
+    ),
+  ).toEqual({ block: true, reason: "denied" });
   expect(
     await reviewToolCall(
       { toolName: "mcp__computer__click", input: {} },
@@ -144,6 +169,80 @@ it("asks the Daemon about Pi commands and MCP calls and blocks unless allowed", 
     block: true,
     reason: "bash was not approved",
   });
+  expect(await reviewToolCall(powershell, ui(undefined))).toEqual({
+    block: true,
+    reason: "powershell was not approved",
+  });
+});
+
+it("registers the UTF-8 PowerShell override only on Windows", async () => {
+  const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+  const { POWERSHELL_UTF8_PREFIX, registerWindowsPowerShellTool } =
+    (await import(entry)) as {
+      POWERSHELL_UTF8_PREFIX: string;
+      registerWindowsPowerShellTool: (
+        pi: { registerTool?: (tool: Record<string, unknown>) => void },
+        options?: {
+          platform?: string;
+          cwd?: string;
+          operations?: {
+            exec: (
+              command: string,
+              cwd: string,
+              options: { onData: (data: Buffer) => void },
+            ) => Promise<{ exitCode: number }>;
+          };
+        },
+      ) => boolean;
+    };
+
+  const registered: Array<Record<string, unknown>> = [];
+  const fakePi = {
+    registerTool: (tool: Record<string, unknown>) => {
+      registered.push(tool);
+    },
+  };
+
+  expect(registerWindowsPowerShellTool(fakePi, { platform: "darwin" })).toBe(
+    false,
+  );
+  expect(registerWindowsPowerShellTool(fakePi, { platform: "linux" })).toBe(
+    false,
+  );
+  expect(registerWindowsPowerShellTool({}, { platform: "win32" })).toBe(false);
+  expect(registered).toEqual([]);
+
+  const executed: Array<{ command: string; cwd: string }> = [];
+  const ok = registerWindowsPowerShellTool(fakePi, {
+    platform: "win32",
+    cwd: "C:\\workspace",
+    operations: {
+      exec: async (command, cwd, { onData }) => {
+        executed.push({ command, cwd });
+        onData(Buffer.from("ok\n", "utf8"));
+        return { exitCode: 0 };
+      },
+    },
+  });
+  expect(ok).toBe(true);
+  expect(registered).toHaveLength(1);
+  const tool = registered[0];
+  expect(tool).toBeDefined();
+  if (!tool) throw new Error("expected powershell tool");
+  expect(tool.name).toBe("powershell");
+
+  const execute = tool.execute as (
+    toolCallId: string,
+    params: { command: string },
+  ) => Promise<unknown>;
+  const sample = "@'\nHello \u4f60\u597d\n'@ | teamhub message send --file -";
+  await execute("call_1", { command: sample });
+  expect(executed).toEqual([
+    {
+      command: `${POWERSHELL_UTF8_PREFIX}\n${sample}`,
+      cwd: "C:\\workspace",
+    },
+  ]);
 });
 
 it("synchronizes managed MCP servers dynamically and reports structured verdicts", async () => {
