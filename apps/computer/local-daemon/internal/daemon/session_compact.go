@@ -25,12 +25,13 @@ const (
 // execution Context. Its process is outside the resident table until done
 // closes, when it is parked back or retired.
 type sessionCompact struct {
-	id         string
-	agentID    string
-	contextKey string
-	startedAt  time.Time
-	cancel     context.CancelFunc
-	done       chan struct{}
+	id          string
+	agentID     string
+	runtimeType string
+	contextKey  string
+	startedAt   time.Time
+	cancel      context.CancelFunc
+	done        chan struct{}
 }
 
 // parkedSession is a parked native process taken out for one compaction.
@@ -81,7 +82,7 @@ func (d *Daemon) handleSessionCompact(ctx context.Context, stream transport.Stre
 	}
 	compactCtx, cancel := context.WithTimeout(ctx, sessionCompactTimeout)
 	entry := &sessionCompact{
-		id: request.CompactID, agentID: command.AgentID, contextKey: key, startedAt: receivedAt,
+		id: request.CompactID, agentID: command.AgentID, runtimeType: command.RuntimeType, contextKey: key, startedAt: receivedAt,
 		cancel: cancel, done: make(chan struct{}),
 	}
 	d.sessionCompactMu.Lock()
@@ -208,6 +209,10 @@ func sessionCompactForContext(contextKey string) func(*sessionCompact) bool {
 
 func sessionCompactForAgent(agentID string) func(*sessionCompact) bool {
 	return func(entry *sessionCompact) bool { return entry.agentID == agentID }
+}
+
+func sessionCompactForRuntime(runtimeType string) func(*sessionCompact) bool {
+	return func(entry *sessionCompact) bool { return entry.runtimeType == runtimeType }
 }
 
 func sessionCompactAll(*sessionCompact) bool { return true }

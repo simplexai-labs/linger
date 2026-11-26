@@ -514,3 +514,54 @@ func TestSessionCompactCodexAndClaudeSkipModelReadiness(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidateAntigravityResidentsCancelsOnlyAntigravityCompaction(t *testing.T) {
+	agySession := newFakeParkedSession(native.CompactResult{Outcome: "compacted"})
+	codexSession := newFakeParkedSession(native.CompactResult{Outcome: "compacted"})
+	d, stream, _ := sessionCompactFixture(t, nil, nil)
+	d.takeParkedSession = func(runtimeType, contextKey string) parkedSession {
+		switch {
+		case runtimeType == "antigravity" && contextKey == "ctx-agy":
+			return agySession
+		case runtimeType == "codex" && contextKey == "ctx-codex":
+			return codexSession
+		default:
+			return nil
+		}
+	}
+
+	agyCmd := sessionCompactCommand("compact-agy")
+	agyCmd.RuntimeType = "antigravity"
+	agyCmd.ExecutionContextKey = "ctx-agy"
+	codexCmd := sessionCompactCommand("compact-codex")
+	codexCmd.RuntimeType = "codex"
+	codexCmd.ExecutionContextKey = "ctx-codex"
+
+	if err := d.handleSessionCompact(context.Background(), stream, agyCmd); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.handleSessionCompact(context.Background(), stream, codexCmd); err != nil {
+		t.Fatal(err)
+	}
+	<-agySession.started
+	<-codexSession.started
+
+	d.InvalidateAntigravityResidents("credentials_changed")
+
+	if payload := waitForSessionCompacted(t, stream, "compact-agy"); payload["outcome"] != "canceled" {
+		t.Fatalf("antigravity compaction payload=%v, want canceled", payload)
+	}
+	select {
+	case <-codexSession.finished:
+		t.Fatal("unrelated Codex compaction was canceled by InvalidateAntigravityResidents")
+	default:
+	}
+	if !d.sessionCompactInFlight("ctx-codex") {
+		t.Fatal("expected Codex compaction to remain in flight")
+	}
+
+	close(codexSession.release)
+	if payload := waitForSessionCompacted(t, stream, "compact-codex"); payload["outcome"] != "compacted" {
+		t.Fatalf("codex compaction payload=%v, want compacted", payload)
+	}
+}

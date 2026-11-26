@@ -29,10 +29,12 @@ const maxAntigravityHookBytes = 1 << 20
 // AntigravityHookRequest holds the fields Antigravity passes on stdin to
 // PreInvocation and Stop hooks that the Daemon consumes.
 type AntigravityHookRequest struct {
-	HookEventName  string `json:"hookEventName"`
-	ConversationID string `json:"conversationId"`
-	InvocationNum  int    `json:"invocationNum"`
-	FullyIdle      *bool  `json:"fullyIdle,omitempty"`
+	HookEventName   string `json:"hookEventName"`
+	ConversationID  string `json:"conversationId"`
+	InvocationNum   int    `json:"invocationNum"`
+	FullyIdle       *bool  `json:"fullyIdle,omitempty"`
+	TranscriptPath  string `json:"transcriptPath,omitempty"`
+	InitialNumSteps *int   `json:"initialNumSteps,omitempty"`
 }
 
 // AntigravityInjectStep injects one step before Antigravity's next model

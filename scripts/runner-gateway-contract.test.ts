@@ -1406,8 +1406,13 @@ describe("Runner Gateway contract", () => {
     ).toThrow("Invalid Runner Gateway envelope");
   });
 
-  it("accepts native session compaction only for a parked Codex, Claude, or Pi process", () => {
-    for (const runtimeType of ["codex", "claude", "pi"] as const) {
+  it("accepts native session compaction only for a parked Codex, Claude, Pi, or Antigravity process", () => {
+    for (const runtimeType of [
+      "codex",
+      "claude",
+      "pi",
+      "antigravity",
+    ] as const) {
       expect(
         parseAgentToDaemonEnvelope({
           ...withoutProperty(sessionCompact, "instructions"),
@@ -1420,7 +1425,7 @@ describe("Runner Gateway contract", () => {
       });
     }
     for (const invalid of [
-      { ...sessionCompact, runtime_type: "antigravity" },
+      { ...sessionCompact, runtime_type: "other" },
       { ...sessionCompact, protocol_version: "1.2" },
       { ...sessionCompact, instructions: "" },
       { ...sessionCompact, instructions: "x".repeat(8_193) },

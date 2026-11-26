@@ -597,6 +597,15 @@ for a browser sign-in when signed out.
   changes, logout or re-login diagnostics transitions, Agent stop or removal,
   and Daemon shutdown. Cancelled, timed-out, failed, or background-continuation
   turns never park and confirm process-tree exit.
+- Idle session compaction (`session_compact`, Computer 0.66.0 or later) takes a
+  parked Antigravity process (never an unadopted pre-start), rejects every
+  `session/request_permission` during the compaction turn, submits
+  `/compact <instructions>` over ACP while its `mcpFront` stays unbound, and
+  verifies compaction deterministically from `CHECKPOINT` entries appended to
+  the session's JSONL transcript (never from model prose). It records the first
+  positive `usage_update` `used` value as `pre_tokens`, parks the process back
+  only when the turn ends cleanly with no open tool calls and a valid release
+  fence, and otherwise retires the process before returning.
 - Managed Antigravity hooks (`--add-dir`) canonicalize their temp directory path
   via symlink resolution and keep the loopback callback URL unquoted on Windows
   (wrapping the full command in outer quotes only when the Daemon executable

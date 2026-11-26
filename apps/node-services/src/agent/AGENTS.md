@@ -265,6 +265,11 @@ take precedence.
   (`FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION`), because older Computers
   reject `"pi"` in `SessionCompact.runtime_type` and close the connection.
   Codex and Claude session compaction stay enabled regardless of that gate.
+- Antigravity idle session compaction (`execute` `session_compact` with
+  `runtime_type: "antigravity"`) goes only to Computer 0.66.0 or later
+  (`FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION`), because Computers
+  on 0.65.0 and earlier reject `"antigravity"` in `SessionCompact.runtime_type`
+  and close the connection.
 - Default unit, integration, and fixture smoke tests use deterministic adapters
   and do not call a live model provider. Explicitly named live suites such as
   `smoke:local-runner:live` may use an authenticated provider and must remain

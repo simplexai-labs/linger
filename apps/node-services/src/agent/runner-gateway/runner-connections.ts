@@ -33,6 +33,7 @@ import {
   FIRST_LOCAL_MODELS_ENGINE_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
   FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
+  FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
   type LocalPlacementRequirement,
@@ -886,6 +887,11 @@ export class RunnerConnections {
           isComputerVersionAtLeast(
             connection.hello.daemon_version,
             FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
+          )) ||
+        (runtimeType === "antigravity" &&
+          isComputerVersionAtLeast(
+            connection.hello.daemon_version,
+            FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
           ))) &&
       connection.hello.runtime_diagnostics.some(
         ({ type, status }) => type === runtimeType && status === "ready",

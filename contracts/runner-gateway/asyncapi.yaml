@@ -83,11 +83,13 @@ info:
     whose service_features names local_models_concurrency_probe, advertised to
     Computer 0.64.0 and later.
     execute with kind session_compact compacts the native session of the process
-    parked for a Context with the Runtime's own compaction (Codex, Claude, or
-    Pi), answering executed with kind session_compact (or no_process when no
-    process is parked). Pi session compaction (runtime_type "pi") is sent only
-    to Computer 0.65.0 and later, because older Computers reject "pi" in
-    SessionCompact.runtime_type and close the connection.
+    parked for a Context with the Runtime's own compaction (Codex, Claude, Pi,
+    or Antigravity), answering executed with kind session_compact (or no_process
+    when no process is parked). Pi session compaction (runtime_type "pi") is
+    sent only to Computer 0.65.0 and later, and Antigravity session compaction
+    (runtime_type "antigravity") is sent only to Computer 0.66.0 and later,
+    because older Computers reject those runtime_type values and close the
+    connection.
     execute with kind model_source reads or switches the Computer's model
     source. A BYOK input names its address as base_url, path and endpoint
     with an explicit protocol, and the Computer sends one request there; the

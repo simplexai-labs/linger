@@ -438,9 +438,11 @@ func (d *Daemon) UpdateRuntimeInventory(ctx context.Context, runtimes []string, 
 }
 
 // InvalidateAntigravityResidents cancels in-flight Antigravity provider
-// prepares and stops parked Antigravity residents for reason.
+// prepares and session compactions, and stops parked Antigravity residents
+// for reason.
 func (d *Daemon) InvalidateAntigravityResidents(reason string) {
 	d.cancelProviderPrepares(providerPrepareForRuntime("antigravity"), reason)
+	d.cancelSessionCompacts(sessionCompactForRuntime("antigravity"), reason)
 	if err := native.StopParkedAntigravityResidentsForCredentials(); err != nil {
 		slog.Warn("runner.resident.stop_failed", "provider", "antigravity", "reason", reason, "error", err)
 	}

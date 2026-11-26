@@ -18,14 +18,16 @@ type CompactResult struct {
 	Reason    string
 }
 
-// ParkedSession is a parked Codex, Claude, or Pi process taken out of its
-// resident table for one compaction, so no Run can take it meanwhile.
+// ParkedSession is a parked Codex, Claude, Pi, or Antigravity process taken
+// out of its resident table for one compaction, so no Run can take it
+// meanwhile.
 type ParkedSession struct {
-	codex  *codexProcess
-	claude *claudeProcess
-	pi     *piProcess
-	fence  releaseFence
-	logger *slog.Logger
+	codex       *codexProcess
+	claude      *claudeProcess
+	pi          *piProcess
+	antigravity *acpProcess
+	fence       releaseFence
+	logger      *slog.Logger
 }
 
 // TakeParkedSession takes the process parked for an execution Context, or
@@ -41,6 +43,8 @@ func TakeParkedSession(runtimeType, contextKey string) *ParkedSession {
 		session.claude, session.fence, taken = claudeResidents.takeContext(contextKey, session.logger)
 	case "pi":
 		session.pi, session.fence, taken = piResidents.takeContext(contextKey, session.logger)
+	case "antigravity":
+		session.antigravity, session.fence, taken = antigravityResidents.takeContext(contextKey, session.logger)
 	}
 	if !taken {
 		return nil
@@ -60,6 +64,9 @@ func (s *ParkedSession) CompactWithPrepare(ctx context.Context, instructions str
 			return compactContextResult(ctx)
 		}
 		return s.compactPi(ctx, instructions, prepare)
+	}
+	if s.antigravity != nil {
+		return s.compactAntigravity(ctx, instructions)
 	}
 	var status, reason string
 	var compactions int64

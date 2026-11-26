@@ -89,6 +89,10 @@ export const FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION = "0.64.0";
 // connection, so Pi session compaction is gated to this release and later.
 export const FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION = "0.65.0";
 
+// The first release that decodes `"antigravity"` in `SessionCompact.runtime_type`.
+// Computers on 0.65.0 and earlier reject `"antigravity"` and close the connection.
+export const FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION = "0.66.0";
+
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 /** Source builds report `dev` and follow the current wire contract. */
