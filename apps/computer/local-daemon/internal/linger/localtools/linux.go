@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -105,7 +106,10 @@ func (op *operation) linuxComputerCall(ctx context.Context, name string, args js
 		}
 	}
 	if !action.opens() {
-		if err := op.checkWindow(lease); err != nil {
+		if err := op.checkWindow(lease, action); err != nil {
+			if errors.Is(err, errNoActiveWindow) {
+				return op.finishDesktop(lease, err, nil, map[string]any{}, nil)
+			}
 			return op.finishDesktop(lease, err, nil, map[string]any{}, readWindowState(lease))
 		}
 	}
@@ -179,13 +183,17 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 	}
 	shot := func() ([]byte, error) { return lease.Action("screenshot") }
 	if !actions[0].opens() {
-		if err := op.checkWindow(lease); err != nil {
+		if err := op.checkWindow(lease, actions[0]); err != nil {
+			if errors.Is(err, errNoActiveWindow) {
+				return op.finishDesktop(lease, err, nil, map[string]any{}, nil)
+			}
 			return op.finishDesktop(lease, err, nil, map[string]any{}, readWindowState(lease))
 		}
 	}
 	window, _ := lease.Action("active-window")
 	var mark launchMark
 	done, stopped := 0, ""
+	stoppedNoActiveWindow := false
 	for i, action := range actions {
 		if action.opens() {
 			var markErr error
@@ -205,13 +213,19 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 		}
 		// A launched window or an opened URL must appear before the next step
 		// can reach it; other input needs a short pause for the application to
-		// process it.
+		// process it. Overview toggle keys (Super/Escape) need a slightly longer
+		// settle so GNOME Shell processes the async XTest event before we check
+		// OverviewActive / _NET_ACTIVE_WINDOW.
 		var waitErr error
 		opened := true
 		if action.opens() {
 			opened, waitErr = awaitWindow(lease, mark)
 		} else {
-			waitErr = sleepContext(lease.ToolContext(), batchPause)
+			pause := batchPause
+			if action.isOverviewEscapeKey() && overviewSettle > pause {
+				pause = overviewSettle
+			}
+			waitErr = linuxSleep(lease.ToolContext(), pause)
 		}
 		if waitErr != nil {
 			// Observation sends no input; the next step is simply not sent.
@@ -223,9 +237,23 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 			err = errURLNotOpened
 			break
 		}
-		current, _ := lease.Action("active-window")
+		current, activeErr := lease.Action("active-window")
+		if activeErr != nil {
+			stopped = fmt.Sprintf("reading the active window after step %d failed (%v); observe before continuing", done, activeErr)
+			break
+		}
 		if !opened {
 			stopped = "the application from step " + strconv.Itoa(done) + " did not become the active window; observe before continuing"
+			break
+		}
+		if activeWindowEmpty(current) && actions[i+1].requiresActiveWindow() {
+			stopped = noActiveWindowStopped
+			stoppedNoActiveWindow = true
+			break
+		}
+		if action.isOverviewToggleKey() && actions[i+1].requiresActiveWindow() {
+			stopped = fmt.Sprintf("NO_ACTIVE_WINDOW: bare %s toggles the desktop overview/launcher after step %d; observe before sending further keyboard input", action.values[0], done)
+			stoppedNoActiveWindow = true
 			break
 		}
 		if action.command != "open" && action.command != "run" && !bytes.Equal(current, window) {
@@ -237,7 +265,16 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 	var output []byte
 	var state *windowState
 	report := map[string]any{"completed_steps": done, "total_steps": len(actions)}
-	if done > 0 && !errors.Is(err, errOutcomeUnknown) {
+	if stoppedNoActiveWindow {
+		// Capture the desktop directly without reading a hidden or stale
+		// window state, and preserve op.linuxWindow so returning to the
+		// previously observed window does not trigger WINDOW_CHANGED.
+		if frame, shotErr := shot(); shotErr == nil {
+			output = frame
+		} else {
+			report["observation"] = "the input was sent, but the screen could not be observed: " + shotErr.Error()
+		}
+	} else if done > 0 && !errors.Is(err, errOutcomeUnknown) {
 		launched := err == nil && done == len(actions) && actions[done-1].opens()
 		output, state = observe(lease, shot, launched, mark, report)
 		if launched && actions[done-1].command == "open" && report["window_opened"] == false {
@@ -262,18 +299,95 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 // after another window became active, such as one the user clicked.
 var errWindowChanged = errors.New("WINDOW_CHANGED: another window became active since your last observation, so no input was sent; the active window is shown below, so act on it or bring back the window you meant")
 
-// checkWindow refuses input when the active window is not the one in the
-// Agent's last observation. Before any observation there is nothing to
-// compare, and an action that opens a window needs no check.
-func (op *operation) checkWindow(lease *localLinuxLease) error {
-	if op.linuxWindow == nil {
+// errNoActiveWindow refuses raw keyboard or text input when no X11 window is
+// active or GNOME's Activities Overview is open, so xdotool cannot send keys
+// into GNOME Shell's search box instead of an application window.
+var errNoActiveWindow = fmt.Errorf("NO_ACTIVE_WINDOW: no X11 window is active (the desktop may be in the GNOME Activities overview or unfocused); click a target window or press Escape and observe again: %w", errNotSent)
+
+// noActiveWindowStopped reports a mid-batch stop in run_actions after earlier
+// steps already ran, avoiding errNotSent / outcome="not_dispatched" for a
+// partially executed batch.
+const noActiveWindowStopped = "NO_ACTIVE_WINDOW: no X11 window is active (the desktop may be in the GNOME Activities overview or unfocused), so no further input was sent; click a target window or press Escape and observe again"
+
+// activeWindowEmpty reports whether an X11 active-window reply has no window
+// id (empty output or X11 None "0").
+func activeWindowEmpty(window []byte) bool {
+	trimmed := bytes.TrimSpace(window)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("0"))
+}
+
+// isOverviewToggleKeyName reports whether key is a bare Super/Meta/Win key name
+// that toggles the desktop overview or launcher. Escape is excluded because
+// focused applications such as editors and dialogs use it internally.
+func isOverviewToggleKeyName(key string) bool {
+	switch strings.ToLower(key) {
+	case "super", "super_l", "super_r", "win", "meta":
+		return true
+	default:
+		return false
+	}
+}
+
+// allowKeyWithoutActiveWindow reports whether key is a bare overview-dismiss
+// or overview-toggle key safe to send when no X11 window is active. Chords
+// (such as Super+l or ctrl+a) and ordinary keys (such as Return) are refused
+// because GNOME Shell routes them to the Activities Overview search box or
+// launches search results.
+func allowKeyWithoutActiveWindow(key string) bool {
+	switch strings.ToLower(key) {
+	case "escape", "esc":
+		return true
+	default:
+		return isOverviewToggleKeyName(key)
+	}
+}
+
+// isOverviewToggleKey reports whether an action is a bare Super/Meta/Win
+// press_key that toggles the desktop overview or launcher.
+func (a desktopAction) isOverviewToggleKey() bool {
+	return a.command == "key" && len(a.values) == 1 && isOverviewToggleKeyName(a.values[0])
+}
+
+// isOverviewEscapeKey reports whether an action is a bare Escape or Super
+// press_key intended to dismiss or toggle GNOME's Activities Overview.
+func (a desktopAction) isOverviewEscapeKey() bool {
+	return a.command == "key" && len(a.values) == 1 && allowKeyWithoutActiveWindow(a.values[0])
+}
+
+// requiresActiveWindow reports whether an action sends raw keyboard or text
+// input that must target a focused X11 application window.
+func (a desktopAction) requiresActiveWindow() bool {
+	switch a.command {
+	case "type":
+		return true
+	case "key":
+		return !a.isOverviewEscapeKey()
+	default:
+		return false
+	}
+}
+
+// checkWindow refuses raw keyboard/text input when no X11 window is active,
+// allows bare overview-dismiss/toggle keys when no window is active so an
+// Agent can exit Overview even after observing a previous window, and refuses
+// other input when the active window is not the one in the Agent's last
+// observation. Before any observation non-keyboard actions need no comparison,
+// and an action that opens a window needs no check.
+func (op *operation) checkWindow(lease *localLinuxLease, action desktopAction) error {
+	if !action.requiresActiveWindow() && op.linuxWindow == nil {
 		return nil
 	}
 	current, err := lease.Action("active-window")
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(current, op.linuxWindow) {
+	if action.requiresActiveWindow() && activeWindowEmpty(current) {
+		return errNoActiveWindow
+	}
+	if action.isOverviewEscapeKey() && activeWindowEmpty(current) {
+		return nil
+	}
+	if op.linuxWindow != nil && !bytes.Equal(current, op.linuxWindow) {
 		return errWindowChanged
 	}
 	return nil
@@ -314,13 +428,18 @@ func observe(lease *localLinuxLease, shot func() ([]byte, error), launched bool,
 	return frame, state
 }
 
-var batchPause = 150 * time.Millisecond
+var (
+	batchPause     = 150 * time.Millisecond
+	overviewSettle = 250 * time.Millisecond
+	// linuxSleep pauses between run_actions steps; a test seam.
+	linuxSleep = sleepContext
+)
 
 func (op *operation) finishDesktop(lease *localLinuxLease, err error, screen []byte, report map[string]any, state *windowState) (json.RawMessage, error) {
 	// An input with an unknown outcome stays pending in the action journal,
 	// which blocks later input until cleanup confirms it.
 	confirmed := !errors.Is(err, errOutcomeUnknown)
-	if state != nil {
+	if state != nil && (!activeWindowEmpty(state.windowID) || activeWindowEmpty(op.linuxWindow)) {
 		op.linuxWindow = state.windowID
 	}
 	lease.Finish(confirmed)

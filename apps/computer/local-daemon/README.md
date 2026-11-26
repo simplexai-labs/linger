@@ -1091,6 +1091,27 @@ user clicked, became active since. The result shows the active window, and the
 next input to it goes through. `open_application` and `open_url` are not
 checked, because they bring up a window of their own.
 
+When no X11 window is active—or GNOME Shell's `OverviewActive` D-Bus property
+is true, as in the Activities Overview even after a single `Escape` restores
+`_NET_ACTIVE_WINDOW` to a background window—`type_text` and non-exempt
+`press_key` inputs (including `Return` and chords such as `Super+l` or `ctrl+a`)
+fail with `NO_ACTIVE_WINDOW` before any input is sent (`not_dispatched`) for
+single-step calls and before step 1 of `run_actions`, preserving the last
+observed window so returning to it does not trigger `WINDOW_CHANGED`. Mid-batch
+in `run_actions`, after earlier steps have already run, hitting an empty active
+window stops the batch early with `completed_steps`, `total_steps`, a desktop
+screenshot, and a `NO_ACTIVE_WINDOW` `stopped` reason rather than reporting
+`not_dispatched`, while still preserving the last observed window. Bare
+overview-dismiss and toggle keys (`Escape`, `Esc`, `Super`, `Super_L`,
+`Super_R`, `win`, `meta`) remain allowed while no window is active—including
+immediately after observing another window—alongside pointer, observation,
+launch, and semantic element tools. In `run_actions`, bare overview keys wait a
+250 ms settle pause before the inter-step active-window check so GNOME Shell
+finishes toggling Overview before the next step runs; bare `Super`/`Meta`/`Win`
+keys also unconditionally stop the batch before any subsequent keyboard or text
+step so the Agent observes the overview/launcher state regardless of compositor
+latency (while `Escape` inside a still-focused window continues normally).
+
 GTK4 applications report their controls as sensitive rather than enabled, and
 on X11 report every control at the screen origin. The driver counts either
 state as enabled, and clicks a GTK4 control at the X11 window position plus
