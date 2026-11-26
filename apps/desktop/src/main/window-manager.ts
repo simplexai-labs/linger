@@ -72,14 +72,7 @@ export interface WindowManagerOptions {
 const TITLEBAR_HEIGHT = 40;
 const REVEAL_FALLBACK_MS = 1_500;
 const CANVAS = "#f6f6f6";
-const COMMANDS = new Set<ShellCommand>([
-  "back",
-  "forward",
-  "reload",
-  "minimize",
-  "maximize",
-  "close",
-]);
+const COMMANDS = new Set<ShellCommand>(["minimize", "maximize", "close"]);
 
 const chrome = (platform: NodeJS.Platform): BaseWindowConstructorOptions => {
   if (platform === "darwin")
@@ -364,6 +357,13 @@ export class WindowManagerModule implements Module {
       "blur",
     ] as const)
       window.on(event as "focus", () => this.#pushState());
+    // Keyboard focus belongs to the page: without this, a focused window can
+    // hand it to the title bar's first control, which then shows its focus
+    // ring and swallows typing.
+    if (titlebar)
+      window.on("focus", () => {
+        if (!content.webContents.isDestroyed()) content.webContents.focus();
+      });
 
     if (titlebar) this.#guardTitlebar(titlebar.webContents);
     this.#guardContent(content.webContents);
@@ -454,10 +454,7 @@ export class WindowManagerModule implements Module {
     ) {
       return true;
     }
-    if (serverUrl !== previous) {
-      ctx.config.update({ serverUrl });
-      this.#pushState();
-    }
+    if (serverUrl !== previous) ctx.config.update({ serverUrl });
     if (moved) ctx.bus.emit("server.moved", movedFrom!, serverUrl);
     if (changed) ctx.bus.emit("server.changed", serverUrl);
     setImmediate(() => {
@@ -465,7 +462,6 @@ export class WindowManagerModule implements Module {
         ...(movedFrom !== undefined ? { movedFrom } : {}),
         reason,
       });
-      this.#pushState();
     });
     return true;
   }
@@ -576,14 +572,8 @@ export class WindowManagerModule implements Module {
 
   #titlebarState(): TitlebarState {
     const window = this.#window;
-    const contents = this.#content?.webContents;
-    const serverUrl = this.#serverUrl();
     return {
       platform: process.platform as ShellPlatform,
-      title: serverUrl ? new URL(serverUrl).host : "",
-      canGoBack: contents?.navigationHistory.canGoBack() ?? false,
-      canGoForward: contents?.navigationHistory.canGoForward() ?? false,
-      loading: contents?.isLoading() ?? false,
       maximized: window?.isMaximized() ?? false,
       focused: window?.isFocused() ?? false,
     };
@@ -604,20 +594,8 @@ export class WindowManagerModule implements Module {
 
   #command(name: ShellCommand): void {
     const window = this.#window;
-    const history = this.#content?.webContents.navigationHistory;
     if (!window) return;
     switch (name) {
-      case "back":
-        if (history?.canGoBack()) history.goBack();
-        break;
-      case "forward":
-        if (history?.canGoForward()) history.goForward();
-        break;
-      case "reload":
-        if (this.#content?.webContents.getURL().startsWith(OFFLINE_ORIGIN))
-          this.loadServer("retry");
-        else this.#content?.webContents.reload();
-        break;
       case "minimize":
         window.minimize();
         break;
@@ -761,13 +739,6 @@ export class WindowManagerModule implements Module {
         ms: Date.now() - startedAt,
       });
     });
-    for (const event of [
-      "did-navigate",
-      "did-navigate-in-page",
-      "did-start-loading",
-      "did-stop-loading",
-    ] as const)
-      contents.on(event as "did-start-loading", () => this.#pushState());
     // A new page in the window no longer knows the previews of the last one.
     contents.on("did-navigate", () => this.#previews.closeAll());
     contents.on("render-process-gone", () => this.#previews.closeAll());
