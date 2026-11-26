@@ -30,6 +30,7 @@ type Service struct {
 	collaboration   *collaboration.Service
 	agentManagement roomagent.AgentManagement
 	logger          *slog.Logger
+	anotherMeState  anotherMePlacementState
 }
 
 // New builds the Service. agentManagement may be nil when no Agent Service

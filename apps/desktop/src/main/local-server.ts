@@ -101,6 +101,10 @@ import { humanTenant, type EnrollmentModule } from "./enrollment.js";
 import { compareVersions } from "./update-manifest.js";
 import { systemProxy } from "./system-proxy.js";
 import type { WindowManagerModule } from "./window-manager.js";
+import type {
+  DefaultWorkspaceGrantFailure,
+  WorkspaceGrantsModule,
+} from "./workspace-grants.js";
 import {
   installerKeyChanges,
   savedProviderKeys,
@@ -3875,6 +3879,7 @@ export class LocalServerModule implements Module {
     const timeout = this.#options.agentsTimeoutMs ?? AGENTS_TIMEOUT_MS;
     const pollStartedAt = Date.now();
     const deadline = pollStartedAt + timeout;
+    let lastBlockerKey: string | undefined;
     for (;;) {
       signal.throwIfAborted();
       // A Computer service that cannot start never connects; waiting out the
@@ -3906,7 +3911,10 @@ export class LocalServerModule implements Module {
       // The Another Me has an Agent once the server created it; there is no
       // status to wait for.
       const anotherMe = (await get(`${base}/another-me`)) as
-        | { agent_actor_id?: string }
+        | {
+            agent_actor_id?: string;
+            placement_blocker?: AnotherMePlacementBlocker;
+          }
         | undefined;
       if (!anotherMe) return;
       if (anotherMe.agent_actor_id) {
@@ -3940,8 +3948,47 @@ export class LocalServerModule implements Module {
           this.#advance("agents", 0.6, "Adding your starter agents…");
         }
       } else {
+        const blocker = anotherMe.placement_blocker;
+        if (blocker?.reason) {
+          const blockerRuntimes = blocker.runtimes?.map(
+            (runtime) =>
+              `${runtime.type ?? ""}:${runtime.status ?? ""}:${runtime.model_count ?? 0}`,
+          );
+          const blockerKey = [
+            blocker.reason,
+            blocker.computer_id ?? "",
+            (blockerRuntimes ?? []).join(","),
+          ].join("|");
+          if (blockerKey !== lastBlockerKey) {
+            lastBlockerKey = blockerKey;
+            this.#ctx?.log.warn("local_server.another_me_placement_blocked", {
+              reason: blocker.reason,
+              ...(blocker.computer_id
+                ? { computer_id: blocker.computer_id }
+                : {}),
+              ...(blockerRuntimes?.length ? { runtimes: blockerRuntimes } : {}),
+            });
+          }
+        }
+        const defaultGrantFailure = this.#ctx
+          ?.get<WorkspaceGrantsModule>("WorkspaceGrants")
+          .defaultFailure();
+        const hasWritableGrant =
+          this.#ctx?.config
+            .get()
+            .workspaceGrants.some((grant) => grant.access === "read_write") ??
+          false;
+        if (defaultGrantFailure && !hasWritableGrant) {
+          this.#ctx?.log.warn("local_server.default_workspace_grant_failed", {
+            directory: defaultGrantFailure.directory,
+            error: defaultGrantFailure.error,
+            ...(blocker?.reason ? { blocker_reason: blocker.reason } : {}),
+          });
+          throw new Error(defaultWorkspaceGrantFailed(defaultGrantFailure));
+        }
         if (Date.now() >= deadline) {
-          // Say what the server is missing, as this computer last reported it.
+          // Say what the server is missing, combining the server's placement
+          // blocker with what this computer last reported.
           const computers = (await get(`${base}/local-computers`).catch(
             () => undefined,
           )) as { items?: ReportedComputer[] } | undefined;
@@ -3952,16 +3999,30 @@ export class LocalServerModule implements Module {
           this.#ctx?.log.warn("local_server.another_me_missing", {
             computer_id: computerId,
             computer_status: computer?.status,
-            runtimes: computer?.runtimes?.map(
-              (runtime) =>
-                `${runtime.type}:${runtime.status}:${runtime.models?.length ?? 0}`,
-            ),
+            ...(blocker?.reason ? { blocker_reason: blocker.reason } : {}),
+            ...(blocker?.computer_id
+              ? { blocker_computer_id: blocker.computer_id }
+              : {}),
+            runtimes:
+              blocker?.runtimes?.map(
+                (runtime) =>
+                  `${runtime.type ?? ""}:${runtime.status ?? ""}:${runtime.model_count ?? 0}`,
+              ) ??
+              computer?.runtimes?.map(
+                (runtime) =>
+                  `${runtime.type}:${runtime.status}:${runtime.models?.length ?? 0}`,
+              ),
           });
           throw new Error(
-            anotherMeMissing(computers ? computer : null, timeout),
+            anotherMeMissing(
+              computers ? computer : null,
+              timeout,
+              blocker,
+              hasWritableGrant ? undefined : defaultGrantFailure,
+            ),
           );
         }
-        this.#advance("agents", 0.2, "Preparing your Another Me…");
+        this.#advance("agents", 0.2, anotherMeProgressMessage(blocker));
       }
       await delay(
         pollDelayMs(pollStartedAt, this.#options.pollMs ?? 1_000),
@@ -4813,6 +4874,45 @@ const RUNTIME_STATES: Record<string, string> = {
   unknown: "not checked yet",
 };
 
+// Server-reported diagnostic explaining why TeamHub skipped or failed creating
+// the Human's Another Me on GET /v0/tenants/{tenantId}/another-me.
+export interface AnotherMePlacementRuntimeStatus {
+  readonly type?: string;
+  readonly status?: string;
+  readonly model_count?: number;
+  readonly message?: string;
+}
+
+export interface AnotherMePlacementBlocker {
+  readonly reason?: string;
+  readonly computer_id?: string;
+  readonly runtimes?: readonly AnotherMePlacementRuntimeStatus[];
+}
+
+const anotherMeProgressMessage = (
+  blocker: AnotherMePlacementBlocker | undefined,
+): string => {
+  switch (blocker?.reason) {
+    case "no_online_computer":
+      return "Waiting for this computer to connect…";
+    case "computer_upgrade_required":
+      return "Waiting for an updated Computer service…";
+    case "no_writable_workspace_grant":
+      return "Waiting for a writable workspace folder…";
+    case "no_ready_runtime_with_models":
+      return "Waiting for a signed-in AI runtime…";
+    case "create_failed":
+      return "Retrying Another Me setup…";
+    default:
+      return "Preparing your Another Me…";
+  }
+};
+
+export const defaultWorkspaceGrantFailed = (
+  failure: DefaultWorkspaceGrantFailure,
+): string =>
+  `Linger could not create its default workspace folder (${failure.directory}): ${failure.error.replace(/[.\s]+$/, "")}. Choose a writable folder in Linger Settings, then try again.`;
+
 // Why setup gave up on the Another Me. The server creates it once this
 // computer is online, shares a writable folder and reports a signed-in
 // runtime with a model; `computer` is what the server last heard from this
@@ -4833,13 +4933,63 @@ export function computerNotOnline(
   return "This computer did not come online on Linger.";
 }
 
+const formatMissingRuntimes = (
+  runtimes: readonly {
+    readonly type?: string;
+    readonly status?: string;
+    readonly message?: string;
+  }[],
+): string => {
+  const found = runtimes.map((runtime) => {
+    const name = RUNTIME_NAMES[runtime.type ?? ""] ?? runtime.type;
+    const state =
+      runtime.status === "ready"
+        ? "signed in but reports no models"
+        : (RUNTIME_STATES[runtime.status ?? ""] ?? runtime.status);
+    return `${name}: ${state}${runtime.message ? ` (${runtime.message})` : ""}`;
+  });
+  return [
+    "No signed-in AI runtime is reported by this computer.",
+    ...(found.length ? [`It found ${found.join("; ")}.`] : []),
+    "Install Codex or Claude Code and sign in to it in a terminal (codex login, or claude), then restart Linger and try again.",
+  ].join(" ");
+};
+
 export const anotherMeMissing = (
   computer: ReportedComputer | undefined | null,
   timeoutMs: number,
+  blocker?: AnotherMePlacementBlocker,
+  defaultGrantFailure?: DefaultWorkspaceGrantFailure,
 ): string => {
   const minutes = Math.max(1, Math.round(timeoutMs / 60_000));
   const waited = `Your Another Me was not created after ${minutes} minute${minutes === 1 ? "" : "s"}. The server creates it once this computer is connected with a signed-in AI runtime (Codex, Claude Code or Pi).`;
   const reason = ((): string => {
+    switch (blocker?.reason) {
+      case "no_online_computer":
+        return "The server sees this computer as offline: its Computer service is not connected. computer-daemon.log in the logs says why.";
+      case "computer_upgrade_required":
+        return "This computer's Computer service is too old for the server. Update Linger, then try again.";
+      case "no_writable_workspace_grant":
+        return defaultGrantFailure
+          ? defaultWorkspaceGrantFailed(defaultGrantFailure)
+          : "This computer shares no folder that agents can write to.";
+      case "no_ready_runtime_with_models":
+        return formatMissingRuntimes(
+          blocker.runtimes?.length
+            ? blocker.runtimes
+            : (computer?.runtimes ?? []),
+        );
+      case "create_failed":
+        return "This computer reports a signed-in runtime, but the server did not create the Another Me; the server log says why (another_me.create_failed).";
+    }
+    if (
+      defaultGrantFailure &&
+      (!computer ||
+        !computer.workspace_grants?.some(
+          (grant) => grant.mode === "workspace-write",
+        ))
+    )
+      return defaultWorkspaceGrantFailed(defaultGrantFailure);
     if (computer === null)
       return "Linger could not read this computer's status from the server.";
     if (!computer)
@@ -4861,19 +5011,7 @@ export const anotherMeMissing = (
       )
     )
       return "This computer reports a signed-in runtime, but the server did not create the Another Me; the server log says why (another_me.create_failed).";
-    const found = runtimes.map((runtime) => {
-      const name = RUNTIME_NAMES[runtime.type ?? ""] ?? runtime.type;
-      const state =
-        runtime.status === "ready"
-          ? "signed in but reports no models"
-          : (RUNTIME_STATES[runtime.status ?? ""] ?? runtime.status);
-      return `${name}: ${state}${runtime.message ? ` (${runtime.message})` : ""}`;
-    });
-    return [
-      "No signed-in AI runtime is reported by this computer.",
-      ...(found.length ? [`It found ${found.join("; ")}.`] : []),
-      "Install Codex or Claude Code and sign in to it in a terminal (codex login, or claude), then restart Linger and try again.",
-    ].join(" ");
+    return formatMissingRuntimes(runtimes);
   })();
   return `${waited}\n${reason}`;
 };

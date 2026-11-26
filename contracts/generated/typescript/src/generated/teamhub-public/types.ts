@@ -276,7 +276,7 @@ export interface paths {
     };
     /**
      * Read the current Human's Another Me and its Chat.
-     * @description Both fields are absent until the Human's Computer first comes online with a ready Runtime and a writable workspace, which creates the Another Me.
+     * @description Both agent_actor_id and room_id are absent until the Human's Computer first comes online with a ready Runtime and a writable workspace, which creates the Another Me. While absent, placement_blocker reports why TeamHub could not place or create it on the Human's registered Local Computers.
      */
     get: operations["getAnotherMe"];
     put?: never;
@@ -4555,11 +4555,35 @@ export interface components {
       consecutive_failures: number;
       reason: components["schemas"]["AnotherMeBackgroundFailureReason"];
     };
-    /** @description The Human's Another Me and its live direct Chat. Empty until the Another Me exists; room_id is also absent while the Chat is being deleted. */
+    /**
+     * @description Why TeamHub skipped or failed creating the Human's Another Me on their Local Computers. Clients treat an unknown value as unknown.
+     * @enum {string}
+     */
+    AnotherMePlacementBlockerReason:
+      | "no_online_computer"
+      | "computer_upgrade_required"
+      | "no_writable_workspace_grant"
+      | "no_ready_runtime_with_models"
+      | "create_failed";
+    AnotherMePlacementRuntimeStatus: {
+      type: components["schemas"]["LocalRuntimeType"];
+      status: components["schemas"]["LocalRuntimeDiagnosticStatus"];
+      model_count: number;
+      message?: string;
+    };
+    /** @description Present while the Human has no Another Me yet and TeamHub has a known reason it cannot place or create one on the Human's Local Computers. Absent once the Another Me exists or before any Local Computer is registered for the Human. */
+    AnotherMePlacementBlocker: {
+      reason: components["schemas"]["AnotherMePlacementBlockerReason"];
+      computer_id?: components["schemas"]["Id"];
+      /** @description Runtime diagnostics last reported by the candidate Computer when placement is blocked because no Runtime is ready with models. */
+      runtimes?: components["schemas"]["AnotherMePlacementRuntimeStatus"][];
+    };
+    /** @description The Human's Another Me and its live direct Chat. Empty until the Another Me exists or a registered Local Computer reports a placement blocker; room_id is also absent while the Chat is being deleted. */
     AnotherMe: {
       agent_actor_id?: components["schemas"]["Id"];
       room_id?: components["schemas"]["Id"];
       background_failure?: components["schemas"]["AnotherMeBackgroundFailure"];
+      placement_blocker?: components["schemas"]["AnotherMePlacementBlocker"];
     };
     TenantAgentAvatarUpdateRequest: {
       avatar_key: string;
@@ -9228,7 +9252,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The Another Me, or an empty object before it exists. */
+      /** @description The Another Me, or an empty/diagnostic object before it exists. */
       200: {
         headers: {
           [name: string]: unknown;
