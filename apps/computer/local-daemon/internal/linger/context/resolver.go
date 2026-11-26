@@ -105,6 +105,7 @@ type ExecutionResolver struct {
 	// Bound by the local launcher; never accepted from a wire request.
 	ServiceCommand     []string
 	TeamHubCLIBin      string
+	TeamHubCLINodePath string
 	ToolGuide          string // describes the Computer's local tools to every Operation
 	Providers          map[string]ProviderInstallation
 	ProviderLookup     func(context.Context, string) (ProviderInstallation, bool, error)
@@ -237,6 +238,13 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 	if devHadMarker || (!baseHadMarker && len(daemonStaticGuides) > 0) {
 		spec.DeveloperInstructions = &resolvedDeveloper
 	}
+	// Strip any untrusted LINGER_CLI_NODE_PATH before binding the locally
+	// configured runtime Node executable for installed TeamHub CLI wrappers.
+	for name := range spec.Environment {
+		if strings.EqualFold(name, "LINGER_CLI_NODE_PATH") {
+			delete(spec.Environment, name)
+		}
+	}
 	// The profile path is stable and depends only on the Agent-level credential,
 	// so a Run's first and later provider starts see the same environment.
 	configuration := filepath.Join(workingDirectory, ".teamhub", "cli", "config.json")
@@ -266,6 +274,9 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 			searchPath = os.Getenv("PATH")
 		}
 		spec.Environment["PATH"] = r.TeamHubCLIBin + string(os.PathListSeparator) + searchPath
+		if cliNodePath := strings.TrimSpace(r.TeamHubCLINodePath); cliNodePath != "" && filepath.IsAbs(cliNodePath) {
+			spec.Environment["LINGER_CLI_NODE_PATH"] = cliNodePath
+		}
 	}
 	if command.RuntimeType == "codex" {
 		// Local Codex records the same reasoning the Cloud Runtime does and

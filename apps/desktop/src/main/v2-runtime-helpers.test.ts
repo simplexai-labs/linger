@@ -13,6 +13,7 @@ import { EventBus, ModuleHost } from "./modules.js";
 import { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import {
   buildV2HealthProbes,
+  resolveColdStartDaemonLaunch,
   resolveToolsNodePath,
 } from "./v2-runtime-helpers.js";
 
@@ -23,6 +24,43 @@ async function makeTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+function mkRelease(version: string, suffix: string): LocalReleaseDescriptor {
+  return {
+    schema: 1,
+    appVersion: version,
+    channel: "stable",
+    installedAt: new Date().toISOString(),
+    source: "incremental-update",
+    compat: {
+      minShellVersion: "0.1.0",
+      minNativeDepsHash: `sha256:${"a".repeat(64)}`,
+      runnerGatewayProtocol: 1,
+      dbSchemaEpoch: 892,
+      rollbackSafe: true,
+    },
+    infra: {
+      node: "infra/node/v26",
+      postgres: "infra/postgres/pg17",
+      voiceTools: "infra/voice-tools/lk1",
+      nodeDeps: "infra/node-deps/nd-aaaaaaaaaaaaaaaa",
+    },
+    modules: {
+      web: {
+        artifactId: "web-111111111111",
+        originAppVersion: "0.1.10-v2test.2",
+        sha256: "1".repeat(64),
+        path: "store/web/web-111111111111",
+      },
+      backend: {
+        artifactId: `backend-${suffix}`,
+        originAppVersion: version,
+        sha256: suffix.padEnd(64, "0"),
+        path: `store/backend/backend-${suffix}`,
+      },
+    },
+  };
 }
 
 async function listenJson(
@@ -146,41 +184,6 @@ describe("buildV2HealthProbes (P0-C)", () => {
     const deadTeamhubPort = closedTeamhub.port;
     await new Promise<void>((resolve) => closedTeamhub.server.close(() => resolve()));
 
-    const mkRelease = (version: string, suffix: string): LocalReleaseDescriptor => ({
-      schema: 1,
-      appVersion: version,
-      channel: "stable",
-      installedAt: new Date().toISOString(),
-      source: "incremental-update",
-      compat: {
-        minShellVersion: "0.1.0",
-        minNativeDepsHash: `sha256:${"a".repeat(64)}`,
-        runnerGatewayProtocol: 1,
-        dbSchemaEpoch: 892,
-        rollbackSafe: true,
-      },
-      infra: {
-        node: "infra/node/v26",
-        postgres: "infra/postgres/pg17",
-        voiceTools: "infra/voice-tools/lk1",
-        nodeDeps: "infra/node-deps/nd-aaaaaaaaaaaaaaaa",
-      },
-      modules: {
-        web: {
-          artifactId: "web-111111111111",
-          originAppVersion: "0.1.10-v2test.2",
-          sha256: "1".repeat(64),
-          path: "store/web/web-111111111111",
-        },
-        backend: {
-          artifactId: `backend-${suffix}`,
-          originAppVersion: version,
-          sha256: suffix.padEnd(64, "0"),
-          path: `store/backend/backend-${suffix}`,
-        },
-      },
-    });
-
     const store = new BundleStoreModule({ home, target: "darwin-arm64" });
     const watchdog = new HealthWatchdogModule();
     const restartedVersions: string[] = [];
@@ -282,5 +285,78 @@ describe("buildV2HealthProbes (P0-C)", () => {
     });
     expect(await missingPortProbes[0]!.check()).toBe(false);
     expect(await missingPortProbes[1]!.check()).toBe(false);
+  });
+});
+
+describe("resolveColdStartDaemonLaunch", () => {
+  it("falls back to shell daemon when state/current.json is absent", async () => {
+    const home = await makeTempDir("linger-cold-daemon-");
+    const launch = await resolveColdStartDaemonLaunch({
+      home,
+      shellDaemonPath: "/shell/linger-computer-daemon",
+      shellTeamhubCliDirectory: "/shell/teamhub-cli",
+      env: {},
+    });
+    expect(launch).toEqual({
+      daemonPath: "/shell/linger-computer-daemon",
+      teamhubCliDirectory: "/shell/teamhub-cli",
+      source: "shell",
+    });
+  });
+
+  it("loads committed V2 store computer-daemon, teamhub-cli, and toolsNodePath on cold start", async () => {
+    const home = await makeTempDir("linger-cold-daemon-");
+    const store = new BundleStoreModule({ home });
+    const release = mkRelease("0.1.10-v2test.4", "444444444444");
+    await store.writeReleaseDescriptor(release);
+    await store.beginPending({
+      appVersion: release.appVersion,
+      releaseFile: `releases/${release.appVersion}/release.json`,
+      updatedAt: new Date().toISOString(),
+    });
+    await store.commitPending();
+
+    const daemonDir = path.join(
+      home,
+      release.modules.backend.path,
+      "computer-daemon",
+    );
+    const daemonExe = path.join(daemonDir, "linger-computer-daemon");
+    const cliDir = path.join(daemonDir, "teamhub-cli");
+    const infraNode = path.join(home, release.infra.node, "bin", "node");
+    await mkdir(cliDir, { recursive: true });
+    await mkdir(path.dirname(infraNode), { recursive: true });
+    await writeFile(daemonExe, "#!/bin/sh\n");
+    await writeFile(infraNode, "#!/bin/sh\n");
+
+    const launch = await resolveColdStartDaemonLaunch({
+      home,
+      shellDaemonPath: "/shell/linger-computer-daemon",
+      shellTeamhubCliDirectory: "/shell/teamhub-cli",
+      platform: "darwin",
+      env: {},
+    });
+    expect(launch).toEqual({
+      daemonPath: daemonExe,
+      teamhubCliDirectory: cliDir,
+      toolsNodePath: infraNode,
+      source: "store",
+      appVersion: "0.1.10-v2test.4",
+    });
+  });
+
+  it("honors LINGER_COMPUTER_DAEMON override over V2 store", async () => {
+    const home = await makeTempDir("linger-cold-daemon-");
+    const launch = await resolveColdStartDaemonLaunch({
+      home,
+      shellDaemonPath: "/shell/linger-computer-daemon",
+      shellTeamhubCliDirectory: "/shell/teamhub-cli",
+      env: { LINGER_COMPUTER_DAEMON: "/custom/daemon" },
+    });
+    expect(launch).toEqual({
+      daemonPath: path.resolve("/custom/daemon"),
+      teamhubCliDirectory: "/shell/teamhub-cli",
+      source: "env",
+    });
   });
 });

@@ -49,6 +49,7 @@ import { LanguageModule } from "./language.js";
 import { offlineMessages } from "../shell/offline.messages.js";
 import {
   buildV2HealthProbes,
+  resolveColdStartDaemonLaunch,
   resolveToolsNodePath,
 } from "./v2-runtime-helpers.js";
 import {
@@ -354,20 +355,35 @@ async function main(): Promise<void> {
           },
         }
       : undefined;
+  const initialDaemon = await resolveColdStartDaemonLaunch({
+    home,
+    shellDaemonPath,
+    shellTeamhubCliDirectory: path.join(here, "../teamhub-cli"),
+    resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    isPackaged: app.isPackaged,
+  });
+  if (initialDaemon.source === "store") {
+    log.info("computer_daemon.cold_start_store", {
+      appVersion: initialDaemon.appVersion,
+      daemonPath: initialDaemon.daemonPath,
+      teamhubCliDirectory: initialDaemon.teamhubCliDirectory,
+      hasToolsNodePath: Boolean(initialDaemon.toolsNodePath),
+    });
+  }
   const computerDaemon = new ComputerDaemonModule({
     spawn: spawnDaemon(
-      shellDaemonPath,
+      initialDaemon.daemonPath,
       path.join(userData, "logs", "computer-daemon.log"),
     ),
     credentials,
     directory: daemonDirectory,
-    // The bundled teamhub CLI, run by the app's own Node, so runtimes reply
-    // with a matching version and the computer needs no Node.
-    teamhubCliDirectory: path.join(here, "../teamhub-cli"),
+    // The bundled teamhub CLI (or committed V2 store copy), run by the app's
+    // own Node, so runtimes reply with a matching version and the computer needs no Node.
+    teamhubCliDirectory: initialDaemon.teamhubCliDirectory,
     defaultDisplayName,
-    env: daemonEnv(loginShell),
+    env: daemonEnv(loginShell, initialDaemon.toolsNodePath),
     ...(process.platform === "win32"
-      ? { protect: protectWithDaemon(shellDaemonPath) }
+      ? { protect: protectWithDaemon(initialDaemon.daemonPath) }
       : {}),
     ...desktopPermissions,
   });
@@ -861,6 +877,7 @@ async function inspectEnv(
 // daemon keeps LINGER_* from runtimes.
 async function daemonEnv(
   loginShell: Promise<Record<string, string> | undefined>,
+  toolsNodePath?: string,
 ): Promise<Record<string, string>> {
   const login = await loginShell;
   const env: Record<string, string> = {};
@@ -879,6 +896,7 @@ async function daemonEnv(
     if (value) env[name] = value;
   }
   env.LINGER_CLI_NODE_PATH = process.execPath;
+  if (toolsNodePath) env.LINGER_TOOLS_NODE_PATH = toolsNodePath;
   const toolsDir = computerToolsDirectory();
   if (existsSync(toolsDir)) env.LINGER_COMPUTER_TOOLS_DIR = toolsDir;
   return env;

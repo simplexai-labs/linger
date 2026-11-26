@@ -259,10 +259,15 @@ func run(args []string) (resultErr error) {
 	if managedToolsBin != "" {
 		teamhubBin = managedToolsBin
 	}
+	teamhubCLINodePath := strings.TrimSpace(environment["LINGER_CLI_NODE_PATH"])
+	if !filepath.IsAbs(teamhubCLINodePath) {
+		teamhubCLINodePath = ""
+	}
 	resolver := lingercontext.ExecutionResolver{
-		ServiceCommand: serviceCommand,
-		TeamHubCLIBin:  teamhubBin,
-		ProviderLookup: providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
+		ServiceCommand:     serviceCommand,
+		TeamHubCLIBin:      teamhubBin,
+		TeamHubCLINodePath: teamhubCLINodePath,
+		ProviderLookup:     providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
 		CLICredentials: cliCredentials,
 		RegistrationLookup: func(ctx context.Context, registrationID string) (lingercontext.RegistrationBinding, bool, error) {
 			items, err := registrationStore.List(ctx)

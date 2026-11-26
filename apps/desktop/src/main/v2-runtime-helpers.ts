@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-import type { BundleModuleId } from "@linger/local-installation/release-descriptor";
+import {
+  parseLocalReleaseDescriptor,
+  parseReleasePointer,
+  readJsonIfExists,
+  resolveSafeHomePath,
+  type BundleModuleId,
+} from "@linger/local-installation/release-descriptor";
 
 import type { HealthProbe } from "./health-watchdog.js";
 
@@ -86,6 +92,110 @@ export function resolveToolsNodePath(
     if (exists(candidate)) return candidate;
   }
   return undefined;
+}
+
+export interface ResolveColdStartDaemonLaunchOptions {
+  readonly home: string;
+  readonly shellDaemonPath: string;
+  readonly shellTeamhubCliDirectory: string;
+  readonly resourcesPath?: string;
+  readonly isPackaged?: boolean;
+  readonly platform?: NodeJS.Platform;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly exists?: (filePath: string) => boolean;
+  readonly readdir?: (dirPath: string) => string[];
+}
+
+export interface ColdStartDaemonLaunch {
+  readonly daemonPath: string;
+  readonly teamhubCliDirectory: string;
+  readonly toolsNodePath?: string;
+  readonly source: "env" | "store" | "shell";
+  readonly appVersion?: string;
+}
+
+/**
+ * Resolves the initial `computer-daemon` binary, `teamhub-cli` directory, and
+ * `LINGER_TOOLS_NODE_PATH` on Desktop cold start.
+ *
+ * When a V2 release is already committed in `<home>/state/current.json` and
+ * its extracted `computer-daemon` binary exists under `<home>/store/backend/`,
+ * cold start boots directly into the active V2 store copy instead of reverting
+ * to the Shell-bundled daemon. Falls back cleanly to the Shell baseline if
+ * state is absent, invalid, or incomplete.
+ */
+export async function resolveColdStartDaemonLaunch(
+  options: ResolveColdStartDaemonLaunchOptions,
+): Promise<ColdStartDaemonLaunch> {
+  const env = options.env ?? process.env;
+  const envOverride = env.LINGER_COMPUTER_DAEMON?.trim();
+  if (envOverride) {
+    return {
+      daemonPath: path.resolve(envOverride),
+      teamhubCliDirectory: options.shellTeamhubCliDirectory,
+      source: "env",
+    };
+  }
+
+  const shellFallback: ColdStartDaemonLaunch = {
+    daemonPath: options.shellDaemonPath,
+    teamhubCliDirectory: options.shellTeamhubCliDirectory,
+    source: "shell",
+  };
+
+  const platform = options.platform ?? process.platform;
+  const exists = options.exists ?? existsSync;
+  const daemonName =
+    platform === "win32"
+      ? "linger-computer-daemon.exe"
+      : "linger-computer-daemon";
+
+  try {
+    const pointer = await readJsonIfExists(
+      path.join(options.home, "state", "current.json"),
+      parseReleasePointer,
+    );
+    if (!pointer) return shellFallback;
+
+    const releasePath = resolveSafeHomePath(options.home, pointer.releaseFile);
+    const release = await readJsonIfExists(
+      releasePath,
+      parseLocalReleaseDescriptor,
+    );
+    if (!release) return shellFallback;
+
+    const backendDir = resolveSafeHomePath(
+      options.home,
+      release.modules.backend.path,
+    );
+    const daemonDir = path.join(backendDir, "computer-daemon");
+    const daemonExe = path.join(daemonDir, daemonName);
+    if (!exists(daemonExe)) return shellFallback;
+
+    const storeCliDir = path.join(daemonDir, "teamhub-cli");
+    const toolsNodePath = resolveToolsNodePath({
+      home: options.home,
+      releaseInfraNode: release.infra.node,
+      resourcesPath: options.resourcesPath,
+      isPackaged: options.isPackaged,
+      platform,
+      env,
+      exists,
+      readdir: options.readdir,
+    });
+
+    return {
+      daemonPath: daemonExe,
+      teamhubCliDirectory: exists(storeCliDir)
+        ? storeCliDir
+        : options.shellTeamhubCliDirectory,
+      ...(toolsNodePath ? { toolsNodePath } : {}),
+      source: "store",
+      appVersion: release.appVersion,
+    };
+  } catch {
+    return shellFallback;
+  }
 }
 
 export interface BuildV2HealthProbesOptions {
