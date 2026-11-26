@@ -1746,3 +1746,74 @@ it("wires loop guard reset on before_agent_start and blocks before review in man
   ).toBeUndefined();
   expect(reviewCalls).toBe(6);
 });
+
+it("injects strata_pin and Bifrost passthrough headers during prefix warm-up", async () => {
+  const result = await run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+      import assert from "node:assert/strict";
+      const mod = await import(${JSON.stringify(new URL("../tools/pi-mcp.mjs", import.meta.url).href)});
+      assert.equal(process.env.LINGER_PI_STRATA_PIN, undefined);
+
+      assert.throws(() => mod.parseStrataPinConfig(JSON.stringify({ name: "meta", prefill_only: true, resident: "ram", persist: true })), /Unsupported strata_pin field/);
+      assert.throws(() => mod.parseStrataPinConfig(JSON.stringify({ name: "../bad", prefill_only: true })), /Invalid strata_pin\\.name/);
+      assert.throws(() => mod.parseStrataPinConfig(JSON.stringify({ name: "meta", prefill_only: "yes" })), /Invalid strata_pin\\.prefill_only/);
+
+      const parsed = mod.parseStrataPinConfig(JSON.stringify({
+        name: "meta",
+        prefill_only: true,
+        resident: "ram",
+        anchor: "<!-- LINGER_STATIC_PREFIX_END -->",
+      }));
+      assert.deepEqual(parsed, {
+        name: "meta",
+        prefill_only: true,
+        resident: "ram",
+        anchor: "<!-- LINGER_STATIC_PREFIX_END -->",
+      });
+
+      const handlers = new Map();
+      const pi = {
+        on: (event, handler) => handlers.set(event, handler),
+      };
+      await mod.default(pi);
+      assert.ok(handlers.has("before_provider_headers"));
+      assert.ok(handlers.has("before_provider_request"));
+      assert.ok(handlers.has("tool_call"));
+
+      const headers = { Authorization: "Bearer test" };
+      await handlers.get("before_provider_headers")({ headers });
+      assert.equal(headers["x-bf-passthrough-extra-params"], "true");
+
+      const originalPayload = { model: "localmodels/m", messages: [] };
+      const mutatedPayload = await handlers.get("before_provider_request")({ payload: originalPayload });
+      assert.equal("strata_pin" in originalPayload, false);
+      assert.deepEqual(mutatedPayload, {
+        model: "localmodels/m",
+        messages: [],
+        strata_pin: parsed,
+      });
+
+      const blocked = await handlers.get("tool_call")({ toolName: "read", input: {} }, { ui: {} });
+      assert.equal(blocked.block, true);
+      console.log("strata pin hooks passed");
+      `,
+    ],
+    {
+      timeout: 20_000,
+      env: {
+        ...process.env,
+        LINGER_PI_STRATA_PIN: JSON.stringify({
+          name: "meta",
+          prefill_only: true,
+          resident: "ram",
+          anchor: "<!-- LINGER_STATIC_PREFIX_END -->",
+        }),
+      },
+    },
+  );
+  expect(result.stdout).toContain("strata pin hooks passed");
+}, 30_000);

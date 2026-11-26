@@ -3211,8 +3211,14 @@ type ConnectAgentRuntimeLocalComputerRequestStatus string
 
 // ConnectAgentRuntimeLocalComputerResult defines model for ConnectAgentRuntimeLocalComputerResult.
 type ConnectAgentRuntimeLocalComputerResult struct {
-	Computer   AgentRuntimeLocalComputer     `json:"computer"`
-	Placements []AgentRuntimeRunnerPlacement `json:"placements"`
+	Computer AgentRuntimeLocalComputer `json:"computer"`
+
+	// ConnectedApps Whether TeamHub currently has a connected-app provider configured.
+	ConnectedApps *bool `json:"connected_apps,omitempty"`
+
+	// PermissionReview Whether TeamHub currently has a Runtime permission judge enabled.
+	PermissionReview *bool                         `json:"permission_review,omitempty"`
+	Placements       []AgentRuntimeRunnerPlacement `json:"placements"`
 }
 
 // CreateRuntimeHumanInteractionRequest defines model for CreateRuntimeHumanInteractionRequest.

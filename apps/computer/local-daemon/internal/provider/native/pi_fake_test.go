@@ -36,6 +36,8 @@ func init() {
 		os.Exit(piFakeCatalog())
 	case "invoke-clamp":
 		os.Exit(piFakeInvokeClamp(os.Args[1:]))
+	case "prefix-warmup", "prefix-warmup-cancel":
+		os.Exit(piFakePrefixWarmup(mode, os.Args[1:]))
 	case "resident":
 		os.Exit(piResidentFake(os.Args[1:]))
 	default:
@@ -464,6 +466,89 @@ func piFakeInvokeClamp(args []string) int {
 			}})
 			send(map[string]any{"type": "agent_end"})
 			send(map[string]any{"type": "agent_settled", "aborted": false})
+		default:
+			return 25
+		}
+	}
+}
+
+// piFakePrefixWarmup emulates one-shot Pi prefix warm-up turns launched by
+// WarmupPiPrefix.
+func piFakePrefixWarmup(mode string, args []string) int {
+	if path := os.Getenv(piFakeArgvEnv); path != "" {
+		_ = os.WriteFile(path, []byte(strings.Join(args, "\n")), 0o600)
+	}
+	writeRecord := func(prompt string) {
+		path := os.Getenv(piFakeRecordEnv)
+		if path == "" {
+			return
+		}
+		encoded, _ := json.Marshal(map[string]string{
+			"prompt":              prompt,
+			"strata_pin":          os.Getenv(piStrataPinEnvKey),
+			"node_path":           os.Getenv(piNodePathKey),
+			"inherited_node_path": os.Getenv(piInheritedNodePathKey),
+		})
+		_ = os.WriteFile(path, encoded, 0o600)
+	}
+	send := func(value any) {
+		encoded, _ := json.Marshal(value)
+		_, _ = os.Stdout.Write(append(encoded, '\n'))
+	}
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			return 0
+		}
+		if err != nil {
+			return 23
+		}
+		var command struct {
+			ID      string `json:"id"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(line, &command) != nil {
+			return 22
+		}
+		switch command.Type {
+		case "get_state":
+			send(map[string]any{
+				"type": "response", "id": command.ID, "command": "get_state", "success": true,
+				"data": map[string]any{
+					"model":         map[string]any{"provider": "localmodels", "id": "test-qwen"},
+					"thinkingLevel": "off",
+				},
+			})
+		case "prompt":
+			writeRecord(command.Message)
+			send(map[string]any{
+				"type": "response", "id": command.ID, "command": "prompt", "success": true,
+				"data": map[string]any{"disposition": "started"},
+			})
+			send(map[string]any{"type": "agent_start"})
+			if mode == "prefix-warmup-cancel" {
+				if logPath := os.Getenv(piFakeLogEnv); logPath != "" {
+					_ = os.WriteFile(logPath, []byte("prompted\n"), 0o600)
+				}
+				continue
+			}
+			send(map[string]any{"type": "message_start", "message": map[string]any{"role": "assistant"}})
+			send(map[string]any{"type": "message_end", "message": map[string]any{
+				"role":       "assistant",
+				"model":      "localmodels/test-qwen",
+				"stopReason": "stop",
+				"content":    []any{},
+				"usage":      map[string]any{"input": 100, "output": 0, "cacheRead": 0, "cacheWrite": 100},
+			}})
+			send(map[string]any{"type": "agent_end"})
+			send(map[string]any{"type": "agent_settled", "aborted": false})
+		case "clear_queue":
+			send(map[string]any{"type": "response", "id": command.ID, "command": "clear_queue", "success": true})
+		case "abort":
+			send(map[string]any{"type": "agent_settled", "aborted": true})
+			send(map[string]any{"type": "response", "id": command.ID, "command": "abort", "success": true})
 		default:
 			return 25
 		}

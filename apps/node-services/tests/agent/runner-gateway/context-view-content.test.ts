@@ -249,4 +249,59 @@ describe("Context View content", () => {
     second.release();
     expect(await status()).toBe(404);
   });
+
+  it("serves static system-prompt prefixes only to authorized GET requests when configured", async () => {
+    const bundle = {
+      version: 1 as const,
+      marker: "<!-- LINGER_STATIC_PREFIX_END -->",
+      compact_max_context_tokens: 128 * 1024,
+      prefixes: {
+        meta: { full: "meta-full", compact: "meta-compact" },
+        alter_ego: { full: "alter-full", compact: "alter-compact" },
+      },
+    };
+    const views = createContextViewContent({
+      publicOrigin: "https://agent.example",
+      signingKey: "k".repeat(32),
+      isCurrentConnection: (computerId, epoch) =>
+        `${computerId}:${epoch}` === "computer-1:1",
+      staticPrefixes: () => bundle,
+    });
+    const url = views.contentUrl("computer-1", 1);
+    const response = await views.handle(
+      token(url),
+      "static-prefixes",
+      "v1",
+      new Request(`${url}/static-prefixes/v1`),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(bundle);
+
+    const postResponse = await views.handle(
+      token(url),
+      "static-prefixes",
+      "v1",
+      new Request(`${url}/static-prefixes/v1`, { method: "POST" }),
+    );
+    expect(postResponse.status).toBe(404);
+
+    const badVersion = await views.handle(
+      token(url),
+      "static-prefixes",
+      "v2",
+      new Request(`${url}/static-prefixes/v2`),
+    );
+    expect(badVersion.status).toBe(404);
+
+    const withoutHandler = content();
+    const fallbackUrl = withoutHandler.contentUrl("computer-1", 1);
+    const disabled = await withoutHandler.handle(
+      token(fallbackUrl),
+      "static-prefixes",
+      "v1",
+      new Request(`${fallbackUrl}/static-prefixes/v1`),
+    );
+    expect(disabled.status).toBe(404);
+  });
 });

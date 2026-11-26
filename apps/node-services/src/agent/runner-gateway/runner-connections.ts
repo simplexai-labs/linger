@@ -289,17 +289,30 @@ export class RunnerConnections {
     const registrations = runtimeRegistrationSnapshot(owner, hello);
     this.owners.operations().validateReconciliationInventory(hello);
     const previous = this.#connections.get(hello.runner_id);
-    const placements =
-      (await this.context.computerRegistry?.connect({
-        computerId: hello.runner_id,
-        owner,
-        credentialGeneration: claims.credentialGeneration,
-        hello,
-        status: isServingConnection(previous) ? "online" : "offline",
-        ...(this.context.options.computerRelease
-          ? { recommendedVersion: this.context.options.computerRelease.version }
-          : {}),
-      })) ?? [];
+    const connectResult = await this.context.computerRegistry?.connect({
+      computerId: hello.runner_id,
+      owner,
+      credentialGeneration: claims.credentialGeneration,
+      hello,
+      status: isServingConnection(previous) ? "online" : "offline",
+      ...(this.context.options.computerRelease
+        ? { recommendedVersion: this.context.options.computerRelease.version }
+        : {}),
+    });
+    const placements = connectResult?.placements ?? [];
+    if (
+      connectResult?.connectedApps !== undefined ||
+      connectResult?.permissionReview !== undefined
+    ) {
+      this.context.deploymentFeatures = {
+        connectedApps:
+          connectResult.connectedApps ??
+          this.context.deploymentFeatures.connectedApps,
+        permissionReview:
+          connectResult.permissionReview ??
+          this.context.deploymentFeatures.permissionReview,
+      };
+    }
     const pending = this.owners
       .operations()
       .retainedOperations(hello.runner_id);

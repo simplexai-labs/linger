@@ -418,6 +418,38 @@ func run(args []string) (resultErr error) {
 			default:
 			}
 		},
+		WarmupPrefix: (&daemon.PrefixWarmupRunner{
+			ContentURL: func() string {
+				if localDaemon == nil {
+					return ""
+				}
+				return localDaemon.ContentURL()
+			},
+			PiInstallation: func() (lingercontext.ProviderInstallation, bool) {
+				install, ok, lookupErr := providerCatalog.Lookup(context.Background(), "pi")
+				if lookupErr == nil && ok && install.ExecutablePath != "" {
+					return install, true
+				}
+				if localModels != nil {
+					if exe := localModels.PiExecutable(); exe != "" {
+						return lingercontext.ProviderInstallation{
+							Type:           "pi",
+							ExecutablePath: exe,
+							Environment:    currentProviderEnvironment(),
+							ModelGateway:   true,
+							APILink:        true,
+						}, true
+					}
+				}
+				return lingercontext.ProviderInstallation{}, false
+			},
+			ManagedMCPExtension:  piExtension,
+			ServiceCommand:       serviceCommand,
+			ToolGuide:            resolver.ToolGuide,
+			HostEnvironmentGuide: resolver.HostEnvironmentGuide,
+			TeamHubCLI:           teamhubBin != "",
+			TempBase:             operationTempBase,
+		}).Warmup,
 	})
 	defer localModels.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
