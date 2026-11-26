@@ -35,17 +35,17 @@ export const createAgentLogFileSink = (
   const notify = () => {
     for (const resolve of waiters) resolve();
   };
-  const report = (reason: string, count: number) => {
+  const warn = (event: Record<string, unknown>) => {
     // Never send sink diagnostics through the sink itself or include raw paths
     // and filesystem errors, which may contain sensitive identifiers.
     try {
-      console.warn(
-        JSON.stringify({ event: "agent_log.file_loss", reason, count }),
-      );
+      console.warn(JSON.stringify(event));
     } catch {
       /* terminal failure must not affect business work */
     }
   };
+  const report = (reason: string, count: number) =>
+    warn({ event: "agent_log.file_loss", reason, count });
   const fail = () => {
     if (closed || failed) return;
     failed = true;
@@ -108,7 +108,11 @@ export const createAgentLogFileSink = (
 
   return {
     enqueue(record: AgentLogFileRecord): void {
-      if (closed || failed) return;
+      if (closed) return;
+      if (failed) {
+        dropped++;
+        return;
+      }
       const bytes =
         Buffer.byteLength(record.line) +
         Buffer.byteLength(record.root) +
@@ -146,9 +150,13 @@ export const createAgentLogFileSink = (
     },
     async close(timeoutMs: number): Promise<boolean> {
       const complete = await this.flush(timeoutMs);
+      if (closed) return complete;
       closed = true;
       if (pendingCount > 0) report("drain_timeout", pendingCount);
       dropped += pendingCount;
+      if (dropped > 0) {
+        warn({ event: "agent_log.file_loss_summary", count: dropped });
+      }
       queue = [];
       pendingBytes = pendingCount = 0;
       inFlight = undefined;
