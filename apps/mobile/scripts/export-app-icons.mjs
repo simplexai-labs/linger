@@ -5,7 +5,7 @@
 // the glyph alone inside its adaptive-icon safe zone over an ink background.
 // Needs Google Chrome: `node apps/mobile/scripts/export-app-icons.mjs`.
 import { chromium } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { copyFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,7 +60,13 @@ try {
     true,
   );
   await shoot("android-icon-background.png", "", 512, false);
-  await shoot("splash-icon.png", sized(mark, 1024), 1024, true);
+  // The splash shows the tile on a light screen with its corners clear. The
+  // traced SVG leaves a hairline seam across the tile that only shows over
+  // a transparent background, so the splash takes the approved raster.
+  copyFileSync(
+    join(root, "apps/assets/logo/source/linger.png"),
+    join(assets, "splash-icon.png"),
+  );
 } finally {
   await browser.close();
 }
