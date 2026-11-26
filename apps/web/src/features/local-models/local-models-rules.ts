@@ -3,7 +3,7 @@ import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import type { Translate } from "@/i18n/language";
 import { formatBytes } from "@/lib/format-bytes";
 
-import { architectureCopy, capabilityCopy } from "./local-models-copy";
+import { architectureCopy } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
 import type {
   LocalModel,
@@ -350,18 +350,6 @@ export function buildModelGroups(
     unavailable,
     unavailableAllMemory,
   };
-}
-
-/** Whether at least one model on this Computer is already usable without a driver update. */
-export function hasReadyLocalModels(entries: readonly ModelEntry[]): boolean {
-  return entries.some(
-    (entry) =>
-      entry.status === "loaded" ||
-      entry.status === "loading" ||
-      entry.status === "idle" ||
-      entry.status === "downloading" ||
-      entry.status === "available",
-  );
 }
 
 /** The library as one list: by status, then recommended, then featured, then by fit. */
@@ -908,54 +896,6 @@ export function parametersLabel(model: LocalModel, t: Translate) {
   if (scale && architecture)
     return t(m.parametersWithArchitecture, { architecture, scale });
   return scale || architecture;
-}
-
-/** Compact context badge for collapsed model rows: "128K", or undefined below 1K. */
-export function compactContextLabel(tokens: number, t: Translate) {
-  if (tokens < 1024) return undefined;
-  return t(m.contextCompact, { thousands: Math.round(tokens / 1024) });
-}
-
-function allModelBadges(model: LocalModel, t: Translate): string[] {
-  const badges: string[] = [];
-  if (model.active_parameters) {
-    badges.push(t(m.activeParameters, { parameters: model.active_parameters }));
-  } else if (model.parameters) {
-    badges.push(model.parameters);
-  }
-  for (const capability of modelCapabilities(model)) {
-    badges.push(capabilityCopy(capability, t));
-  }
-  const context = compactContextLabel(model.context_tokens, t);
-  if (context) {
-    badges.push(context);
-  }
-  return badges;
-}
-
-const visibleBadgeCount = 3;
-
-export interface CollapsedRowBadges {
-  badges: string[];
-  overflowTitle?: string;
-}
-
-/** Concise badges and any `+N` overflow tooltip for the collapsed row, built once from structured fields. */
-export function collapsedRowBadges(
-  model: LocalModel,
-  t: Translate,
-): CollapsedRowBadges {
-  const badges = allModelBadges(model, t);
-  if (badges.length <= visibleBadgeCount) {
-    return { badges };
-  }
-  return {
-    badges: [
-      ...badges.slice(0, visibleBadgeCount),
-      `+${badges.length - visibleBadgeCount}`,
-    ],
-    overflowTitle: joinList(badges.slice(visibleBadgeCount), t),
-  };
 }
 
 function formatRemainingTime(seconds: number, t: Translate) {

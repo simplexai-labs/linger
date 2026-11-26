@@ -144,9 +144,6 @@ export function VoiceKeyDialog({
   return (
     <ModalDialog
       closeOnBackdrop
-      description={
-        providers.length > 1 ? t(m.chooseProvider) : t(details.purpose)
-      }
       onClose={onClose}
       size="md"
       title={
@@ -223,7 +220,6 @@ export function VoiceKeyDialog({
                   describeError={(error) =>
                     describeSaveError(error, provider, t)
                   }
-                  hint={t(m.keyHint)}
                   key={provider}
                   label={t(m.apiKey, { provider: details.name })}
                   // TeamHub answers the save once the voice workers are up.

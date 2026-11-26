@@ -23,10 +23,7 @@ export function LanguageSettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-(--app-settings-width) flex-col gap-8 pb-4">
-      <SettingsPageHeading
-        description={t(settingsMessages.languageDescription)}
-        title={t(settingsMessages.language)}
-      />
+      <SettingsPageHeading title={t(settingsMessages.language)} />
 
       <section className="rounded-2xl border border-border bg-background p-6">
         <div className="flex flex-col justify-center gap-3 sm:flex-row sm:items-center sm:justify-between">

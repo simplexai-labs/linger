@@ -308,11 +308,7 @@ export function AgentSkillUploadPanel({
         </ul>
       ) : (
         <SettingsRow icon={<Icon icon={BookOpen01Icon} size={16} />}>
-          <SettingsRowText
-            description={t(agentInfoMessages.noSkillsBody)}
-            muted
-            title={t(agentInfoMessages.noSkillsTitle)}
-          />
+          <SettingsRowText muted title={t(agentInfoMessages.noSkillsTitle)} />
         </SettingsRow>
       )}
       {onToggleExpanded ? (

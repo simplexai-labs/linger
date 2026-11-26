@@ -198,7 +198,6 @@ function WebSearchBackendDialog({
     <ModalDialog
       className="app-key-dialog"
       closeOnBackdrop
-      description={webSearchBackendDescription(backend, t)}
       onClose={onClose}
       size="md"
       title={backend.name}
@@ -215,7 +214,8 @@ function WebSearchBackendDialog({
               {webSearchBackendFreeTier(backend, t) ?? ""}
             </Fact>
           ) : null}
-          {backend.tier_text ? (
+          {/* You.com's free tier and free use say the same thing. */}
+          {backend.tier_text && !(backend.free_tier && backend.id === "you") ? (
             <Fact label={t(m.factFreeUse)}>
               {webSearchBackendFreeUse(backend, t) ?? ""}
             </Fact>

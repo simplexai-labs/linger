@@ -766,7 +766,7 @@ describe("Room Message delivery identity", () => {
     );
 
     expect(delivery.result.current.outgoing[0]).toMatchObject({
-      error: expect.stringContaining("may already have reached TeamHub"),
+      error: expect.stringContaining("may have sent"),
       status: "unknown",
     });
     await expect(outbox.list(scope)).resolves.toMatchObject([
@@ -891,9 +891,7 @@ describe("Room Message delivery identity", () => {
       { body: "Second restored Message", status: "unknown" },
     ]);
     await waitFor(() =>
-      expect(result.current.outboxError).toContain(
-        "interrupted delivery state could not be updated",
-      ),
+      expect(result.current.outboxError).toContain("couldn't be restored"),
     );
   });
 
@@ -949,7 +947,7 @@ describe("Room Message delivery identity", () => {
     expect(createMessage).not.toHaveBeenCalled();
     expect(result.current.outgoing[0]).toMatchObject({
       status: "failed",
-      error: expect.stringContaining("browser storage is full"),
+      error: expect.stringContaining("Browser storage is full"),
     });
 
     act(() =>
@@ -1064,7 +1062,7 @@ describe("Room Message delivery identity", () => {
     );
     expect(result.current.outgoing[0]).toMatchObject({
       status: "unknown",
-      error: expect.stringContaining("was sent"),
+      error: expect.stringContaining("Sent, but not cleared"),
     });
     expect(onMessageCommitted).toHaveBeenCalledOnce();
     expect(onMessageCommitted).toHaveBeenCalledWith(
@@ -1110,7 +1108,7 @@ describe("Room Message delivery identity", () => {
 
     await waitFor(() =>
       expect(result.current.outboxError).toContain(
-        "Saved Messages could not be restored",
+        "Couldn't restore unsent messages",
       ),
     );
   });

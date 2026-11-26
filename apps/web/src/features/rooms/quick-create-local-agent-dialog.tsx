@@ -232,11 +232,6 @@ export function QuickCreateLocalAgentDialog({
       onClose={onClose}
       size="md"
       title={t(createAgentMessages.title)}
-      description={t(
-        setupOpen
-          ? createAgentMessages.connectDescription
-          : createAgentMessages.chooseDescription,
-      )}
       footer={
         !pending ? (
           <>
@@ -475,7 +470,6 @@ export function QuickCreateLocalAgentDialog({
                       diagnosticMessage={selectedRuntime.message}
                       platform={selectedComputer.platform}
                       runtimeType={selectedRuntime.type}
-                      version={selectedRuntime.version}
                     />
                   ) : selectedComputer &&
                     selectedRuntime?.status === "unknown" ? (

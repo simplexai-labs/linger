@@ -120,11 +120,7 @@ describe("Room Chat", () => {
       "/t/tenant-northstar/rooms/room-dm-codex/chat",
     );
 
-    expect(
-      await screen.findByText(
-        "This Agent has been deleted. Message and Run history remain available.",
-      ),
-    ).toBeVisible();
+    expect(await screen.findByText("This Agent was deleted.")).toBeVisible();
     expect(screen.getByLabelText("Room timeline").textContent).toContain(
       "I can continue the Room V0 implementation",
     );
@@ -193,7 +189,6 @@ describe("Room Chat", () => {
     expect(
       await screen.findByText("Offline computer is offline."),
     ).toBeVisible();
-    expect(screen.getByText("Agent unavailable")).toBeVisible();
     expect(screen.getByLabelText("Message Room")).toBeEnabled();
   });
 
@@ -243,10 +238,11 @@ describe("Room Chat", () => {
       );
 
       expect(
-        await screen.findByText(`${runtimeName} sign-in required`),
+        await screen.findByText(
+          `${runtimeName} on Jenny's Mac needs you to sign in.`,
+        ),
       ).toBeVisible();
       expect(screen.getByText(command)).toBeVisible();
-      expect(screen.getByText("Agent unavailable")).toBeVisible();
       expect(screen.getByLabelText("Room timeline").textContent).toContain(
         "I can continue the Room V0 implementation",
       );
@@ -265,7 +261,9 @@ describe("Room Chat", () => {
         body: "@Codex Save this message while authentication is unavailable",
         roomId: "room-dm-codex",
       });
-      expect(screen.getByText(`${runtimeName} sign-in required`)).toBeVisible();
+      expect(
+        screen.getByText(`${runtimeName} on Jenny's Mac needs you to sign in.`),
+      ).toBeVisible();
       expect(
         screen.queryByText(/authentication expired/),
       ).not.toBeInTheDocument();
@@ -315,7 +313,7 @@ describe("Room Chat", () => {
       queryClient,
       "/t/tenant-northstar/rooms/room-dm-codex/chat",
     );
-    await screen.findByText("Codex sign-in required");
+    await screen.findByText("codex login");
     const editor = await screen.findByLabelText("Message Room");
     fireEvent.change(editor, { target: { value: "Keep my unsent draft" } });
     for (const status of [
@@ -336,10 +334,7 @@ describe("Room Chat", () => {
       expect(editor).toHaveValue("Keep my unsent draft");
       if (status === "unknown") {
         expect(
-          await screen.findByText("Checking Local Computer status…"),
-        ).toBeVisible();
-        expect(
-          screen.getByText("You can keep sending messages."),
+          await screen.findByText("Checking Acceptance server…"),
         ).toBeVisible();
         expect(
           screen.getByRole("button", { name: "Send message" }),
@@ -350,18 +345,14 @@ describe("Room Chat", () => {
         expect(
           await screen.findByText("Runtime diagnostic timed out"),
         ).toBeVisible();
-        expect(
-          screen.queryByText("Codex sign-in required"),
-        ).not.toBeInTheDocument();
+        expect(screen.queryByText("codex login")).not.toBeInTheDocument();
       }
       if (status === "ready")
         await waitFor(() =>
-          expect(
-            screen.queryByText("Codex sign-in required"),
-          ).not.toBeInTheDocument(),
+          expect(screen.queryByText("codex login")).not.toBeInTheDocument(),
         );
       if (status === "authentication_required")
-        await screen.findByText("Codex sign-in required");
+        await screen.findByText("codex login");
       expect(screen.getByLabelText("Message Room")).toBe(editor);
       expect(editor).toHaveValue("Keep my unsent draft");
     }
@@ -403,7 +394,7 @@ describe("Room Chat", () => {
     );
     const editor = await screen.findByLabelText("Message Room");
     fireEvent.change(editor, { target: { value: "Keep this draft" } });
-    const notice = await screen.findByText("Reconnecting to Local Computer…");
+    const notice = await screen.findByText("Reconnecting to Computer…");
     expect(notice.closest('[role="status"]')).not.toHaveClass("border-t");
     expect(notice.closest('[role="status"]')).toHaveAttribute(
       "title",
@@ -436,7 +427,7 @@ describe("Room Chat", () => {
     });
     await waitFor(() =>
       expect(
-        screen.queryByText("Reconnecting to Local Computer…"),
+        screen.queryByText("Reconnecting to Computer…"),
       ).not.toBeInTheDocument(),
     );
     expect(screen.getByLabelText("Message Room")).toBe(editor);
@@ -581,8 +572,8 @@ describe("Room Chat", () => {
       );
       await screen.findByText(
         active === false
-          ? "This Agent has been deleted. Message and Run history remain available."
-          : "Agent status is unavailable. Messages remain read-only.",
+          ? "This Agent was deleted."
+          : "Can't load this Agent right now.",
       );
       expect(screen.queryByLabelText("Message Room")).not.toBeInTheDocument();
     },
@@ -601,9 +592,7 @@ describe("Room Chat", () => {
       testQueryClient(),
       "/t/tenant-northstar/rooms/room-dm-codex/chat",
     );
-    await screen.findByText(
-      "Agent status is unavailable. Messages remain read-only.",
-    );
+    await screen.findByText("Can't load this Agent right now.");
     expect(screen.queryByLabelText("Message Room")).not.toBeInTheDocument();
   });
 
@@ -631,9 +620,7 @@ describe("Room Chat", () => {
     );
 
     expect(
-      await screen.findByText(
-        "Agent status is unavailable. Messages remain read-only.",
-      ),
+      await screen.findByText("Can't load this Agent right now."),
     ).toBeVisible();
     expect(screen.queryByLabelText("Message Room")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));

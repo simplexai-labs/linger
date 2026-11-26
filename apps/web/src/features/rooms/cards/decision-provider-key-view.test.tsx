@@ -69,7 +69,9 @@ describe("Composio key card", () => {
     const box = await screen.findByRole("region", {
       name: "Composio API key requested",
     });
-    expect(box).toHaveTextContent("Needed to connect Higgsfield");
+    expect(box).toHaveTextContent(
+      "Please add a Composio API key so I can connect Higgsfield.",
+    );
     fireEvent.click(within(box).getByRole("button", { name: "Add key" }));
     fireEvent.change(await screen.findByLabelText("Composio API key"), {
       target: { value: " ak_secret " },
@@ -90,7 +92,9 @@ describe("Composio key card", () => {
     setup({ ...card, provider_key: {} });
     expect(
       await screen.findByRole("region", { name: "Composio API key requested" }),
-    ).toHaveTextContent("Every connected app needs it");
+    ).toHaveTextContent(
+      "Please add a Composio API key so I can use connected apps.",
+    );
   });
 
   it("tells the owner how to set the key when TeamHub cannot store one", async () => {

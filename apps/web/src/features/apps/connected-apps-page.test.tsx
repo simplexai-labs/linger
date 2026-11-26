@@ -31,7 +31,6 @@ describe("Connected apps", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Connect Slack" });
     expect(dialog).toHaveTextContent("COMPOSIO_API_KEY");
-    expect(dialog).toHaveTextContent("TEAMHUB_SECRET_ENCRYPTION_KEY");
     expect(
       within(dialog).queryByLabelText("Composio API key"),
     ).not.toBeInTheDocument();
@@ -67,23 +66,14 @@ describe("Connected apps", () => {
       await screen.findByRole("button", { name: "Connect Slack" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Connect Slack" });
-    expect(dialog).toHaveTextContent(
-      "Connect Slack securely through Composio. Add your API key once to enable your connectors.",
-    );
-    expect(dialog).toHaveTextContent("full read and write access");
     expect(dialog).toHaveTextContent("Read All");
     expect(dialog).toHaveTextContent("Write All");
-    expect(dialog).toHaveTextContent(
-      "Permissions cannot be changed after a key is created",
-    );
+    expect(dialog).toHaveTextContent("Read-only keys can't connect apps.");
     expect(dialog).toHaveTextContent(
       "Copy the key, paste it below, and select Save key",
     );
     expect(dialog).toHaveTextContent(
       "select Connect, and complete authorization",
-    );
-    expect(dialog).toHaveTextContent(
-      "Read-only keys cannot create the authorization",
     );
     expect(
       within(dialog).getByRole("link", { name: "Get a key" }),
@@ -135,7 +125,7 @@ describe("Connected apps", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("shows a one-line summary on the card and the full description in the dialog", async () => {
+  it("shows a one-line summary on the card and keeps the description out of the dialog", async () => {
     const runtime = await testRuntime();
     const description =
       "Import the last six months, up to 3,000 messages, for Profile and Wiki.";
@@ -170,7 +160,7 @@ describe("Connected apps", () => {
     fireEvent.click(card);
     expect(
       await screen.findByRole("dialog", { name: "Gmail" }),
-    ).toHaveTextContent(description);
+    ).not.toHaveTextContent(description);
   });
 
   it("renders a concise non-truncating subtitle for Calendly with full title tooltip", async () => {
@@ -950,7 +940,7 @@ describe("Connected apps", () => {
       within(dialog).getAllByRole("button", { name: "Close" }).length,
     ).toBeGreaterThan(0);
     expect(within(dialog).getByRole("status")).toHaveTextContent(
-      "Provider authorization: pending",
+      "Disconnected. Revoking access…",
     );
     expect(disconnect.mock.calls[0]?.[1]).toEqual({ expected_revision: 1 });
   });

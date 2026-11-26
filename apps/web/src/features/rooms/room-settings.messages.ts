@@ -21,7 +21,6 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   roomDescription: "Room description",
   descriptionPlaceholder: "What is this Room for?",
   saveChanges: "Save changes",
-  detailsDescription: "Update the name and description shown to Room members.",
   deleteDescription: "Deleting this Room revokes access for every member.",
   saveUnconfirmed:
     "TeamHub did not confirm whether these Room changes were committed. Check the Room settings before you retry.",
@@ -62,7 +61,6 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   membersLoadFailed: "Some members could not be loaded.",
   noMatchingMembers: "No matching members.",
 
-  shareDescription: "Create a read-only snapshot for sharing or debugging.",
   shareNotice:
     "Anyone with the link can read messages sent up to now, without signing in. New messages and later changes are not included. Files appear as cards; source documents stay private.",
   conversationLink: "Conversation link",

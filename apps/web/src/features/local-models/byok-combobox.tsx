@@ -2,7 +2,6 @@ import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import {
   type CSSProperties,
   type KeyboardEvent,
-  type ReactNode,
   useEffect,
   useEffectEvent,
   useRef,
@@ -40,7 +39,6 @@ export function ByokCombobox({
   inputStyle,
   label,
   menuClassName = "-left-px",
-  note,
   onCommit,
   onOpenChange,
   onValueChange,
@@ -62,8 +60,6 @@ export function ByokCombobox({
   label: string;
   /** Which edge of the box the suggestions line up with; the left by default. */
   menuClassName?: string;
-  /** A line above the suggestions, such as why there are none. */
-  note?: ReactNode;
   /** Tidies the typed value once the owner leaves the field. */
   onCommit?: () => void;
   onOpenChange: (open: boolean) => void;
@@ -204,7 +200,7 @@ export function ByokCombobox({
           size={14}
         />
       </button>
-      {open ? (
+      {open && options.length ? (
         <DropdownOptions
           aria-label={t(m.byokSuggestions, { label })}
           className={cn(
@@ -220,11 +216,6 @@ export function ByokCombobox({
           {heading ? (
             <p className="px-2 pb-1 pt-1.5 text-xs text-muted-foreground">
               {heading}
-            </p>
-          ) : null}
-          {note ? (
-            <p className="max-w-80 px-2 py-1.5 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-              {note}
             </p>
           ) : null}
           {options.map((option) => (

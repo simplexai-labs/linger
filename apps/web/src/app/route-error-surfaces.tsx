@@ -111,9 +111,6 @@ function ApplicationRouteErrorSurface({ tenantId }: { tenantId?: string }) {
               <p className="text-sm text-muted-foreground">
                 {t(routePagesMessages.rooms)}
               </p>
-              <p className="mt-3 text-sm text-muted-foreground">
-                {t(routePagesMessages.backToRoomsHint)}
-              </p>
             </div>
           </nav>
         ) : null}
@@ -226,11 +223,8 @@ function useRouteErrorContent(fullPage: boolean) {
       ),
       message: t(routePagesMessages.restrictedBody),
     };
-  const message = isRouteErrorResponse(error)
-    ? `${error.status} ${error.statusText}`.trim()
-    : error instanceof Error
-      ? error.message
-      : t(routePagesMessages.loadFailedBody);
+  // The raw error is for diagnostics, not for the reader.
+  const message = t(routePagesMessages.loadFailedBody);
 
   return {
     restricted: false,

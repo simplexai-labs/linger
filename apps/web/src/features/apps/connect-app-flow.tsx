@@ -131,13 +131,9 @@ export function ConnectAppStatus({
           className="app-key-dialog"
           closeOnBackdrop
           description={
-            flow.configured && !flow.keyRejected
-              ? undefined
-              : flow.keyRejected
-                ? t(flow.canSaveKey ? m.keyNoLongerAccepted : m.keyRejected)
-                : flow.canSaveKey
-                  ? t(m.connectThroughComposio, { app: setupApp.display_name })
-                  : undefined
+            flow.keyRejected
+              ? t(flow.canSaveKey ? m.keyNoLongerAccepted : m.keyRejected)
+              : undefined
           }
           onClose={flow.closeSetup}
           size="md"

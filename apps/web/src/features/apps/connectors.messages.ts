@@ -97,10 +97,9 @@ export const connectorMessages = defineMessages("connectors", {
   disconnectTitle: "Disconnect account?",
   disconnectBody:
     "Agents lose access to this account. Content already imported is kept.",
-  accessStopped: "App access stopped in Linger.",
-  providerAuthorizationRevoked: "Provider authorization: revoked",
-  providerAuthorizationRetrying: "Provider authorization: retrying",
-  providerAuthorizationPending: "Provider authorization: pending",
+  providerAuthorizationRevoked: "Disconnected.",
+  providerAuthorizationRetrying: "Disconnected. Still revoking access…",
+  providerAuthorizationPending: "Disconnected. Revoking access…",
   accountNotDisconnected: "Account could not be disconnected.",
 
   // Authorization errors
@@ -119,18 +118,14 @@ export const connectorMessages = defineMessages("connectors", {
   keyNoLongerAccepted:
     "Composio no longer accepts the saved API key. Save a new key to keep connecting apps.",
   keyRejected: "Composio rejected this deployment's API key.",
-  connectThroughComposio:
-    "Connect {app} securely through Composio. Add your API key once to enable your connectors.",
-  updateServerKey:
-    "Update <code>COMPOSIO_API_KEY</code> where the server reads it. When Linger is installed on this computer, that is <code>user.env</code>; reopen the Linger app afterwards.",
+  updateServerKey: "Update <code>COMPOSIO_API_KEY</code> on the server.",
   notConfigured:
-    "Connecting Gmail, GitHub, Slack, Notion and other apps needs a Composio API key. When Linger is installed on this computer, set <code>COMPOSIO_API_KEY</code> in <code>user.env</code>, then reopen the Linger app. On a server you run yourself, set it there, or set <code>TEAMHUB_SECRET_ENCRYPTION_KEY</code> to save the key here.",
+    "Connecting apps needs a Composio API key. Set <code>COMPOSIO_API_KEY</code> on the server.",
 
   // API key guide and form. Read All and Write All are labels in Composio.
   getYourApiKey: "Get your API key",
   getAKey: "Get a key",
-  composioKeyNote:
-    "Permissions cannot be changed after a key is created. If Write All was not selected, create a new key. Read-only keys cannot create the authorization needed to connect apps.",
+  composioKeyNote: "Read-only keys can't connect apps.",
   composioStepOpen: "Open Composio and sign in or create an account.",
   composioStepCreate:
     "Create a project API key and select <strong>Read All</strong> and <strong>Write All</strong> before creating it.",
@@ -138,8 +133,6 @@ export const connectorMessages = defineMessages("connectors", {
   composioStepReturn:
     "Return to your app, select Connect, and complete authorization.",
   composioApiKey: "Composio API key",
-  composioKeyHint:
-    "Use a key with full read and write access (Read All and Write All). It is stored encrypted and never shown again.",
   checkingKey: "Checking key...",
   saveKey: "Save key",
 
@@ -202,8 +195,7 @@ export const connectorMessages = defineMessages("connectors", {
   keySaved: "A key is saved.",
   defaultSearchBackend: "Default search backend",
   defaultChosen: "Your Agents search with {backend} when they name no backend.",
-  defaultFirstReady:
-    "Your Agents search with {backend} when they name no backend, because it is the first ready one in the default order.",
+  defaultFirstReady: "Default when Agents don't name a backend.",
   defaultOffer:
     "Make {backend} the backend your Agents search with when they name none.",
   defaultNeedsKey: "Add a key to make {backend} the default.",

@@ -39,7 +39,7 @@ export const documentPageMessages = defineMessages("documentPage", {
   readOnly: "Read only",
   saveStatus: "Document save status",
   saved: "Saved",
-  saveProtocolError: "Save protocol error",
+  saveProtocolError: "Couldn't save. Reload to retry.",
   offlineChangesPending: "Offline changes pending",
   offline: "Offline",
   connecting: "Connecting...",
@@ -68,8 +68,7 @@ export const documentPageMessages = defineMessages("documentPage", {
   alreadyCurrent: "Already current.",
   restored: "Restored.",
   revisionInconsistent: "History Revision identity is inconsistent.",
-  revisionIntegrityFailed:
-    "History Revision bytes failed integrity verification.",
+  revisionIntegrityFailed: "This version couldn't be loaded.",
   revisionInvalid: "History Revision bytes are invalid.",
   // Joins names in a list, such as the people who changed a checkpoint.
   listSeparator: ", ",

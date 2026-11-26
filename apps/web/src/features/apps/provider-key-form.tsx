@@ -23,7 +23,7 @@ export function ProviderKeyForm({
 }: {
   /** The message shown under the field when `save` fails. */
   describeError?: (error: Error) => string;
-  hint: string;
+  hint?: string;
   label: string;
   onSaved?: () => void;
   /** The Save button's text while `save` runs; "Checking key..." without one. */
@@ -76,7 +76,6 @@ export function ComposioKeyForm({ onSaved }: { onSaved?: () => void } = {}) {
   const t = useT();
   return (
     <ProviderKeyForm
-      hint={t(m.composioKeyHint)}
       label={t(m.composioApiKey)}
       onSaved={onSaved}
       save={async (apiKey) => {

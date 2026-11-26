@@ -31,7 +31,7 @@ describe("historyRevisionMarkdown", () => {
 
     expect(() =>
       historyRevisionMarkdown(bytesToBase64(state.stateBytes), "0".repeat(64)),
-    ).toThrow("History Revision bytes failed integrity verification.");
+    ).toThrow("This version couldn't be loaded.");
   });
 });
 

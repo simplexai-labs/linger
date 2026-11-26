@@ -16,14 +16,10 @@ export const filePreviewErrorMessages = defineMessages("filePreview", {
   mermaidTooLarge: "This file is larger than the safe Mermaid preview limit.",
   htmlTooLarge: "This file is larger than the safe HTML preview limit.",
   downloadOnly: "This format is available as a download only.",
-  mediaTypeMismatch:
-    "The filename and media type do not agree, so preview is disabled.",
-  versionNotInDocument:
-    "This Version does not belong to the selected Document.",
-  noUsableMediaType: "The immutable Version has no usable media type.",
-  mediaTypeChanged:
-    "The downloaded media type does not match its immutable Version metadata.",
-  noUsableDigest: "The immutable Version has no usable SHA-256 digest.",
-  digestMismatch:
-    "The downloaded SHA-256 does not match its immutable Version metadata.",
+  mediaTypeMismatch: "This file can't be previewed. Download it instead.",
+  versionNotInDocument: "This version can't be previewed here.",
+  noUsableMediaType: "This file can't be previewed. Download it instead.",
+  mediaTypeChanged: "This file changed while loading. Reload to preview it.",
+  noUsableDigest: "This file can't be previewed. Download it instead.",
+  digestMismatch: "This file changed while loading. Reload to preview it.",
 });
