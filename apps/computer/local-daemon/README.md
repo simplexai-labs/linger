@@ -597,6 +597,11 @@ for a browser sign-in when signed out.
   changes, logout or re-login diagnostics transitions, Agent stop or removal,
   and Daemon shutdown. Cancelled, timed-out, failed, or background-continuation
   turns never park and confirm process-tree exit.
+- Managed Antigravity hooks (`--add-dir`) canonicalize their temp directory path
+  via symlink resolution and keep the loopback callback URL unquoted on Windows
+  (wrapping the full command in outer quotes only when the Daemon executable
+  path contains `cmd /c` special characters `&<>()@^|`) so `cmd /c` preserves
+  quotes around the executable path.
 - Legacy `agy` installations that lack `session/list` or `session/resume`
   report `not_eligible` on `provider.prepare` and fall back to a one-shot
   process per Operation using `session/load` (dropping replayed history). An id
