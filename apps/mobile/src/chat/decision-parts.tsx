@@ -20,6 +20,8 @@ export function ApprovalActions(props: {
   readonly approveDisabled?: boolean;
   readonly denyLabel: string;
   readonly reasonRequired?: boolean;
+  /** False where the kind's denial carries no reason; see decision-rules. */
+  readonly reasonAllowed?: boolean;
   readonly busy: boolean;
   readonly onApprove: () => void;
   readonly onDeny: (reason: string | undefined) => void;
@@ -69,7 +71,9 @@ export function ApprovalActions(props: {
           style={styles.action}
         />
       </View>
-      {composing || props.reasonRequired ? null : (
+      {composing ||
+      props.reasonRequired ||
+      props.reasonAllowed === false ? null : (
         <Pressable
           accessibilityRole="button"
           onPress={() => setComposing(true)}

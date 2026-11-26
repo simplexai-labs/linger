@@ -30,7 +30,7 @@ import { useDecisionAnswer } from "./decision-answer";
 import { chatDecisionMessages as m } from "./decision-card.messages";
 import { ProviderKey, SearchKey } from "./decision-key-views";
 import { ApprovalActions } from "./decision-parts";
-import { canDecide } from "./decision-rules";
+import { canDecide, denyRequest, denyTakesReason } from "./decision-rules";
 import {
   ConnectionAuth,
   ProfileSetupApps,
@@ -546,12 +546,8 @@ function Approval(props: DecisionViewProps) {
       reasonRequired={card.kind === "room_creation"}
       busy={decision.busy}
       onApprove={() => void decision.answer({ decision: "approve" })}
-      onDeny={(reason) =>
-        void decision.answer({
-          decision: "deny",
-          ...(reason ? { comment: reason } : {}),
-        })
-      }
+      reasonAllowed={denyTakesReason(card.kind)}
+      onDeny={(reason) => void decision.answer(denyRequest(card.kind, reason))}
     />
   );
 }

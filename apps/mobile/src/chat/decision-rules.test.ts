@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { DecisionCard, WebSearchBackend } from "../api/types";
-import { canDecide, keySite, searchKeyBackends } from "./decision-rules";
+import {
+  canDecide,
+  denyRequest,
+  keySite,
+  searchKeyBackends,
+} from "./decision-rules";
 
 type Rules = Pick<
   DecisionCard,
@@ -76,5 +81,22 @@ describe("search key backends", () => {
       "tavily.com/dashboard",
     );
     expect(keySite("https://api.exa.ai")).toBe("api.exa.ai");
+  });
+});
+
+describe("denials", () => {
+  it("carries a reason only where TeamHub takes one", () => {
+    expect(denyRequest("connection_auth", "Not this account")).toEqual({
+      decision: "deny",
+    });
+    expect(denyRequest("search_key", "Later")).toEqual({ decision: "deny" });
+    expect(denyRequest("connector_write", "Wrong person")).toEqual({
+      decision: "deny",
+      comment: "Wrong person",
+    });
+    expect(denyRequest("room_creation", "Use the old Room")).toEqual({
+      decision: "deny",
+      comment: "Use the old Room",
+    });
   });
 });

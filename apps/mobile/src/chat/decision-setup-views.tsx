@@ -58,6 +58,7 @@ import {
   styles as parts,
 } from "./decision-parts";
 import { saveComposioKey } from "./decision-key-views";
+import { denyRequest, denyTakesReason } from "./decision-rules";
 import {
   MAX_FILES,
   MAX_LINKS,
@@ -699,11 +700,7 @@ export function ConnectionAuth(props: DecisionViewProps) {
     }
   };
 
-  const deny = (reason: string | undefined) =>
-    void decision.answer({
-      decision: "deny",
-      ...(reason ? { comment: reason } : {}),
-    });
+  const deny = () => void decision.answer(denyRequest(card.kind, undefined));
 
   const approveLabel = selected
     ? t(selected.status === "active" ? m.allow : m.connect)
@@ -767,7 +764,7 @@ export function ConnectionAuth(props: DecisionViewProps) {
           <Button
             label={t(m.notNow)}
             variant="secondary"
-            onPress={() => deny(undefined)}
+            onPress={deny}
             disabled={busy}
             style={parts.action}
           />
@@ -783,6 +780,7 @@ export function ConnectionAuth(props: DecisionViewProps) {
           }
           approveDisabled={loading}
           denyLabel={t(m.notNow)}
+          reasonAllowed={denyTakesReason(card.kind)}
           busy={busy}
           onApprove={() => void approve()}
           onDeny={deny}
@@ -792,7 +790,7 @@ export function ConnectionAuth(props: DecisionViewProps) {
         <Button
           label={t(m.notNow)}
           variant="secondary"
-          onPress={() => deny(undefined)}
+          onPress={deny}
           disabled={busy}
         />
       ) : null}

@@ -2,6 +2,8 @@
 // as the web's decision card and search key card decide.
 import type {
   DecisionCard,
+  DecisionKind,
+  DecisionRequest,
   WebSearchBackend,
   WebSearchKeyBackend,
 } from "../api/types";
@@ -23,6 +25,30 @@ export function canDecide(
     card.requester.kind === "agent" &&
     workspaceAgentIds.has(card.requester.id)
   );
+}
+
+/** Kinds whose denial TeamHub refuses to carry a comment for. */
+const DENY_WITHOUT_REASON: ReadonlySet<DecisionKind> = new Set([
+  "browser_connection",
+  "computer_permission",
+  "connection_auth",
+  "provider_key",
+  "search_key",
+]);
+
+/** Whether a denial of this kind may say why, as TeamHub accepts it. */
+export function denyTakesReason(kind: DecisionKind): boolean {
+  return !DENY_WITHOUT_REASON.has(kind);
+}
+
+/** A denial, with the reason only where the kind takes one. */
+export function denyRequest(
+  kind: DecisionKind,
+  reason: string | undefined,
+): Pick<DecisionRequest, "decision" | "comment"> {
+  return reason && denyTakesReason(kind)
+    ? { decision: "deny", comment: reason }
+    : { decision: "deny" };
 }
 
 const KEY_BACKENDS: Record<WebSearchKeyBackend, string> = {

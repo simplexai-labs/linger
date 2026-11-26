@@ -142,8 +142,10 @@ public contract operation the Mobile App uses; everything else answers 404
 `NOT_AVAILABLE_ON_MOBILE` without reaching TeamHub. Sign-in, password,
 logout, local identity, Computer enrollment, Document editing credentials,
 pairing administration, Agent Runtime, internal and Agent API routes are not
-on it. The Composio and web search keys are on it only as far as a decision
-card asks for one: saving that key answers the card. The Gateway removes `Cookie`, `Authorization`,
+on it. The routes that save the Composio key and a web search key are on
+it, so a paired phone can save either key at any time, as the desktop can.
+The app offers them only on a key decision card, where saving the key
+answers the card. The Gateway removes `Cookie`, `Authorization`,
 `Origin`, `Referer`, `Accept-Encoding` and forwarding headers, then attaches
 the phone's device Session. `WEB_PUBLIC_ORIGIN`, cookies and CORS are
 untouched because no request leaves the process.
