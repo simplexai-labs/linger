@@ -5,12 +5,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
 
-var errPiNoModels = errors.New("Pi returned no available models")
+var (
+	errPiNoModels             = errors.New("Pi returned no available models")
+	errPiProtocolIncompatible = errors.New("Pi protocol handshake failed")
+)
+
+// PiProbeResult holds the outcome of a single-session Pi RPC handshake
+// and model catalog query.
+type PiProbeResult struct {
+	ProtocolVerified bool
+	Models           ModelList
+	Stderr           string
+}
 
 // PiRPCResourceArgs is the resource policy shared by managed execution,
 // managed catalog discovery and the protocol probe. It returns a new slice.
@@ -96,6 +108,127 @@ func DiscoverPiModels(ctx context.Context, invocation Invocation) (ModelList, er
 		return ModelList{}, errPiNoModels
 	}
 	return piCatalogList(state, available.Models)
+}
+
+// ProbePiProtocolAndModels verifies the Pi RPC protocol handshake and queries
+// the model catalog in a single Pi RPC process.
+func ProbePiProtocolAndModels(ctx context.Context, invocation Invocation) (PiProbeResult, error) {
+	program, err := exec.LookPath(invocation.Program)
+	if err != nil {
+		return PiProbeResult{}, err
+	}
+	invocation.Program = program
+	args := append([]string{"--mode", "rpc", "--no-session"}, PiRPCResourceArgs("")...)
+	requests := []any{
+		map[string]string{"id": "linger-probe", "type": "get_state"},
+		map[string]string{"id": "linger-models", "type": "get_available_models"},
+	}
+	var (
+		protocolVerified bool
+		needLegacyState  bool
+		modelsFailed     bool
+		stateReceived    bool
+		modelsReceived   bool
+		stateRaw         json.RawMessage
+		modelsRaw        json.RawMessage
+	)
+	receive := func(frame []byte, send func(...any) error) (bool, error) {
+		reply, isReply := piCatalogReplyFrame(frame)
+		if !isReply {
+			return false, nil
+		}
+		switch reply.ID {
+		case "linger-probe":
+			if protocolVerified {
+				return false, nil
+			}
+			if reply.Command != "get_state" || !reply.Success {
+				return false, errPiProtocolIncompatible
+			}
+			var data map[string]any
+			if json.Unmarshal(reply.Data, &data) != nil {
+				return false, errPiProtocolIncompatible
+			}
+			if _, streaming := data["isStreaming"].(bool); !streaming {
+				return false, errPiProtocolIncompatible
+			}
+			protocolVerified = true
+			_, hasModel := data["model"]
+			_, hasThinking := data["thinkingLevel"]
+			if hasModel || hasThinking {
+				stateRaw = reply.Data
+				stateReceived = true
+			} else if !modelsFailed {
+				needLegacyState = true
+				if err := send(map[string]string{"id": "linger-state", "type": "get_state"}); err != nil {
+					modelsFailed = true
+				}
+			}
+		case "linger-state":
+			if !needLegacyState {
+				return false, nil
+			}
+			if reply.Command != "get_state" || !reply.Success {
+				modelsFailed = true
+			} else {
+				stateRaw = reply.Data
+				stateReceived = true
+			}
+		case "linger-models":
+			if reply.Command != "get_available_models" || !reply.Success {
+				modelsFailed = true
+			} else {
+				modelsRaw = reply.Data
+				modelsReceived = true
+			}
+		default:
+			return false, nil
+		}
+		if protocolVerified {
+			if modelsFailed {
+				return false, errPiNoModels
+			}
+			if stateReceived && modelsReceived {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if err := exchangeCatalog(ctx, invocation, args, requests, receive); err != nil {
+		var exchangeErr *catalogExchangeError
+		stderr := ""
+		if errors.As(err, &exchangeErr) {
+			stderr = exchangeErr.stderr
+		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return PiProbeResult{ProtocolVerified: protocolVerified, Stderr: stderr}, context.DeadlineExceeded
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return PiProbeResult{ProtocolVerified: protocolVerified, Stderr: stderr}, context.Canceled
+		}
+		if !protocolVerified {
+			if errors.Is(err, errPiProtocolIncompatible) {
+				return PiProbeResult{Stderr: stderr}, err
+			}
+			return PiProbeResult{Stderr: stderr}, fmt.Errorf("%w: %w", errPiProtocolIncompatible, err)
+		}
+		return PiProbeResult{ProtocolVerified: true, Stderr: stderr}, errPiNoModels
+	}
+	if !protocolVerified {
+		return PiProbeResult{}, errPiProtocolIncompatible
+	}
+	var state piCatalogState
+	var available struct {
+		Models []json.RawMessage `json:"models"`
+	}
+	if json.Unmarshal(stateRaw, &state) != nil || json.Unmarshal(modelsRaw, &available) != nil {
+		return PiProbeResult{ProtocolVerified: true}, errPiNoModels
+	}
+	list, err := piCatalogList(state, available.Models)
+	if err != nil {
+		return PiProbeResult{ProtocolVerified: true}, err
+	}
+	return PiProbeResult{ProtocolVerified: true, Models: list}, nil
 }
 
 // piCatalogReplyFrame reports whether frame is a command response. Events

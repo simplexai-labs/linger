@@ -116,7 +116,7 @@ func TestOperationInputRecordFailureStopsTheDaemonWithoutATerminal(t *testing.T)
 	backend.complete = make(chan struct{})
 	d.ledger = inputOutcomeFailureLedger{d.ledger}
 	stream := &fakeStream{}
-	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false); err != nil {
+	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.handleOperationStart(t.Context(), stream, start); err != nil {
@@ -185,7 +185,7 @@ func TestOperationInputOutcomePrecedesImmediateTerminal(t *testing.T) {
 	d, _, start, input, backend := delayedInputFixture(t)
 	backend.complete = make(chan struct{})
 	stream := &fakeStream{}
-	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false); err != nil {
+	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.handleOperationStart(t.Context(), stream, start); err != nil {
@@ -400,7 +400,7 @@ func TestOperationInputBusyReceiptPrecedesConcurrentOutput(t *testing.T) {
 			close(stream.release)
 		}
 	})
-	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false); err != nil {
+	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.handleOperationStart(t.Context(), stream, start); err != nil {
@@ -444,7 +444,7 @@ func TestOperationInputRuntimeResponseIsNotBusyBehindASteer(t *testing.T) {
 	d, _, start, input, backend := delayedInputFixture(t)
 	backend.complete = make(chan struct{})
 	stream := &fakeStream{}
-	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false); err != nil {
+	if err := d.activateStreamAndReplay(t.Context(), stream, nil, false, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.handleOperationStart(t.Context(), stream, start); err != nil {

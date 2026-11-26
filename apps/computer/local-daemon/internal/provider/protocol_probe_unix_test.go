@@ -55,11 +55,11 @@ func TestProtocolProbeLogsWhyAnUnansweredHandshakeFailed(t *testing.T) {
 exit 2
 `)
 	environment := map[string]string{"PATH": "/usr/bin:/bin", "HOME": t.TempDir()}
-	if err := probeRuntimeProtocol(context.Background(), "pi", script, environment, 5*time.Second); err == nil {
+	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second); err == nil {
 		t.Fatal("an unanswered handshake passed")
 	}
 	output := logged.String()
-	for _, want := range []string{"runner.runtime_probe.handshake_failed", "runtime_type=pi", "exit_code=2", "unexpected argument found"} {
+	for _, want := range []string{"runner.runtime_probe.handshake_failed", "runtime_type=codex", "exit_code=2", "unexpected argument found"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("log lacks %q: %s", want, output)
 		}
