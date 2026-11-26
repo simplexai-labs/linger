@@ -2,7 +2,6 @@
 // The setup window walks a new install through server, sign-in, connecting
 // this computer and the system permissions it needs.
 
-import { INKLING_2_MINI_ANNOUNCEMENT_URL } from "@linger/service-kit/featured-models";
 import {
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
@@ -88,19 +87,8 @@ export interface SetupLocalServer {
   // The local model downloading in the background while another source
   // runs.
   readonly backgroundModel?: SetupBackgroundModel;
-  // existing: the install location already has an owner sign-in (an
-  // earlier or upgraded installation), which setup leaves as it is.
-  readonly ownerAccount: "new" | "existing";
   // While installing or failed: the source being installed.
   readonly source?: "local" | "subscription" | "byok";
-}
-
-// The owner sign-in chosen during setup. Checked like the server checks it:
-// a lowercase email and an 8-256 character password without control
-// characters.
-export interface SetupOwnerAccount {
-  readonly email: string;
-  readonly password: string;
 }
 
 export type SetupByokProtocol =
@@ -135,7 +123,13 @@ export type SetupByokCheck =
       readonly modelId: string;
       readonly contextWindow: number;
     }
-  | { readonly state: "failed"; readonly message: string };
+  | {
+      readonly state: "failed";
+      readonly message: string;
+      // The check's own code (BYOK_UNREACHABLE, BYOK_AUTH_FAILED...), when
+      // it gave one.
+      readonly code?: string;
+    };
 
 export interface SetupByokModel {
   readonly id: string;
@@ -278,7 +272,6 @@ export type SetupLocalModelsCheck =
         readonly memoryBytes: number | null;
         // The model library's name for it (<id>:<quant>).
         readonly library?: string;
-        readonly featuredInkling?: true;
       };
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries. The
@@ -362,18 +355,13 @@ export interface SetupState {
 // Exact HTTPS URLs that the sandboxed setup page may ask the main process to
 // open in the system browser. Any other URL is rejected at the IPC boundary.
 export const SETUP_EXTERNAL_URLS = [
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
 ] as const;
 
 export type SetupExternalUrl = (typeof SETUP_EXTERNAL_URLS)[number];
 
-export {
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
-  NVIDIA_DRIVER_DOWNLOAD_URL,
-  NVIDIA_DRIVER_GUIDE_URL,
-};
+export { NVIDIA_DRIVER_DOWNLOAD_URL, NVIDIA_DRIVER_GUIDE_URL };
 
 export type SetupCommand =
   | { readonly op: "server.set"; readonly serverUrl: string }
@@ -391,8 +379,6 @@ export type SetupCommand =
       readonly keys?: SetupProviderKeys;
       // Also download the planned local model in the background.
       readonly background?: boolean;
-      // The owner sign-in chosen on the page, for a new installation.
-      readonly account?: SetupOwnerAccount;
     }
   // Step 2's subscription runtimes: read them again, install one, start its
   // sign-in (device: Codex's device-code login), give Claude Code the code
@@ -456,10 +442,13 @@ export type SetupCommand =
       readonly byok: SetupByokConfig;
     }
   // The finished install's account: show or hide the password, copy it to
-  // the clipboard, or show its file in the file manager.
+  // the clipboard, show its file in the file manager, or change the
+  // password (8-256 characters without control characters, as the server
+  // and local-account.json take it).
   | { readonly op: "local.account.show"; readonly on: boolean }
   | { readonly op: "local.account.copy"; readonly what?: "email" | "password" }
   | { readonly op: "local.account.reveal" }
+  | { readonly op: "local.account.password"; readonly password: string }
   | { readonly op: "signin.open" }
   | { readonly op: "computer.connect" }
   | { readonly op: "notifications.test" }
@@ -483,7 +472,6 @@ export type SetupCommand =
     };
 
 export interface LingerSetupApi {
-  readonly featuredAnnouncementUrl: SetupExternalUrl;
   readonly nvidiaDriverDownloadUrl: SetupExternalUrl;
   readonly nvidiaDriverGuideUrl: SetupExternalUrl;
   minDriverForCuda(requiredCuda: string | undefined): string | undefined;

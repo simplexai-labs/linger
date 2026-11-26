@@ -92,7 +92,7 @@ test("config exposes defaults and validates input before starting work", async (
   const { api, calls } = await setup();
   const config = await (await api("/api/config")).json();
   expect(config.instance).toBe("default");
-  expect(config.email).toBe("owner@linger.local");
+  expect(config.email).toBe("admin@gmail.com");
   expect(config).not.toHaveProperty("password");
   expect(
     (await api("/api/jobs", "POST", { instance: "../../escape" })).status,

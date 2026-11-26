@@ -1,7 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { inspectRuntime } from "@linger/local-installation/managed-runtimes";
 import { parseInstallerArguments } from "../main.js";
 import type { RuntimeLoginManager } from "./runtime-login.js";
@@ -9,19 +7,11 @@ import {
   downloadLocalModel,
   libraryModel,
   prepareSetupRuntime,
-  presetOwnerAccount,
   runtimeStatus,
   setupRuntime,
   setupRuntimeLogin,
 } from "./setup-commands.js";
 import { validateInput } from "./validation.js";
-
-const roots: string[] = [];
-afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
-  );
-});
 
 it("parses the setup commands without a source checkout and refuses bad values", () => {
   expect(parseInstallerArguments(["--runtime-status"])).toMatchObject({
@@ -33,9 +23,6 @@ it("parses the setup commands without a source checkout and refuses bad values",
   expect(
     parseInstallerArguments(["--runtime-login", "codex", "--device-login"]),
   ).toMatchObject({ runtimeLogin: "codex", deviceLogin: true });
-  expect(
-    parseInstallerArguments(["--owner-account", "--instance", "desktop"]),
-  ).toMatchObject({ ownerAccount: true, instanceName: "desktop" });
   expect(
     parseInstallerArguments(["--download-local-model", "qwen3-8b:Q4_K_M"]),
   ).toMatchObject({ downloadModel: "qwen3-8b:Q4_K_M" });
@@ -230,32 +217,6 @@ it("cancels the vendor sign-in when stopped", async () => {
   await done;
   expect(manager.cancel).toHaveBeenCalledWith("setup");
   expect(manager.close).toHaveBeenCalled();
-});
-
-it("presets the owner sign-in from stdin and never echoes the password", async () => {
-  const home = await mkdtemp(path.join(tmpdir(), "owner-account-"));
-  roots.push(home);
-  const password = "chosen password 9";
-  const written = await presetOwnerAccount(
-    home,
-    "desktop",
-    JSON.stringify({ email: "me@example.com", password }),
-  );
-  expect(written).toEqual({ written: true });
-  const file = path.join(home, "instances", "desktop", "local-account.json");
-  expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({
-    email: "me@example.com",
-    password,
-  });
-  for (const input of [
-    "not json",
-    JSON.stringify({ email: "me@example.com" }),
-    JSON.stringify({ email: "bad", password }),
-  ]) {
-    const outcome = await presetOwnerAccount(home, "other", input);
-    expect(outcome).toHaveProperty("error");
-    expect(JSON.stringify(outcome)).not.toContain(password);
-  }
 });
 
 it("downloads the planned model into the library with throttled progress", async () => {

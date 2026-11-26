@@ -2,7 +2,6 @@ import {
   BYOK_URL_PATH_PATTERN,
   MAX_BYOK_URL_PATH,
 } from "@linger/service-kit/byok-endpoint";
-import { validOwnerEmail } from "@linger/local-installation/account";
 import { z } from "zod";
 
 import { SETUP_EXTERNAL_URLS, type SetupCommand } from "../shared/setup.js";
@@ -45,17 +44,12 @@ const externalUrl = z.enum(SETUP_EXTERNAL_URLS);
 const setupRuntime = z.enum(["claude", "codex", "pi"]);
 const signInRuntime = z.enum(["claude", "codex"]);
 
-// The owner sign-in chosen on the page, checked as the server checks it.
-const ownerAccount = z
-  .object({
-    email: z.string().refine(validOwnerEmail, "Invalid email"),
-    password: z
-      .string()
-      .min(8)
-      .max(256)
-      .regex(/^\P{Cc}*$/u, "Invalid password"),
-  })
-  .strict();
+// A new owner password, as local-account.json and the server take it.
+const ownerPassword = z
+  .string()
+  .min(8)
+  .max(256)
+  .regex(/^\P{Cc}*$/u, "Invalid password");
 
 const setupCommand = z.discriminatedUnion("op", [
   z
@@ -88,7 +82,6 @@ const setupCommand = z.discriminatedUnion("op", [
         .strict()
         .optional(),
       background: z.boolean().optional(),
-      account: ownerAccount.optional(),
     })
     .strict(),
   z.object({ op: z.literal("local.runtimes.check") }).strict(),
@@ -173,6 +166,12 @@ const setupCommand = z.discriminatedUnion("op", [
     })
     .strict(),
   z.object({ op: z.literal("local.account.reveal") }).strict(),
+  z
+    .object({
+      op: z.literal("local.account.password"),
+      password: ownerPassword,
+    })
+    .strict(),
   z.object({ op: z.literal("signin.open") }).strict(),
   z.object({ op: z.literal("computer.connect") }).strict(),
   z.object({ op: z.literal("notifications.test") }).strict(),

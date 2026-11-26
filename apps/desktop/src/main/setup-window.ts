@@ -315,7 +315,6 @@ export class SetupWindowModule implements Module {
           ...(command.byok ? { byok: command.byok } : {}),
           ...(command.keys ? { keys: command.keys } : {}),
           ...(command.background ? { background: true } : {}),
-          ...(command.account ? { account: command.account } : {}),
         } as const;
         // Nothing signed in for a subscription: the page keeps Install off
         // until one is, so this only answers a stale page.
@@ -439,6 +438,14 @@ export class SetupWindowModule implements Module {
         return;
       case "local.account.reveal":
         this.#account?.reveal();
+        return;
+      case "local.account.password":
+        // The server takes it first, then local-account.json; a shown
+        // password shows the new one.
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .changePassword(command.password);
+        await this.#account?.refresh();
         return;
       case "signin.open":
         windows.show();
@@ -675,7 +682,6 @@ const localServerState = (
     failure,
     runtimes,
     backgroundModel,
-    ownerAccount,
     source,
   } = local.status();
   const home = os.homedir();
@@ -712,7 +718,6 @@ const localServerState = (
     ...(account ? { account } : {}),
     ...(runtimes ? { runtimes } : {}),
     ...(backgroundModel ? { backgroundModel } : {}),
-    ownerAccount,
     ...(source ? { source } : {}),
   };
 };

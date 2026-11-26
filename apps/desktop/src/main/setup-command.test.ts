@@ -1,8 +1,10 @@
-import { INKLING_2_MINI_HF_URL } from "@linger/service-kit/featured-models";
+import {
+  INKLING_2_MINI_ANNOUNCEMENT_URL,
+  INKLING_2_MINI_HF_URL,
+} from "@linger/service-kit/featured-models";
 import { describe, expect, it } from "vitest";
 
 import {
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
   SETUP_EXTERNAL_URLS,
@@ -292,6 +294,7 @@ describe("parseSetupCommand", () => {
 
     for (const url of [
       INKLING_2_MINI_HF_URL,
+      INKLING_2_MINI_ANNOUNCEMENT_URL,
       "https://evil.example.com/",
       "http://thinkingmachines.ai/news/inkling-2-mini/",
       `${INKLING_2_MINI_ANNOUNCEMENT_URL}?ref=test`,
@@ -334,21 +337,14 @@ describe("parseSetupCommand", () => {
     ).toThrow();
   });
 
-  it("accepts the setup sources' commands and a chosen sign-in the server would", () => {
-    const account = { email: "me@example.com", password: "my own pass 1" };
+  it("accepts the setup sources' commands", () => {
     expect(
       parseSetupCommand({
         op: "local.start",
         runtime: "subscription",
         background: true,
-        account,
       }),
-    ).toEqual({
-      op: "local.start",
-      runtime: "subscription",
-      background: true,
-      account,
-    });
+    ).toEqual({ op: "local.start", runtime: "subscription", background: true });
     for (const command of [
       { op: "local.runtimes.check" },
       { op: "local.runtime.install", runtime: "pi" },
@@ -365,11 +361,33 @@ describe("parseSetupCommand", () => {
       // Pi has no sign-in of its own.
       { op: "local.runtime.signin", runtime: "pi" },
       { op: "local.runtime.code", runtime: "claude", code: " " },
-      { op: "local.start", account: { ...account, email: "Me@Example.com" } },
-      { op: "local.start", account: { ...account, email: "me@localhost" } },
-      { op: "local.start", account: { ...account, password: "short" } },
-      { op: "local.start", account: { ...account, password: "tab\there!" } },
-      { op: "local.start", account: { ...account, extra: true } },
+      // Setup creates the owner account itself; the page never picks one.
+      {
+        op: "local.start",
+        account: { email: "me@example.com", password: "my own pass 1" },
+      },
+    ])
+      expect(() => parseSetupCommand(command)).toThrow();
+  });
+
+  it("takes a new owner password the server would", () => {
+    for (const password of ["a-new-pass", "x".repeat(256), "spaces are ok 1"])
+      expect(
+        parseSetupCommand({ op: "local.account.password", password }),
+      ).toEqual({ op: "local.account.password", password });
+    for (const command of [
+      { op: "local.account.password", password: "1234567" },
+      { op: "local.account.password", password: "x".repeat(257) },
+      { op: "local.account.password", password: "has\nnewline" },
+      { op: "local.account.password", password: "tab\there!!" },
+      { op: "local.account.password", password: "del\u007fchar" },
+      { op: "local.account.password" },
+      { op: "local.account.password", password: 12345678 },
+      {
+        op: "local.account.password",
+        password: "a-new-pass",
+        email: "me@example.com",
+      },
     ])
       expect(() => parseSetupCommand(command)).toThrow();
   });

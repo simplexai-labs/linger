@@ -344,12 +344,12 @@ runtimes (`codex`, `claude`) a setup signed in beside its `codex` or `claude`
 choice; a job that names a choice rewrites it (none leaves only the choice),
 and `inspectRuntimeDescriptors` reports those that are installed after the
 chosen one, so the Computer runs either while the choice stays the default.
-`presetLocalAccount` (`account.ts`) writes the owner sign-in chosen at setup
-to a new instance's private `local-account.json` with `provisioned: false`
-before the owner is created; it checks the email the way TeamHub accepts it
-(`validOwnerEmail`: lower case, local part at most 100 characters, 320 in
-all) and the password with `validateLocalCredentials`, and leaves an
-existing file as it is, so an upgrade keeps its sign-in. A plan whose model
+A new instance's owner is `DEFAULT_OWNER_EMAIL` (`admin@gmail.com`,
+`account.ts`) with a generated password unless the caller names others;
+`ensureLocalAccount` leaves an existing `local-account.json` as it is, so an
+upgrade keeps its sign-in. `writeLocalLoginPassword` replaces only the
+password there after TeamHub accepted a change (same checks as a read,
+written beside the file and renamed over it, owner-only). A plan whose model
 names a quantization carries `libraryModel` (`<id>:<quant>`,
 `LIBRARY_MODEL_ID`), which setup downloads in the background while another
 source runs.

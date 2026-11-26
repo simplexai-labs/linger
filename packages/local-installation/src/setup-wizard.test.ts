@@ -1,18 +1,19 @@
 // The pieces the two-step desktop setup relies on: the planned model's
 // library id, subscription runtimes linked beside the chosen one, and the
-// owner sign-in chosen before the installation exists.
+// owner's password changed on the ready screen.
 import {
   mkdir,
   mkdtemp,
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { presetLocalAccount, validOwnerEmail } from "./account.js";
+import { readLocalLogin, writeLocalLoginPassword } from "./account.js";
 import type { Instance } from "./instance.js";
 import {
   inspectLinkedRuntimeDescriptors,
@@ -168,59 +169,79 @@ it("binds linked runtimes beside the chosen one, chosen runtime first", async ()
   ).toEqual([]);
 });
 
-it("validates the owner email the way TeamHub stores it", () => {
-  for (const email of [
-    "owner@linger.local",
-    "a.b+c@example.co",
-    `${"a".repeat(100)}@x.io`,
-  ])
-    expect(validOwnerEmail(email)).toBe(true);
-  for (const email of [
-    "Owner@linger.local",
-    " owner@linger.local",
-    "owner@localhost",
-    "owner@@x.io",
-    "a..b@x.io",
-    `${"a".repeat(101)}@x.io`,
-    `a@${"b".repeat(320)}.io`,
-    "owner@-x.io",
-  ])
-    expect(validOwnerEmail(email)).toBe(false);
-});
-
-it("presets the owner sign-in once, privately, and never overwrites an existing account", async () => {
-  const home = await scratch("preset-account-");
-  const root = path.join(home, "instances", "default");
+it("replaces the owner password privately and keeps the email", async () => {
+  const root = path.join(await scratch("owner-password-"), "desktop");
+  await mkdir(root, { recursive: true });
   const file = path.join(root, "local-account.json");
-  const credentials = { email: "me@example.com", password: "my own pass 1" };
-  expect(await presetLocalAccount(root, credentials)).toEqual({
-    written: true,
-  });
-  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-    ...credentials,
-    provisioned: false,
-  });
-  if (process.platform !== "win32") {
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect((await stat(root)).mode & 0o777).toBe(0o700);
-  }
-  expect(
-    await presetLocalAccount(root, {
-      email: "other@example.com",
-      password: "another pass",
-    }),
-  ).toEqual({ written: false });
-  expect(JSON.parse(await readFile(file, "utf8")).email).toBe("me@example.com");
+  const account = {
+    email: "owner@linger.local",
+    password: "generated pass 1",
+    provisioned: true,
+  };
+  await writeFile(file, JSON.stringify(account), { mode: 0o600 });
 
-  const fresh = path.join(home, "instances", "fresh");
-  for (const [credential, message] of [
-    [{ email: "ME@example.com", password: "12345678" }, "valid login email"],
-    [{ email: "me@example.com", password: "short" }, "8–256 characters"],
-    [{ email: "me@example.com", password: "has\nnewline" }, "8–256"],
-    [{ email: "me@example.com", password: "x".repeat(257) }, "8–256"],
-  ] as const)
-    await expect(presetLocalAccount(fresh, credential)).rejects.toThrow(
-      message,
+  await writeLocalLoginPassword({ root }, "my new pass 2");
+  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+    ...account,
+    password: "my new pass 2",
+  });
+  expect(await readLocalLogin({ root })).toMatchObject({
+    email: "owner@linger.local",
+    password: "my new pass 2",
+  });
+  if (process.platform !== "win32")
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+
+  // The server's rules, checked before anything is written.
+  for (const password of ["short", "has\nnewline", "x".repeat(257)])
+    await expect(writeLocalLoginPassword({ root }, password)).rejects.toThrow(
+      "8–256",
     );
-  await expect(stat(fresh)).rejects.toThrow();
+  expect(JSON.parse(await readFile(file, "utf8")).password).toBe(
+    "my new pass 2",
+  );
 });
+
+it.skipIf(process.platform === "win32")(
+  "refuses to replace an account file that is not private or not a file",
+  async () => {
+    const home = await scratch("owner-password-");
+    const open = path.join(home, "open");
+    await mkdir(open);
+    const account = JSON.stringify({
+      email: "owner@linger.local",
+      password: "generated pass 1",
+      provisioned: true,
+    });
+    await writeFile(path.join(open, "local-account.json"), account, {
+      mode: 0o644,
+    });
+    await expect(
+      writeLocalLoginPassword({ root: open }, "my new pass 2"),
+    ).rejects.toThrow(/private/);
+    expect(
+      JSON.parse(await readFile(path.join(open, "local-account.json"), "utf8"))
+        .password,
+    ).toBe("generated pass 1");
+
+    const linked = path.join(home, "linked");
+    await mkdir(linked);
+    const target = path.join(home, "target.json");
+    await writeFile(target, account, { mode: 0o600 });
+    await symlink(target, path.join(linked, "local-account.json"));
+    await expect(
+      writeLocalLoginPassword({ root: linked }, "my new pass 2"),
+    ).rejects.toThrow(/private/);
+    expect(JSON.parse(await readFile(target, "utf8")).password).toBe(
+      "generated pass 1",
+    );
+
+    // Nothing to replace before the installer created the owner.
+    await expect(
+      writeLocalLoginPassword(
+        { root: path.join(home, "none") },
+        "my new pass 2",
+      ),
+    ).rejects.toThrow();
+  },
+);

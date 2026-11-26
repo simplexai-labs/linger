@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -46,6 +47,7 @@ import {
   LocalServerModule,
   MIN_MACOS,
   anotherMeMissing,
+  changeOwnerPassword,
   checkLocation,
   computerNotOnline,
   followHttps,
@@ -58,6 +60,7 @@ import {
   parseSetCookie,
   pollDelayMs,
   LocalServerUnverifiedError,
+  PasswordChangeError,
   proveLocalServer,
   runChild,
   RUNTIME_LOOKUP_HINT_MS,
@@ -164,6 +167,11 @@ if (args.includes("--migrate")) {
   process.exit(0);
 }
 if (args.includes("--check-byok")) {
+  const byok = JSON.parse(fs.readFileSync(0, "utf8") || "{}");
+  if (byok.modelId === "unreachable") {
+    process.stdout.write(JSON.stringify({ ok: false, code: "BYOK_UNREACHABLE", message: "Could not reach https://byok.example/v1/responses (URLError)." }) + "\n");
+    process.exit(1);
+  }
   fs.mkdirSync(path.join(home, "installer"), { recursive: true });
   fs.writeFileSync(
     path.join(home, "installer", "byok-env.json"),
@@ -2624,6 +2632,20 @@ describe("LocalServerModule", () => {
     expect(seenByok.ANTHROPIC_BASE_URL).not.toBe(
       "https://shell-profile.example",
     );
+    // A failed check keeps its code for the page's short line.
+    await installFixture.module.checkByok({
+      runtime: "codex",
+      baseUrl: "https://byok.example",
+      path: "/v1",
+      endpoint: "/responses",
+      modelId: "unreachable",
+      protocol: "openai-responses",
+    });
+    expect(installFixture.module.status().byokCheck).toEqual({
+      state: "failed",
+      code: "BYOK_UNREACHABLE",
+      message: "Could not reach https://byok.example/v1/responses (URLError).",
+    });
 
     await installFixture.module.begin();
     const seenServer = JSON.parse(
@@ -2677,28 +2699,6 @@ describe("LocalServerModule", () => {
       "https://shell-profile.example",
     );
     await resumeFixture.host.stop("quit");
-  });
-
-  it("marks checked Inkling 2 Mini models with featuredInkling using the shared matcher", async () => {
-    const f = fixture({ checkout: "/src" }, {}, (home) => {
-      mkdirSync(home, { recursive: true });
-      writeFileSync(
-        path.join(home, "inspect-model"),
-        "thinkingmachines/Inkling-2-Mini",
-      );
-    });
-    await f.host.start();
-    f.module.inspect();
-    await waitForInstaller(() =>
-      expect(f.module.status().localModels).toMatchObject({
-        state: "checked",
-        eligible: true,
-        model: {
-          name: "thinkingmachines/Inkling-2-Mini",
-          featuredInkling: true,
-        },
-      }),
-    );
   });
 
   it("forwards validated CUDA driver versions without leaking tool prose", async () => {
@@ -8123,6 +8123,129 @@ describe("signInWithPassword", () => {
   });
 });
 
+// A TeamHub with KEY whose owner signs in with `current`; the password
+// change answers with `change`.
+const passwordTeamhub = (
+  current: string,
+  change: () => Response = () => new Response(null, { status: 204 }),
+) =>
+  vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const body = init?.body ? (JSON.parse(String(init.body)) as never) : {};
+    switch (url.pathname) {
+      case "/v0/local/identity":
+        return Response.json({
+          proof: localIdentityProof(
+            KEY,
+            (body as { nonce: string }).nonce,
+            WEB_ORIGIN,
+          ).toString("base64url"),
+        });
+      case "/v0/auth/login":
+        return (body as { password: string }).password === current
+          ? new Response("{}", {
+              headers: {
+                "set-cookie":
+                  "linger_session=change; Path=/; HttpOnly; SameSite=Lax",
+              },
+            })
+          : new Response("{}", { status: 401 });
+      case "/v0/account/password":
+        return change();
+      default:
+        return new Response(null, { status: 204 });
+    }
+  });
+
+describe("changeOwnerPassword", () => {
+  it("changes it in a session of its own, then logs that session out", async () => {
+    const fetcher = passwordTeamhub("old password 1");
+    await changeOwnerPassword(
+      server(WEB_ORIGIN),
+      "owner@linger.local",
+      "old password 1",
+      "new password 2",
+      fetcher as typeof fetch,
+    );
+    const calls = fetcher.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      headers: init?.headers as Record<string, string>,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    }));
+    expect(calls.map((call) => call.url)).toEqual([
+      `${TEAMHUB}/v0/local/identity`,
+      `${TEAMHUB}/v0/auth/login`,
+      `${TEAMHUB}/v0/account/password`,
+      `${TEAMHUB}/v0/auth/logout`,
+    ]);
+    expect(calls[2]).toMatchObject({
+      headers: { cookie: "linger_session=change", origin: WEB_ORIGIN },
+      body: {
+        current_password: "old password 1",
+        new_password: "new password 2",
+      },
+    });
+    expect(calls[3]!.headers).toMatchObject({
+      cookie: "linger_session=change",
+    });
+  });
+
+  it.each([
+    [
+      400,
+      { error: { code: "INVALID_CURRENT_PASSWORD" } },
+      "The saved password no longer works. Log in with your email and password.",
+    ],
+    [
+      400,
+      { error: { code: "INVALID_REQUEST" } },
+      "Use 8–256 characters without control characters.",
+    ],
+    [
+      429,
+      { error: { code: "RATE_LIMITED" } },
+      "Too many password changes. Try again in a few minutes.",
+    ],
+    [500, {}, "Couldn't change the password (500)."],
+  ])(
+    "says what to do when TeamHub answers %i",
+    async (status, body, message) => {
+      const fetcher = passwordTeamhub("old password 1", () =>
+        Response.json(body, { status }),
+      );
+      const failure = changeOwnerPassword(
+        server(WEB_ORIGIN),
+        "owner@linger.local",
+        "old password 1",
+        "new password 2",
+        fetcher as typeof fetch,
+      );
+      await expect(failure).rejects.toEqual(
+        new PasswordChangeError(status, message),
+      );
+      // The session opened for it is still logged out.
+      expect(String(fetcher.mock.calls.at(-1)![0])).toBe(
+        `${TEAMHUB}/v0/auth/logout`,
+      );
+    },
+  );
+
+  it("never sends either password to a server that does not prove itself", async () => {
+    const fetcher = teamhub(() => Response.json({ proof: "A".repeat(43) }));
+    await expect(
+      changeOwnerPassword(
+        server(WEB_ORIGIN),
+        "owner@linger.local",
+        "old password 1",
+        "new password 2",
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toBeInstanceOf(LocalServerUnverifiedError);
+    expect(sentPassword(fetcher, "old password 1")).toBe(false);
+    expect(sentPassword(fetcher, "new password 2")).toBe(false);
+  });
+});
+
 describe("signInFailure", () => {
   it("says what to do by status and error kind, not by message", () => {
     expect(signInFailure(new SignInRejectedError(401))).toBe(
@@ -8589,6 +8712,109 @@ describe("LocalServerModule owner account", () => {
       await expect(failure).rejects.toThrow(message);
       await expect(failure).rejects.not.toThrow(OWNER.password);
       expect(f.signIn).not.toHaveBeenCalled();
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
+
+  it("changes the password on the server, then in the account file, and signs in again", async () => {
+    const fetcher = passwordTeamhub(OWNER.password);
+    const f = fixture(
+      { fetch: fetcher as typeof fetch },
+      enrolled,
+      installed(OWNER),
+    );
+    const info = vi.spyOn(silentLog, "info");
+    const warn = vi.spyOn(silentLog, "warn");
+    await f.host.start();
+    try {
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await f.module.changePassword("my new password 3");
+      const file = path.join(
+        f.home,
+        "instances",
+        LOCAL_INSTANCE,
+        "local-account.json",
+      );
+      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+        ...OWNER,
+        password: "my new password 3",
+      });
+      if (process.platform !== "win32")
+        expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(f.signIn).toHaveBeenLastCalledWith(
+        server(ORIGIN),
+        OWNER.email,
+        "my new password 3",
+      );
+      expect(info).toHaveBeenCalledWith("local_server.password_changed");
+      const logged = JSON.stringify([info.mock.calls, warn.mock.calls]);
+      expect(logged).not.toContain(OWNER.password);
+      expect(logged).not.toContain("my new password 3");
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("leaves the account file alone when the server refuses the change", async () => {
+    const fetcher = passwordTeamhub(OWNER.password, () =>
+      Response.json(
+        { error: { code: "INVALID_CURRENT_PASSWORD" } },
+        { status: 400 },
+      ),
+    );
+    const f = fixture(
+      { fetch: fetcher as typeof fetch },
+      enrolled,
+      installed(OWNER),
+    );
+    const warn = vi.spyOn(silentLog, "warn");
+    await f.host.start();
+    try {
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await expect(
+        f.module.changePassword("my new password 3"),
+      ).rejects.toThrow(
+        "The saved password no longer works. Log in with your email and password.",
+      );
+      expect((await f.module.account()).password).toBe(OWNER.password);
+      expect(f.signIn).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith("local_server.password_change_failed", {
+        status: 400,
+      });
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain(OWNER.password);
+      expect(logged).not.toContain("my new password 3");
+    } finally {
+      warn.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("changes nothing while the services are not running", async () => {
+    const fetcher = passwordTeamhub(OWNER.password);
+    const f = fixture({ fetch: fetcher as typeof fetch }, enrolled, (home) => {
+      installed(OWNER)(home);
+      writeFileSync(path.join(home, "resume-fails"), "");
+    });
+    await f.host.start();
+    try {
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("failed"),
+      );
+      await expect(
+        f.module.changePassword("my new password 3"),
+      ).rejects.toThrow(
+        "This window is not showing the Linger on this computer.",
+      );
+      expect(sentPassword(fetcher, OWNER.password)).toBe(false);
+      expect(sentPassword(fetcher, "my new password 3")).toBe(false);
     } finally {
       await f.host.stop("quit");
     }
@@ -9835,17 +10061,14 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
 });
 
 // The installer's headless setup commands, answered from `answers` by their
-// first argument; each call is kept with the input it was sent.
+// first argument; each call is kept.
 const setupCommands = (
   answers: Record<string, Record<string, unknown>[]> = {},
   onCall: (args: readonly string[]) => void = () => undefined,
 ) => {
-  const calls: { args: string[]; input?: string }[] = [];
+  const calls: { args: string[] }[] = [];
   const run: SetupCommandRunner = async (args, options) => {
-    calls.push({
-      args: [...args],
-      ...(options.input !== undefined ? { input: options.input } : {}),
-    });
+    calls.push({ args: [...args] });
     onCall(args);
     for (const line of answers[args[0]!] ?? []) options.onLine(line);
     return {
@@ -9867,19 +10090,11 @@ const SIGNED_IN_BOTH = {
       ],
     },
   ],
-  "--owner-account": [{ written: true }],
 };
 
 describe("LocalServerModule setup sources", () => {
-  it("installs a subscription with Codex by default, links Claude Code, and writes the chosen sign-in first", async () => {
-    let home = "";
-    let launchedBeforeAccount: boolean | undefined;
-    const commands = setupCommands(SIGNED_IN_BOTH, (args) => {
-      if (args[0] === "--owner-account")
-        launchedBeforeAccount = existsSync(
-          path.join(home, "installer", "args.json"),
-        );
-    });
+  it("installs a subscription with Codex by default and links Claude Code", async () => {
+    const commands = setupCommands(SIGNED_IN_BOTH);
     const api = installerApi([], {
       state: "succeeded",
       setupChoice: "codex",
@@ -9888,16 +10103,12 @@ describe("LocalServerModule setup sources", () => {
     api.runtime.setupChoice = "codex";
     api.runtime.environment = { LINGER_CODEX_PATH: "/opt/codex/codex" };
     const f = fixture(
-      (fixtureHome) => {
-        home = fixtureHome;
-        return { ...withCheckout(fixtureHome), setupCommand: commands.run };
-      },
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
       {},
       checkout,
       api,
     );
     await f.host.start();
-    expect(f.module.status()).toMatchObject({ ownerAccount: "new" });
     expect(f.module.status().runtimes).toBeUndefined();
     await f.module.setupRuntimes().check();
     expect(f.module.status().runtimes?.map((row) => row.signedIn)).toEqual([
@@ -9905,8 +10116,7 @@ describe("LocalServerModule setup sources", () => {
       true,
       false,
     ]);
-    const account = { email: "me@example.com", password: "my own pass 1" };
-    await f.module.beginSetup({ runtime: "subscription", account });
+    await f.module.beginSetup({ runtime: "subscription" });
     expect(f.api.created).toEqual([
       {
         instance: LOCAL_INSTANCE,
@@ -9914,25 +10124,17 @@ describe("LocalServerModule setup sources", () => {
         linkedRuntimes: ["claude"],
       },
     ]);
-    const preset = commands.calls.find(
-      (call) => call.args[0] === "--owner-account",
-    );
-    expect(preset).toEqual({
-      args: ["--owner-account", "--instance", LOCAL_INSTANCE],
-      input: JSON.stringify(account),
-    });
-    // Written before the installer starts, so it creates the owner with it.
-    expect(launchedBeforeAccount).toBe(false);
-    // Never on the command line.
-    expect(JSON.stringify(installerArgs(f.home))).not.toContain(
-      account.password,
-    );
+    // The installer creates the owner with its generated sign-in, as
+    // Quick Install does.
+    expect(
+      commands.calls.map((call) => call.args[0]).filter(Boolean),
+    ).not.toContain("--owner-account");
     expect(f.module.status().phase).toBe("ready");
     expect(f.host.ctx.config.get().preferredRuntime).toBe("codex");
     await f.host.stop("quit");
   });
 
-  it("refuses a subscription with nothing signed in, and leaves an existing sign-in alone", async () => {
+  it("refuses a subscription with nothing signed in", async () => {
     const commands = setupCommands({
       "--runtime-status": [
         {
@@ -9947,19 +10149,9 @@ describe("LocalServerModule setup sources", () => {
     const f = fixture(
       (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
       {},
-      (home) => {
-        checkout(home);
-        mkdirSync(path.join(home, "instances", LOCAL_INSTANCE), {
-          recursive: true,
-        });
-        writeFileSync(
-          path.join(home, "instances", LOCAL_INSTANCE, "local-account.json"),
-          "{}",
-        );
-      },
+      checkout,
     );
     await f.host.start();
-    expect(f.module.status().ownerAccount).toBe("existing");
     await f.module.setupRuntimes().check();
     await expect(
       f.module.beginSetup({ runtime: "subscription" }),

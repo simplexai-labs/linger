@@ -111,8 +111,13 @@ Gateway and runs Agents. The daemon exits with the app.
   service natively. It drives the installer's local API itself (`InstallerApi`):
   the session from `installer/launch.html`, one job for instance `desktop`
   with the chosen AI runtime and local models, then the job's progress, which
-  the setup page shows as five steps. Each Install or Try Again is a new attempt: its timers and bar
-  start over, and the bar never moves back within one. There is no
+  the setup page shows as one progress bar with one short line that changes
+  with the step (a download, such as the local model's, folds into the same
+  line with its bytes); there is no checklist and no timings. Each Install
+  is a new attempt: its timers and bar start over, and the bar never moves
+  back within one. A failure shows a brief message and one button, Report
+  issue: Send Diagnostics' consent flow when a receiver is set up, else Save
+  Diagnostics to Downloads. There is no
   installer window. When the job waits for the runtime sign-in (its
   `runtime` stage `waiting_user`, or `RUNTIME_AUTH_REQUIRED`), it asks the
   installer (`GET /api/runtime-login`) whether the runtime is signed in
@@ -213,23 +218,37 @@ Gateway and runs Agents. The daemon exits with the app.
   where the minimum comes from.
   The welcome has two steps in one window of fixed size, with the main
   button in a fixed place (`data-stage` on the section: `checking`,
-  `choose`, `settings`). Step 1 waits for a short check of this computer
-  (after 8 s "Choose without waiting" offers the cards while the check runs
-  on), then offers three source cards: Local model, BYOK and Subscription.
-  The card picked first is the recommendation: the Local model when the
+  `choose`, `settings`). Step 1 shows only a spinner while it checks this
+  computer (after 20 s "Choose now" offers the cards while the check runs
+  on), then offers three source cards, each a title and one short line,
+  with no subtitle, badges or tags: Local model ("On this computer"), BYOK
+  ("Your API key") and Subscription ("ChatGPT or Claude plan").
+  The card picked first is the advice: the Local model when the
   localmodels report recommends `local-models` with a model that runs now
   and no subscription runtime is signed in, else Subscription; BYOK is never
-  recommended. A local model that cannot run, or is held, shows its card
-  disabled with the reason and Check again. Step 2 shows the chosen source's
-  settings, Back (or Escape) and Install; the install location and app keys
-  sit behind More options. The Local model installs Pi with the planned
-  model (`runtime: "local"`) and says setup waits for the download. BYOK
-  has no runtime picker: it always runs on Pi (`runtime: "pi"`). Subscription
-  lists Claude Code, Codex and Pi, each read from this computer through the
+  picked. A local model that cannot run, or is held, shows its card
+  disabled ("Not available here" or "On hold") with the reason under the
+  cards and Check again. Step 2 shows the chosen source's
+  settings, Back (or Escape) and Install. The install location shows only
+  when the default one fails its check, with the error and Change inline;
+  setup takes no app keys. The Local model installs Pi with the planned
+  model (`runtime: "local"`); step 2 names the model and its download size. BYOK
+  asks only for the URL, API key and Model ID and always runs on Pi
+  (`runtime: "pi"`); the URL picks the format (a path ending in a format's
+  endpoint such as `/messages` or `/chat/completions` uses that format, a
+  bare host gets `/v1`), and Install first checks the endpoint quietly
+  (`local.byok.check`), showing an inline error only when it fails: the
+  usual codes (`BYOK_UNREACHABLE`, `BYOK_CHECK_TIMEOUT`, `BYOK_AUTH_FAILED`,
+  `BYOK_NOT_FOUND`, `BYOK_UPSTREAM_REJECTED`) get one short line, any other
+  keeps the check's own message.
+  Subscription lists Claude Code and Codex, each a name and one status
+  line (Not installed, Installing with a bar, Not signed in, Signing in…,
+  Signed in), read from this computer through the
   installer's headless commands (`setup-sources.ts`: `--runtime-status`,
   `--prepare-runtime`, `--runtime-login`); Claude Code and Codex offer
   Install with a progress bar and then Sign in (with the link, a code to
-  paste or a device code, and Cancel), Pi only Install. Install is enabled
+  paste or a device code, and Cancel). Pi has no row: the installer installs
+  it by itself when a source needs it. Install is enabled
   only while Claude Code or Codex is signed in and nothing installs or
   signs in. With both signed in, Codex is the default runtime and Claude Code
   is configured too (`linkedRuntimes`, `linked-runtimes.json` in the
@@ -239,34 +258,36 @@ Gateway and runs Agents. The daemon exits with the app.
   the Local model's installation downloads, its wait offers Use Subscription
   and Use BYOK (`local.leave-local`): the installer's job is cancelled, the
   model keeps downloading in the background and step 2 of the other source
-  shows "Local model NN% · ready when done". A new installation's owner
-  sign-in is chosen on step 2 (`ownerAccount: "new"`, from whether the
-  install location has `local-account.json`): `owner@linger.local` and a
-  generated password, editable in a sheet with Show, Confirm, Generate and
-  the server's rules (lower-case `OWNER_EMAIL`, local part at most 100 and
-  320 in all; password 8 to 256 UTF-16 units without control characters).
-  Install sends it as `account`; LocalServer writes it before the installer
-  runs (`installer.js --owner-account`, the sign-in on stdin, into the
-  owner-only `local-account.json`, never over an existing one) and drops it
-  once written. It is never logged, and Try Again sends it again until the
-  location has an account. An existing or upgraded installation keeps its
-  sign-in and shows no such row. The ready screen copies the email or the
-  password (`local.account.copy` with `what`).
+  shows "Local model NN%". Setup asks nothing about the
+  sign-in: the installer gives a new installation's owner `admin@gmail.com`
+  (`DEFAULT_OWNER_EMAIL`) and a generated password in the owner-only
+  `local-account.json`, and an existing or upgraded installation keeps its
+  own. The ready screen folds them under "Sign-in details" (collapsed by
+  default): the email with Copy, the password with Show and Copy
+  (`local.account.show`, `local.account.copy` with `what`) and Change
+  password. A new password (8 to 256 UTF-16 units without control
+  characters) goes through `local.account.password`: LocalServer proves the
+  instance's identity, signs in privately, posts TeamHub's
+  `POST /v0/account/password`, signs that session out, and only after the
+  204 replaces the password in `local-account.json` (`writeLocalLoginPassword`,
+  written beside it and renamed over it, owner-only), then signs the window
+  in again so automatic sign-in keeps working. It logs
+  `local_server.password_changed` or `local_server.password_change_failed`
+  with the status, never the password.
   The recommendation follows the localmodels setup
   report (`installer.js --inspect`, run for the selected install location
   as the setup window opens and again when that location changes, including
   after a failed install). Checks keep their tool cache in the default home,
   leave alternative locations untouched, and never migrate installations.
-  In the report, `local-models` is the planned model served by Pi, shown with the model,
-  GPU, memory and download (the card's memory is the whole stack's, so
-  "with its services"); otherwise the named runtime, with why there is no
-  local model. The page words each reason by its code and the structured
+  In the report, `local-models` is the planned model served by Pi, shown on
+  step 2 by name and download size; otherwise the named runtime, with why
+  there is no local model. The page words each reason by its code and the structured
   counts or numeric versions it carries (`gpuIndex`, `freeBytes`,
   `requiredBytes`, `detectedCudaVersion`, `requiredCudaVersion`,
   `driverVersion`); the tool's message goes only to the main process log
   (`local_server.inspected`), never to the page. The Local model card stays
-  visible once the check ends: disabled, "Not available on this computer",
-  with that reason. For `cuda-driver-update-required` and
+  visible once the check ends: disabled, "Not available here", with that
+  reason. For `cuda-driver-update-required` and
   `cuda-driver-version-unknown`, the page explains the NVIDIA graphics driver
   requirement (with required driver branch via `@linger/service-kit/nvidia-driver`),
   offers one-click verified Windows GeForce RTX driver installation
@@ -441,18 +462,19 @@ Gateway and runs Agents. The daemon exits with the app.
   `local-computers` and says what is missing (offline computer, no writable
   folder, or no signed-in runtime with each runtime's reported state) and logs
   `local_server.another_me_missing` or
-  `local_server.computer_offline_after_agents`. More options → API keys takes the
-  Composio key only (`provider-keys.ts`); voice keys are saved in the app,
+  `local_server.computer_offline_after_agents`. The setup page sends no
+  keys; the Composio key is set in Linger's Settings › Security › API keys.
+  `local.start` still accepts it (`provider-keys.ts`); voice keys are saved in the app,
   and a `SONIOX_API_KEY` or `XAI_API_KEY` written into `user.env` by hand
-  still reaches the services and overrides the app's. Install saves the edits
+  still reaches the services and overrides the app's. Keys sent with `local.start` are saved
   before the installer starts (`installer.js --instance desktop --user-keys`,
   the keys on stdin) into the owner-only `instances/desktop/user.env` of the
   install location, and the page only learns which keys are saved. Both
   engines pass them to the services whenever they are configured (an edit
   runs a new job even after a finished one); Native also starts its bundled
   LiveKit whenever this computer has voice tools, with or without a voice
-  key (see Source Package and Release). There is no settings page
-  after setup yet: keys change on the next Install or Try Again.
+  key (see Source Package and Release). Keys sent this way change
+  only on the next `local.start`.
   When the setup window opens and runs `inspect()`, in addition to prewarming
   Node, `LocalServer` silently pre-stages a bundled local source archive (source
   skeleton, TeamHub binaries, and offline native runtime) into the default home
@@ -510,7 +532,7 @@ Gateway and runs Agents. The daemon exits with the app.
   weights. It
   imports no Electron API, so it is tested with Windows paths on any
   platform.
-- `src/main/diagnostics-upload.ts`: "Send Diagnostics" on the setup page, the
+- `src/main/diagnostics-upload.ts`: "Send Diagnostics" (the setup page's Report issue), the
   start failure page and the tray, shown only while a receiver is set up
   (`diagnosticsUploadUrl` in `config.json`, else `HOSTED_DIAGNOSTICS_UPLOAD_URL`, which `build.mjs` bakes
   in from the release pipeline's `LINGER_DIAGNOSTICS_UPLOAD_URL` secret and
@@ -594,9 +616,7 @@ Gateway and runs Agents. The daemon exits with the app.
   `src/shell/messages.html` (`t`, `tSpans`, and `data-t` / `data-t-<attribute>`
   fill-in). Markup carries message names, never English or translated text.
   The setup page stays sandboxed with `window.open` and navigation blocked;
-  the main process flags checked Inkling 2 Mini models with `featuredInkling`
-  via `@linger/service-kit/featured-models`, preload exposes
-  `featuredAnnouncementUrl`, and external partner links call
+  its NVIDIA driver links call
   `setup.run({ op: "external.open", url })`, which accepts only the exact
   HTTPS URLs listed in `SETUP_EXTERNAL_URLS` (`src/shared/setup.ts`) and opens
   them through `shell.openExternal`.

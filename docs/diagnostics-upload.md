@@ -7,9 +7,10 @@ Linger can collect reports too.
 
 ## In the app
 
-Send Diagnostics shows on the setup page's failed step ("Installation
-stopped"), on the start failure page and in the tray menu, but only while a
-receiver is set up. The app builds the same redacted zip as Save Diagnostics
+Send Diagnostics shows on the start failure page and in the tray menu, but
+only while a receiver is set up; on the setup page's failed step
+("Installation stopped") it is the one Report issue button, which saves the
+zip to Downloads instead when no receiver is set up. The app builds the same redacted zip as Save Diagnostics
 (see `apps/desktop/src/main/diagnostics.ts`): credential files are never
 included, secret-looking values are replaced with `[REDACTED]`, and the home
 folder path is replaced with `~`. It then lists every file, the size and the

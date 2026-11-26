@@ -34,8 +34,6 @@ export type SetupCommandRunner = (
     readonly pinnedNode?: boolean;
     // The person's terminal environment, as the setup check uses.
     readonly inspect?: boolean;
-    // Sent on stdin, which then closes; for input that must stay out of argv.
-    readonly input?: string;
     readonly onLine: (line: Record<string, unknown>) => void;
   },
 ) => Promise<SetupCommandProcess>;

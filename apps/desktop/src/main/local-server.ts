@@ -34,6 +34,7 @@ import {
   proveLocalIdentity,
   readLocalIdentity,
   readLocalLogin,
+  writeLocalLoginPassword,
 } from "@linger/local-installation/account";
 import { extractArchiveFallback } from "@linger/local-installation/archive";
 import { downloadInRegion } from "@linger/local-installation/region";
@@ -77,7 +78,6 @@ import {
   teamhubBinaryStampsFile,
 } from "@linger/local-installation/teamhub-binaries";
 import { redact } from "@linger/local-installation/redaction";
-import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import {
   windowsPrivateLocation,
   windowsPrivateRefusal,
@@ -123,7 +123,6 @@ import type {
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
-  SetupOwnerAccount,
   SetupReason,
   SetupRuntimeRow,
 } from "../shared/setup.js";
@@ -216,15 +215,13 @@ export interface LocalServerPlan {
 
 // What setup's Install asks for: a plan, or "subscription" for the runtimes
 // signed in on the page (Codex by default when both are, the other linked).
-// background: download the planned local model meanwhile; account: the
-// owner sign-in chosen on the page, written before the installer runs.
+// background: download the planned local model meanwhile.
 export interface LocalServerRequest extends Omit<
   LocalServerPlan,
   "runtime" | "linkedRuntimes"
 > {
   readonly runtime: LocalServerPlan["runtime"] | "subscription";
   readonly background?: boolean;
-  readonly account?: SetupOwnerAccount;
 }
 
 export const QUICK_INSTALL: LocalServerPlan = {
@@ -403,9 +400,6 @@ export interface LocalServerStatus {
   readonly runtimes?: readonly SetupRuntimeRow[];
   // The local model downloading while another source runs.
   readonly backgroundModel?: SetupBackgroundModel;
-  // Whether the install location already holds an owner sign-in (an
-  // earlier or upgraded installation), which setup leaves as it is.
-  readonly ownerAccount: "new" | "existing";
   // While an installation runs or after it failed: the source it installs.
   readonly source?: "local" | "subscription" | "byok";
 }
@@ -688,8 +682,6 @@ export class LocalServerModule implements Module {
   #serverOk: boolean | undefined;
   readonly #runtimes: SetupRuntimes;
   readonly #background: BackgroundModel;
-  // The owner sign-in chosen on the page, until written to the location.
-  #account: SetupOwnerAccount | undefined;
   // The running installation's own stop, and what it installs.
   #installAbort: AbortController | undefined;
   #source: LocalServerStatus["source"];
@@ -1158,16 +1150,6 @@ export class LocalServerModule implements Module {
         : {}),
       ...(runtimes ? { runtimes } : {}),
       ...(backgroundModel ? { backgroundModel } : {}),
-      ownerAccount: existsSync(
-        path.join(
-          this.#location ?? this.#home,
-          "instances",
-          LOCAL_INSTANCE,
-          "local-account.json",
-        ),
-      )
-        ? "existing"
-        : "new",
       ...(this.#source &&
       (this.#phase === "installing" || this.#phase === "failed")
         ? { source: this.#source }
@@ -1219,11 +1201,10 @@ export class LocalServerModule implements Module {
   }
 
   // Setup's Install: resolves a subscription to the runtimes signed in on
-  // the page, keeps the chosen owner sign-in until the installation writes
-  // it, and starts the local model's background download when asked.
+  // the page, and starts the local model's background download when asked.
   beginSetup(request: LocalServerRequest): Promise<void> {
     if (this.#running) return this.#running;
-    const { runtime, background, account, ...rest } = request;
+    const { runtime, background, ...rest } = request;
     let plan: LocalServerPlan;
     if (runtime === "subscription") {
       const signedIn = this.#runtimes.signedIn();
@@ -1237,7 +1218,6 @@ export class LocalServerModule implements Module {
         ...(signedIn.length > 1 ? { linkedRuntimes: signedIn.slice(1) } : {}),
       };
     } else plan = { ...rest, runtime };
-    this.#account = account;
     if (background && plan.runtime !== "local") this.#downloadInBackground();
     return this.begin(plan);
   }
@@ -1280,8 +1260,7 @@ export class LocalServerModule implements Module {
 
   // Runs one of the installer's headless setup commands against the
   // install location; each stdout line is one JSON value. Never logs its
-  // output: a sign-in prints the vendor's codes, and the owner sign-in
-  // goes in on stdin.
+  // output: a sign-in prints the vendor's codes.
   #setupCommand: SetupCommandRunner = async (args, options) => {
     const home = this.#location ?? this.#home;
     const node = options.pinnedNode
@@ -1332,7 +1311,6 @@ export class LocalServerModule implements Module {
       });
       child.once("close", (code) => resolve(code ?? 1));
     });
-    if (options.input !== undefined) child.stdin.end(options.input);
     return {
       write: (line) => {
         if (child.stdin.writable) child.stdin.write(`${line}\n`);
@@ -1343,37 +1321,6 @@ export class LocalServerModule implements Module {
       done,
     };
   };
-
-  // Writes the owner sign-in chosen on the page into the install location
-  // before the installer creates the owner; a location that has one keeps
-  // it. The password goes on stdin and is dropped here once sent.
-  async #presetOwner(
-    account: SetupOwnerAccount,
-    signal: AbortSignal,
-  ): Promise<void> {
-    let answer: Record<string, unknown> = {};
-    const child = await (this.#options.setupCommand ?? this.#setupCommand)(
-      ["--owner-account", "--instance", LOCAL_INSTANCE],
-      {
-        input: JSON.stringify(account),
-        onLine: (line) => {
-          answer = line;
-        },
-      },
-    );
-    const stop = () => child.stop();
-    signal.addEventListener("abort", stop, { once: true });
-    try {
-      await child.done;
-    } finally {
-      signal.removeEventListener("abort", stop);
-    }
-    if (signal.aborted) throw new Error("Cancelled");
-    if (typeof answer.error === "string" && answer.error)
-      throw new Error(answer.error);
-    if (typeof answer.written !== "boolean")
-      throw new Error("Could not save the sign-in chosen for Linger.");
-  }
 
   // Installs into a folder the person picked, once it can hold Linger; null
   // goes back to the default.
@@ -1577,6 +1524,9 @@ export class LocalServerModule implements Module {
         : {
             state: "failed",
             message: byokFailure(out, "Could not test the BYOK endpoint."),
+            ...(typeof out.code === "string" && out.code
+              ? { code: out.code }
+              : {}),
           };
   }
 
@@ -1872,9 +1822,6 @@ export class LocalServerModule implements Module {
               ...(typeof report.localModels.libraryModel === "string" &&
               LIBRARY_MODEL_ID.test(report.localModels.libraryModel)
                 ? { library: report.localModels.libraryModel }
-                : {}),
-              ...(isInkling2MiniModelId(name)
-                ? { featuredInkling: true as const }
                 : {}),
             },
           }
@@ -2327,8 +2274,6 @@ export class LocalServerModule implements Module {
       plan.runtime !== "recommended"
     )
       this.#cancelBifrostPrefetch("subscription_runtime");
-    const account = this.#account;
-    this.#account = undefined;
     this.#source = plan.byok
       ? "byok"
       : plan.runtime === "local"
@@ -2407,10 +2352,6 @@ export class LocalServerModule implements Module {
         });
       }
       const node = await this.#timed("node", () => this.#ensureNode(signal));
-      if (account)
-        await this.#timed("owner_account", () =>
-          this.#presetOwner(account, signal),
-        );
       const keysChanged = Object.keys(plan.keys ?? {}).length > 0;
       if (keysChanged)
         await this.#timed("keys", () =>
@@ -2816,6 +2757,51 @@ export class LocalServerModule implements Module {
       );
     } catch (error) {
       throw new Error(signInFailure(error), { cause: error });
+    }
+  }
+
+  // Changes the owner's password from the ready screen: TeamHub takes it
+  // first (checking the current one from local-account.json), then the file
+  // does, so the desktop keeps signing in; the window signs in again since
+  // TeamHub ended its session. Neither password is kept or logged.
+  async changePassword(next: string): Promise<void> {
+    const record = await this.#windowRecord();
+    if (!record)
+      throw new Error(
+        "This window is not showing the Linger on this computer.",
+      );
+    const account = await this.account();
+    try {
+      await changeOwnerPassword(
+        await this.#serverIdentity(record.home, record.origin),
+        account.email,
+        account.password,
+        next,
+        this.#options.fetch,
+      );
+    } catch (error) {
+      this.#ctx?.log.warn("local_server.password_change_failed", {
+        ...(error instanceof PasswordChangeError
+          ? { status: error.status }
+          : error instanceof SignInRejectedError
+            ? { status: error.status, step: "sign_in" }
+            : { reason: unverifiedReason(error) }),
+      });
+      if (error instanceof PasswordChangeError) throw error;
+      throw new Error(signInFailure(error), { cause: error });
+    }
+    await writeLocalLoginPassword(
+      { root: path.join(record.home, "instances", LOCAL_INSTANCE) },
+      next,
+    );
+    this.#ctx?.log.info("local_server.password_changed");
+    try {
+      await this.#signInAs(record.home, record.origin, account.email, next);
+    } catch (error) {
+      throw new Error(
+        `The password was changed, but signing in again failed: ${signInFailure(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -6415,6 +6401,92 @@ export const signInWithPassword = async (
     .filter((cookie) => cookie !== undefined);
   if (!cookies.length) throw new Error("Signing in to Linger failed");
   for (const cookie of cookies) await setCookie(cookie);
+};
+
+// A password change TeamHub refused, with what the person can do about it.
+export class PasswordChangeError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "PasswordChangeError";
+    this.status = status;
+  }
+}
+
+// Changes the owner's password on the installed server: once the server
+// proved it is this installation's TeamHub, a sign-in with the current
+// password opens a session of its own (the app's web session is left
+// alone), that session changes the password (POST /v0/account/password,
+// which revokes every other session) and then logs out. Both passwords go
+// only to TeamHub's own loopback port.
+export const changeOwnerPassword = async (
+  server: LocalServerIdentity,
+  email: string,
+  current: string,
+  next: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> => {
+  await proveLocalServer(server, fetcher);
+  const post = (route: string, body?: unknown, cookie?: string) =>
+    fetcher(new URL(route, server.teamhub), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        origin: server.origin,
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(cookie ? { cookie } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+  const login = await post("/v0/auth/login", {
+    identifier: email,
+    password: current,
+  });
+  await login.body?.cancel();
+  if (!login.ok) throw new SignInRejectedError(login.status);
+  const cookie = login.headers
+    .getSetCookie()
+    .flatMap((header) => {
+      const entry = parseSetCookie(header);
+      return entry?.value ? [`${entry.name}=${entry.value}`] : [];
+    })
+    .join("; ");
+  if (!cookie) throw new Error("Signing in to Linger failed");
+  try {
+    const answer = await post(
+      "/v0/account/password",
+      { current_password: current, new_password: next },
+      cookie,
+    );
+    if (answer.status === 204) return;
+    let code: unknown;
+    try {
+      code = ((await answer.json()) as { error?: { code?: unknown } })?.error
+        ?.code;
+    } catch {
+      code = undefined;
+    }
+    throw new PasswordChangeError(
+      answer.status,
+      answer.status === 400 && code === "INVALID_CURRENT_PASSWORD"
+        ? "The saved password no longer works. Log in with your email and password."
+        : answer.status === 400
+          ? "Use 8–256 characters without control characters."
+          : answer.status === 429
+            ? "Too many password changes. Try again in a few minutes."
+            : answer.status === 401
+              ? "The saved password no longer works. Log in with your email and password."
+              : `Couldn't change the password (${answer.status}).`,
+    );
+  } finally {
+    // The session opened for the change is not kept.
+    await post("/v0/auth/logout", undefined, cookie)
+      .then((response) => response.body?.cancel())
+      .catch(() => undefined);
+  }
 };
 
 // Release assets redirect to a CDN; the digest, not the host, is what is

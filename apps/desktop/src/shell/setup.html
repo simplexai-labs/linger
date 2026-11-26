@@ -509,7 +509,7 @@
       .lead.tight {
         margin-bottom: 0;
       }
-      /* Back and More options sit beside the badge above the title. */
+      /* Back sits beside the badge above the title. */
       .stage-bar {
         position: relative;
         display: flex;
@@ -519,11 +519,8 @@
       .stage-bar .eyebrow {
         margin-bottom: 0;
       }
-      /* Step 1 showed the badge; on step 2 Back and More options flank the
-         title, and the bar keeps a row only for the local model's progress. */
-      section[data-stage="settings"] #welcome-eyebrow {
-        display: none;
-      }
+      /* On step 2 Back sits beside the title, and the bar keeps a row only
+         for the local model's progress. */
       section[data-stage="settings"] .stage-bar:has(> #model-behind[hidden]) {
         top: 14px;
         height: 0;
@@ -617,37 +614,21 @@
           animation: none !important;
         }
       }
-      /* Checking this computer: what is happening and what for, in the
-         room the cards take next. */
+      /* Checking this computer: one quiet spinner in the room the cards
+         take next. */
       .checking {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 5px;
+        gap: 14px;
         min-height: 216px;
-        padding-top: 98px;
+        padding-top: 72px;
       }
-      .checking p {
-        margin: 0;
-      }
-      .checking-now {
-        color: var(--ink);
-        font-size: 13.5px;
-        font-weight: 550;
-        letter-spacing: -0.005em;
-      }
-      .checking-now .spinner {
-        color: #8a897f;
-      }
-      .checking-why {
-        max-width: 400px;
-        color: var(--muted);
-        font-size: 12.5px;
-        font-variant-numeric: tabular-nums;
-        text-wrap: pretty;
-      }
-      .checking .link {
-        margin-top: 8px;
+      .checking .spinner {
+        width: 18px;
+        height: 18px;
+        margin-right: 0;
+        color: #a3a29a;
       }
       /* The local model left downloading behind BYOK or a subscription. */
       .eyebrow.behind {
@@ -730,9 +711,7 @@
         letter-spacing: -0.01em;
         white-space: nowrap;
       }
-      /* One badge on the card's top edge: Recommended marks what the check
-         advises; a card that cannot be picked says why instead. */
-      .source-rec,
+      /* A card that cannot be picked says why on its top edge. */
       .source-pill {
         position: absolute;
         top: -9px;
@@ -760,28 +739,10 @@
       }
       .source-about {
         width: 100%;
-        min-height: 34px;
         color: var(--muted);
         font-size: 12.5px;
         line-height: 17px;
         text-wrap: pretty;
-      }
-      .source-meta {
-        width: 100%;
-        margin-top: auto;
-        padding-top: 8px;
-        overflow: hidden;
-        border-top: 1px solid #ecece7;
-        color: #52524b;
-        font-size: 11px;
-        font-weight: 500;
-        line-height: 16px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-variant-numeric: tabular-nums;
-      }
-      .source-card:disabled .source-meta {
-        color: #8a897f;
       }
       .source-panel {
         padding: 4px 16px;
@@ -796,13 +757,6 @@
          sources' rows are still there, hidden. */
       .source-panel > :not([hidden]) ~ .choice {
         border-top: 1px solid #f1f1ee;
-      }
-      .source-hint {
-        width: 100%;
-        margin: 0;
-        color: var(--muted);
-        font-size: 11.5px;
-        line-height: 1.4;
       }
       .choice.local .sub {
         white-space: normal;
@@ -837,17 +791,6 @@
         display: flex;
         align-items: center;
         gap: 7px;
-      }
-      .runtime-rec {
-        padding: 0 6px;
-        border: 1px solid #cfe3d3;
-        border-radius: 999px;
-        background: #edf6ef;
-        color: #25693a;
-        font-size: 10px;
-        font-weight: 600;
-        line-height: 15px;
-        letter-spacing: 0.01em;
       }
       .choice.runtime .sub {
         font-variant-numeric: tabular-nums;
@@ -969,82 +912,6 @@
         line-height: 1.4;
         font-variant-numeric: tabular-nums;
       }
-      #local-options {
-        padding: 2px 16px;
-      }
-      /* The sign-in email and password a new installation creates. */
-      .credentials label {
-        display: block;
-        margin: 10px 0 4px;
-        color: #5f5e55;
-        font-size: 12px;
-        font-weight: 500;
-      }
-      .credentials input {
-        width: 100%;
-        min-width: 0;
-        height: 30px;
-        padding: 0 10px;
-        border: 1px solid #e6e6e1;
-        border-radius: 8px;
-        outline: none;
-        background: #fff;
-        color: var(--ink);
-        font: inherit;
-        font-size: 12.5px;
-        user-select: text;
-        -webkit-user-select: text;
-      }
-      .credentials input:focus {
-        border-color: var(--ink);
-      }
-      .credentials input[aria-invalid="true"] {
-        border-color: var(--error);
-      }
-      .credentials-line {
-        display: flex;
-        gap: 6px;
-      }
-      .signin-modal .credentials .problem {
-        min-height: 18px;
-        margin: 10px 0 0;
-        color: var(--error);
-      }
-      /* Done keeps clear of the last field, with or without a problem. */
-      .credentials .actions {
-        margin-top: 16px;
-      }
-      /* Switching to BYOK or a subscription while the local model
-         downloads: a quiet box above the progress. */
-      .leave {
-        width: 380px;
-        margin: 16px auto 0;
-        padding: 11px 14px 12px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: #fafaf8;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1.45;
-        text-align: left;
-      }
-      .leave[hidden] {
-        display: none;
-      }
-      .leave p {
-        margin: 0 0 9px;
-        text-wrap: pretty;
-      }
-      .leave .error:empty {
-        display: none;
-      }
-      .leave-row {
-        display: flex;
-        gap: 8px;
-      }
-      .leave + .panel {
-        margin-top: 12px;
-      }
       .eyebrow {
         display: inline-flex;
         align-self: center;
@@ -1141,95 +1008,6 @@
         margin-top: auto;
         padding-top: 12px;
       }
-      .featured-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 1px 6px;
-        border: 1px solid #eed9bc;
-        border-radius: 999px;
-        background: #fbf4ea;
-        color: #8f4f10;
-        font-size: 10px;
-        font-weight: 550;
-        line-height: 1.4;
-        white-space: nowrap;
-      }
-      .featured-pill::before {
-        content: "";
-        flex: none;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: #d9822b;
-      }
-      .spotlight-card {
-        width: min(100%, 468px);
-        margin: 12px auto 0;
-        padding: 8px 12px;
-        border: 1px solid #e8e5dc;
-        border-radius: 12px;
-        background: linear-gradient(180deg, #fcfcfa 0%, #f7f5ef 100%);
-        text-align: left;
-      }
-      .spotlight-card[data-recommended="true"] {
-        border-color: #e6d2b5;
-        background: linear-gradient(180deg, #fffdf9 0%, #fbf6ee 100%);
-      }
-      .spotlight-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .spotlight-title {
-        display: inline-flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 6px;
-        min-width: 0;
-      }
-      .spotlight-title strong {
-        color: var(--ink);
-        font-size: 12.5px;
-        font-weight: 600;
-        letter-spacing: -0.008em;
-      }
-      .spotlight-specs {
-        margin: 3px 0 0;
-        color: #52524b;
-        font-size: 11.5px;
-        line-height: 1.4;
-      }
-      .spotlight-note {
-        margin: 2px 0 0;
-        color: var(--muted);
-        font-size: 11px;
-        line-height: 1.4;
-      }
-      .spotlight-link {
-        flex: none;
-        padding: 2px 6px;
-        border: 0;
-        border-radius: 6px;
-        background: none;
-        color: #52524b;
-        font-size: 11.5px;
-        font-weight: 500;
-        white-space: nowrap;
-        text-decoration: underline;
-        text-decoration-color: #d4d4cd;
-        text-underline-offset: 3px;
-        transition:
-          background-color 140ms ease,
-          color 140ms ease,
-          text-decoration-color 140ms ease;
-      }
-      .spotlight-link:hover:not(:disabled) {
-        background: rgba(20, 20, 16, 0.05);
-        color: var(--ink);
-        text-decoration-color: var(--ink);
-      }
       .plan-why {
         max-width: 440px;
         margin-top: 4px;
@@ -1245,24 +1023,6 @@
         justify-content: center;
         gap: 6px;
         margin-top: 8px;
-      }
-      /* What downloads now, or what a long step waits on, under the
-         installing bar. */
-      .transfer {
-        display: grid;
-        gap: 2px;
-        margin: 10px 0 0;
-        color: var(--faint);
-        font-size: 11.5px;
-        line-height: 1.45;
-        font-variant-numeric: tabular-nums;
-      }
-      .transfer span span {
-        white-space: nowrap;
-      }
-      .transfer strong {
-        color: var(--ink);
-        font-weight: 500;
       }
       .link.quiet {
         padding: 2px 4px;
@@ -1619,36 +1379,6 @@
         font-size: 0.95em;
         overflow-wrap: anywhere;
       }
-      .choice.optional-keys {
-        display: block;
-      }
-      .choice.optional-keys summary {
-        cursor: pointer;
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 500;
-        list-style: none;
-      }
-      .choice.optional-keys summary::-webkit-details-marker {
-        display: none;
-      }
-      .choice.optional-keys[open] summary {
-        margin-bottom: 8px;
-        color: var(--ink);
-      }
-      .choices,
-      .panel {
-        border: 1px solid rgba(20, 20, 16, 0.07);
-        border-radius: 16px;
-        background: #fff;
-        box-shadow:
-          0 1px 2px rgba(20, 20, 16, 0.04),
-          0 12px 32px -18px rgba(20, 20, 16, 0.22);
-        text-align: left;
-      }
-      .choices {
-        padding: 2px 16px;
-      }
       .choice {
         display: flex;
         align-items: center;
@@ -1695,28 +1425,6 @@
         font-size: 12px;
         font-weight: 550;
       }
-      .local-spotlight {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 5px 9px;
-        border: 1px solid #eceae2;
-        border-radius: 8px;
-        background: #faf9f5;
-        color: #52524b;
-        font-size: 11px;
-        line-height: 1.35;
-      }
-      .local-spotlight[data-recommended="true"] {
-        border-color: #e6d2b5;
-        background: #fbf6ee;
-      }
-      .local-spotlight span {
-        flex: 1;
-        min-width: 0;
-      }
       /* Opens the system folder picker. */
       .change {
         flex: none;
@@ -1741,47 +1449,6 @@
       }
       .choice .sub[data-warn="true"] {
         color: var(--error);
-      }
-      /* Provider keys: one line per provider under the row. */
-      .choice.provider-keys {
-        flex-wrap: wrap;
-        row-gap: 6px;
-      }
-      .keys {
-        width: 100%;
-        display: grid;
-        grid-template-columns: 64px 1fr auto auto;
-        align-items: center;
-        gap: 6px 8px;
-      }
-      .keys label {
-        color: #5f5e55;
-        font-size: 12px;
-        font-weight: 500;
-      }
-      .keys input {
-        min-width: 0;
-        height: 28px;
-        padding: 0 10px;
-        border: 1px solid #e6e6e1;
-        border-radius: 8px;
-        outline: none;
-        background: #fff;
-        color: var(--ink);
-        font: inherit;
-        font-size: 12px;
-        user-select: text;
-        -webkit-user-select: text;
-        transition: border-color 140ms ease;
-      }
-      .keys input:focus {
-        border-color: var(--ink);
-      }
-      .keys-note {
-        width: 100%;
-        margin: 0;
-        color: var(--muted);
-        font-size: 11.5px;
       }
       .team {
         margin: auto 0 0;
@@ -1818,26 +1485,55 @@
         overflow-y: auto;
       }
 
-      /* Installing: one panel with the bar and a short stepper. */
-      .panel {
-        width: 380px;
-        margin: 26px auto 0;
-        padding: 20px 22px 18px;
+      /* Installing: one bar, and one line under it that says what is
+         happening now. */
+      .progress {
+        width: 360px;
+        margin: 28px auto 0;
+        text-align: left;
+      }
+      .progress .track {
+        margin-top: 0;
       }
       .now {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: 12px;
-        color: var(--ink);
-        font-size: 13px;
-        font-weight: 500;
-        letter-spacing: -0.005em;
+        min-height: 18px;
+        margin: 12px 0 0;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 18px;
+        font-variant-numeric: tabular-nums;
+      }
+      .now #installing-step {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .now .pct {
+        flex: none;
         color: var(--ink);
-        font-size: 13px;
-        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+      }
+      /* While the local model downloads: one quiet line to install
+         another source instead. */
+      .leave {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 4px;
+        margin: 18px 0 0;
+        color: var(--faint);
+        font-size: 12px;
+      }
+      .leave[hidden] {
+        display: none;
+      }
+      #leave-error:empty {
+        display: none;
       }
       .track {
         position: relative;
@@ -1870,111 +1566,14 @@
         transform: translateX(-100%);
         animation: sheen 1.8s ease-in-out infinite;
       }
-      section[data-failed="true"] .fill {
-        background: #c9c8c0;
-      }
-      section[data-failed="true"] .fill::after {
+      /* A failure shows its message instead of the bar. */
+      section[data-failed="true"] .progress {
         display: none;
       }
       @keyframes sheen {
         to {
           transform: translateX(100%);
         }
-      }
-      .checks {
-        position: relative;
-        display: grid;
-        gap: 12px;
-        margin: 18px 0 0;
-        padding: 16px 0 0;
-        border-top: 1px solid #f1f1ee;
-        list-style: none;
-        color: var(--faint);
-        font-size: 12.5px;
-      }
-      .checks li {
-        position: relative;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        transition: color 240ms ease;
-      }
-      /* The line that joins the steps. */
-      .checks li + li::before {
-        content: "";
-        position: absolute;
-        left: 7.25px;
-        bottom: calc(100% + 1px);
-        width: 1.5px;
-        height: 10px;
-        border-radius: 1px;
-        background: #ecece8;
-        transition: background-color 240ms ease;
-      }
-      .checks li[data-state="done"] + li::before {
-        background: var(--ink);
-      }
-      .checks li[data-state="now"] {
-        color: var(--ink);
-        font-weight: 500;
-      }
-      .checks li[data-state="done"] {
-        color: #52524b;
-      }
-      .checks .time {
-        margin-left: auto;
-        color: var(--faint);
-        font-size: 11.5px;
-        font-weight: 400;
-        font-variant-numeric: tabular-nums;
-      }
-      .dot {
-        display: grid;
-        flex: none;
-        place-items: center;
-        width: 16px;
-        height: 16px;
-        border: 1.5px solid #deded8;
-        border-radius: 50%;
-        background: #fff;
-        transition:
-          background-color 240ms ease,
-          border-color 240ms ease;
-      }
-      .dot svg {
-        width: 9px;
-        height: 9px;
-        stroke: #fff;
-        stroke-width: 3;
-        opacity: 0;
-        transform: scale(0.6);
-        transition:
-          opacity 200ms ease,
-          transform 260ms var(--ease);
-      }
-      [data-state="done"] .dot {
-        border-color: var(--ink);
-        background: var(--ink);
-      }
-      [data-state="done"] .dot svg {
-        opacity: 1;
-        transform: none;
-      }
-      [data-state="now"] .dot {
-        border-color: var(--ink);
-        border-right-color: transparent;
-        animation: spin 0.9s linear infinite;
-      }
-      [data-state="failed"] .dot {
-        border-color: var(--error);
-      }
-      .checks li[data-state="failed"] {
-        color: var(--error);
-      }
-      /* After a failure the steps not reached make room for the error and
-         what to do next. */
-      section[data-failed="true"] .checks li[data-state=""] {
-        display: none;
       }
       .problem {
         width: 380px;
@@ -1992,11 +1591,41 @@
       .problem:empty {
         display: none;
       }
-      /* The whole message, line breaks kept; long ones fold behind
-         "Show Details". */
+      /* A failure in a few lines; the whole message is its tooltip and
+         goes with the report. */
       #installing-error {
-        white-space: pre-wrap;
+        width: 360px;
+        margin-top: 18px;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+        overflow: hidden;
         overflow-wrap: anywhere;
+      }
+      #installing-error:empty {
+        display: none;
+      }
+      footer.report {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        margin-top: 20px;
+      }
+      footer.report[hidden] {
+        display: none;
+      }
+      footer.report output {
+        max-width: 360px;
+        color: #52524b;
+        font-size: 12px;
+        text-align: center;
+        overflow-wrap: anywhere;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      footer.report output:empty {
+        display: none;
       }
       #installing-error.folded {
         max-height: 7.5em;
@@ -2175,20 +1804,6 @@
       .signin-modal .sheet:has(.signin-byok:not([hidden])) {
         width: 448px;
       }
-      .diagnostics {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        align-items: center;
-        gap: 4px 10px;
-        width: 380px;
-        margin: 6px auto 0;
-        font-size: 12px;
-      }
-      .diagnostics[hidden],
-      .diagnostics [hidden] {
-        display: none;
-      }
       /* Send Diagnostics: consent, progress and the report id. */
       .send-modal .files {
         max-height: 132px;
@@ -2224,14 +1839,6 @@
         letter-spacing: 0.06em;
         user-select: all;
         -webkit-user-select: all;
-      }
-      .diagnostics output {
-        flex-basis: 100%;
-        color: #52524b;
-        text-align: center;
-        overflow-wrap: anywhere;
-        user-select: text;
-        -webkit-user-select: text;
       }
 
       /* Ready: the check draws itself, then a short receipt. */
@@ -2300,21 +1907,49 @@
         animation: enter 420ms 120ms var(--ease) both;
       }
       /* The owner account of the finished install. */
+      /* Folded away by default: a quiet link that opens the card. */
       .account {
         width: 100%;
         max-width: 420px;
-        margin: 18px auto 0;
+        margin: 14px auto 0;
+        text-align: center;
+      }
+      .account-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 6px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .account-toggle:hover {
+        color: var(--ink);
+      }
+      .account-toggle svg {
+        width: 11px;
+        height: 11px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 160ms var(--ease);
+      }
+      .account-toggle[aria-expanded="true"] svg {
+        transform: rotate(90deg);
+      }
+      .account-body {
+        margin-top: 6px;
         padding: 12px 14px;
         border: 1px solid var(--line);
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.86);
         text-align: left;
-      }
-      .account-title {
-        margin: 0 0 8px;
-        color: var(--ink);
-        font-size: 12.5px;
-        font-weight: 600;
       }
       .account dl {
         display: grid;
@@ -2354,6 +1989,44 @@
       .account-note .link {
         padding: 2px 4px;
         font-size: 11.5px;
+      }
+      /* A new password, typed in place of the note. */
+      .account-change {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .account-change input {
+        flex: 1 1 160px;
+        min-width: 0;
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid #e6e6e1;
+        border-radius: 8px;
+        outline: none;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-size: 12.5px;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .account-change input:focus {
+        border-color: var(--ink);
+      }
+      .account-change input[aria-invalid="true"] {
+        border-color: var(--error);
+      }
+      .account-problem {
+        width: 100%;
+        margin: 0;
+        color: var(--error);
+        font-size: 11.5px;
+      }
+      .account-problem:empty {
+        display: none;
       }
       .account-error {
         margin: 0;
@@ -2409,38 +2082,27 @@
             <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg
             ><span data-t="back"></span>
           </button>
-          <span class="eyebrow" id="welcome-eyebrow"
-            ><svg viewBox="0 0 24 24">
-              <rect x="5" y="11" width="14" height="9" rx="2" />
-              <path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg
-            ><span data-t="welcomeEyebrow"></span
-          ></span>
           <span class="eyebrow behind" id="model-behind" hidden
             ><span class="behind-bar"><span id="model-behind-fill"></span></span
             ><span id="model-behind-text"></span
           ></span>
-          <button
-            class="link quiet"
-            id="local-customize"
-            type="button"
-            aria-expanded="false"
-            aria-controls="local-options"
-            hidden
-            data-t="moreOptions"
-          ></button>
         </div>
         <div class="stage">
           <h1 id="welcome-title" tabindex="-1" data-t="welcomeTitle"></h1>
-          <p class="lead tight" id="welcome-lead"></p>
-          <div class="checking" id="welcome-checking" hidden>
-            <p class="checking-now" id="checking-now"></p>
-            <p class="checking-why" id="checking-why"></p>
+          <div
+            class="checking"
+            id="welcome-checking"
+            role="status"
+            data-t-aria-label="gettingReady"
+            hidden
+          >
+            <span class="spinner"></span>
             <button
               class="link quiet"
               id="checking-skip"
               type="button"
               hidden
-              data-t="chooseWithoutWaiting"
+              data-t="chooseNow"
             ></button>
           </div>
           <div class="setup-card" id="local-setup" hidden>
@@ -2456,12 +2118,9 @@
                 role="radio"
                 data-value="local"
               >
-                <span class="source-rec" data-t="recommended" hidden></span
-                ><span class="source-pill" id="source-local-pill" hidden></span
-                ><span class="source-top"
+                <span class="source-top"
                   ><strong data-t="localModel"></strong></span
-                ><span class="source-about" data-t="sourceLocalAbout"></span
-                ><span class="source-meta" id="source-local-meta"></span>
+                ><span class="source-about" id="source-local-about"></span>
               </button>
               <button
                 type="button"
@@ -2469,10 +2128,12 @@
                 role="radio"
                 data-value="byok"
               >
-                <span class="source-rec" data-t="recommended" hidden></span
-                ><span class="source-top"><strong>BYOK</strong></span
-                ><span class="source-about" data-t="sourceByokAbout"></span
-                ><span class="source-meta" data-t="runsOnPi"></span>
+                <span class="source-top"><strong>BYOK</strong></span
+                ><span
+                  class="source-about"
+                  id="source-byok-about"
+                  data-t="sourceByokAbout"
+                ></span>
               </button>
               <button
                 type="button"
@@ -2480,11 +2141,13 @@
                 role="radio"
                 data-value="subscription"
               >
-                <span class="source-rec" data-t="recommended" hidden></span
-                ><span class="source-top"
+                <span class="source-top"
                   ><strong data-t="subscription"></strong></span
-                ><span class="source-about" data-t="sourceSubAbout"></span
-                ><span class="source-meta" id="source-sub-meta"></span>
+                ><span
+                  class="source-about"
+                  id="source-sub-about"
+                  data-t="sourceSubAbout"
+                ></span>
               </button>
             </div>
             <p class="plan-why" id="plan-why" hidden></p>
@@ -2518,52 +2181,12 @@
                 data-t="checkAgain"
               ></button>
             </div>
-            <aside
-              class="spotlight-card"
-              id="featured-spotlight"
-              data-t-aria-label="featuredModelAriaLabel"
-              hidden
-            >
-              <div class="spotlight-head">
-                <span class="spotlight-title"
-                  ><strong data-t="featuredModelName"></strong
-                  ><span
-                    class="featured-pill"
-                    data-t="featuredPartnerBadge"
-                  ></span
-                ></span>
-                <button
-                  type="button"
-                  class="spotlight-link"
-                  id="featured-spotlight-link"
-                  data-t-title="openAnnouncement"
-                ></button>
-              </div>
-              <p class="spotlight-specs" data-t="featuredModelSpecs"></p>
-              <p class="spotlight-note" id="featured-spotlight-note"></p>
-            </aside>
             <div class="source-panel" id="source-panel" hidden>
               <div class="choice local" id="local-row" hidden>
                 <div class="facts" id="local-facts">
                   <span class="pick-head"
-                    ><span class="pick-name" id="local-model-name"></span
-                    ><span
-                      class="featured-pill"
-                      id="local-model-featured"
-                      hidden
-                      data-t="featuredPartnerBadge"
-                    ></span></span
+                    ><span class="pick-name" id="local-model-name"></span></span
                   ><small id="local-model-needs"></small>
-                </div>
-                <p class="source-hint" id="local-wait"></p>
-                <div class="local-spotlight" id="local-spotlight" hidden>
-                  <span id="local-spotlight-text"></span>
-                  <button
-                    type="button"
-                    class="spotlight-link"
-                    id="local-spotlight-link"
-                    data-t-title="openAnnouncement"
-                  ></button>
                 </div>
               </div>
               <div
@@ -2579,12 +2202,7 @@
                   role="listitem"
                 >
                   <div class="text">
-                    <strong
-                      >Claude Code<span
-                        class="runtime-rec"
-                        hidden
-                        data-t="recommended"
-                      ></span></strong
+                    <strong>Claude Code</strong
                     ><span class="sub" data-runtime-sub></span>
                   </div>
                   <div class="runtime-act">
@@ -2665,12 +2283,7 @@
                   role="listitem"
                 >
                   <div class="text">
-                    <strong
-                      >Codex<span
-                        class="runtime-rec"
-                        hidden
-                        data-t="recommended"
-                      ></span></strong
+                    <strong>Codex</strong
                     ><span class="sub" data-runtime-sub></span>
                   </div>
                   <div class="runtime-act">
@@ -2744,43 +2357,6 @@
                     ></button>
                   </div>
                 </div>
-                <div class="choice runtime" data-runtime="pi" role="listitem">
-                  <div class="text">
-                    <strong>Pi</strong
-                    ><span class="sub" data-runtime-sub></span>
-                  </div>
-                  <div class="runtime-act">
-                    <button
-                      type="button"
-                      class="change"
-                      data-runtime-install
-                      data-t="install"
-                    ></button>
-                    <div
-                      class="runtime-progress"
-                      role="progressbar"
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      hidden
-                    >
-                      <div class="track"><div class="fill"></div></div>
-                      <span class="pct"></span>
-                    </div>
-                    <button
-                      type="button"
-                      class="link quiet"
-                      data-runtime-cancel
-                      hidden
-                      data-t="cancel"
-                    ></button>
-                    <span
-                      class="badge"
-                      data-ok="true"
-                      data-runtime-done
-                      hidden
-                    ></span>
-                  </div>
-                </div>
               </div>
               <div class="choice byok-box" id="byok-row" hidden>
                 <div class="byok-fields" id="byok-fields"></div>
@@ -2789,58 +2365,12 @@
                 <input type="checkbox" id="background-model" /><label
                   for="background-model"
                   data-t="alsoDownload"
-                ></label
-                ><span class="sub" id="background-model-detail"></span>
+                ></label>
               </div>
-              <div class="choice" id="credentials-row" hidden>
-                <div class="text">
-                  <strong data-t="signInAccount"></strong
-                  ><span class="sub" id="credentials-sub"></span>
-                </div>
-                <button
-                  type="button"
-                  class="change"
-                  id="credentials-edit"
-                  aria-haspopup="dialog"
-                  data-t="edit"
-                ></button>
-              </div>
-            </div>
-            <div class="choices" id="local-options" hidden>
-              <details class="choice optional-keys" id="optional-keys">
-                <summary data-t="appIntegrations"></summary>
-                <div class="text">
-                  <span class="sub" data-t="appIntegrationsHint"></span>
-                </div>
-                <div class="keys">
-                  <label for="key-composio">Composio</label>
-                  <input
-                    id="key-composio"
-                    type="password"
-                    data-key="composio"
-                    autocomplete="off"
-                    spellcheck="false"
-                    data-t-aria-label="composioKey"
-                  />
-                  <button
-                    type="button"
-                    class="change"
-                    data-reveal="composio"
-                    data-t="show"
-                  ></button>
-                  <button
-                    type="button"
-                    class="change"
-                    data-remove="composio"
-                    data-t="remove"
-                  ></button>
-                </div>
-                <p class="keys-note" id="keys-note"></p>
-              </details>
-              <div class="choice">
+              <div class="choice" id="location-row" hidden>
                 <div class="text">
                   <strong data-t="installLocation"></strong
-                  ><span class="sub" id="location-sub"></span>
+                  ><span class="sub" id="location-sub" data-warn="true"></span>
                 </div>
                 <button
                   type="button"
@@ -2897,44 +2427,36 @@
 
       <section data-step="installing" aria-labelledby="installing-title">
         <h1 id="installing-title" data-t="installingTitle"></h1>
-        <p class="lead tight" id="installing-plan"></p>
-        <div class="leave" id="local-model-leave" hidden>
-          <p data-t="leaveLead"></p>
-          <div class="leave-row">
-            <button
-              class="secondary"
-              type="button"
-              data-leave="subscription"
-              data-t="useSubscription"
-            ></button>
-            <button
-              class="secondary"
-              type="button"
-              data-leave="byok"
-              data-t="useByok"
-            ></button>
-          </div>
-          <p class="error" id="leave-error" role="alert"></p>
-        </div>
         <div
-          class="panel"
+          class="progress"
           role="progressbar"
           id="installing-bar"
           aria-valuemin="0"
           aria-valuemax="100"
+          aria-labelledby="installing-title"
         >
-          <div class="now">
+          <div class="track"><div class="fill" id="installing-fill"></div></div>
+          <p class="now" aria-live="polite">
             <span id="installing-step"></span
             ><span class="pct" id="installing-count"></span>
-          </div>
-          <div class="track"><div class="fill" id="installing-fill"></div></div>
-          <p class="transfer" id="installing-transfer" hidden>
-            <strong id="installing-transfer-label"></strong
-            ><span id="installing-transfer-bytes"></span>
           </p>
-          <p class="transfer" id="installing-waiting" hidden></p>
-          <ol class="checks" id="installing-checks"></ol>
         </div>
+        <p class="leave" id="local-model-leave" hidden>
+          <button
+            class="link quiet"
+            type="button"
+            data-leave="subscription"
+            data-t="useSubscription"
+          ></button
+          ><span aria-hidden="true">·</span
+          ><button
+            class="link quiet"
+            type="button"
+            data-leave="byok"
+            data-t="useByok"
+          ></button>
+        </p>
+        <p class="error" id="leave-error" role="alert"></p>
         <div
           class="signin-modal"
           id="runtime-signin"
@@ -3075,35 +2597,6 @@
           </div>
         </div>
         <p class="problem" id="installing-error" role="alert"></p>
-        <div class="diagnostics" id="installing-diagnostics" hidden>
-          <button
-            class="link quiet"
-            id="installing-more"
-            type="button"
-            hidden
-            data-t="showDetails"
-          ></button>
-          <button
-            class="link quiet"
-            id="show-logs"
-            type="button"
-            data-t="showLogs"
-          ></button>
-          <button
-            class="link quiet"
-            id="save-diagnostics"
-            type="button"
-            data-t="saveDiagnostics"
-          ></button>
-          <button
-            class="link quiet"
-            id="send-diagnostics"
-            type="button"
-            hidden
-            data-t="sendDiagnostics"
-          ></button>
-          <output id="diagnostics-note"></output>
-        </div>
         <div
           class="signin-modal send-modal"
           id="send-modal"
@@ -3134,19 +2627,14 @@
             </div>
           </div>
         </div>
-        <footer class="actions" id="installing-actions">
-          <button
-            class="ghost"
-            data-go="welcome"
-            type="button"
-            data-t="back"
-          ></button>
+        <footer class="report" id="installing-actions" hidden>
           <button
             class="primary"
-            id="local-retry"
+            id="report-issue"
             type="button"
-            data-t="tryAgain"
+            data-t="reportIssue"
           ></button>
+          <output id="diagnostics-note"></output>
         </footer>
       </section>
 
@@ -3155,46 +2643,95 @@
           ><svg viewBox="0 0 24 24"><path d="m5 12 5 5 9-10" /></svg
         ></span>
         <h1 id="ready-title" data-t="readyTitle"></h1>
-        <p class="lead tight" id="ready-lead"></p>
         <p class="connected">
           <span class="live"></span><span data-t="computerConnected"></span>
         </p>
         <div class="account" id="account" hidden>
-          <p class="account-title" data-t="accountTitle"></p>
-          <dl id="account-fields">
-            <dt data-t="email"></dt>
-            <dd class="email" id="account-email"></dd>
-            <button
-              class="change"
-              id="account-copy-email"
-              type="button"
-              data-t="copy"
-            ></button>
-            <dt data-t="password"></dt>
-            <dd class="secret" id="account-password"></dd>
-            <button
-              class="change"
-              id="account-show"
-              type="button"
-              data-t="show"
-            ></button>
-            <button
-              class="change"
-              id="account-copy"
-              type="button"
-              data-t="copy"
-            ></button>
-          </dl>
-          <p class="account-note" id="account-note">
-            <span data-t="accountNote"></span>
-            <button
-              class="link"
-              id="account-reveal"
-              type="button"
-              data-t="accountReveal"
-            ></button>
-          </p>
-          <p class="account-error" id="account-error" role="alert"></p>
+          <button
+            class="account-toggle"
+            id="account-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="account-body"
+          >
+            <span data-t="accountTitle"></span
+            ><svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="m4.5 3 3 3-3 3" />
+            </svg>
+          </button>
+          <div class="account-body" id="account-body" hidden>
+            <dl id="account-fields">
+              <dt data-t="email"></dt>
+              <dd class="email" id="account-email"></dd>
+              <button
+                class="change"
+                id="account-copy-email"
+                type="button"
+                data-t="copy"
+              ></button>
+              <dt data-t="password"></dt>
+              <dd class="secret" id="account-password"></dd>
+              <button
+                class="change"
+                id="account-show"
+                type="button"
+                data-t="show"
+              ></button>
+              <button
+                class="change"
+                id="account-copy"
+                type="button"
+                data-t="copy"
+              ></button>
+            </dl>
+            <form class="account-change" id="account-change" novalidate hidden>
+              <input
+                id="account-new-password"
+                type="password"
+                autocomplete="new-password"
+                spellcheck="false"
+                autocapitalize="off"
+                data-t-placeholder="newPassword"
+                data-t-aria-label="newPassword"
+              />
+              <button
+                class="change"
+                id="account-new-show"
+                type="button"
+                data-t="show"
+              ></button>
+              <button class="change" id="account-new-save" type="submit">
+                <span id="account-new-save-label" data-t="save"></span>
+              </button>
+              <button
+                class="link quiet"
+                id="account-new-cancel"
+                type="button"
+                data-t="cancel"
+              ></button>
+              <p
+                class="account-problem"
+                id="account-new-error"
+                role="alert"
+              ></p>
+            </form>
+            <p class="account-note" id="account-note">
+              <span data-t="accountNote"></span>
+              <button
+                class="link"
+                id="account-change-open"
+                type="button"
+                data-t="changePassword"
+              ></button>
+              <button
+                class="link"
+                id="account-reveal"
+                type="button"
+                data-t="accountReveal"
+              ></button>
+            </p>
+            <p class="account-error" id="account-error" role="alert"></p>
+          </div>
         </div>
         <p class="legacy-note" id="legacy-note" hidden></p>
         <div class="start">
@@ -3443,67 +2980,6 @@
           ></button>
         </footer>
       </section>
-      <div
-        class="signin-modal"
-        id="credentials-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="credentials-title"
-        hidden
-      >
-        <form class="sheet credentials" id="credentials-form" novalidate>
-          <h2 id="credentials-title" data-t="credentialsTitle"></h2>
-          <p data-t="credentialsLead"></p>
-          <label for="credentials-email" data-t="email"></label>
-          <input
-            id="credentials-email"
-            type="email"
-            autocomplete="off"
-            spellcheck="false"
-            autocapitalize="off"
-          />
-          <label for="credentials-password" data-t="password"></label>
-          <div class="credentials-line">
-            <input
-              id="credentials-password"
-              type="password"
-              autocomplete="new-password"
-              spellcheck="false"
-              autocapitalize="off"
-            />
-            <button
-              type="button"
-              class="change"
-              id="credentials-show"
-              data-t="show"
-            ></button>
-            <button
-              type="button"
-              class="change"
-              id="credentials-generate"
-              data-t="generate"
-            ></button>
-          </div>
-          <label for="credentials-confirm" data-t="confirmPassword"></label>
-          <input
-            id="credentials-confirm"
-            type="password"
-            autocomplete="new-password"
-            spellcheck="false"
-            autocapitalize="off"
-          />
-          <p class="problem" id="credentials-error" role="alert"></p>
-          <div class="actions">
-            <button class="primary" type="submit" data-t="done"></button>
-            <button
-              class="link quiet"
-              id="credentials-cancel"
-              type="button"
-              data-t="cancel"
-            ></button>
-          </div>
-        </form>
-      </div>
     </main>
 
     <script>
@@ -3516,8 +2992,6 @@
       let step;
       // The one action in flight; every control waits for it.
       let pending = null;
-      // Whether the full failure message is unfolded.
-      let detailsOpen = false;
       let shownDiagnostics;
 
       // What each macOS permission is for, and what goes wrong without it.
@@ -3538,11 +3012,7 @@
       // which of them this installation shows.
       const ALL_STEPS = [
         ["prepare", () => t("stepPrepare")],
-        // A version is an identifier, so its digits stay as they are.
-        [
-          "download",
-          () => t("stepDownload", { version: String(state.version) }),
-        ],
+        ["download", () => t("stepDownload")],
         ["services", () => t("stepServices")],
         ["workspace", () => t("stepWorkspace")],
         [
@@ -3563,37 +3033,14 @@
         bytes < 1024 ** 3
           ? Math.max(0, Math.round(bytes / 1024 ** 2)) + " MB"
           : (bytes / 1024 ** 3).toFixed(1) + " GB";
-      const duration = (seconds) => {
-        const minutes = Math.round(seconds / 60);
-        if (minutes < 1) return t("lessThanMinuteLeft");
-        if (minutes < 60) return t("minutesLeft", { minutes });
-        const hours = Math.floor(minutes / 60);
-        return minutes % 60
-          ? t("hoursMinutesLeft", { hours, minutes: minutes % 60 })
-          : t("hoursLeft", { hours });
-      };
-      // A download as the localmodels tool or the installer counts it: how
-      // much of how much, what remains, and the rate and time left when the
-      // source reports a rate. A count of one file of several says only
-      // that file's bytes, since nothing says what remains after it.
-      const transferParts = (transfer) => {
-        const { completed, total, bytesPerSecond: rate, partial } = transfer;
-        const left = total && !partial ? total - completed : undefined;
+      // How far a download is: how much of how much. A count of one file
+      // of several says only that file's bytes.
+      const transferAmount = ({ completed, total, partial }) => {
         const amount = total
           ? t("amountOf", { done: size(completed), total: size(total) })
           : size(completed);
-        return [
-          partial ? t("thisFile", { amount }) : amount,
-          left !== undefined && t("amountLeft", { size: size(left) }),
-          rate > 0 && size(rate) + "/s",
-          rate > 0 && left !== undefined && duration(left / rate),
-        ].filter(Boolean);
+        return partial ? t("thisFile", { amount }) : amount;
       };
-      // Long folders keep their start and their end.
-      const shortPath = (value) =>
-        value.length <= 46
-          ? value
-          : value.slice(0, 18) + "…" + value.slice(-27);
       // Why the installation stopped: in the page's words when the main
       // process names the reason, else the message it passed on.
       const failureText = (local) =>
@@ -3627,17 +3074,19 @@
       // Where the welcome is: checking this computer, choosing a source, or
       // the chosen source's settings.
       let stage;
+      // The check only offers a way on without it once it has run this long.
+      const SLOW_CHECK_MS = 20_000;
       let slowCheck = false;
       let slowTimer = 0;
       let motionTimer = 0;
       let runtimesAsked = false;
-      // More options: the install location and app keys.
-      let options = false;
       // Also download the local model in the background.
       let background = false;
-      // The sign-in a new installation creates, and the sheet's draft of it.
-      let credentials = null;
-      let editing = null;
+      // The ready screen's new password while it is typed:
+      // { value, visible, tried, saving }.
+      let passwordEdit = null;
+      // The ready screen's sign-in details, folded until asked for.
+      let accountOpen = false;
       // What a runtime row just copied: { runtime, what }.
       let runtimeCopied;
       const enterStage = (next, motion) => {
@@ -3651,12 +3100,12 @@
         } else delete section.dataset.motion;
         clearTimeout(slowTimer);
         slowCheck = false;
-        // A check that runs long offers a way on without it.
+        // Only a check that runs very long offers a way on without it.
         if (next === "checking")
           slowTimer = setTimeout(() => {
             slowCheck = true;
             render();
-          }, 8000);
+          }, SLOW_CHECK_MS);
       };
       // Moves between the welcome's stages and says where it went.
       const setStage = (next, motion) => {
@@ -3677,49 +3126,16 @@
         Object.fromEntries(
           (local.runtimes ?? []).map((row) => [row.runtime, row]),
         );
-      // A generated password: four groups of five characters that cannot
-      // be mistaken for one another, drawn without bias.
-      const PASSWORD_ALPHABET =
-        "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-      const generatePassword = () => {
-        const chars = [];
-        const limit = 256 - (256 % PASSWORD_ALPHABET.length);
-        while (chars.length < 20) {
-          for (const byte of crypto.getRandomValues(new Uint8Array(32))) {
-            if (byte >= limit || chars.length === 20) continue;
-            chars.push(PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length]);
-          }
-        }
-        return [0, 5, 10, 15]
-          .map((at) => chars.slice(at, at + 5).join(""))
-          .join("-");
-      };
-      const freshCredentials = () => ({
-        email: "owner@linger.local",
-        password: generatePassword(),
-        generated: true,
-      });
-      // The server's rules for an owner sign-in
-      // (packages/local-installation/src/account.ts).
-      const OWNER_EMAIL =
-        /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
-      const EMAIL_PROBLEMS = new Set(["emailInvalid", "emailTooLong"]);
-      const PASSWORD_PROBLEMS = new Set([
-        "passwordTooShort",
-        "passwordTooLong",
-        "passwordControl",
-      ]);
-      const credentialsProblem = (draft) => {
-        const email = draft.email.trim().toLowerCase();
-        if (email.length > 320 || email.indexOf("@") > 100)
-          return "emailTooLong";
-        if (!OWNER_EMAIL.test(email)) return "emailInvalid";
-        if (draft.password.length < 8) return "passwordTooShort";
-        if (draft.password.length > 256) return "passwordTooLong";
-        if (/\p{Cc}/u.test(draft.password)) return "passwordControl";
-        if (draft.password !== draft.confirm) return "passwordMismatch";
-        return "";
-      };
+      // A new password as the server and the account file take it
+      // (validateLocalCredentials in packages/local-installation).
+      const passwordProblem = (password) =>
+        password.length < 8
+          ? "passwordTooShort"
+          : password.length > 256
+            ? "passwordTooLong"
+            : /\p{Cc}/u.test(password)
+              ? "passwordControl"
+              : "";
       // BYOK. Requests go to the base URL + path + endpoint, used verbatim;
       // path and endpoint are optional, and a grey value is the default that
       // is sent. The wire format follows the end of that address, else the
@@ -3798,6 +3214,15 @@
           /^Error invoking remote method '[^']+': (Error: )?/,
           "",
         );
+      // The test's usual failures in a few words; any other keeps the
+      // check's own message, which says what to change.
+      const BYOK_FAILURES = {
+        BYOK_UNREACHABLE: "byokUnreachable",
+        BYOK_CHECK_TIMEOUT: "byokUnreachable",
+        BYOK_AUTH_FAILED: "byokKeyRefused",
+        BYOK_NOT_FOUND: "byokModelMissing",
+        BYOK_UPSTREAM_REJECTED: "byokRejected",
+      };
       // Asks the main process to test or list an endpoint. The answer comes
       // back in the state the command returns; nothing else waits for it.
       const byokAsk = async (command, field) => {
@@ -4301,21 +3726,102 @@
       // endpoint serves the runtime signing in.
       const byokRuntime = "pi";
       let signInByokOpen = false;
-      const mainByok = byokFields(
-        $("byok-fields"),
-        "byok",
-        () => byokRuntime,
-        () => {},
-      );
+      // The setup form's BYOK: an address, a key and a model, nothing else.
+      // The address may be a base URL or a whole request URL; a bare host
+      // gets the usual /v1, and an ending that names a format picks it, as
+      // the full form's defaults do. Install tests it once, quietly.
+      const simpleByok = (root, prefix, runtime) => {
+        root.innerHTML = `
+          <input class="byok-key" id="${prefix}-url" type="url"
+            autocomplete="off" spellcheck="false"
+            aria-label="${esc(t("baseUrl"))}"
+            placeholder="${esc(t("baseUrlPlaceholder"))}" />
+          <input class="byok-key" id="${prefix}-key" type="password"
+            autocomplete="off" spellcheck="false" aria-label="${esc(t("apiKey"))}"
+            placeholder="${esc(t("apiKeyPlaceholder"))}" />
+          <input class="byok-key" id="${prefix}-model" type="text"
+            autocomplete="off" spellcheck="false" aria-label="${esc(t("model"))}"
+            placeholder="${esc(t("modelPlaceholder"))}" />
+          <p class="byok-status" id="${prefix}-status" data-tone="err"
+            role="alert" hidden></p>`;
+        const [url, key, model] = root.querySelectorAll("input");
+        const status = root.querySelector(".byok-status");
+        let f = { url: "", apiKey: "", modelId: "" };
+        // Why the last Install's test failed, until the fields change.
+        let failure = "";
+        const edit = (next) => {
+          f = { ...f, ...next };
+          failure = "";
+          render();
+        };
+        url.addEventListener("input", () => edit({ url: url.value }));
+        key.addEventListener("input", () => edit({ apiKey: key.value }));
+        model.addEventListener("input", () => edit({ modelId: model.value }));
+        const address = () => {
+          const typed = f.url.trim().replace(/\/+$/, "");
+          for (const [protocol, { suffix }] of Object.entries(BYOK_FORMATS))
+            if (typed.endsWith(suffix))
+              return {
+                baseUrl: typed.slice(0, -suffix.length),
+                path: "",
+                endpoint: suffix,
+                protocol,
+              };
+          let bare = false;
+          try {
+            bare = new URL(typed).pathname.replace(/\/+$/, "") === "";
+          } catch {}
+          const protocol = RUNTIME_FORMATS[runtime];
+          return {
+            baseUrl: typed,
+            path: bare ? DEFAULT_PATH : "",
+            endpoint: BYOK_FORMATS[protocol].suffix,
+            protocol,
+          };
+        };
+        return {
+          root,
+          complete: () => f.url.trim() !== "" && f.modelId.trim() !== "",
+          modelId: () => f.modelId.trim(),
+          config: () => {
+            const apiKey = f.apiKey.trim();
+            return {
+              ...address(),
+              ...(apiKey ? { apiKey } : {}),
+              modelId: f.modelId.trim(),
+              runtime,
+            };
+          },
+          fail: (message) => {
+            failure = message;
+          },
+          clearKey: () => {
+            f = { ...f, apiKey: "" };
+            key.value = "";
+          },
+          reset: () => {
+            f = { url: "", apiKey: "", modelId: "" };
+            failure = "";
+          },
+          sync: (busy) => {
+            if (url.value !== f.url) url.value = f.url;
+            if (key.value !== f.apiKey) key.value = f.apiKey;
+            if (model.value !== f.modelId) model.value = f.modelId;
+            for (const input of [url, key, model]) input.disabled = busy;
+            status.hidden = !failure;
+            status.textContent = failure;
+          },
+        };
+      };
+      const mainByok = simpleByok($("byok-fields"), "byok", byokRuntime);
       const signInByok = byokFields(
         $("signin-byok-fields"),
         "signin-byok",
         () => state.localServer.signIn?.runtime ?? "claude",
         () => {},
       );
-      // Provider keys typed or removed here ("" removes the saved one); kept
-      // only in the inputs and sent once with Install.
-      let keys = {};
+      // Install is testing the BYOK endpoint before it starts.
+      let byokTesting = false;
 
       const host = (url) => {
         try {
@@ -4432,37 +3938,15 @@
         if (shown < cap) shown += (cap - shown) * (1 - Math.exp(-seconds / 90));
         return shown;
       };
-      // When each step began, for the timings beside the steps.
-      let started = [];
-      // Each Install or Try Again times its steps and fills the bar afresh.
+      // Each install fills the bar afresh.
       let attempt;
-      // The attempt whose failure was last scrolled into view.
-      let revealed;
       const startAttempt = (local) => {
         if (local.attempt === attempt) return;
         attempt = local.attempt;
-        started = [];
         shown = 0;
         eased = 0;
       };
-      const timeStep = (local, at) => {
-        if (local.phase === "idle") started = [];
-        for (let index = 0; index <= at; index++) started[index] ??= Date.now();
-        if (local.phase === "ready") started[local.steps.length] ??= Date.now();
-      };
-      const clock = (ms) => {
-        const seconds = Math.max(0, Math.round(ms / 1000));
-        return (
-          Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")
-        );
-      };
-      const stepTime = (index, stepState) =>
-        stepState === "now"
-          ? clock(Date.now() - started[index])
-          : stepState === "done" && started[index] && started[index + 1]
-            ? clock(started[index + 1] - started[index])
-            : "";
-      // Timers and the easing bar move once a second while installing.
+      // The easing bar moves once a second while installing.
       setInterval(() => {
         if (step === "installing" && state?.localServer.phase === "installing")
           render();
@@ -4672,65 +4156,10 @@
         "cuda-driver-update-required",
         "cuda-driver-version-unknown",
       ]);
-      const MEMORY_HELD_CODES = new Set([
-        "gpu-memory-required",
-        "free-memory-required",
-        "gpu-sharing-required",
-        "plan-unavailable",
-      ]);
       const cudaDriverHeld = (models) =>
         Boolean(
           models.reasons?.some((reason) => CUDA_DRIVER_CODES.has(reason.code)),
         );
-      const memoryHeld = (models) =>
-        models.freeMemory != null ||
-        Boolean(
-          models.reasons?.some((reason) => MEMORY_HELD_CODES.has(reason.code)),
-        );
-      // The held card's short line: what blocks local models right now.
-      const heldLine = (models) => {
-        if (
-          models.reasons?.some(
-            (reason) => reason.code === "gateway-port-in-use",
-          )
-        )
-          return t("heldGatewayPort");
-        if (
-          models.reasons?.some(
-            (reason) => reason.code === "harness-unavailable",
-          )
-        )
-          return t("heldHarnessUnavailable");
-        if (cudaDriverHeld(models)) return t("heldCudaDriver");
-        const gpu = models.reasons?.find(
-          (reason) =>
-            reason.code === "gpu-memory-required" &&
-            reason.freeBytes != null &&
-            reason.requiredBytes != null,
-        );
-        if (gpu) {
-          const values = {
-            gpu: String(gpu.gpuIndex),
-            free: size(gpu.freeBytes),
-            needed: size(gpu.requiredBytes),
-          };
-          return gpu.gpuIndex != null
-            ? t("heldGpuOf", values)
-            : t("heldGpu", values);
-        }
-        const ram = models.reasons?.find(
-          (reason) =>
-            reason.code === "free-memory-required" &&
-            reason.freeBytes != null &&
-            reason.requiredBytes != null,
-        );
-        const free = ram?.freeBytes ?? models.freeMemory?.ramAvailableBytes;
-        const needed =
-          ram?.requiredBytes ?? models.freeMemory?.ramRequiredBytes;
-        if (free != null && needed != null)
-          return t("heldMemory", { free: size(free), needed: size(needed) });
-        return memoryHeld(models) ? t("heldClose") : t("heldResolve");
-      };
 
       // The welcome view: a short check of this computer, the three
       // sources, then the chosen source's settings with Install.
@@ -4751,11 +4180,6 @@
             setup.run({ op: "local.runtimes.check" }).catch(() => {});
           }
         }
-        // The account a new installation creates; an installation that has
-        // one keeps it, and the page forgets what it held.
-        if (local.ownerAccount !== "new" || local.phase === "ready")
-          credentials = null;
-        else if (available) credentials ??= freshCredentials();
         if (!picked) source = defaults();
         const recommended = defaults();
         const known =
@@ -4777,22 +4201,17 @@
         const choosing = available && stage === "choose";
         const checkingStage = available && stage === "checking";
 
-        // The bar above the title: Back, the badge or the local model's
-        // progress, and More options.
-        $("stage-bar").hidden = !available;
+        // The bar above the title: Back on step 2, or the local model's
+        // progress.
+        $("stage-bar").hidden =
+          !available || checkingStage || (!settings && !behind);
         $("source-back").hidden = !settings;
         $("model-behind").hidden = !behind;
-        $("welcome-eyebrow").hidden = behind;
         if (behind) {
           const percent = modelPercent(local.backgroundModel);
           $("model-behind-fill").style.width = percent + "%";
           $("model-behind-text").textContent = t("modelBehind", { percent });
         }
-        $("local-customize").hidden = !settings;
-        $("local-customize").setAttribute("aria-expanded", String(options));
-        $("local-customize").textContent = t(
-          options ? "fewerOptions" : "moreOptions",
-        );
 
         const NAMES = {
           local: t("localModel"),
@@ -4802,78 +4221,32 @@
         $("welcome-title").textContent = settings
           ? NAMES[source]
           : t("welcomeTitle");
-        $("welcome-lead").textContent = !available
-          ? t("welcomeLeadTeam")
-          : !settings
-            ? t("welcomeLeadLocal")
-            : source === "local"
-              ? models.gpu
-                ? t("leadLocalGpu", { gpu: models.gpu })
-                : t("leadLocal")
-              : source === "byok"
-                ? t("leadByok")
-                : t("leadSubscription");
 
-        // Checking: what runs now, and a way on when it runs long.
+        // Checking: only a quiet spinner under the title, and a way on once
+        // it has run very long.
         $("welcome-checking").hidden = !checkingStage;
-        const fetching = checking ? models.download : undefined;
-        const now =
-          '<span class="spinner"></span>' +
-          esc(t(fetching ? "downloadingTools" : "checkingComputer"));
-        if ($("checking-now").innerHTML !== now)
-          $("checking-now").innerHTML = now;
-        $("checking-why").textContent = slowCheck
-          ? t("checkingSlow")
-          : fetching
-            ? transferParts(fetching).join(" · ")
-            : t("checkingWhy");
         $("checking-skip").hidden = !slowCheck;
 
         $("local-setup").hidden = !choosing && !settings;
         $("source-grid").hidden = !choosing;
-        $("source-panel").hidden = !settings || options;
-        $("local-options").hidden = !settings || !options;
+        $("source-panel").hidden = !settings;
 
-        // The cards. Recommended marks the advice once the check gave it;
-        // a card that cannot be picked says why in its place.
+        // One line under each name: what the source is, or why the local
+        // model cannot be picked.
         const localCard = document.querySelector(
           '.source-card[data-value="local"]',
         );
-        const pill = behind
-          ? ["pillDownloading", false]
-          : checking
-            ? ["pillChecking", false]
-            : held
-              ? ["pillOnHold", true]
-              : !model
-                ? ["pillUnavailable", false]
-                : undefined;
-        $("source-local-pill").hidden = !pill;
-        if (pill) {
-          $("source-local-pill").textContent = t(pill[0]);
-          $("source-local-pill").dataset.warn = String(pill[1]);
-        }
-        $("source-local-meta").textContent = behind
+        $("source-local-about").textContent = behind
           ? t("localMetaBehind", {
               percent: modelPercent(local.backgroundModel),
             })
-          : checking
-            ? t("checkingComputer")
-            : model
-              ? [
-                  model.name,
-                  model.downloadBytes != null && size(model.downloadBytes),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")
-              : held
-                ? heldLine(models)
-                : t("localNotAvailable");
-        $("source-sub-meta").textContent = signedIn.length
-          ? t("subMetaSignedIn", {
-              runtimes: signedIn.map((runtime) => RUNTIMES[runtime]).join(", "),
-            })
-          : t("subMetaNone");
+          : model
+            ? t("sourceLocalAbout")
+            : held
+              ? t("onHold")
+              : known
+                ? t("localNotAvailable")
+                : t("rtChecking");
         for (const card of document.querySelectorAll(".source-card")) {
           const value = card.dataset.value;
           const off = value === "local" && !localUsable;
@@ -4881,8 +4254,6 @@
           card.setAttribute("aria-checked", String(source === value));
           // One card takes Tab; the arrows move between them.
           card.tabIndex = source === value ? 0 : -1;
-          card.querySelector(".source-rec").hidden =
-            !known || off || value !== recommended;
         }
         if (localCard.disabled && source === "local" && !busy)
           localCard.tabIndex = 0;
@@ -4903,55 +4274,24 @@
         $("plan-why").hidden = !$("plan-why").textContent;
         renderDriver(local, models, busy, choosing && !behind);
 
-        // The featured model, on the first step when it is the one this
-        // computer would run, and with the local model's settings.
-        const shown = model || heldModel;
-        const featured = Boolean(shown?.featuredInkling);
-        const featuredPick = Boolean(model?.featuredInkling) && !behind;
-        $("featured-spotlight").hidden =
-          !choosing || !featuredPick || recommended !== "local";
-        $("featured-spotlight").dataset.recommended = "true";
-        $("featured-spotlight-note").textContent = t("featuredModelSelected");
-        $("featured-spotlight-link").textContent = t("learnMoreLink");
-
         // Step 2: the chosen source.
         $("local-row").hidden = source !== "local";
         $("subscription-row").hidden = source !== "subscription";
         $("byok-row").hidden = source !== "byok";
-        if (shown) {
-          $("local-model-name").textContent = shown.name;
-          $("local-model-needs").textContent = [
-            shown.downloadBytes != null &&
-              t("downloadAmount", { size: gigabytes(shown.downloadBytes) }),
-            shown.diskBytes != null &&
-              t("diskAmount", { size: gigabytes(shown.diskBytes) }),
-            // The whole stack's memory, so more than the model's own on
-            // the Local models page.
-            shown.memoryBytes != null &&
-              t("memoryWithServices", { size: gigabytes(shown.memoryBytes) }),
-          ]
-            .filter(Boolean)
-            .join(" · ");
-        } else {
-          $("local-model-name").textContent = t(
-            held ? "localOnHold" : "localNotAvailable",
-          );
-          $("local-model-needs").textContent = held
-            ? reasonsText(models, true)
-            : unavailableText;
-        }
-        $("local-wait").textContent = held ? heldLine(models) : t("localWait");
-        $("local-model-featured").hidden = !featured;
-        $("local-spotlight").hidden = !shown;
-        $("local-spotlight").dataset.recommended = String(featured);
-        $("local-spotlight-text").textContent = t(
-          featured ? "featuredModelSpecs" : "featuredModelCustomizeNote",
-        );
-        $("local-spotlight-link").textContent = t(
-          featured ? "learnMoreLink" : "thinkingMachinesLink",
-        );
-        renderRuntimes(rows, busy, signedIn);
-        mainByok.sync(busy);
+        const shown = model || heldModel;
+        $("local-model-name").textContent = shown
+          ? shown.name
+          : t("localNotAvailable");
+        $("local-model-needs").textContent =
+          shown && !held
+            ? shown.downloadBytes != null
+              ? size(shown.downloadBytes)
+              : ""
+            : held
+              ? reasonsText(models, true)
+              : unavailableText;
+        renderRuntimes(rows, busy);
+        mainByok.sync(busy || byokTesting);
         // The local model can come along in the background, off unless
         // chosen, on a computer that runs it.
         const offerBackground =
@@ -4960,44 +4300,16 @@
         $("background-row").hidden = !offerBackground;
         $("background-model").checked = background;
         $("background-model").disabled = busy;
-        $("background-model-detail").textContent = model
-          ? t("backgroundDetail", {
-              model: model.name,
-              size: size(model.downloadBytes ?? 0),
-            })
-          : "";
-        $("credentials-row").hidden = !credentials;
-        if (credentials)
-          $("credentials-sub").textContent = t(
-            credentials.generated
-              ? "credentialsGenerated"
-              : "credentialsCustom",
-            { email: credentials.email },
-          );
-        $("credentials-edit").disabled = busy;
-        renderCredentials();
 
-        // Location and app keys, behind More options.
+        // The install location shows only when it is the problem, with
+        // what is wrong and a way to change it.
         const location = local.location;
-        $("location-sub").textContent =
-          location.error || shortPath(location.path);
-        $("location-sub").title = location.error || location.path;
-        $("location-sub").dataset.warn = String(!!location.error);
-        $("location-reset").hidden = !location.custom && !location.error;
-        for (const input of document.querySelectorAll("[data-key]")) {
-          const provider = input.dataset.key;
-          const saved = local.keys[provider];
-          const removing = keys[provider] === "";
-          input.placeholder = t(
-            removing ? "keyRemovedOnInstall" : saved ? "keySaved" : "apiKey",
-          );
-          const remove = document.querySelector(`[data-remove="${provider}"]`);
-          // Kept in place so the inputs line up.
-          remove.style.visibility =
-            saved || keys[provider] ? "visible" : "hidden";
-          remove.textContent = t(removing ? "keep" : "remove");
-        }
-        $("keys-note").textContent = t("keysNote");
+        $("location-row").hidden = !location.error;
+        $("location-sub").textContent = location.error ?? "";
+        $("location-sub").title = location.path;
+        $("location-reset").hidden = !location.custom;
+        $("location-change").disabled = busy;
+        $("location-reset").disabled = busy;
 
         // The button and what it does. Continue opens the settings; Install
         // waits for what the source needs.
@@ -5013,48 +4325,32 @@
               ? mainByok.complete()
               : signedIn.length > 0;
         $("local-install").disabled =
-          busy || !ready || Boolean(working) || Boolean(location.error);
-        const label = esc(t(behind ? "continueSetup" : "install"));
+          busy ||
+          !ready ||
+          byokTesting ||
+          Boolean(working) ||
+          Boolean(location.error);
+        const label = byokTesting
+          ? '<span class="spinner"></span>' + esc(t("checkingByok"))
+          : esc(t(behind ? "continueSetup" : "install"));
         if ($("local-install-label").innerHTML !== label)
           $("local-install-label").innerHTML = label;
-        const also =
-          background && model
-            ? t("planAlsoModel", { model: model.name })
-            : behind
-              ? t("planModelKeeps")
-              : "";
         const order = ["codex", "claude"].filter((runtime) =>
           signedIn.includes(runtime),
         );
+        // One short line under the button, on step 2 only; step 1 keeps its
+        // empty room so the button stays where it is on step 2.
         $("plan-line").hidden = !available || checkingStage;
-        $("plan-line").textContent = !settings
-          ? t("planNothingYet")
-          : [
-              source === "local"
-                ? model
-                  ? t("planLocal", {
-                      model: model.name,
-                      size: size(model.downloadBytes ?? 0),
-                    })
-                  : ""
-                : source === "byok"
-                  ? t("planByok")
-                  : working
-                    ? t("planWaitRuntime", {
-                        runtime: RUNTIMES[working.runtime],
-                      })
-                    : order.length === 2
-                      ? t("planBoth", {
-                          first: RUNTIMES[order[0]],
-                          second: RUNTIMES[order[1]],
-                        })
-                      : order.length
-                        ? t("planRuntime", { runtime: RUNTIMES[order[0]] })
-                        : t("planSignInFirst"),
-              source !== "local" && also,
-            ]
-              .filter(Boolean)
-              .join(" ");
+        $("plan-line").textContent =
+          !settings || source !== "subscription"
+            ? ""
+            : working
+              ? t("planWaitRuntime", { runtime: RUNTIMES[working.runtime] })
+              : order.length === 2
+                ? t("planBoth", { first: RUNTIMES[order[0]] })
+                : order.length
+                  ? ""
+                  : t("planSignInFirst");
         $("team").hidden = !available || settings || checkingStage;
       };
 
@@ -5149,25 +4445,19 @@
 
       // Each runtime row: what it is on this computer, and the one thing
       // left to do on the right.
-      const PLAN_OF = { claude: "planClaude", codex: "planCodex" };
-      const renderRuntimes = (rows, busy, signedIn) => {
-        // With both signed in, Codex is the default; with one, that one.
-        const primary = signedIn.includes("codex") ? "codex" : signedIn[0];
+      const renderRuntimes = (rows, busy) => {
         for (const el of document.querySelectorAll(".choice.runtime")) {
           const runtime = el.dataset.runtime;
-          const pi = runtime === "pi";
           const row = rows[runtime] ?? {
             runtime,
             installed: false,
             signedIn: false,
             state: "checking",
           };
-          const plan = pi ? "" : t(PLAN_OF[runtime]);
           const idle = row.state === "idle";
           const installing = row.state === "installing";
           const signing = row.state === "signing_in";
-          const done = pi ? row.installed : row.signedIn;
-          const version = row.version ? " · " + row.version : "";
+          const done = row.signedIn;
           const sub = el.querySelector("[data-runtime-sub]");
           sub.dataset.warn = String(Boolean(row.failed) && idle);
           sub.textContent =
@@ -5176,23 +4466,17 @@
               : installing
                 ? t("rtInstalling")
                 : signing
-                  ? t("rtSigningIn", { plan })
+                  ? t("rtSigningIn")
                   : row.failed === "install"
                     ? row.message || t("rtInstallFailed")
                     : row.failed === "signin"
                       ? row.message || t("signInFailed")
-                      : pi
-                        ? row.installed
-                          ? t("rtPiInstalled") + version
-                          : t("rtPiNotInstalled")
-                        : row.signedIn
-                          ? t("rtSignedInWith", { plan }) + version
-                          : row.installed
-                            ? t("rtSignInWith", { plan }) + version
-                            : t("rtNotInstalled", { plan });
+                      : row.installed
+                        ? t("rtInstalledNotSignedIn")
+                        : t("rtNotInstalled");
           sub.title = sub.textContent;
-          const rec = el.querySelector(".runtime-rec");
-          if (rec) rec.hidden = runtime !== primary || signedIn.length < 2;
+          // Done says so once, in the badge on the right.
+          sub.hidden = idle && done && !row.failed;
           const install = el.querySelector("[data-runtime-install]");
           install.hidden = !idle || row.installed;
           install.textContent = t(
@@ -5223,8 +4507,13 @@
             else progress.setAttribute("aria-valuenow", String(percent));
             progress.querySelector(".fill").style.width =
               Math.max(4, percent ?? 30) + "%";
+            // An unknown total counts bytes, once there are any.
             progress.querySelector(".pct").textContent =
-              percent === undefined ? size(completed) : percent + "%";
+              percent !== undefined
+                ? percent + "%"
+                : completed
+                  ? size(completed)
+                  : "";
           }
           el.querySelector(".runtime-wait")?.toggleAttribute(
             "hidden",
@@ -5235,7 +4524,7 @@
           cancel.disabled = busy;
           const badge = el.querySelector("[data-runtime-done]");
           badge.hidden = !idle || !done;
-          const badgeHtml = check + esc(t(pi ? "installedBadge" : "signedIn"));
+          const badgeHtml = check + esc(t("signedIn"));
           if (badge.innerHTML !== badgeHtml) badge.innerHTML = badgeHtml;
           // The link and code for a browser that did not open, and a
           // pasted code for Claude Code's page.
@@ -5266,40 +4555,6 @@
         }
       };
 
-      // The sign-in email and password: shown in a sheet over step 2, where
-      // they can be changed; checked the way the server checks them.
-      const renderCredentials = () => {
-        const sheet = $("credentials-sheet");
-        sheet.hidden = !editing;
-        if (!editing) return;
-        const problem = credentialsProblem(editing);
-        const shownProblem = editing.tried ? problem : "";
-        $("credentials-error").textContent = shownProblem
-          ? t(shownProblem)
-          : "";
-        $("credentials-email").setAttribute(
-          "aria-invalid",
-          String(editing.tried && EMAIL_PROBLEMS.has(problem)),
-        );
-        $("credentials-password").setAttribute(
-          "aria-invalid",
-          String(editing.tried && PASSWORD_PROBLEMS.has(problem)),
-        );
-        $("credentials-confirm").setAttribute(
-          "aria-invalid",
-          String(editing.tried && problem === "passwordMismatch"),
-        );
-        $("credentials-password").type = editing.visible ? "text" : "password";
-        $("credentials-confirm").type = editing.visible ? "text" : "password";
-        $("credentials-show").textContent = t(
-          editing.visible ? "hide" : "show",
-        );
-        $("credentials-show").setAttribute(
-          "aria-label",
-          t(editing.visible ? "hidePassword" : "showPassword"),
-        );
-      };
-
       const renderLocal = (busy) => {
         const local = state.localServer;
         renderWelcome(local, busy);
@@ -5314,10 +4569,6 @@
               ? "startingLinger"
               : "installingTitle",
         );
-        const modelOn = local.backgroundModel?.state === "downloading";
-        $("installing-plan").textContent = failed
-          ? t("dataKept")
-          : t(modelOn ? "takesMinutesModel" : "takesMinutes");
         // The local model's wait offers another source meanwhile; the model
         // keeps downloading.
         $("local-model-leave").hidden = !(
@@ -5336,83 +4587,43 @@
         const percent = Math.round(shownProgress(local, at) * 100);
         $("installing-fill").style.width = Math.max(2, percent) + "%";
         $("installing-bar").setAttribute("aria-valuenow", String(percent));
-        timeStep(local, at);
+        // One bar and one line under it: what is happening now, a download
+        // folded in with how far it is.
+        const transfer = !failed && !starting ? local.transfer : undefined;
+        const waiting =
+          !failed && !starting && !transfer && local.waiting === "runtime";
         $("installing-step").textContent = failed
-          ? steps[at][1]()
+          ? ""
           : starting
             ? t(
                 local.preparing === "updating"
                   ? "preparingUpdate"
                   : "preparingStart",
               )
-            : t("stepRunning", { step: steps[at][1]() });
-        $("installing-count").textContent = starting ? "" : percent + "%";
-        // A download under way: what it is and how far, in the counts the
-        // installer passes on from the localmodels tool.
-        const transfer = !failed && !starting ? local.transfer : undefined;
-        $("installing-transfer").hidden = !transfer;
-        $("installing-transfer-label").textContent = transfer
-          ? transfer.label
-          : "";
-        // Each part stays on one line, so a wrap falls between parts.
-        $("installing-transfer-bytes").replaceChildren(
-          ...(transfer ? transferParts(transfer) : []).flatMap((text, i) => {
-            const part = document.createElement("span");
-            part.textContent = text;
-            return i ? [" · ", part] : [part];
-          }),
-        );
-        // A step that runs a while with the bar standing still says what
-        // it is waiting on.
-        const waiting =
-          !failed && !starting && !transfer && local.waiting === "runtime";
-        $("installing-waiting").hidden = !waiting;
-        $("installing-waiting").textContent = waiting
-          ? t("waitingRuntime")
-          : "";
-        $("installing-checks").hidden = starting;
-        const checks = $("installing-checks");
-        if (checks.children.length !== steps.length)
-          checks.replaceChildren(
-            ...steps.map(() => {
-              const item = document.createElement("li");
-              item.innerHTML =
-                '<span class="dot">' +
-                check +
-                '</span><span></span><span class="time"></span>';
-              return item;
-            }),
-          );
-        steps.forEach(([, label], index) => {
-          const item = checks.children[index];
-          item.dataset.state =
-            local.phase === "ready" || index < at
-              ? "done"
-              : index === at
-                ? failed
-                  ? "failed"
-                  : "now"
-                : "";
-          item.children[1].textContent = label();
-          item.lastChild.textContent = stepTime(index, item.dataset.state);
-        });
+            : transfer
+              ? [
+                  // The installer's own words name tools and timings; the
+                  // line says only what downloads: the local model, which
+                  // the runtime stage fetches, or Linger.
+                  t(
+                    local.source === "local" && steps[at][0] === "services"
+                      ? "stepModel"
+                      : "stepDownload",
+                  ),
+                  transferAmount(transfer),
+                ].join(" · ")
+              : waiting
+                ? t("waitingRuntime")
+                : steps[at][1]();
+        $("installing-count").textContent =
+          starting || failed ? "" : percent + "%";
+        // A failure says why in a line or two, with one way on: report it.
         const problem = $("installing-error");
         const message = failed ? failureText(local) : "";
-        if (problem.textContent !== message) {
-          problem.textContent = message;
-          detailsOpen = false;
-        }
-        // Folded first to see whether the message overflows the fold.
-        problem.classList.add("folded");
-        const long = failed && problem.scrollHeight > problem.clientHeight + 1;
-        problem.classList.toggle("folded", long && !detailsOpen);
-        $("installing-more").hidden = !long;
-        $("installing-more").textContent = t(
-          detailsOpen ? "hideDetails" : "showDetails",
-        );
-        $("installing-diagnostics").hidden = !failed;
-        // A new save result replaces the note; a failed "Show Logs" writes
-        // its own error there and stays until the next result.
+        if (problem.textContent !== message) problem.textContent = message;
+        problem.title = message;
+        // A new save result replaces the note; a failed report writes its
+        // own error there and stays until the next result.
         const saved = state.diagnostics;
         const savedKey = saved && JSON.stringify(saved);
         if (saved && savedKey !== shownDiagnostics)
@@ -5423,18 +4634,6 @@
         $("installing-actions").hidden = !failed;
         renderSignIn(local, busy);
         renderSend();
-        // Each failure brings its message and actions into view once.
-        if (failed && revealed !== local.attempt) {
-          revealed = local.attempt;
-          requestAnimationFrame(() =>
-            $("installing-actions").scrollIntoView({ block: "nearest" }),
-          );
-        }
-        $("ready-lead").textContent = t(
-          local.backgroundModel?.state === "downloading"
-            ? "readyLeadModel"
-            : "readyLead",
-        );
         renderAccount(local.account);
         $("legacy-note").hidden = !local.legacyBackup;
         $("legacy-note").textContent = local.legacyBackup
@@ -5448,11 +4647,14 @@
       const renderAccount = (account) => {
         $("account").hidden = !account;
         if (!account) return;
+        $("account-body").hidden = !accountOpen;
+        $("account-toggle").setAttribute("aria-expanded", String(accountOpen));
         const error = account.error ?? "";
         $("account-error").textContent = error;
         $("account-error").hidden = !error;
         $("account-fields").hidden = !!error;
         $("account-note").hidden = !!error;
+        $("account-change").hidden = true;
         if (error) return;
         $("account-email").textContent = account.email;
         $("account-password").textContent =
@@ -5470,6 +4672,38 @@
           copied === "email" ? "copied" : "copy",
         );
         $("account-copy-email").setAttribute("aria-label", t("copyEmail"));
+        // Changing the password: the form takes the note's place.
+        const editing = passwordEdit !== null;
+        $("account-change").hidden = !editing;
+        $("account-note").hidden = editing;
+        if (!editing) return;
+        const problem = passwordEdit.tried
+          ? passwordProblem(passwordEdit.value)
+          : "";
+        const message = problem ? t(problem) : (passwordEdit.error ?? "");
+        $("account-new-error").textContent = message;
+        $("account-new-password").setAttribute(
+          "aria-invalid",
+          String(Boolean(problem)),
+        );
+        $("account-new-password").type = passwordEdit.visible
+          ? "text"
+          : "password";
+        $("account-new-password").disabled = passwordEdit.saving;
+        $("account-new-show").textContent = t(
+          passwordEdit.visible ? "hide" : "show",
+        );
+        $("account-new-show").setAttribute(
+          "aria-label",
+          t(passwordEdit.visible ? "hidePassword" : "showPassword"),
+        );
+        $("account-new-save").disabled = passwordEdit.saving;
+        const saveLabel = passwordEdit.saving
+          ? '<span class="spinner"></span>' + esc(t("saving"))
+          : esc(t("save"));
+        if ($("account-new-save-label").innerHTML !== saveLabel)
+          $("account-new-save-label").innerHTML = saveLabel;
+        $("account-new-cancel").disabled = passwordEdit.saving;
       };
 
       const render = () => {
@@ -5558,7 +4792,6 @@
       let copiedReport;
       const renderSend = () => {
         const send = state.diagnosticsSend;
-        $("send-diagnostics").hidden = !send;
         const phase = send?.phase ?? "idle";
         $("send-modal").hidden = phase === "idle";
         if (phase === "idle") return;
@@ -5591,9 +4824,7 @@
                   })
                 : phase === "sent"
                   ? t("sendSentLead")
-                  : send.retry
-                    ? ""
-                    : t("sendByHand");
+                  : "";
         const files = $("send-files");
         files.hidden = phase !== "confirm";
         if (
@@ -5619,7 +4850,7 @@
         const primary = {
           confirm: "send",
           sent: copiedReport === send.reportId ? "copied" : "copyReportId",
-          failed: send.retry ? "tryAgain" : "",
+          failed: send.retry ? "tryAgain" : "saveInstead",
         }[phase];
         $("send-primary").hidden = !primary;
         $("send-primary").textContent = primary ? t(primary) : "";
@@ -5670,6 +4901,28 @@
         const chosen =
           local.phase === "failed" && local.source ? local.source : source;
         const byokPayload = chosen === "byok" ? mainByok.config() : undefined;
+        // BYOK is tested once, quietly, before the first Install; only a
+        // failure shows, under the fields. Try Again installs what passed.
+        if (byokPayload && local.phase !== "failed") {
+          if (byokTesting) return;
+          byokTesting = true;
+          mainByok.fail("");
+          render();
+          const answer = await byokAsk(
+            { op: "local.byok.check", byok: byokPayload },
+            "byokCheck",
+          );
+          byokTesting = false;
+          if (answer.state !== "ready") {
+            mainByok.fail(
+              BYOK_FAILURES[answer.code]
+                ? t(BYOK_FAILURES[answer.code])
+                : answer.message,
+            );
+            render();
+            return;
+          }
+        }
         const ok = await run(
           {
             op: "local.start",
@@ -5682,17 +4935,7 @@
                   ? "pi"
                   : "subscription",
             ...(byokPayload ? { byok: byokPayload } : {}),
-            ...(Object.keys(keys).length ? { keys } : {}),
             ...(background && chosen !== "local" ? { background: true } : {}),
-            // Sent again on Try Again until the installation has it.
-            ...(credentials && local.ownerAccount === "new"
-              ? {
-                  account: {
-                    email: credentials.email,
-                    password: credentials.password,
-                  },
-                }
-              : {}),
           },
           "local-error",
         );
@@ -5789,28 +5032,33 @@
             "runtime-signin-error",
           ),
         );
-      $("local-retry").addEventListener("click", install);
-      $("installing-more").addEventListener("click", () => {
-        detailsOpen = !detailsOpen;
-        render();
-      });
-      $("show-logs").addEventListener("click", () =>
-        run({ op: "logs.open" }, "diagnostics-note"),
-      );
-      $("save-diagnostics").addEventListener("click", () =>
-        run({ op: "diagnostics.save" }, "diagnostics-note"),
-      );
-      $("send-diagnostics").addEventListener("click", () => {
+      // Report issue sends the diagnostics where this build has somewhere
+      // to send them, after asking; else it saves them to Downloads.
+      $("report-issue").addEventListener("click", () => {
         copiedReport = undefined;
-        run({ op: "diagnostics.send", action: "start" }, "diagnostics-note");
+        run(
+          state.diagnosticsSend
+            ? { op: "diagnostics.send", action: "start" }
+            : { op: "diagnostics.save" },
+          "diagnostics-note",
+        );
       });
       $("send-primary").addEventListener("click", async () => {
         const send = state.diagnosticsSend;
         if (send?.phase === "confirm")
           run({ op: "diagnostics.send", action: "confirm" }, "send-error");
-        else if (send?.phase === "failed")
+        else if (send?.phase === "failed" && send.retry)
           run({ op: "diagnostics.send", action: "retry" }, "send-error");
-        else if (send?.phase === "sent") {
+        // Nothing left to retry: save the report to Downloads instead.
+        else if (send?.phase === "failed") {
+          if (
+            await run(
+              { op: "diagnostics.send", action: "cancel" },
+              "send-error",
+            )
+          )
+            run({ op: "diagnostics.save" }, "diagnostics-note");
+        } else if (send?.phase === "sent") {
           if (
             await run({ op: "diagnostics.send", action: "copy" }, "send-error")
           )
@@ -5822,48 +5070,9 @@
         run({ op: "diagnostics.send", action: "cancel" }, "send-error"),
       );
       const clearKeys = () => {
-        keys = {};
         mainByok.clearKey();
         signInByok.clearKey();
-        for (const input of document.querySelectorAll("[data-key]")) {
-          input.value = "";
-          input.type = "password";
-        }
-        for (const reveal of document.querySelectorAll("[data-reveal]"))
-          reveal.textContent = t("show");
       };
-      for (const input of document.querySelectorAll("[data-key]"))
-        input.addEventListener("input", () => {
-          const key = input.value.trim();
-          if (key) keys = { ...keys, [input.dataset.key]: key };
-          else {
-            const { [input.dataset.key]: _, ...rest } = keys;
-            keys = rest;
-          }
-          render();
-        });
-      for (const reveal of document.querySelectorAll("[data-reveal]"))
-        reveal.addEventListener("click", () => {
-          const input = $(`key-${reveal.dataset.reveal}`);
-          input.type = input.type === "password" ? "text" : "password";
-          reveal.textContent = t(input.type === "password" ? "show" : "hide");
-        });
-      for (const remove of document.querySelectorAll("[data-remove]"))
-        remove.addEventListener("click", () => {
-          const provider = remove.dataset.remove;
-          const { [provider]: current, ...rest } = keys;
-          $(`key-${provider}`).value = "";
-          // Remove clears a typed key, then the saved one; Keep undoes that.
-          keys =
-            current === undefined && state.localServer.keys[provider]
-              ? { ...rest, [provider]: "" }
-              : rest;
-          render();
-        });
-      $("local-customize").addEventListener("click", () => {
-        options = !options;
-        render();
-      });
       // The source cards: a click picks, a double click or Enter goes on,
       // and the arrows move between them.
       const cards = [...document.querySelectorAll(".source-card")];
@@ -5904,10 +5113,9 @@
       $("source-continue").addEventListener("click", () =>
         setStage("settings", "forward"),
       );
-      $("source-back").addEventListener("click", () => {
-        options = false;
-        setStage("choose", "back");
-      });
+      $("source-back").addEventListener("click", () =>
+        setStage("choose", "back"),
+      );
       $("checking-skip").addEventListener("click", () =>
         setStage("choose", "reveal"),
       );
@@ -5916,11 +5124,9 @@
           event.key !== "Escape" ||
           step !== "welcome" ||
           stage !== "settings" ||
-          editing ||
           combos.some((combo) => combo.open)
         )
           return;
-        options = false;
         setStage("choose", "back");
       });
       $("background-model").addEventListener("change", () => {
@@ -5993,81 +5199,6 @@
           });
       }
 
-      // The sign-in sheet edits a draft; Done keeps it, Cancel drops it.
-      const closeCredentials = () => {
-        editing = null;
-        render();
-        $("credentials-edit").focus();
-      };
-      $("credentials-edit").addEventListener("click", () => {
-        if (!credentials) return;
-        editing = {
-          email: credentials.email,
-          password: credentials.password,
-          confirm: credentials.password,
-          visible: false,
-          tried: false,
-        };
-        $("credentials-email").value = editing.email;
-        $("credentials-password").value = editing.password;
-        $("credentials-confirm").value = editing.confirm;
-        render();
-        $("credentials-email").focus();
-      });
-      for (const [id, field] of [
-        ["credentials-email", "email"],
-        ["credentials-password", "password"],
-        ["credentials-confirm", "confirm"],
-      ])
-        $(id).addEventListener("input", () => {
-          if (!editing) return;
-          editing = { ...editing, [field]: $(id).value };
-          render();
-        });
-      $("credentials-show").addEventListener("click", () => {
-        editing = { ...editing, visible: !editing.visible };
-        render();
-      });
-      $("credentials-generate").addEventListener("click", () => {
-        const password = generatePassword();
-        editing = {
-          ...editing,
-          password,
-          confirm: password,
-          visible: true,
-          generated: password,
-        };
-        $("credentials-password").value = password;
-        $("credentials-confirm").value = password;
-        render();
-      });
-      $("credentials-form").addEventListener("submit", (event) => {
-        event.preventDefault();
-        if (!editing) return;
-        if (credentialsProblem(editing)) {
-          editing = { ...editing, tried: true };
-          render();
-          return;
-        }
-        const email = editing.email.trim().toLowerCase();
-        // Generated while editing, or the generated one kept as it was.
-        credentials = {
-          email,
-          password: editing.password,
-          generated:
-            editing.password === editing.generated ||
-            (credentials.generated &&
-              editing.password === credentials.password),
-        };
-        closeCredentials();
-      });
-      $("credentials-cancel").addEventListener("click", closeCredentials);
-      $("credentials-sheet").addEventListener("keydown", (event) => {
-        if (event.key !== "Escape") return;
-        event.stopPropagation();
-        closeCredentials();
-      });
-
       // From the local model's wait: install another source instead while
       // the model downloads on.
       for (const leave of document.querySelectorAll("[data-leave]"))
@@ -6075,7 +5206,6 @@
           if (!(await run({ op: "local.leave-local" }, "leave-error"))) return;
           picked = true;
           source = leave.dataset.leave;
-          options = false;
           show("welcome");
           setStage("settings", "forward");
         });
@@ -6134,23 +5264,18 @@
           "local-error",
         ),
       );
-      const openFeaturedAnnouncement = () =>
-        run(
-          {
-            op: "external.open",
-            url: window.lingerSetup.featuredAnnouncementUrl,
-          },
-          "local-error",
-        );
-      $("featured-spotlight-link").addEventListener(
-        "click",
-        openFeaturedAnnouncement,
-      );
-      $("local-spotlight-link").addEventListener(
-        "click",
-        openFeaturedAnnouncement,
-      );
       $("open").addEventListener("click", () => run({ op: "finish" }));
+      $("account-toggle").addEventListener("click", () => {
+        accountOpen = !accountOpen;
+        // Folding away puts the password back out of sight.
+        if (!accountOpen) {
+          passwordEdit = null;
+          $("account-new-password").value = "";
+          if (state.localServer.account?.password)
+            run({ op: "local.account.show", on: false });
+        }
+        render();
+      });
       $("account-show").addEventListener("click", () =>
         run({
           op: "local.account.show",
@@ -6174,6 +5299,62 @@
       $("account-reveal").addEventListener("click", () =>
         run({ op: "local.account.reveal" }),
       );
+      // A new password goes to the server, which checks the current one;
+      // the account file and this computer's sign-in then follow it.
+      $("account-change-open").addEventListener("click", () => {
+        passwordEdit = { value: "", visible: false, tried: false };
+        $("account-new-password").value = "";
+        render();
+        $("account-new-password").focus();
+      });
+      const closePasswordEdit = () => {
+        passwordEdit = null;
+        $("account-new-password").value = "";
+        render();
+        $("account-change-open").focus();
+      };
+      $("account-new-password").addEventListener("input", () => {
+        if (!passwordEdit) return;
+        passwordEdit = {
+          ...passwordEdit,
+          value: $("account-new-password").value,
+          error: "",
+        };
+        render();
+      });
+      $("account-new-show").addEventListener("click", () => {
+        passwordEdit = { ...passwordEdit, visible: !passwordEdit.visible };
+        render();
+      });
+      $("account-new-cancel").addEventListener("click", closePasswordEdit);
+      $("account-change").addEventListener("keydown", (event) => {
+        if (event.key !== "Escape" || passwordEdit?.saving) return;
+        event.stopPropagation();
+        closePasswordEdit();
+      });
+      $("account-change").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!passwordEdit || passwordEdit.saving) return;
+        const password = passwordEdit.value;
+        if (passwordProblem(password)) {
+          passwordEdit = { ...passwordEdit, tried: true };
+          render();
+          return;
+        }
+        passwordEdit = { ...passwordEdit, saving: true, error: "" };
+        render();
+        try {
+          state = await setup.run({ op: "local.account.password", password });
+          closePasswordEdit();
+        } catch (error) {
+          passwordEdit = {
+            ...passwordEdit,
+            saving: false,
+            error: ipcMessage(error),
+          };
+          render();
+        }
+      });
       $("signin").addEventListener("click", () => {
         if (state.signedIn) return show("connect");
         if (pending !== null && pending !== "signin.open") return;

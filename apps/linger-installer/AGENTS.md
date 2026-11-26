@@ -163,11 +163,10 @@ runtimes with progress lines; `--runtime-login <codex|claude>` (with
 `--device-login` for Codex's device code) runs its sign-in against the
 runtime's own managed profile, taking a pasted code on stdin and stopping on
 SIGTERM; `--download-local-model <id:quant>` downloads the planned model into
-the model library with progress; and `--owner-account --instance <name>`
-takes a new installation's owner sign-in on stdin and writes it to that
-instance's owner-only `local-account.json` before the instance exists, never
-over an existing one, answering only `{ written }` or `{ error }`. No
-secret, sign-in code or password is printed or logged. A job's optional
+the model library with progress. No secret, sign-in code or password is
+printed or logged. A new installation's owner is `admin@gmail.com`
+(`DEFAULT_OWNER_EMAIL` from `@linger/local-installation/account`) with a
+generated password; an installation that has `local-account.json` keeps it. A job's optional
 `linkedRuntimes` (`codex`/`claude`, with a `codex` or `claude`
 `setupChoice`) names the subscription runtimes signed in at setup that the
 Computer also configures beside the default runtime.

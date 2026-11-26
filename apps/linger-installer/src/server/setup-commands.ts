@@ -1,9 +1,8 @@
 // Headless commands the desktop setup page runs before anything is
 // installed: which AI runtimes this computer has and whether they are signed
-// in, installing one, its sign-in, the owner's sign-in for the new
-// installation, and downloading the planned local model in the background.
-// Each writes JSON lines on stdout; secrets arrive on stdin and are never
-// written back.
+// in, installing one, its sign-in, and downloading the planned local model
+// in the background. Each writes JSON lines on stdout; sign-in codes arrive
+// on stdin and are never written back.
 import {
   inspectRuntime,
   inspectRuntimeDescriptors,
@@ -12,8 +11,6 @@ import {
   type NativeRuntime,
 } from "@linger/local-installation/managed-runtimes";
 import type { InstallOutcome } from "@linger/local-installation/events";
-import { presetLocalAccount } from "@linger/local-installation/account";
-import { instanceRoot } from "@linger/local-installation/instance";
 import {
   localmodelsBaseDirectory,
   runLocalmodels,
@@ -214,35 +211,6 @@ export async function setupRuntimeLogin(
   } finally {
     if (!ended) manager.cancel(input.instance);
     manager.close();
-  }
-}
-
-/**
- * Sets the owner's email and password for the installation about to be
- * created. Read from stdin as JSON; the password is never echoed.
- */
-export async function presetOwnerAccount(
-  home: string,
-  instance: string,
-  input: string,
-): Promise<{ written: boolean } | { error: string }> {
-  try {
-    let value: { email?: unknown; password?: unknown };
-    try {
-      value = JSON.parse(input) as typeof value;
-    } catch {
-      throw new Error("Invalid sign-in.");
-    }
-    if (typeof value?.email !== "string" || typeof value.password !== "string")
-      throw new Error("Invalid sign-in.");
-    return await presetLocalAccount(instanceRoot({ name: instance, home }), {
-      email: value.email,
-      password: value.password,
-    });
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : "Invalid sign-in.",
-    };
   }
 }
 

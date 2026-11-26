@@ -148,7 +148,8 @@ No second time needed. Name the kind and it changes whether you are told; name t
 For one person on one computer. Choose your platform below. The app
 opens Linger, connects this computer and runs its agents. Its two-step setup
 (choose a model source, then Install) sets up a Linger server on this computer
-too, with the sign-in email and password you choose.
+too; the ready screen keeps its sign-in details folded away, where you can
+copy them or change the password.
 
 | Platform                                                                                       | Package                                                                                            |
 | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |

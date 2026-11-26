@@ -36,7 +36,6 @@ export function parseInstallerArguments(args: string[]) {
     prepareRuntime?: string;
     runtimeLogin?: string;
     deviceLogin?: boolean;
-    ownerAccount?: boolean;
     downloadModel?: string;
   } = {
     home: lingerHome(),
@@ -99,10 +98,6 @@ export function parseInstallerArguments(args: string[]) {
       options.deviceLogin = true;
       continue;
     }
-    if (flag === "--owner-account") {
-      options.ownerAccount = true;
-      continue;
-    }
     if (
       ![
         "--home",
@@ -161,8 +156,6 @@ export function parseInstallerArguments(args: string[]) {
     throw new Error("The installer needs a source checkout (--source-repo).");
   if (options.deviceLogin && options.runtimeLogin !== "codex")
     throw new Error("A device login needs --runtime-login codex.");
-  if (options.ownerAccount && !options.instanceName)
-    throw new Error("The owner account needs an instance.");
   if (options.inspectTarget && !options.inspect)
     throw new Error("An inspection target requires --inspect.");
   if (options.abortOnStdinClose && !options.prefetchBifrost)
@@ -182,14 +175,12 @@ function setupCommand(options: {
   runtimeStatus?: boolean;
   prepareRuntime?: string;
   runtimeLogin?: string;
-  ownerAccount?: boolean;
   downloadModel?: string;
 }): boolean {
   return Boolean(
     options.runtimeStatus ||
     options.prepareRuntime ||
     options.runtimeLogin ||
-    options.ownerAccount ||
     options.downloadModel,
   );
 }
@@ -574,7 +565,7 @@ async function prepareVoiceTools(
   process.exit(0);
 }
 // Headless setup commands for the desktop setup page, before anything is
-// installed: JSON lines on stdout, secrets on stdin only. SIGTERM stops a
+// installed: JSON lines on stdout, codes on stdin only. SIGTERM stops a
 // runtime install, sign-in or model download.
 async function runSetupCommand(
   options: ReturnType<typeof parseInstallerArguments>,
@@ -609,15 +600,6 @@ async function runSetupCommand(
         },
       );
       finish({ ended: true }, 0);
-    } else if (options.ownerAccount) {
-      let input = "";
-      for await (const chunk of process.stdin) input += String(chunk);
-      const outcome = await commands.presetOwnerAccount(
-        options.home,
-        options.instanceName!,
-        input,
-      );
-      finish(outcome, "error" in outcome ? 1 : 0);
     } else if (options.downloadModel) {
       const outcome = await commands.downloadLocalModel(
         options.home,
@@ -705,8 +687,7 @@ if (
   // warning on stderr would read as the reason a start failed. A skipped
   // instance is refused with its own error when a mode opens it.
   let skipped: LegacyInstanceSkipped[] = [];
-  // Setup commands run before an installation; only the owner account,
-  // written into one, waits for a migration.
+  // Setup commands run before an installation and need no migration.
   if (
     options &&
     !options.inspect &&
@@ -714,7 +695,7 @@ if (
     !options.stop &&
     !options.stopLocalModels &&
     !options.prepareVoiceTools &&
-    (!setupCommand(options) || options.ownerAccount)
+    !setupCommand(options)
   )
     await import("@linger/local-installation/legacy-migration")
       .then(async ({ migrateLegacyInstallation }) => {
