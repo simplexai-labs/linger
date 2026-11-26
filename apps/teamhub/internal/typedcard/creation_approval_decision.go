@@ -258,9 +258,9 @@ func persistRoomCreationHandoffMessage(
 	delivered []RoomCreationArtifactSnapshot,
 	decidedAt time.Time,
 ) (messagecreation.Persisted, error) {
-	text, err := roomCreationHandoffText(
-		requestID, cardMessageID, originRoomID, roomID, description, delivered, decisionOwner.ID, decidedAt,
-	)
+	text, err := roomCreationHandoffText(originRoomID, roomID, description, delivered, &roomHandoffApproval{
+		requestID: requestID, cardMessageID: cardMessageID, decidedBy: decisionOwner.ID, decidedAt: decidedAt,
+	})
 	if err != nil {
 		return messagecreation.Persisted{}, err
 	}
@@ -275,48 +275,55 @@ func roomCreationHandoffMessageID(requestID string) string {
 	return "message_" + hex.EncodeToString(digest[:16])
 }
 
-func roomCreationHandoffText(
-	requestID, cardMessageID, originRoomID, roomID string,
-	description *string,
-	delivered []RoomCreationArtifactSnapshot,
-	decidedByActorID string,
-	decidedAt time.Time,
-) (string, error) {
-	var purpose *string
-	if description != nil {
-		if trimmed := strings.TrimSpace(*description); trimmed != "" {
-			purpose = &trimmed
-		}
-	}
+type roomHandoffApproval struct {
+	requestID, cardMessageID, decidedBy string
+	decidedAt                           time.Time
+}
+
+func roomCreationHandoffText(originRoomID, roomID string, description *string, delivered []RoomCreationArtifactSnapshot, approval *roomHandoffApproval) (string, error) {
 	if delivered == nil {
 		delivered = []RoomCreationArtifactSnapshot{}
 	}
-	payload, err := json.Marshal(struct {
+	payload := struct {
 		Kind           string                         `json:"kind"`
-		RequestID      string                         `json:"creation_approval_request_id"`
-		CardMessageID  string                         `json:"approval_card_message_id"`
+		RequestID      *string                        `json:"creation_approval_request_id,omitempty"`
+		CardMessageID  *string                        `json:"approval_card_message_id,omitempty"`
 		OriginRoomID   string                         `json:"origin_room_id"`
 		OriginInboxID  string                         `json:"origin_room_inbox_id"`
 		RoomInboxID    string                         `json:"room_inbox_id"`
-		Purpose        *string                        `json:"purpose,omitempty"`
+		Purpose        string                         `json:"purpose,omitempty"`
 		DeliveredItems []RoomCreationArtifactSnapshot `json:"delivered_artifacts"`
-		Decision       string                         `json:"decision"`
-		DecidedBy      string                         `json:"decided_by"`
-		DecidedAt      time.Time                      `json:"decided_at"`
+		Decision       string                         `json:"decision,omitempty"`
+		DecidedBy      *string                        `json:"decided_by,omitempty"`
+		DecidedAt      *time.Time                     `json:"decided_at,omitempty"`
 	}{
-		"room_creation_handoff", requestID, cardMessageID, originRoomID, "room:" + originRoomID, "room:" + roomID,
-		purpose, delivered, "approved", decidedByActorID, decidedAt.UTC(),
-	})
-	if err != nil {
-		return "", err
+		Kind: "room_creation_handoff", OriginRoomID: originRoomID, OriginInboxID: "room:" + originRoomID,
+		RoomInboxID: "room:" + roomID, DeliveredItems: delivered,
 	}
-	prompt := fmt.Sprintf(`<room-handoff-pattern>
+	if description != nil {
+		payload.Purpose = strings.TrimSpace(*description)
+	}
+	prompt := `<room-handoff-pattern>
+You created this Room. Continue the requested work here and reply only to the Inbox
+room:%s. Origin Room messages are not copied into this Room. Read delivered_artifacts
+with teamhub docs get <document-id> and this Room's history with teamhub message read.
+</room-handoff-pattern>`
+	if approval != nil {
+		decidedAt := approval.decidedAt.UTC()
+		payload.RequestID, payload.CardMessageID = &approval.requestID, &approval.cardMessageID
+		payload.Decision, payload.DecidedBy, payload.DecidedAt = "approved", &approval.decidedBy, &decidedAt
+		prompt = `<room-handoff-pattern>
 This Room was created by approval of your request. Continue the requested work here and
 reply only to the Inbox room:%s. Origin Room messages are not copied into this Room.
 Read delivered_artifacts with teamhub docs get <document-id> and this Room's history with
 teamhub message read.
-</room-handoff-pattern>`, roomID)
-	return " Room creation handoff=" + string(payload) + "\n" + prompt, nil
+</room-handoff-pattern>`
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return " Room creation handoff=" + string(encoded) + "\n" + fmt.Sprintf(prompt, roomID), nil
 }
 
 type roomCreationSkippedArtifact struct {

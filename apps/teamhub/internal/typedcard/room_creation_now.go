@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -106,7 +105,7 @@ func (s *Service) CreateRoomInTx(ctx context.Context, tx pgx.Tx, input CreationA
 		return CreateResult{}, err
 	}
 	roomID := room.created.Room.ID
-	text, err := roomCreatedHandoffText(input.RoomID, roomID, room.snapshot.Description, room.delivered)
+	text, err := roomCreationHandoffText(input.RoomID, roomID, room.snapshot.Description, room.delivered, nil)
 	if err != nil {
 		return CreateResult{}, err
 	}
@@ -131,36 +130,4 @@ func (s *Service) CreateRoomInTx(ctx context.Context, tx pgx.Tx, input CreationA
 		return CreateResult{}, err
 	}
 	return CreateResult{Status: http.StatusOK, Body: body}, nil
-}
-
-// roomCreatedHandoffText hands the requested work to the Agent inside the Room
-// it created. Like an approved creation's handoff it carries no origin Room
-// messages and no skipped Documents.
-func roomCreatedHandoffText(originRoomID, roomID string, description *string, delivered []RoomCreationArtifactSnapshot) (string, error) {
-	var purpose *string
-	if description != nil {
-		if trimmed := strings.TrimSpace(*description); trimmed != "" {
-			purpose = &trimmed
-		}
-	}
-	if delivered == nil {
-		delivered = []RoomCreationArtifactSnapshot{}
-	}
-	payload, err := json.Marshal(struct {
-		Kind           string                         `json:"kind"`
-		OriginRoomID   string                         `json:"origin_room_id"`
-		OriginInboxID  string                         `json:"origin_room_inbox_id"`
-		RoomInboxID    string                         `json:"room_inbox_id"`
-		Purpose        *string                        `json:"purpose,omitempty"`
-		DeliveredItems []RoomCreationArtifactSnapshot `json:"delivered_artifacts"`
-	}{"room_creation_handoff", originRoomID, "room:" + originRoomID, "room:" + roomID, purpose, delivered})
-	if err != nil {
-		return "", err
-	}
-	prompt := fmt.Sprintf(`<room-handoff-pattern>
-You created this Room. Continue the requested work here and reply only to the Inbox
-room:%s. Origin Room messages are not copied into this Room. Read delivered_artifacts
-with teamhub docs get <document-id> and this Room's history with teamhub message read.
-</room-handoff-pattern>`, roomID)
-	return " Room creation handoff=" + string(payload) + "\n" + prompt, nil
 }

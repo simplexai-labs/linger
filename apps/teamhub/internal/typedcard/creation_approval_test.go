@@ -14,6 +14,7 @@ func TestRoomCreationHandoffTextCarriesRequestFactsAndDeliveredDocumentsOnly(t *
 	blank := "   "
 	delivered := []RoomCreationArtifactSnapshot{{DocumentID: "doc-ok", DocumentVersionID: "version-1"}}
 	decidedAt := time.Date(2026, 10, 22, 17, 39, 0, 123456000, time.FixedZone("CST", 8*60*60))
+	approval := &roomHandoffApproval{requestID: "request-1", cardMessageID: "card-1", decidedBy: "actor-owner", decidedAt: decidedAt}
 	for _, test := range []struct {
 		name        string
 		description *string
@@ -24,8 +25,7 @@ func TestRoomCreationHandoffTextCarriesRequestFactsAndDeliveredDocumentsOnly(t *
 		{"blank description", &blank, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			text, err := roomCreationHandoffText("request-1", "card-1", "room-origin", "room-new", test.description, delivered,
-				"actor-owner", decidedAt)
+			text, err := roomCreationHandoffText("room-origin", "room-new", test.description, delivered, approval)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,7 +67,7 @@ func TestRoomCreationHandoffTextCarriesRequestFactsAndDeliveredDocumentsOnly(t *
 			}
 		})
 	}
-	empty, err := roomCreationHandoffText("request-2", "card-2", "room-origin", "room-new", nil, nil, "actor-owner", decidedAt)
+	empty, err := roomCreationHandoffText("room-origin", "room-new", nil, nil, approval)
 	if err != nil || !strings.Contains(empty, `"delivered_artifacts":[]`) {
 		t.Fatalf("empty handoff=%q err=%v", empty, err)
 	}

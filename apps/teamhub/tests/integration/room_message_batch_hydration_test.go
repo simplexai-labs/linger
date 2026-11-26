@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 )
 
 func TestRoomMessageCardHydrationQueryCountIsConstantAtLimit200(t *testing.T) {
@@ -107,8 +106,7 @@ func newRoomMessageQueryCountEnv(t *testing.T, tracer pgx.QueryTracer) (*testEnv
 	return env, env.login("alice", alicePassword)
 }
 
-// seedQueryCountCards commits count pending create_room approval cards through
-// the live creation approval writer.
+// seedQueryCountCards stores pending approval cards for a Room message history.
 func seedQueryCountCards(t *testing.T, env *testEnv, roomID, suffix string, count int) {
 	t.Helper()
 	tx, err := env.pool.Begin(t.Context())
@@ -116,11 +114,8 @@ func seedQueryCountCards(t *testing.T, env *testEnv, roomID, suffix string, coun
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	cards := typedcard.New(env.pool)
 	for index := range count {
-		if _, err := cards.CreateCreationApprovalRequestInTx(t.Context(), tx, roomCreationApprovalInput(t, roomID, fmt.Sprintf("query-count-%s-%d", suffix, index))); err != nil {
-			t.Fatalf("seed query-count card %d: %v", index, err)
-		}
+		seedLegacyRoomCreationCardInTx(t, tx, roomCreationApprovalInput(t, roomID, fmt.Sprintf("query-count-%s-%d", suffix, index)))
 	}
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)

@@ -359,6 +359,35 @@ func TestAgentCreationApprovalPostgreSQLVerticalSlice(t *testing.T) {
 		assertRoomCreationHandoff(t, env, decodeRoomCreated(t, result).RoomID, originRoomID, nil, purpose,
 			[]string{nativeArtifactID, roomArtifact.ID})
 	})
+	t.Run("replaying a pending Room submission returns its original card", func(t *testing.T) {
+		snapshot := typedcard.RoomCreationSnapshot{
+			OriginRoomID: originRoomID, Name: "Pending retry", MemberIDs: []string{"actor_acme_official"},
+			InitialMessageSegments: []messagecreation.Segment{{Type: "text", Content: "Discuss the plan."}},
+		}
+		input := roomCreationApprovalInputFor(t, snapshot, "pending-retry")
+		pending := postRoomCreationCard(t, env, input)
+		before := countRows(t, env, `SELECT count(*) FROM rooms WHERE tenant_id=$1`, acmeTenant)
+		tx, err := env.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		cards := typedcard.New(env.pool)
+		replay, err := cards.CreateRoomInTx(t.Context(), tx, input)
+		if err != nil || !replay.Replay || replay.DecisionID != pending.DecisionID || replay.MessageID != pending.MessageID {
+			t.Fatalf("pending card replay=%+v, err=%v; want decision %s and message %s", replay, err, pending.DecisionID, pending.MessageID)
+		}
+		snapshot.Name = "Changed proposal"
+		if _, err := cards.CreateRoomInTx(t.Context(), tx, roomCreationApprovalInputFor(t, snapshot, "pending-retry")); !errors.Is(err, typedcard.ErrIdempotencyConflict) {
+			t.Fatalf("reuse with a changed proposal: got %v, want ErrIdempotencyConflict", err)
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if got := countRows(t, env, `SELECT count(*) FROM rooms WHERE tenant_id=$1`, acmeTenant); got != before {
+			t.Fatalf("pending card replay changed Room count from %d to %d", before, got)
+		}
+	})
 	t.Run("an earlier pending card creates its Room on approval", func(t *testing.T) {
 		pending := pendingCard(t, "Approved MCP Room "+suffix, nil)
 		before := countRows(t, env, `SELECT count(*) FROM rooms WHERE tenant_id=$1`, acmeTenant)
