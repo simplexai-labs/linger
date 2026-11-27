@@ -774,6 +774,7 @@
     "stateUnknown": "未知",
     "declined": "已拒绝",
     "relaunchLinger": "重新启动 Linger",
+    "relaunchCuaDriver": "重新启动 CuaDriver",
     "request": "请求",
     "openSettings": "打开设置",
     "stepDidNotRun": "这一步没有执行。",

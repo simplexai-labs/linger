@@ -1736,7 +1736,7 @@ export interface components {
       host: "desktop" | "standalone";
       subjects: components["schemas"]["ComputerPermissionSubjectStatus"][];
     };
-    /** @description One step the owner takes on their own Mac. prompt raises the macOS prompt, open_settings opens the System Settings pane, and relaunch restarts the Linger desktop app so a new grant takes effect. */
+    /** @description One step the owner takes on their own Mac. prompt raises the macOS prompt, open_settings opens the System Settings pane, and relaunch restarts the Linger desktop app or CuaDriver service so a new grant takes effect. */
     ComputerPermissionAction: {
       /** @enum {string} */
       action: "prompt" | "open_settings" | "relaunch";

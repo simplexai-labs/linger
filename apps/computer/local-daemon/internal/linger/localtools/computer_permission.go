@@ -110,6 +110,10 @@ type CuaPermissionChecker interface {
 	// RestartCua stops the CuaDriver service so the next read starts a new
 	// process.
 	RestartCua() error
+	// CuaGrantRunning reports whether CuaDriver's background permissions
+	// grant flow is still running. A prompt's restart waits for it to exit,
+	// because restarting while the owner is still granting loses the grant.
+	CuaGrantRunning() bool
 }
 
 // ComputerPermissionOptions configures ComputerPermissions. Nil Linger and
@@ -137,6 +141,14 @@ type ComputerPermissions struct {
 	// for. check_permissions reports only granted or not, and macOS shows each
 	// prompt once, so a permission still missing after its prompt is denied.
 	cuaPrompted map[string]bool
+	// cuaRestartPending records that this process asked CuaDriver for Screen
+	// Recording. It stays armed until the grant flow exits, then the next
+	// denied read restarts the service once, so a polled permission card
+	// cannot keep killing another Run's CuaDriver calls.
+	cuaRestartPending bool
+	// cuaLingerGranted is the Desktop app's Screen Recording state last read,
+	// so only the transition to granted restarts CuaDriver.
+	cuaLingerGranted bool
 }
 
 // NewComputerPermissions returns the Computer's permission service.
@@ -191,7 +203,7 @@ func (p *ComputerPermissions) ComputerPermission(ctx context.Context, action, su
 	}
 	status.Subjects = append(status.Subjects, lingerGroup(linger, answered))
 	if cua == nil {
-		cua = p.cuaStatus(ctx)
+		cua = p.cuaStatus(ctx, linger, answered)
 	}
 	status.Subjects = append(status.Subjects, p.cuaGroup(cua))
 	return status, nil
@@ -328,6 +340,7 @@ func (p *ComputerPermissions) cuaAction(ctx context.Context, action, permission 
 		}
 		if !reading.ScreenRecording {
 			p.cuaPrompted[PermissionScreenRecording] = true
+			p.cuaRestartPending = true
 		}
 		// Stopping the service now could disturb the flow it serves, so this
 		// reading stands in for the status read.
@@ -338,7 +351,7 @@ func (p *ComputerPermissions) cuaAction(ctx context.Context, action, permission 
 }
 
 // cuaStatus reads CuaDriver's permissions, or nil when it is unavailable.
-func (p *ComputerPermissions) cuaStatus(ctx context.Context) *CuaPermissionReading {
+func (p *ComputerPermissions) cuaStatus(ctx context.Context, linger []LingerPermission, lingerAnswered bool) *CuaPermissionReading {
 	if p.options.Cua == nil {
 		return nil
 	}
@@ -349,14 +362,48 @@ func (p *ComputerPermissions) cuaStatus(ctx context.Context) *CuaPermissionReadi
 		}
 		return nil
 	}
-	if !reading.ScreenRecording {
+	if !reading.ScreenRecording && p.cuaRestartDue(linger, lingerAnswered) {
+		p.cuaRestartPending = false
 		// CuaDriver caches its Screen Recording preflight for the life of
 		// the process, so only a new process sees a grant made since.
 		if err := p.options.Cua.RestartCua(); err != nil {
 			slog.Warn("computer_permission.cua_restart_failed", "error", err)
 		}
 	}
+	if reading.ScreenRecording {
+		p.cuaRestartPending = false
+	}
 	return &reading
+}
+
+// cuaRestartDue consumes one stale-grant trigger: a prompt this process asked
+// for, or the Desktop app's Screen Recording grant appearing since the last
+// read. A prompt stays pending while CuaDriver's grant flow runs, so the
+// owner's later grant is seen by the restart that follows the flow's exit.
+func (p *ComputerPermissions) cuaRestartDue(linger []LingerPermission, lingerAnswered bool) bool {
+	granted := false
+	if lingerAnswered {
+		for _, permission := range linger {
+			if permission.ID == PermissionScreenRecording &&
+				permission.State == permissionGranted {
+				granted = true
+				break
+			}
+		}
+	}
+	newGrant := granted && !p.cuaLingerGranted
+	p.cuaLingerGranted = granted
+	if newGrant {
+		p.cuaRestartPending = false
+		return true
+	}
+	if !p.cuaRestartPending {
+		return false
+	}
+	if p.options.Cua.CuaGrantRunning() {
+		return false
+	}
+	return true
 }
 
 func (p *ComputerPermissions) cuaGroup(reading *CuaPermissionReading) ComputerPermissionGroup {

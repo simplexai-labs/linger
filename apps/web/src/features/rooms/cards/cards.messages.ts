@@ -234,6 +234,7 @@ export const cardsMessages = defineMessages("cards", {
   stateUnknown: "Unknown",
   declined: "Declined",
   relaunchLinger: "Relaunch Linger",
+  relaunchCuaDriver: "Relaunch CuaDriver",
   request: "Request",
   openSettings: "Open Settings",
   stepDidNotRun: "The step did not run.",

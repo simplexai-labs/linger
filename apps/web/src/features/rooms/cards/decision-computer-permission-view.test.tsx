@@ -254,6 +254,60 @@ describe("Computer permission card", () => {
     );
   });
 
+  it("offers a CuaDriver relaunch after opening its settings pane", async () => {
+    desktopOn("computer-mac");
+    const { requests } = setup({
+      next: {
+        ...card,
+        computer_permission: {
+          ...card.computer_permission!,
+          subject: "computer_use",
+        },
+      },
+      live: {
+        platform: "darwin",
+        host: "desktop",
+        subjects: [
+          {
+            subject: "computer_use",
+            permissions: [
+              entry("screen_recording", "denied"),
+              entry("accessibility", "granted"),
+            ],
+          },
+        ],
+      },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Settings" }),
+    );
+    await waitFor(() =>
+      expect(requests.at(-1)).toEqual({
+        method: "POST",
+        path: permissionsPath,
+        body: {
+          action: "open_settings",
+          subject: "computer_use",
+          permission: "screen_recording",
+        },
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Relaunch CuaDriver" }),
+    );
+    await waitFor(() =>
+      expect(requests.at(-1)).toEqual({
+        method: "POST",
+        path: permissionsPath,
+        body: { action: "relaunch", subject: "computer_use" },
+      }),
+    );
+    // If the relaunch did not pick up a grant, the owner can reopen the pane.
+    expect(
+      await screen.findByRole("button", { name: "Open Settings" }),
+    ).toBeVisible();
+  });
+
   it("opens Settings when the Mac can only open the pane", async () => {
     desktopOn("computer-mac");
     setup({

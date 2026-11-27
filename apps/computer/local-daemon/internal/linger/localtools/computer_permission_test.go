@@ -36,6 +36,7 @@ type fakeCuaPermissions struct {
 	restarts        int
 	reading         CuaPermissionReading
 	err, requestErr error
+	grantRunning    bool
 }
 
 func (f *fakeCuaPermissions) CuaPermissions(context.Context) (CuaPermissionReading, error) {
@@ -51,6 +52,10 @@ func (f *fakeCuaPermissions) RequestCuaPermissions() error {
 func (f *fakeCuaPermissions) RestartCua() error {
 	f.restarts++
 	return nil
+}
+
+func (f *fakeCuaPermissions) CuaGrantRunning() bool {
+	return f.grantRunning
 }
 
 type permissionFixture struct {
@@ -168,6 +173,9 @@ func TestComputerPermissionsReportBothSubjectsOnMacOS(t *testing.T) {
 
 func TestComputerPermissionsRestartCuaAfterMissingScreenRecording(t *testing.T) {
 	fixture := newPermissionFixture("darwin", true, true)
+	// The Desktop app sees the grant while CuaDriver still reads its cached
+	// denial: the stale grant a restart can clear.
+	fixture.linger.granted[PermissionScreenRecording] = true
 	fixture.cua.reading = CuaPermissionReading{Accessibility: true}
 	status, err := fixture.service.ComputerPermission(t.Context(), "status", "", "")
 	if err != nil {
@@ -209,6 +217,122 @@ func TestComputerPermissionsRestartCuaAfterMissingScreenRecording(t *testing.T) 
 	}
 	if !slices.Equal(fixture.opened, []string{"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"}) {
 		t.Fatalf("opened = %v", fixture.opened)
+	}
+}
+
+func TestComputerPermissionsDoesNotRestartCuaWithoutAStaleGrant(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.cua.reading = CuaPermissionReading{Accessibility: true}
+	for range 3 {
+		if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.cua.restarts != 0 {
+		t.Fatalf("a plain denied reading restarted the shared service: restarts=%d", fixture.cua.restarts)
+	}
+}
+
+func TestComputerPermissionsRestartsCuaOncePerGrantedReading(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.linger.granted[PermissionScreenRecording] = true
+	fixture.cua.reading = CuaPermissionReading{Accessibility: true}
+	for range 5 {
+		if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.cua.restarts != 1 {
+		t.Fatalf("a polled status restart storm: restarts=%d", fixture.cua.restarts)
+	}
+}
+
+func TestComputerPermissionsRestartsCuaWhenTheGrantAppears(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.cua.reading = CuaPermissionReading{Accessibility: true}
+	if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.cua.restarts != 0 {
+		t.Fatalf("an ungranted reading restarted the service: restarts=%d", fixture.cua.restarts)
+	}
+	fixture.linger.granted[PermissionScreenRecording] = true
+	for range 3 {
+		if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.cua.restarts != 1 {
+		t.Fatalf("the appearing grant did not restart once: restarts=%d", fixture.cua.restarts)
+	}
+}
+
+func TestComputerPermissionsRestartsCuaAfterAPromptOnce(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.cua.reading = CuaPermissionReading{Accessibility: true}
+	if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.cua.restarts != 0 {
+		t.Fatalf("an unprompted reading restarted the service: restarts=%d", fixture.cua.restarts)
+	}
+	if _, err := fixture.service.ComputerPermission(t.Context(), "prompt", "computer_use", "screen_recording"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.cua.restarts != 1 {
+		t.Fatalf("the prompted grant restarted more than once: restarts=%d", fixture.cua.restarts)
+	}
+}
+
+func TestComputerPermissionsWaitsForTheGrantFlow(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.cua.reading = CuaPermissionReading{Accessibility: true}
+	fixture.cua.grantRunning = true
+	if _, err := fixture.service.ComputerPermission(t.Context(), "prompt", "computer_use", "screen_recording"); err != nil {
+		t.Fatal(err)
+	}
+	// The owner is still in the grant flow: restarting now would start a
+	// process that caches the old denial.
+	for range 3 {
+		if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.cua.restarts != 0 {
+		t.Fatalf("a status poll restarted CuaDriver during the grant flow: restarts=%d", fixture.cua.restarts)
+	}
+	// The grant flow exits after the owner grants; the next status read
+	// restarts once so the new process sees it.
+	fixture.cua.grantRunning = false
+	if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.cua.restarts != 1 {
+		t.Fatalf("the grant flow exit did not restart once: restarts=%d", fixture.cua.restarts)
+	}
+	for range 3 {
+		if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.cua.restarts != 1 {
+		t.Fatalf("the restart repeated after the grant flow: restarts=%d", fixture.cua.restarts)
+	}
+}
+
+func TestComputerPermissionsDoesNotRestartCuaWhenGranted(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.cua.reading = CuaPermissionReading{Accessibility: true, ScreenRecording: true}
+	if _, err := fixture.service.ComputerPermission(t.Context(), "status", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.cua.restarts != 0 {
+		t.Fatalf("a granted reading restarted the service: restarts=%d", fixture.cua.restarts)
 	}
 }
 

@@ -96,7 +96,8 @@ components:
       description: >-
         One step the owner takes on their own Mac. prompt raises the macOS
         prompt, open_settings opens the System Settings pane, and relaunch
-        restarts the Linger desktop app so a new grant takes effect.
+        restarts the Linger desktop app or CuaDriver service so a new grant
+        takes effect.
       type: object
       additionalProperties: false
       required: [action, subject]

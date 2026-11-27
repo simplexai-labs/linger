@@ -86,12 +86,26 @@ function cardState(
 function nextAction(
   subject: Subject,
   entry: Entry,
+  settingsOpened: boolean,
 ): { action: ComputerPermissionAction; label: Message<string> } | undefined {
   if (entry.state === "granted") return undefined;
   if (entry.relaunch_required && subject === "linger")
     return {
       action: { action: "relaunch", subject },
       label: cardsMessages.relaunchLinger,
+    };
+  // CuaDriver caches its Screen Recording denial. Once the owner has opened
+  // its Settings pane, a relaunch is the step that picks up a grant made
+  // there.
+  if (
+    subject === "computer_use" &&
+    entry.id === "screen_recording" &&
+    entry.state === "denied" &&
+    settingsOpened
+  )
+    return {
+      action: { action: "relaunch", subject },
+      label: cardsMessages.relaunchCuaDriver,
     };
   if (entry.prompt === "available" && entry.state === "not_determined")
     return {
@@ -153,6 +167,9 @@ export function ComputerPermissionDecision({
   const [now] = useState(Date.now);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Opening CuaDriver's Settings pane only makes sense once; after it, the
+  // useful step is the relaunch that sees the grant the owner made.
+  const [settingsOpened, setSettingsOpened] = useState(false);
   const owner = currentActorId === card.decision_owner.id;
   const pending = card.status === "pending";
   const local =
@@ -187,7 +204,17 @@ export function ComputerPermissionDecision({
           : translate(cardsMessages.stepDidNotRun),
       ),
     onMutate: () => setError(""),
-    onSuccess: (next) => {
+    onSuccess: (next, action) => {
+      if (
+        action.action === "open_settings" &&
+        action.subject === "computer_use" &&
+        action.permission === "screen_recording"
+      )
+        setSettingsOpened(true);
+      // A relaunch is the end of that Settings detour: if it did not pick up
+      // the grant, the owner can open the pane again.
+      if (action.action === "relaunch" && action.subject === "computer_use")
+        setSettingsOpened(false);
       const key = computerPermissionsQueryKey(tenantId, computerId);
       if (next) queryClient.setQueryData(key, next);
       else void queryClient.invalidateQueries({ queryKey: key });
@@ -254,7 +281,9 @@ export function ComputerPermissionDecision({
         <ul className="flex flex-col">
           {rows.map(({ id, entry }) => {
             const step =
-              entry && interactive ? nextAction(subject, entry) : undefined;
+              entry && interactive
+                ? nextAction(subject, entry, settingsOpened)
+                : undefined;
             const granted = state === "granted" || entry?.state === "granted";
             return (
               <li

@@ -237,6 +237,15 @@ func (m *Manager) RequestCuaPermissions() error {
 	return nil
 }
 
+// CuaGrantRunning reports whether the background permissions grant flow is
+// still running. Its exit is the signal that the owner has finished granting,
+// so a status poll can then restart CuaDriver once to see the grant.
+func (m *Manager) CuaGrantRunning() bool {
+	m.cuaGrantMu.Lock()
+	defer m.cuaGrantMu.Unlock()
+	return m.cuaGrant != nil
+}
+
 func (m *Manager) stopCuaGrant() {
 	m.cuaGrantMu.Lock()
 	defer m.cuaGrantMu.Unlock()

@@ -5538,7 +5538,7 @@ type CompleteExternalConnectionAuthorizationRequest struct {
 	ConnectedAccountId *string `json:"connected_account_id,omitempty"`
 }
 
-// ComputerPermissionAction One step the owner takes on their own Mac. prompt raises the macOS prompt, open_settings opens the System Settings pane, and relaunch restarts the Linger desktop app so a new grant takes effect.
+// ComputerPermissionAction One step the owner takes on their own Mac. prompt raises the macOS prompt, open_settings opens the System Settings pane, and relaunch restarts the Linger desktop app or CuaDriver service so a new grant takes effect.
 type ComputerPermissionAction struct {
 	Action ComputerPermissionActionAction `json:"action"`
 
