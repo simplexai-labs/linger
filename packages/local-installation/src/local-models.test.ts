@@ -131,7 +131,7 @@ test("delegates planning and review without pinning a model, decision or GPU", a
 });
 test("plans exactly the model picked in setup and keeps it through approval", async () => {
   const f = await fixture();
-  let quantOverride: string | undefined;
+  const planner: { quant?: string } = {};
   const call = vi.fn<typeof runLocalmodels>(async (home, args, options) => {
     if (args[0] === "stack" && args[1] === "plan") {
       const llm = args.indexOf("--llm");
@@ -143,7 +143,7 @@ test("plans exactly the model picked in setup and keeps it through approval", as
           llm: {
             model: {
               id: args[llm + 1],
-              quant: quantOverride ?? args[args.indexOf("--quant") + 1],
+              quant: planner.quant ?? args[args.indexOf("--quant") + 1],
             },
           },
         }),
@@ -189,7 +189,7 @@ test("plans exactly the model picked in setup and keeps it through approval", as
   expect(plans()).toHaveLength(2);
   expect(plans()[1]![1]).toContain("inkling-2-mini");
   // A planner that swaps in another quant is refused before saving its plan.
-  quantOverride = "UD-IQ3_XXS";
+  planner.quant = "UD-IQ3_XXS";
   const before = await readFile(
     path.join(f.home, "runtime/localmodels/plan.json"),
     "utf8",
