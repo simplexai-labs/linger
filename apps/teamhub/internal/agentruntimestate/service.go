@@ -37,7 +37,7 @@ func (s *Service) OnLocalComputerOnline(hook LocalComputerOnlineHook) {
 	s.onlineHooks = append(s.onlineHooks, hook)
 }
 
-func (s *Service) runOnlineHooks(ctx context.Context, tx pgx.Tx, row store.LocalComputer) error {
+func (s *Service) runOnlineHooks(ctx context.Context, tx pgx.Tx, row store.RuntimeLocalComputer) error {
 	if len(s.onlineHooks) == 0 || row.Status != "online" {
 		return nil
 	}

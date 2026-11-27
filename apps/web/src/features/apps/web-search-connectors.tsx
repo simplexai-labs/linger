@@ -130,7 +130,7 @@ function WebSearchBackendCard({
     isWebSearchKeyBackend(backend) &&
     (backend.key_state === "none" || state?.tone === "danger");
   return (
-    <article className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-3 transition-colors duration-150 hover:bg-accent/40 motion-reduce:transition-none">
+    <article className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl px-4 py-3 transition-colors duration-150 hover:bg-accent motion-reduce:transition-none">
       <button
         aria-label={backend.name}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -198,7 +198,6 @@ function WebSearchBackendDialog({
     <ModalDialog
       className="app-key-dialog"
       closeOnBackdrop
-      description={webSearchBackendDescription(backend, t)}
       onClose={onClose}
       size="md"
       title={backend.name}
@@ -361,7 +360,7 @@ function BackendLogoTile({ backend }: { backend: TeamHubWebSearchBackend }) {
     <span
       aria-hidden="true"
       className={cn(
-        "flex size-10 shrink-0 items-center justify-center rounded-lg bg-card shadow-outline",
+        "flex size-10 shrink-0 items-center justify-center",
         logo ? "text-foreground" : "text-muted-foreground",
       )}
     >

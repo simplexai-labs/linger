@@ -894,6 +894,28 @@ func (q *Queries) GetVisibleAgentAvatarImage(ctx context.Context, arg GetVisible
 	return i, err
 }
 
+const hasAgentCreationNotice = `-- name: HasAgentCreationNotice :one
+SELECT EXISTS (
+    SELECT 1 FROM messages
+    WHERE room_id=$1::text AND author_actor_id=$2::text
+      AND message_kind='room_notice' AND room_seq IS NOT NULL
+      AND notice->>'type'='agent_created' AND notice->'agent'->>'id'=$3::text
+)
+`
+
+type HasAgentCreationNoticeParams struct {
+	RoomID        string `json:"room_id"`
+	AuthorActorID string `json:"author_actor_id"`
+	AgentActorID  string `json:"agent_actor_id"`
+}
+
+func (q *Queries) HasAgentCreationNotice(ctx context.Context, arg HasAgentCreationNoticeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAgentCreationNotice, arg.RoomID, arg.AuthorActorID, arg.AgentActorID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const hasPendingAgentLocalWork = `-- name: HasPendingAgentLocalWork :one
 SELECT EXISTS (
   SELECT 1 FROM agent_execution_contexts context

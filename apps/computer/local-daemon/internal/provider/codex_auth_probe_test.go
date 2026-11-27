@@ -182,7 +182,7 @@ func TestCodexAuthenticationFailureDiagnostics(t *testing.T) {
 				defer cancel()
 			}
 			started := time.Now()
-			outcome := probeCodexAuthentication(ctx, executable, environment, scenario.timeout)
+			outcome := probeCodexAuthentication(ctx, executable, environment, scenario.timeout, "")
 			elapsed := time.Since(started)
 			if elapsed < scenario.minimum || elapsed > scenario.minimum+5*time.Second {
 				t.Fatalf("probe duration = %v, want %v plus cleanup budget", elapsed, scenario.minimum)
@@ -201,7 +201,7 @@ func TestCodexAuthenticationStartFailureAndCancellation(t *testing.T) {
 		if canceled {
 			cancel()
 		}
-		outcome := probeCodexAuthentication(ctx, filepath.Join(t.TempDir(), "missing-secret-executable"), nil, time.Second)
+		outcome := probeCodexAuthentication(ctx, filepath.Join(t.TempDir(), "missing-secret-executable"), nil, time.Second, "")
 		cancel()
 		message := "Codex authentication probe process or RPC failed"
 		if canceled {
@@ -261,7 +261,7 @@ fi
 	expected := "app-server --disable plugins --disable goals --listen stdio:// --config tool_output_token_limit=12000 --config features.memories=false --config features.memory_tool=false --config features.apps=false --config features.image_generation=false" +
 		" --config project_root_markers=[] --config skills.bundled.enabled=false --config features.multi_agent=false --config features.multi_agent_v2=false --config agents.enabled=false"
 	environment := map[string]string{"HOME": root, "CODEX_HOME": root, "EXPECTED_ARGS": expected, "LAUNCH_TRACE": trace}
-	outcome := probeRuntime(t.Context(), "codex", executable, environment, 5*time.Second)
+	outcome := probeRuntime(t.Context(), "codex", executable, environment, 5*time.Second, probeOptions{})
 	if outcome.Status != "ready" {
 		t.Fatalf("protocol/authentication probe = %+v", outcome)
 	}
@@ -313,7 +313,7 @@ printf '{"id":2,"result":%s}\n' "$ACCOUNT_RESULT"
 			root := t.TempDir()
 			result := probeCodexAuthentication(context.Background(), executable, map[string]string{
 				"HOME": root, "CODEX_HOME": root, "ACCOUNT_RESULT": scenario.response,
-			}, 5*time.Second)
+			}, 5*time.Second, "")
 			if result.Status != scenario.want {
 				t.Fatalf("got %+v, want %s", result, scenario.want)
 			}
@@ -339,7 +339,7 @@ func TestNativeCodexAuthenticationWithoutAuthFile(t *testing.T) {
 		}
 		result := probeCodexAuthentication(context.Background(), executable, map[string]string{
 			"HOME": root, "CODEX_HOME": root, "PATH": os.Getenv("PATH"),
-		}, 5*time.Second)
+		}, 5*time.Second, "")
 		want := "authentication_required"
 		if custom {
 			want = "ready"
@@ -371,7 +371,7 @@ func TestNativeClaudeAuthenticationDoesNotCallModel(t *testing.T) {
 		"HOME": root, "CLAUDE_CONFIG_DIR": root, "PATH": os.Getenv("PATH"),
 		"ANTHROPIC_API_KEY": "fixture-not-a-real-key", "ANTHROPIC_BASE_URL": server.URL,
 		"DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_AUTOUPDATER": "1",
-	}, 5*time.Second)
+	}, 5*time.Second, probeOptions{})
 	if outcome.Status != "ready" {
 		t.Fatalf("Claude local authentication = %+v", outcome)
 	}

@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, type ReactNode, useId } from "react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { Link } from "react-router";
 
+import { LaptopIcon } from "@hugeicons/core-free-icons";
+
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { Select, SelectItem } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   appNames,
@@ -16,6 +18,7 @@ import { LocalRuntimeAuthenticationGuidance } from "@/features/local-computer/lo
 import { LocalRuntimeInstallGuidance } from "@/features/local-computer/local-runtime-install-guidance";
 import { localRuntimeMessage } from "@/features/local-computer/local-runtime-message";
 import { LocalRuntimeUpdateGuidance } from "@/features/local-computer/local-runtime-update-guidance";
+import { RuntimeLogo } from "@/features/local-computer/runtime-logo";
 import {
   classifyPiLocalModelsState,
   piAuthRequiredStatusMessage,
@@ -31,7 +34,6 @@ import type {
   TeamHubTenantAgentUpdateInput,
 } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
-import type { Translate } from "@/i18n/language";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
 import { createAgentMessages } from "../create-agent.messages";
@@ -43,6 +45,14 @@ import {
   runtimeLabels,
 } from "./agent-move-target";
 import { agentRuntimeMessages } from "./agent-runtime.messages";
+import {
+  ComputerStatus,
+  EffortSegments,
+  OptionList,
+  Placeholder,
+  SettingRow,
+  StatusDot,
+} from "./runtime-setting-rows";
 import { useAgentMoveTarget } from "./use-agent-move-target";
 import { reasoningEffortLabel } from "./use-agent-model-selection";
 
@@ -118,8 +128,22 @@ export function EditAgentRuntimeDialog({
   const placementLocked = field === "model" || field === "reasoning";
   const noWritableGrant = moving && Boolean(computer) && !grant;
   const unavailable =
-    computers.isError || (!loading && (!computer || (!moving && !grant)));
+    (computers.isError && !computers.data) ||
+    (!loading && (!computer || (!moving && !grant)));
   const canSave = Boolean(modelIsAvailable && localReady && target);
+  // The row the dialog was opened from starts open; one row opens at a time.
+  const [openRow, setOpenRow] = useState<AgentRuntimeField | undefined>(field);
+  const modelText = modelIsAvailable
+    ? selection.selectedModel?.label
+    : model && !loading
+      ? t(agentRuntimeMessages.unavailableOption, {
+          name: unavailableModelLabel,
+        })
+      : model || t(agentRuntimeMessages.noModels);
+
+  function toggle(row: AgentRuntimeField) {
+    setOpenRow((current) => (current === row ? undefined : row));
+  }
 
   const modelsLink = (text: string) =>
     selection.computerId ? (
@@ -187,133 +211,175 @@ export function EditAgentRuntimeDialog({
       }
     >
       <form id={formId} onSubmit={submit}>
-        <fieldset
-          className="space-y-4 px-5 py-4"
-          disabled={isPending || loading}
-        >
-          <div>
-            <span className="mb-1.5 block text-sm font-medium">
-              {t(agentRuntimeMessages.computer)}
-            </span>
-            <Select
-              aria-label={t(agentRuntimeMessages.computerLabel)}
-              className="ui-field-control w-full"
-              disabled={placementLocked}
-              onValueChange={selection.selectComputer}
-              placeholder={t(agentRuntimeMessages.chooseComputer)}
+        <fieldset className="min-w-0 px-3 pb-1" disabled={isPending || loading}>
+          <SettingRow
+            disabled={placementLocked}
+            label={t(agentRuntimeMessages.computer)}
+            onToggle={() => toggle("computer")}
+            open={openRow === "computer"}
+            value={
+              computer ? (
+                <>
+                  <span className="truncate">{computer.display_name}</span>
+                  <ComputerStatus computer={computer} />
+                </>
+              ) : (
+                <Placeholder>
+                  {t(agentRuntimeMessages.chooseComputer)}
+                </Placeholder>
+              )
+            }
+          >
+            <OptionList
+              label={t(agentRuntimeMessages.computerLabel)}
+              onChange={(value) => {
+                selection.selectComputer(value);
+                setOpenRow(undefined);
+              }}
+              options={(computers.data?.items ?? []).map((item) => ({
+                description: <ComputerStatus computer={item} labelled />,
+                disabled: item.upgrade_required,
+                label: item.display_name,
+                leading: (
+                  <Icon
+                    className="shrink-0 text-muted-foreground"
+                    icon={LaptopIcon}
+                  />
+                ),
+                value: item.computer_id,
+              }))}
               value={selection.computerId}
-            >
-              {(computers.data?.items ?? []).map((item) => (
-                <SelectItem
-                  disabled={item.upgrade_required}
-                  key={item.computer_id}
-                  value={item.computer_id}
-                >
-                  {computerOptionLabel(item, t)}
-                </SelectItem>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <span className="mb-1.5 block text-sm font-medium">
-              {t(agentRuntimeMessages.runtime)}
-            </span>
-            <Select
-              aria-label={t(agentRuntimeMessages.runtimeLabel)}
-              className="ui-field-control w-full"
-              disabled={placementLocked}
-              onValueChange={(value) =>
-                selection.selectRuntime(value as TeamHubLocalRuntimeType)
-              }
-              placeholder={t(agentRuntimeMessages.chooseRuntime)}
+            />
+          </SettingRow>
+          <SettingRow
+            disabled={placementLocked}
+            label={t(agentRuntimeMessages.runtime)}
+            onToggle={() => toggle("runtime")}
+            open={openRow === "runtime"}
+            value={
+              selection.runtimeType ? (
+                <>
+                  <RuntimeLogo type={selection.runtimeType} />
+                  <span className="truncate">
+                    {runtimeLabels[selection.runtimeType]}
+                  </span>
+                </>
+              ) : (
+                <Placeholder>
+                  {t(agentRuntimeMessages.chooseRuntime)}
+                </Placeholder>
+              )
+            }
+          >
+            <OptionList
+              label={t(agentRuntimeMessages.runtimeLabel)}
+              onChange={(value) => {
+                selection.selectRuntime(value as TeamHubLocalRuntimeType);
+                setOpenRow(undefined);
+              }}
+              options={(computer?.runtimes ?? []).map((item) => ({
+                description: (
+                  <>
+                    <StatusDot tone={item.status === "ready" ? "ok" : "warn"} />
+                    {t(
+                      item.type === "pi" &&
+                        item.status === "authentication_required"
+                        ? piAuthRequiredStatusMessage(piModelsState)
+                        : runtimeStatusLabels[item.status],
+                    )}
+                  </>
+                ),
+                label: runtimeLabels[item.type],
+                leading: <RuntimeLogo type={item.type} />,
+                value: item.type,
+              }))}
               value={selection.runtimeType}
-            >
-              {(computer?.runtimes ?? []).map((item) => (
-                <SelectItem key={item.type} value={item.type}>
-                  {item.status === "ready"
-                    ? runtimeLabels[item.type]
-                    : t(agentRuntimeMessages.runtimeNotReady, {
-                        runtime: runtimeLabels[item.type],
-                        status: t(
-                          item.type === "pi" &&
-                            item.status === "authentication_required"
-                            ? piAuthRequiredStatusMessage(piModelsState)
-                            : runtimeStatusLabels[item.status],
-                        ),
-                      })}
-                </SelectItem>
-              ))}
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <div>
-              <span className="mb-1.5 block text-sm font-medium">
-                {t(agentRuntimeMessages.model)}
-              </span>
-              <Select
-                aria-label={t(agentRuntimeMessages.modelLabel)}
-                className="ui-field-control w-full"
-                disabled={field === "reasoning"}
-                onValueChange={selection.selectModel}
-                placeholder={t(agentRuntimeMessages.noModels)}
+            />
+          </SettingRow>
+          <SettingRow
+            disabled={field === "reasoning"}
+            label={t(agentRuntimeMessages.model)}
+            onToggle={() => toggle("model")}
+            open={openRow === "model"}
+            value={<span className="truncate">{modelText}</span>}
+          >
+            {model || selection.modelOptions.length ? (
+              <OptionList
+                label={t(agentRuntimeMessages.modelLabel)}
+                onChange={(value) => {
+                  selection.selectModel(value);
+                  setOpenRow(undefined);
+                }}
+                options={[
+                  ...(model && !modelIsAvailable
+                    ? [
+                        {
+                          disabled: true,
+                          label: t(agentRuntimeMessages.unavailableOption, {
+                            name: unavailableModelLabel,
+                          }),
+                          value: model,
+                        },
+                      ]
+                    : []),
+                  ...selection.modelOptions.map((item) => ({
+                    label: item.label,
+                    value: item.id,
+                  })),
+                ]}
                 value={model}
-              >
-                {model && !modelIsAvailable ? (
-                  <SelectItem value={model} disabled>
-                    {t(agentRuntimeMessages.unavailableOption, {
-                      name: unavailableModelLabel,
-                    })}
-                  </SelectItem>
-                ) : null}
-                {selection.modelOptions.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </Select>
-            </div>
-            {selection.runtimeType === "pi" &&
-            selection.computerId &&
-            !loading &&
-            !unavailable &&
-            localReady &&
-            selection.modelOptions.length > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                <RichMessage
-                  message={createAgentMessages.manageModels}
-                  tags={{ link: modelsLink }}
-                />
+              />
+            ) : (
+              <p className="px-2.5 py-2 text-sm text-muted-foreground">
+                {t(agentRuntimeMessages.noModels)}
               </p>
-            ) : null}
-          </div>
-          <ReasoningField
+            )}
+          </SettingRow>
+          {selection.runtimeType === "pi" &&
+          selection.computerId &&
+          !loading &&
+          !unavailable &&
+          localReady &&
+          selection.modelOptions.length > 0 ? (
+            <p className="px-2.5 pb-1 text-xs text-muted-foreground">
+              <RichMessage
+                message={createAgentMessages.manageModels}
+                tags={{ link: modelsLink }}
+              />
+            </p>
+          ) : null}
+          <ReasoningRow
             allowed={selection.selectedModel?.allowed_reasoning_effort}
             onChange={selection.selectReasoningEffort}
+            onToggle={() => toggle("reasoning")}
+            open={openRow === "reasoning"}
             savedUnavailableEffort={selection.savedUnavailableEffort}
             value={selection.reasoningEffort}
           />
-          <EditAgentRuntimeFeedback
-            busy={busy}
-            computer={computer}
-            computersLink={computersLink}
-            error={error}
-            hasModelOptions={selection.modelOptions.length > 0}
-            isLoadingLocalModels={localModels.isLoading}
-            loading={loading}
-            localModelsAvailable={localModels.data?.available}
-            localReady={localReady}
-            modelIsAvailable={modelIsAvailable}
-            modelsLink={modelsLink}
-            moving={moving}
-            noWritableGrant={noWritableGrant}
-            onRetryComputers={() => void computers.refetch()}
-            piGuidanceCoversLocalModels={piGuidanceCoversLocalModels}
-            piModelsState={piModelsState}
-            registration={registration}
-            runtime={runtime}
-            runtimeType={selection.runtimeType}
-            unavailable={unavailable}
-          />
+          <div className="space-y-3 px-2.5 pb-2 pt-2 empty:hidden">
+            <EditAgentRuntimeFeedback
+              busy={busy}
+              computer={computer}
+              computersLink={computersLink}
+              error={error}
+              hasModelOptions={selection.modelOptions.length > 0}
+              isLoadingLocalModels={localModels.isLoading}
+              loading={loading}
+              localModelsAvailable={localModels.data?.available}
+              localReady={localReady}
+              modelIsAvailable={modelIsAvailable}
+              modelsLink={modelsLink}
+              moving={moving}
+              noWritableGrant={noWritableGrant}
+              onRetryComputers={() => void computers.refetch()}
+              piGuidanceCoversLocalModels={piGuidanceCoversLocalModels}
+              piModelsState={piModelsState}
+              registration={registration}
+              runtime={runtime}
+              runtimeType={selection.runtimeType}
+              unavailable={unavailable}
+            />
+          </div>
         </fieldset>
       </form>
     </ModalDialog>
@@ -364,24 +430,42 @@ function EditAgentRuntimeFeedback({
   unavailable: boolean;
 }) {
   const t = useT();
+  const missingDefault = moving && computer && !runtimeType;
+  const modelMissing =
+    !loading &&
+    !unavailable &&
+    !modelIsAvailable &&
+    runtime?.status === "ready";
+  const showsError =
+    Boolean(missingDefault) ||
+    noWritableGrant ||
+    modelMissing ||
+    unavailable ||
+    Boolean(error);
+  const piHasNoModels =
+    modelMissing &&
+    !hasModelOptions &&
+    !missingDefault &&
+    !noWritableGrant &&
+    !error;
+  // One muted hint at most, and none while an error explains the state.
+  const hint = showsError
+    ? undefined
+    : busy
+      ? agentRuntimeMessages.waitForAgent
+      : computer?.status === "offline" && !computer.upgrade_required
+        ? createAgentMessages.offlineComputerHint
+        : moving && computer
+          ? agentRuntimeMessages.moveHint
+          : undefined;
   return (
     <>
-      {busy ? (
+      {hint ? (
         <p className="text-sm text-app-subtle" role="status">
-          {t(agentRuntimeMessages.waitForAgent)}
+          {t(hint)}
         </p>
       ) : null}
-      {moving && computer ? (
-        <p className="text-sm text-app-subtle" role="status">
-          {t(agentRuntimeMessages.moveHint)}
-        </p>
-      ) : null}
-      {computer?.status === "offline" && !computer.upgrade_required ? (
-        <p className="text-sm text-app-subtle" role="status">
-          {t(createAgentMessages.offlineComputerHint)}
-        </p>
-      ) : null}
-      {moving && computer && !runtimeType ? (
+      {missingDefault ? (
         <p className="text-sm text-app-danger" role="alert">
           {describeMissingDefault(registration, [computer], t)}
         </p>
@@ -391,10 +475,7 @@ function EditAgentRuntimeFeedback({
           {t(agentRuntimeMessages.noWritableWorkspace)}
         </p>
       ) : null}
-      {!loading &&
-      !unavailable &&
-      !modelIsAvailable &&
-      runtime?.status === "ready" ? (
+      {modelMissing ? (
         <p className="text-sm text-app-danger" role="alert">
           {t(
             hasModelOptions
@@ -422,7 +503,11 @@ function EditAgentRuntimeFeedback({
       runtime?.status !== "incompatible" &&
       runtime?.status !== "unknown" &&
       localModelsAvailable !== false &&
-      !piGuidanceCoversLocalModels ? (
+      !piGuidanceCoversLocalModels &&
+      !hint &&
+      // An empty Pi model list is only fixable from Settings › Models, so
+      // its link stays beside that error.
+      (!showsError || piHasNoModels) ? (
         <p className="text-xs text-muted-foreground">
           <RichMessage
             message={createAgentMessages.downloadModel}
@@ -476,23 +561,11 @@ function RuntimeSetupGuidance({
         className="rounded-lg border border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)] p-3 text-sm text-app-body"
         role="alert"
       >
-        <p className="font-medium text-foreground">
-          {t(computerSetupMessages.computerUpgradeRequiredTitle)}
-        </p>
-        <p className="mt-1 text-muted-foreground">
-          {localRuntimeMessage(
-            { error_code: "LOCAL_COMPUTER_UPGRADE_REQUIRED" },
-            runtime.type,
-            computer.display_name,
-            t,
-          )}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          <RichMessage
-            message={computerSetupMessages.openComputerSettings}
-            tags={{ link: computersLink }}
-          />
-        </p>
+        <RichMessage
+          message={computerSetupMessages.computerUpgradeRequired}
+          tags={{ link: computersLink }}
+          values={{ computer: computer.display_name }}
+        />
       </div>
     );
   if (runtime.status === "incompatible")
@@ -502,7 +575,6 @@ function RuntimeSetupGuidance({
         diagnosticMessage={runtime.message}
         platform={computer.platform}
         runtimeType={runtime.type}
-        version={runtime.version}
       />
     );
   if (runtime.status === "not_installed")
@@ -536,9 +608,6 @@ function RuntimeSetupGuidance({
           computerName={computer.display_name}
           runtimeType={runtime.type}
         />
-        <p className="mt-1 text-muted-foreground">
-          {t(agentRuntimeMessages.readyAfterSignIn)}
-        </p>
       </div>
     );
   }
@@ -598,74 +667,48 @@ function RuntimeSetupGuidance({
   );
 }
 
-function computerOptionLabel(computer: LocalComputer, t: Translate) {
-  const online = computer.status === "online";
-  const message = computer.upgrade_required
-    ? online
-      ? agentRuntimeMessages.computerOnlineUpgrade
-      : agentRuntimeMessages.computerOfflineUpgrade
-    : online
-      ? agentRuntimeMessages.computerOnline
-      : agentRuntimeMessages.computerOffline;
-  return t(message, { name: computer.display_name });
-}
-
 /* Model and Reasoning are separate choices. While the model's options can't
    be read, its saved Reasoning still shows, marked unavailable like the
    model. */
-function ReasoningField({
+function ReasoningRow({
   allowed,
   onChange,
+  onToggle,
+  open,
   savedUnavailableEffort,
   value,
 }: {
   allowed?: readonly TeamHubAgentReasoningEffort[];
   onChange: (value: TeamHubAgentReasoningEffort) => void;
+  onToggle: () => void;
+  open: boolean;
   savedUnavailableEffort?: TeamHubAgentReasoningEffort;
   value?: TeamHubAgentReasoningEffort;
 }) {
   const t = useT();
-  if (!allowed?.length) {
-    if (!savedUnavailableEffort) return null;
-    return (
-      <div>
-        <span className="mb-1.5 block text-sm font-medium">
-          {t(agentRuntimeMessages.reasoning)}
-        </span>
-        <Select
-          aria-label={t(agentRuntimeMessages.reasoningLabel)}
-          className="ui-field-control w-full"
-          disabled
-          onValueChange={() => {}}
-          value={savedUnavailableEffort}
-        >
-          <SelectItem value={savedUnavailableEffort} disabled>
-            {t(agentRuntimeMessages.unavailableOption, {
-              name: reasoningEffortLabel(savedUnavailableEffort, t),
-            })}
-          </SelectItem>
-        </Select>
-      </div>
-    );
-  }
+  const available = Boolean(allowed?.length);
+  if (!available && !savedUnavailableEffort) return null;
+  const text = available
+    ? value && reasoningEffortLabel(value, t)
+    : t(agentRuntimeMessages.unavailableOption, {
+        name: reasoningEffortLabel(savedUnavailableEffort!, t),
+      });
   return (
-    <div>
-      <span className="mb-1.5 block text-sm font-medium">
-        {t(agentRuntimeMessages.reasoning)}
-      </span>
-      <Select
-        aria-label={t(agentRuntimeMessages.reasoningLabel)}
-        className="ui-field-control w-full"
-        onValueChange={(next) => onChange(next as TeamHubAgentReasoningEffort)}
-        value={value ?? ""}
-      >
-        {allowed.map((effort) => (
-          <SelectItem key={effort} value={effort}>
-            {reasoningEffortLabel(effort, t)}
-          </SelectItem>
-        ))}
-      </Select>
-    </div>
+    <SettingRow
+      disabled={!available}
+      label={t(agentRuntimeMessages.reasoning)}
+      onToggle={onToggle}
+      open={open}
+      value={<span className="truncate">{text}</span>}
+    >
+      <EffortSegments
+        efforts={allowed ?? []}
+        label={t(agentRuntimeMessages.reasoningLabel)}
+        labelOf={(effort) => reasoningEffortLabel(effort, t)}
+        onChange={onChange}
+        value={value}
+      />
+    </SettingRow>
   );
 }
 

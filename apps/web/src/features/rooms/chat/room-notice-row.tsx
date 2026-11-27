@@ -69,7 +69,7 @@ export function RoomNoticeRow({
 }
 
 const pillClass =
-  "inline-flex max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-[14px] bg-muted px-3 py-1 text-center text-xs leading-[18px] text-muted-foreground";
+  "inline-flex max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-xl bg-muted px-3 py-1 text-center text-xs leading-[18px] text-muted-foreground";
 
 function NoticeLine({
   author,

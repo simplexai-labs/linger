@@ -60,22 +60,9 @@
         width: 52px;
         height: 52px;
       }
-      .mark .badge {
-        position: absolute;
-        right: -2px;
-        bottom: 2px;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        border: 3px solid var(--surface);
-        background: #a3a3a3;
-      }
-      [data-mode="setup"] .badge,
-      [data-mode="updating"] .badge,
       [data-mode="updating"] .actions,
       [data-mode="updating"] #reason,
       [data-mode="updating"] .code,
-      [data-mode="starting"] .badge,
       [data-mode="starting"] .actions,
       [data-mode="failed"] #edit,
       [data-mode="failed"] .countdown {
@@ -334,7 +321,7 @@
   <body data-mode="offline">
     <main>
       <div class="mark">
-        <img src="app://offline/logo.png" alt="" /><span class="badge"></span>
+        <img src="app://offline/logo.png" alt="" />
       </div>
       <h1 id="title" data-t="unreachableTitle"></h1>
       <p id="reason"></p>
@@ -479,10 +466,17 @@
             tone: initialTone,
           });
           shellProgressTimer = setInterval(() => {
-            synthetic = Math.min(88, synthetic + Math.max(1, Math.round((90 - synthetic) * 0.12)));
+            synthetic = Math.min(
+              88,
+              synthetic + Math.max(1, Math.round((90 - synthetic) * 0.12)),
+            );
             $("progress-fill").style.width = `${synthetic}%`;
-            $("progress-track").setAttribute("aria-valuenow", String(synthetic));
-            $("progress-status").textContent = `${initialDetail} · ${synthetic}%`;
+            $("progress-track").setAttribute(
+              "aria-valuenow",
+              String(synthetic),
+            );
+            $("progress-status").textContent =
+              `${initialDetail} · ${synthetic}%`;
             if (synthetic >= 88) {
               clearInterval(shellProgressTimer);
               shellProgressTimer = undefined;

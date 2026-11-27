@@ -1760,6 +1760,12 @@ describe("RemoteCodexProvider session compaction", () => {
         { signal: signal() },
       ),
     ).resolves.toEqual({ status: "nothing_to_compact" });
+    await expect(
+      createProvider(dispatcher, "pi").compactSession!(
+        { provider: "pi", sessionId: "s-pi", lingerMaterialized: false },
+        { signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "nothing_to_compact" });
     expect(dispatcher.compactions).toEqual([]);
   });
 
@@ -1780,19 +1786,166 @@ describe("RemoteCodexProvider session compaction", () => {
     expect(dispatcher.compactions).toHaveLength(1);
   });
 
-  it("offers compaction only for Codex and Claude on a Gateway that supports it", () => {
-    expect(
-      createProvider(new CompactingDispatcher(), "pi").compactSession,
-    ).toBe(undefined);
+  it("offers compaction for Codex, Claude, Pi, and Antigravity on a Gateway that supports it", async () => {
+    const dispatcher = new CompactingDispatcher();
+    dispatcher.outcome = { outcome: "compacted", pre_tokens: 32_100 };
+    const piProvider = createProvider(dispatcher, "pi");
+    expect(piProvider.compactSession).toBeTypeOf("function");
+    await expect(
+      piProvider.compactSession!(
+        { provider: "pi", sessionId: "session-pi-1", lingerMaterialized: true },
+        { instructions: "Keep decisions", signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "compacted", preTokens: 32_100 });
+
+    dispatcher.outcome = { outcome: "compacted", pre_tokens: 12_345 };
+    const agyProvider = createProvider(dispatcher, "antigravity");
+    expect(agyProvider.compactSession).toBeTypeOf("function");
+    await expect(
+      agyProvider.compactSession!({ threadId: "" }, { signal: signal() }),
+    ).resolves.toEqual({ status: "nothing_to_compact" });
+    await expect(
+      agyProvider.compactSession!(
+        { threadId: "agy-session-1" },
+        { instructions: "Keep task ids", signal: signal() },
+      ),
+    ).resolves.toEqual({ status: "compacted", preTokens: 12_345 });
+
+    expect(dispatcher.compactions).toEqual([
+      {
+        target: {
+          runnerId: "runner-local",
+          agentId: "agent-reviewer",
+          executionContextKey: contextScope.executionContextKey,
+        },
+        options: {
+          runtimeType: "pi",
+          instructions: "Keep decisions",
+          signal: expect.any(AbortSignal),
+        },
+      },
+      {
+        target: {
+          runnerId: "runner-local",
+          agentId: "agent-reviewer",
+          executionContextKey: contextScope.executionContextKey,
+        },
+        options: {
+          runtimeType: "antigravity",
+          instructions: "Keep task ids",
+          signal: expect.any(AbortSignal),
+        },
+      },
+    ]);
     expect(createProvider(new ScriptedDispatcher()).compactSession).toBe(
       undefined,
     );
+  });
+
+  it("maps run.background_waiting and run.background_resumed to working status transitions", async () => {
+    const base = new ScriptedDispatcher();
+    const dispatcher: RunnerOperationDispatcher = {
+      startOperation: async (target) => {
+        const operation = await base.startOperation(target);
+        if (target.request.kind !== "run.start") return operation;
+        return {
+          ...operation,
+          events: iterate<WireRunEvent>([
+            {
+              type: "run.started",
+              turn_id: "turn-bg",
+              session: { threadId: "thread-bg" },
+            },
+            {
+              type: "run.background_waiting",
+              observed_at_unix_ms: 10,
+              tools: [
+                {
+                  call_id: "c1",
+                  tool_name: "schedule",
+                  started_at_unix_ms: 10,
+                },
+              ],
+            },
+            {
+              type: "run.background_waiting",
+              observed_at_unix_ms: 20,
+              tools: [
+                {
+                  call_id: "c2",
+                  tool_name: "run_command",
+                  started_at_unix_ms: 20,
+                },
+              ],
+            },
+            {
+              type: "run.background_waiting",
+              observed_at_unix_ms: 30,
+              tools: [
+                {
+                  call_id: "c3",
+                  tool_name: "mcp_custom",
+                  started_at_unix_ms: 30,
+                },
+              ],
+            },
+            {
+              type: "run.background_resumed",
+              observed_at_unix_ms: 40,
+              trigger: "user_input",
+            },
+            {
+              type: "message.delta",
+              message_id: "message-1",
+              delta: "Done",
+            },
+            { type: "run.completed" },
+          ]),
+        };
+      },
+    };
+    const provider = createProvider(dispatcher);
+    const session = await provider.createSession(sessionOptions());
+    const run = await provider.startRun(
+      session,
+      { type: "text", text: "wait on tools" },
+      runSpec,
+    );
+    const events: RunEvent[] = await collect(run.events);
+    await run.wait();
+    expect(events).toEqual([
+      {
+        type: "run.started",
+      },
+      {
+        type: "status.changed",
+        status: "waiting_background",
+      },
+      {
+        type: "status.changed",
+        status: "waiting_background",
+      },
+      {
+        type: "status.changed",
+        status: "waiting_background",
+      },
+      {
+        type: "status.changed",
+        status: "working",
+      },
+      {
+        type: "message.delta",
+        messageId: "message-1",
+        delta: "Done",
+      },
+      { type: "run.completed" },
+    ]);
   });
 });
 
 const createProvider = (
   dispatcher: RunnerOperationDispatcher,
-  runtimeType: "codex" | "claude" | "pi" = "codex",
+  runtimeType: "codex" | "claude" | "pi" | "antigravity" = "codex",
 ) =>
   new RemoteCodexProvider({
     dispatcher,

@@ -124,18 +124,12 @@ func TestAgentRunWakesFollowCommitsAndReconnect(t *testing.T) {
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	origins, err := store.New(env.pool).QueuedAgentRunInputOrigins(t.Context(), metaContextKey)
+	queued, err := store.New(env.pool).HasClaimableAgentRun(t.Context(), metaContextKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sawChat := false
-	for _, origin := range origins {
-		if origin.Notification && !origin.TaskInbox && origin.AuthorType == "user" {
-			sawChat = true
-		}
-	}
-	if !sawChat {
-		t.Fatalf("queued Runs lost the chat origin: %+v", origins)
+	if !queued {
+		t.Fatal("expected a claimable Run after commit")
 	}
 	// The Room Message queues a Run; the Task callback joins it or steers it.
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)

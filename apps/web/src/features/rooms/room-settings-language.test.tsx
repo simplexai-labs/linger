@@ -3,7 +3,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { teamHubData } from "@/features/teamhub/teamhub-api";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import {
@@ -18,7 +17,7 @@ import {
   createTestTeamHubRuntime,
 } from "@/test/teamhub-test-runtime";
 
-import { RoomSettingsDialog } from "./room-settings-dialog";
+import { RoomSettingsPanel } from "./room-settings-panel";
 import { RoomHistoryShareDialog } from "./sharing/room-history-share-dialog";
 
 const words = zhCN.roomSettings;
@@ -28,15 +27,10 @@ describe("Room settings in the language on screen", () => {
     resetLanguageForTest();
   });
 
-  it("says in one sentence that a save was not confirmed", async () => {
+  it("says in one sentence that a rename was not confirmed", async () => {
     await setLanguage("zh-CN");
     const runtime = createTestTeamHubRuntime();
     acceptRoomUpdates(runtime);
-    const room = await teamHubData(
-      runtime.client.api.GET("/v0/rooms/{roomId}", {
-        params: { path: { roomId: "room-all" } },
-      }),
-    );
     runtime.server.on("PATCH", "/v0/rooms/{roomId}", () => {
       throw new Error("Connection closed before confirmation.");
     });
@@ -44,20 +38,19 @@ describe("Room settings in the language on screen", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <TeamHubRuntimeProvider runtime={runtime}>
-          <RoomSettingsDialog
-            onClose={vi.fn()}
-            onDelete={vi.fn()}
-            room={room}
-            tenantId="tenant-northstar"
-          />
+          <RoomSettingsPanel roomId="room-all" tenantId="tenant-northstar" />
         </TeamHubRuntimeProvider>
       </QueryClientProvider>,
     );
 
-    fireEvent.change(screen.getByLabelText(zhCN.roomDialogs.roomName), {
-      target: { value: "release-room" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: words.saveChanges }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: words.renameRoom.replace("{name}", "all"),
+      }),
+    );
+    const name = screen.getByRole("textbox", { name: words.name });
+    fireEvent.change(name, { target: { value: "release-room" } });
+    fireEvent.blur(name);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       words.saveUnconfirmed,

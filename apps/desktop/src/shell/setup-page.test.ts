@@ -294,7 +294,7 @@ describe("setup page Quick Install recommendation", () => {
       "Recommended for this computer: Codex",
     );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Other programs are using the memory it needs. Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
+      "Local model on hold: Not enough free memory. Close other apps.",
     );
     expect($("local-recheck").hidden).toBe(false);
     $("local-customize").click();
@@ -370,7 +370,7 @@ describe("setup page Quick Install recommendation", () => {
       "Recommended for this computer: Codex",
     );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Other programs are using GPU 1's memory (3.0 GB free, 9.0 GB needed). Close programs that use the GPU, such as games, video or other AI apps. Other programs are using the memory it needs (2.7 GB free, 12.7 GB needed). Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
+      "Local model on hold: Other programs are using GPU 1's memory (3.0 GB free, 9.0 GB needed). Close apps using the GPU. Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
     );
     expect($("local-recheck").hidden).toBe(false);
     customizeLocal();
@@ -384,7 +384,7 @@ describe("setup page Quick Install recommendation", () => {
       "welcome",
     );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Other programs are using the memory it needs (2.7 GB free, 12.7 GB needed). Close other programs. Quick Install sets up Codex now, or choose Check again once memory is free.",
+      "Local model on hold: Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
     );
     customizeLocal();
     expect($("local-sub").textContent).toBe(
@@ -396,7 +396,7 @@ describe("setup page Quick Install recommendation", () => {
     for (const [code, expectWhy, expectSub] of [
       [
         "gateway-port-in-use",
-        "Another program is using the port Linger's local model gateway needs. Close the program using that port.",
+        "Another program is using the local model gateway port.",
         "On hold: free the gateway port, then Check again.",
       ],
       [
@@ -416,7 +416,7 @@ describe("setup page Quick Install recommendation", () => {
       };
       const { run } = await openPage(welcome(blockedWithoutPlan), "welcome");
       expect($("plan-why").textContent).toBe(
-        `Local model on hold. ${expectWhy} Quick Install sets up Codex now, or choose Check again once the issue is resolved.`,
+        `Local model on hold: ${expectWhy}`,
       );
       expect($("plan-why").textContent).not.toContain("memory is free");
       expect($("local-recheck").hidden).toBe(false);
@@ -458,7 +458,7 @@ describe("setup page Quick Install recommendation", () => {
     };
     const { run } = await openPage(welcome(blockedCuda), "welcome");
     expect($("plan-why").textContent).toBe(
-      "Local model on hold. Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again. Quick Install sets up Codex now.",
+      "Local model on hold: Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
     );
     expect(
       $("plan-why").textContent?.match(/choose Check again/g),
@@ -507,15 +507,15 @@ describe("setup page Quick Install recommendation", () => {
     const cases: [SetupLocalModelsCheck, string][] = [
       [
         { ...held, reasons: [reason({ code: "gpu-sharing-required" })] },
-        "Local model on hold. Other work is running on the GPU. Close it.",
+        "Local model on hold: Another app is using the GPU.",
       ],
       [
         { ...held, reasons: [reason({ code: "plan-unavailable" })] },
-        "Local model on hold. Another app is holding the memory it needs, such as another AI app. Quit it.",
+        "Local model on hold: Another app is using the memory it needs. Quit it.",
       ],
       [
         { ...small, reasons: [reason({ code: "gpu-ownership-unknown" })] },
-        "Linger couldn't tell which programs are using the GPU, so it can't share it. Close programs that use the GPU.",
+        "Couldn't check which apps are using the GPU. Close GPU apps.",
       ],
       [
         { ...small, reasons: [reason({ code: "facts-unavailable" })] },
@@ -629,7 +629,7 @@ describe("setup page Quick Install recommendation", () => {
       "Not available on this computer",
     );
     expect($("local-model-needs").textContent).toBe(
-      "Linger couldn't tell which programs are using the GPU, so it can't share it. Close programs that use the GPU.",
+      "Couldn't check which apps are using the GPU. Close GPU apps.",
     );
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
     expect(document.body.textContent).not.toContain(TOOL_WORDS);
@@ -1054,6 +1054,173 @@ describe("setup page Quick Install recommendation", () => {
     );
     expect(($("signin-byok-key") as HTMLInputElement).value).toBe("");
   });
+
+  it("unblocks Install for BYOK as soon as fields are valid even while capability check or tool download runs", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    const button = $("local-install") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+
+    $("local-customize").click();
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-plan="source"] [data-value="byok"]',
+      )!
+      .click();
+    // Before required fields are entered, Install shows plain text (no spinner) and stays disabled.
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("false");
+    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Install");
+    expect($("local-install-label").querySelector(".spinner")).toBeNull();
+
+    // Tool download progress arrives while the user enters BYOK fields.
+    push(
+      welcome({
+        state: "checking",
+        download: { completed: 8 * 1024 ** 2, total: 64 * 1024 ** 2 },
+      }),
+    );
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-byok="runtime"] [data-value="codex"]',
+      )!
+      .click();
+    type("byok-url", "https://api.example.com");
+    expect(button.disabled).toBe(true);
+    expect($("local-install-label").querySelector(".spinner")).toBeNull();
+
+    type("byok-model", "gpt-5.4");
+    expect(button.disabled).toBe(false);
+    expect(button.dataset.busy).toBe("false");
+    expect(button.getAttribute("aria-busy")).toBe("false");
+    expect($("local-install-label").textContent).toBe("Install");
+    expect($("local-install-label").querySelector(".spinner")).toBeNull();
+
+    button.click();
+    await vi.waitFor(() =>
+      expect(installed(run)).toEqual([
+        {
+          op: "local.start",
+          runtime: "codex",
+          byok: {
+            runtime: "codex",
+            baseUrl: "https://api.example.com",
+            path: "/v1",
+            endpoint: "/responses",
+            protocol: "openai-responses",
+            modelId: "gpt-5.4",
+          },
+        },
+      ]),
+    );
+  });
+
+  it("keeps BYOK selection and fields intact when a late capability check finishes", async () => {
+    for (const lateResult of [capable, small]) {
+      const { run, push } = await openPage(
+        welcome({ state: "checking" }),
+        "welcome",
+      );
+      $("local-customize").click();
+      document
+        .querySelector<HTMLButtonElement>(
+          '[data-plan="source"] [data-value="byok"]',
+        )!
+        .click();
+      document
+        .querySelector<HTMLButtonElement>(
+          '[data-byok="runtime"] [data-value="pi"]',
+        )!
+        .click();
+      type("byok-url", "https://llm.example.com");
+      type("byok-key", "sk-keep-me");
+      type("byok-model", "qwen3-coder");
+
+      push(welcome(lateResult));
+
+      expect(
+        document
+          .querySelector('[data-plan="source"] [data-value="byok"]')!
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      expect($("byok-row").hidden).toBe(false);
+      expect(($("byok-url") as HTMLInputElement).value).toBe(
+        "https://llm.example.com",
+      );
+      expect(($("byok-key") as HTMLInputElement).value).toBe("sk-keep-me");
+      expect(($("byok-model") as HTMLInputElement).value).toBe("qwen3-coder");
+      expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+
+      $("local-install").click();
+      await vi.waitFor(() =>
+        expect(installed(run)).toEqual([
+          {
+            op: "local.start",
+            runtime: "pi",
+            byok: {
+              runtime: "pi",
+              baseUrl: "https://llm.example.com",
+              path: "/v1",
+              endpoint: "/chat/completions",
+              protocol: "openai-chat",
+              apiKey: "sk-keep-me",
+              modelId: "qwen3-coder",
+            },
+          },
+        ]),
+      );
+    }
+  });
+
+  it("re-disables Install with spinner when switching off BYOK while capability check is still running", async () => {
+    await openPage(welcome({ state: "checking" }), "welcome");
+    const button = $("local-install") as HTMLButtonElement;
+    const source = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="source"] [data-value="${value}"]`,
+      )!;
+    const runtime = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="runtime"] [data-value="${value}"]`,
+      )!;
+
+    $("local-customize").click();
+    source("byok").click();
+    type("byok-url", "https://api.example.com");
+    type("byok-model", "claude-sonnet-4-6");
+    expect(button.disabled).toBe(false);
+
+    source("local").click();
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+
+    source("byok").click();
+    expect(button.disabled).toBe(false);
+
+    source("subscription").click();
+    runtime("recommended").click();
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+
+    source("byok").click();
+    expect(button.disabled).toBe(false);
+
+    // Clicking "Use defaults" closes Customize and waits for the check again.
+    $("local-customize").click();
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.busy).toBe("true");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+  });
 });
 
 describe("setup page permissions", () => {
@@ -1392,7 +1559,7 @@ describe("setup page in Chinese", () => {
   it("words a held local model from the catalog", async () => {
     await openPage(welcome(held), "welcome", "zh-CN");
     expect($("plan-why").textContent).toBe(
-      fill(zh.heldWhy, { reasons: zh.reasonHeld, plan: "Codex" }),
+      fill(zh.heldWhy, { reasons: zh.reasonHeld }),
     );
   });
 
@@ -1453,13 +1620,7 @@ describe("setup page in Chinese", () => {
 
     await openPage(welcome(capable), "welcome", "zh-CN");
     expect($("plan-featured-badge").hidden).toBe(true);
-    expect($("featured-spotlight").hidden).toBe(false);
-    expect($("featured-spotlight-note").textContent).toBe(
-      zh.featuredModelLibraryNote,
-    );
-    expect($("featured-spotlight-link").textContent).toBe(
-      zh.thinkingMachinesLink,
-    );
+    expect($("featured-spotlight").hidden).toBe(true);
     $("local-customize").click();
     expect($("local-model-featured").hidden).toBe(true);
     expect($("local-spotlight-text").textContent).toBe(
@@ -1540,26 +1701,12 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     expect($("featured-spotlight").dataset.recommended).toBe("true");
   });
 
-  it("shows the library spotlight strip with Thinking Machines link when another model or subscription is recommended", async () => {
+  it("hides the welcome spotlight when another model or subscription is recommended while keeping the Customize note", async () => {
     for (const check of [capable, small, held]) {
       const { run } = await openPage(welcome(check), "welcome");
       expect($("plan-featured-badge").hidden).toBe(true);
-      expect($("featured-spotlight").hidden).toBe(false);
+      expect($("featured-spotlight").hidden).toBe(true);
       expect($("featured-spotlight").dataset.recommended).toBe("false");
-      expect($("featured-spotlight-note").textContent).toContain(
-        "Settings → Models",
-      );
-      expect($("featured-spotlight-link").textContent).toBe(
-        "Thinking Machines ↗",
-      );
-
-      $("featured-spotlight-link").click();
-      await vi.waitFor(() =>
-        expect(run).toHaveBeenCalledWith({
-          op: "external.open",
-          url: INKLING_2_MINI_ANNOUNCEMENT_URL,
-        }),
-      );
 
       $("local-customize").click();
       document
@@ -1574,11 +1721,16 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
       );
       expect($("local-spotlight-link").textContent).toBe("Thinking Machines ↗");
       $("local-spotlight-link").click();
-      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() =>
+        expect(run).toHaveBeenCalledWith({
+          op: "external.open",
+          url: INKLING_2_MINI_ANNOUNCEMENT_URL,
+        }),
+      );
     }
   });
 
-  it("badges a held Inkling 2 Mini card in Customize without claiming Quick Install selected it", async () => {
+  it("badges a held Inkling 2 Mini card in Customize without showing the welcome spotlight", async () => {
     await openPage(
       welcome({
         ...held,
@@ -1593,6 +1745,7 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
       "welcome",
     );
     expect($("plan-featured-badge").hidden).toBe(true);
+    expect($("featured-spotlight").hidden).toBe(true);
     expect($("featured-spotlight").dataset.recommended).toBe("false");
     $("local-customize").click();
     document
@@ -1688,5 +1841,281 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     expect($("local-driver-status").textContent).toContain(
       "NVIDIA driver 621.24 installed. Restart Windows to finish",
     );
+  });
+});
+
+describe("setup page install location and customizing layout", () => {
+  const fill = (text: string, values: Record<string, string>) =>
+    text.replace(/\{(\w+)\}/gu, (_, name: string) => values[name]!);
+  const withLocation = (
+    localModels: SetupLocalModelsCheck,
+    location: SetupState["localServer"]["location"],
+  ): SetupState => {
+    const base = welcome(localModels);
+    return {
+      ...base,
+      localServer: {
+        ...base.localServer,
+        location,
+      },
+    };
+  };
+  const type = (id: string, value: string) => {
+    const input = $(id) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event("input"));
+  };
+
+  it("renders a quiet install-location bar and shows Reset only for custom folders (EN and zh-CN)", async () => {
+    const { run, push } = await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 80 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    expect($("install-location").hidden).toBe(false);
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-path").title).toBe("~/.linger");
+    expect($("location-sub").hidden).toBe(true);
+    expect($("location-sub").textContent).toBe("");
+    expect($("location-reset").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+
+    $("location-change").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.pick" }),
+    );
+
+    push(
+      withLocation(small, {
+        path: "/Volumes/Data/Linger",
+        custom: true,
+        freeBytes: 120 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+    );
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("/Volumes/Data/Linger");
+    expect($("location-reset").hidden).toBe(false);
+    expect($("location-reset").textContent).toBe("Reset");
+    $("location-reset").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.reset" }),
+    );
+
+    await openPage(
+      withLocation(small, {
+        path: "/Volumes/Data/Linger",
+        custom: true,
+        freeBytes: 120 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+      "zh-CN",
+    );
+    expect($("location-reset").hidden).toBe(false);
+    expect($("location-reset").textContent).toBe(zhCN.setup.resetLocation);
+  });
+
+  it("warns and disables Quick Install when default disk space is below minFreeBytes in EN and zh-CN", async () => {
+    await openPage(
+      withLocation(small, {
+        path: "C:\\Users\\demo\\.linger",
+        custom: false,
+        freeBytes: 10 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").dataset.warn).toBe("true");
+    expect($("location-sub").textContent).toBe(
+      "Needs 20 GB free; this disk has 10 GB.",
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+
+    await openPage(
+      withLocation(small, {
+        path: "C:\\Users\\demo\\.linger",
+        custom: false,
+        freeBytes: 10 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+      "zh-CN",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      fill(zhCN.setup.locationSpaceLow, { needed: "20", free: "10" }),
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+  });
+
+  it("includes the planned local model disk budget dynamically and clears the warning for Subscription or valid BYOK", async () => {
+    const bigModel: SetupLocalModelsCheck = {
+      ...capable,
+      model: {
+        name: "inkling-2-mini:Q4_K_M",
+        downloadBytes: 15 * GB,
+        diskBytes: 18 * GB,
+        memoryBytes: 22 * GB,
+        featuredInkling: true,
+      },
+    };
+    await openPage(
+      withLocation(bigModel, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 28 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    // 28 GB free covers the 20 GB base requirement, but not 20 + 18 = 38 GB for the local model.
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Needs 38 GB free; this disk has 28 GB.",
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+
+    $("local-customize").click();
+    const source = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="source"] [data-value="${value}"]`,
+      )!;
+    source("subscription").click();
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-sub").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+
+    source("byok").click();
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-sub").hidden).toBe(true);
+    // Disabled only because BYOK fields are incomplete.
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    type("byok-url", "https://api.example.com");
+    type("byok-model", "claude-sonnet-4-6");
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("gives location.error precedence over spaceLow and shows full error text with Reset", async () => {
+    const errorMessage =
+      "Linger can't write to this folder. Choose another one.";
+    await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 5 * GB,
+        minFreeBytes: 20 * GB,
+        error: errorMessage,
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(errorMessage);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(false);
+  });
+
+  it("syncs document.body.dataset.customizing when toggling Customize and leaving welcome", async () => {
+    await openPage(welcome(capable), "welcome");
+    expect(document.body.dataset.customizing).toBe("false");
+
+    $("local-customize").click();
+    expect(document.body.dataset.customizing).toBe("true");
+
+    $("local-customize").click();
+    expect(document.body.dataset.customizing).toBe("false");
+
+    // Enter customizing, then leave welcome via a step transition: body flag resets to false.
+    $("local-customize").click();
+    expect(document.body.dataset.customizing).toBe("true");
+    document
+      .querySelector<HTMLButtonElement>('#team [data-go="server"]')!
+      .click();
+    expect(document.body.dataset.customizing).toBe("false");
+  });
+
+  it("handles legacy snapshots without freeBytes/minFreeBytes cleanly", async () => {
+    await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+      }),
+      "welcome",
+    );
+    expect($("install-location").hidden).toBe(false);
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-sub").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("warns and disables Quick Install when freeBytes is 0", async () => {
+    await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 0,
+        minFreeBytes: 20 * GB,
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Needs 20 GB free; this disk has 0 GB.",
+    );
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+  });
+
+  it("shows rejectedPath while location.error is active and restores location.path once cleared", async () => {
+    const errorMessage =
+      "Linger can't write to this folder. Choose another one.";
+    const { push } = await openPage(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 80 * GB,
+        minFreeBytes: 20 * GB,
+        error: errorMessage,
+        rejectedPath: "/Volumes/ReadOnly/Linger",
+      }),
+      "welcome",
+    );
+    expect($("install-location").dataset.warn).toBe("true");
+    expect($("location-path").textContent).toBe("/Volumes/ReadOnly/Linger");
+    expect($("location-path").title).toBe("/Volumes/ReadOnly/Linger");
+    expect($("location-sub").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(errorMessage);
+    expect($("location-reset").hidden).toBe(false);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+
+    push(
+      withLocation(small, {
+        path: "~/.linger",
+        custom: false,
+        freeBytes: 80 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+    );
+    expect($("install-location").dataset.warn).toBe("false");
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-path").title).toBe("~/.linger");
+    expect($("location-sub").hidden).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
   });
 });

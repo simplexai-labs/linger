@@ -24,7 +24,10 @@ import {
   type RuntimeActivityPathToolCall,
 } from "./runtime-activity-path";
 import { RuntimeActivityEntries } from "./runtime-activity-entries";
-import { runtimeFailureMessage } from "./runtime-failure-message";
+import {
+  runtimeFailureDiagnostic,
+  runtimeFailureMessage,
+} from "./runtime-failure-message";
 import { runtimeStatusMessages as m } from "./runtime-status.messages";
 import { TaskActivityBlock } from "./task-activity-block";
 import {
@@ -274,14 +277,47 @@ function RuntimeActivityPathRow({ item }: { item: RuntimeActivityPathItem }) {
   if (item.kind === "reply") {
     return <ReplyRow text={item.text} />;
   }
+  const detail = item.failure?.detail?.trim();
+  const diagnostic = runtimeFailureDiagnostic(item.failure);
   return (
     <li className="runtime-activity-step py-1.5">
-      <p className={item.tone === "failed" ? "text-app-danger" : undefined}>
-        {/* An interrupted Run says why it stopped, without the error colour. */}
-        {item.tone === "failed" || item.failure
-          ? runtimeFailureMessage(t, item.failure)
-          : t(m.runCanceled)}
+      {/* A failed Run reads as a quiet note with an amber dot, never error
+          red; an interrupted one says why it stopped without the dot. */}
+      <p
+        className={
+          item.tone === "failed"
+            ? "flex items-baseline gap-1.5 text-app-muted"
+            : undefined
+        }
+      >
+        {item.tone === "failed" ? (
+          <span
+            aria-hidden="true"
+            className="size-1.5 shrink-0 -translate-y-px rounded-full bg-app-warning"
+          />
+        ) : null}
+        <span>
+          {item.tone === "failed" || item.failure
+            ? runtimeFailureMessage(t, item.failure)
+            : t(m.runCanceled)}
+        </span>
       </p>
+      {diagnostic ? (
+        <p
+          className="mt-1 font-mono text-[11px] leading-4 text-app-subtle select-text"
+          data-runtime-failure-diagnostic=""
+        >
+          {diagnostic}
+        </p>
+      ) : null}
+      {detail ? (
+        <p
+          className="mt-1.5 break-words rounded-sm border border-app-border bg-app-surface-soft px-2 py-1.5 font-mono text-[12px] leading-4 text-app-muted"
+          data-runtime-failure-detail=""
+        >
+          {detail}
+        </p>
+      ) : null}
     </li>
   );
 }

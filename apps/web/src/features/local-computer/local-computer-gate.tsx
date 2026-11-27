@@ -95,11 +95,8 @@ export function LocalComputerGate({
         className="workspace-scrollbar flex max-h-full w-full max-w-[560px] flex-col overflow-y-auto rounded-2xl border border-border bg-card text-foreground shadow-lg"
         role="dialog"
       >
-        <header className="border-b border-border px-6 pb-4 pt-5">
-          <p className="text-xs text-muted-foreground">
-            {t(computersMessages.gateKicker)}
-          </p>
-          <h2 className="mt-1 text-lg" id="local-computer-gate-title">
+        <header className="px-6 pb-4 pt-5">
+          <h2 className="text-lg" id="local-computer-gate-title">
             {t(computersMessages.gateTitle)}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -119,7 +116,7 @@ export function LocalComputerGate({
             {t(computersMessages.gateReady)}
           </p>
         ) : (
-          <ol className="divide-y divide-border px-6">
+          <ol className="px-6">
             {desktopOnlyStep && desktop ? (
               <GateStep
                 number={1}
@@ -179,7 +176,7 @@ export function LocalComputerGate({
           </div>
         )}
 
-        <footer className="flex justify-end border-t border-border bg-muted/40 px-6 py-3">
+        <footer className="flex justify-end bg-muted/40 px-6 py-3">
           <Button
             data-voice-risk="never"
             disabled={signingOut}
@@ -265,9 +262,9 @@ function AppSetup({
   return (
     <div className="mt-2 space-y-3">
       <p className="text-xs text-muted-foreground">
-        {t(computersMessages.oneReadyAppEnough)}
+        {t(computersMessages.aiAppsHint)}
       </p>
-      <ul className="divide-y divide-border rounded-lg border border-border">
+      <ul className="rounded-lg border border-border">
         {apps.map((app) => (
           <AppRow app={app} key={app} status={appStatus(computer, app)} />
         ))}

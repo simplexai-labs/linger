@@ -188,7 +188,7 @@ func (a *App) switchLocalComputerModelSource(c *gin.Context) {
 	}
 	effort := ""
 	if status.ReasoningEffort != nil {
-		effort = string(*status.ReasoningEffort)
+		effort = *status.ReasoningEffort
 	}
 	result, err := a.agents.SwitchComputerRuntime(applyCtx, agentregistry.ComputerRuntimeSwitch{
 		TenantID: tenantID, OwnerActorID: viewerID, ComputerID: computer.ComputerID,

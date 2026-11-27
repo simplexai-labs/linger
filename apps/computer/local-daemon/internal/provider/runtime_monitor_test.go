@@ -1251,3 +1251,291 @@ exec /bin/sh -c "$2"
 		t.Fatalf("published diagnostics = %+v, want ready codex at %s with PATH %q", published.Diagnostics, codex, resolvedEnv["PATH"])
 	}
 }
+
+func TestChangedInstallationsRespectsBundledPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	root := t.TempDir()
+	emptyPath := filepath.Join(root, "empty")
+	bundledBin := filepath.Join(root, "bundled")
+	for _, dir := range []string{emptyPath, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundledPi := filepath.Join(bundledBin, "pi")
+	missing := RuntimeDiagnostic{Type: "pi", Status: "not_installed", searchPath: emptyPath}
+	options := DiscoveryOptions{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"HOME": filepath.Join(root, "home")},
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+		t.Fatalf("changed = %v before bundled pi exists", changed)
+	}
+	if err := os.WriteFile(bundledPi, []byte("#!/bin/sh\necho 1.5.2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"pi"}) {
+		t.Fatalf("changed = %v after bundled pi appears, want [pi]", changed)
+	}
+}
+
+func TestChangedInstallationsRespectsManagedPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX executable fixture")
+	}
+	root := t.TempDir()
+	emptyPath := filepath.Join(root, "empty")
+	managedBin := filepath.Join(root, "managed")
+	for _, dir := range []string{emptyPath, managedBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	managedPi := filepath.Join(managedBin, "pi")
+	missing := RuntimeDiagnostic{Type: "pi", Status: "not_installed", searchPath: emptyPath}
+	options := DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		Environment:  map[string]string{"HOME": filepath.Join(root, "home")},
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+		t.Fatalf("changed = %v before managed pi exists", changed)
+	}
+	if err := os.WriteFile(managedPi, []byte("#!/bin/sh\necho 1.7.0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"pi"}) {
+		t.Fatalf("changed = %v after managed pi appears, want [pi]", changed)
+	}
+}
+
+func TestRuntimeMonitorBackfillsDeferredRuntimesImmediately(t *testing.T) {
+	if got, want := AllRuntimeTypes(), []string{"codex", "claude", "pi", "antigravity"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("AllRuntimeTypes() = %v, want %v", got, want)
+	}
+	initialPi := RuntimeDiagnostic{
+		Type:           "pi",
+		Status:         "ready",
+		Protocol:       "rpc",
+		Preferred:      true,
+		ExecutablePath: "/bin/pi",
+		Models:         []RuntimeModel{{ID: "fixture/pi", Label: "Pi", AllowedReasoningEffort: []string{}}},
+	}
+	initial := DiscoveryResult{
+		Diagnostics:   []RuntimeDiagnostic{initialPi},
+		Installations: InstallationsFromDiagnostics([]RuntimeDiagnostic{initialPi}),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	started := time.Now()
+	var discoverCalls atomic.Int32
+	var seenRuntimes []string
+	var published DiscoveryResult
+
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		BackfillRuntimes:      []string{"codex", "claude", "antigravity"},
+		Discovery:             DiscoveryOptions{PreferredRuntime: "pi"},
+		RefreshInterval:       10 * time.Second,
+		FullRefreshEveryTicks: 4,
+		Discover: func(_ context.Context, opts DiscoveryOptions) (DiscoveryResult, error) {
+			discoverCalls.Add(1)
+			seenRuntimes = append([]string(nil), opts.Runtimes...)
+			// Return deferred runtimes out of canonical order to verify MergeRuntimeDiagnostics sorts them.
+			found := []RuntimeDiagnostic{
+				{Type: "antigravity", Status: "not_installed", Protocol: "acp", Models: []RuntimeModel{}},
+				{Type: "claude", Status: "authentication_required", Protocol: "stream-json", ExecutablePath: "/bin/claude", Models: []RuntimeModel{}},
+				{Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/bin/codex", Models: []RuntimeModel{}},
+			}
+			return DiscoveryResult{Diagnostics: found, Installations: InstallationsFromDiagnostics(found)}, nil
+		},
+		OnChanged: func(next DiscoveryResult) error {
+			published = next
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("MonitorRuntimeDiagnostics exited with %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("backfill waited %v instead of running immediately before RefreshInterval", elapsed)
+	}
+	if discoverCalls.Load() != 1 {
+		t.Fatalf("discoverCalls = %d, want 1", discoverCalls.Load())
+	}
+	if want := []string{"codex", "claude", "antigravity"}; !reflect.DeepEqual(seenRuntimes, want) {
+		t.Fatalf("backfill discover runtimes = %v, want %v", seenRuntimes, want)
+	}
+	gotTypes := make([]string, len(published.Diagnostics))
+	for i, d := range published.Diagnostics {
+		gotTypes[i] = d.Type
+	}
+	if want := []string{"codex", "claude", "pi", "antigravity"}; !reflect.DeepEqual(gotTypes, want) {
+		t.Fatalf("merged diagnostic order = %v, want %v", gotTypes, want)
+	}
+	if !published.Diagnostics[2].Preferred || published.Diagnostics[2].ExecutablePath != "/bin/pi" {
+		t.Fatalf("initial preferred pi diagnostic was lost: %+v", published.Diagnostics[2])
+	}
+	for _, kind := range []string{"codex", "claude", "pi"} {
+		if _, ok := published.Installations[kind]; !ok {
+			t.Fatalf("merged installations missing %q: %+v", kind, published.Installations)
+		}
+	}
+	if _, ok := published.Installations["antigravity"]; ok {
+		t.Fatalf("not_installed antigravity unexpectedly in installations: %+v", published.Installations)
+	}
+}
+
+func TestRuntimeMonitorRecoversFromBackfillErrorOnNextTick(t *testing.T) {
+	initialPi := RuntimeDiagnostic{
+		Type:           "pi",
+		Status:         "ready",
+		Protocol:       "rpc",
+		Preferred:      true,
+		ExecutablePath: "/bin/pi",
+		Models:         []RuntimeModel{},
+	}
+	initial := DiscoveryResult{
+		Diagnostics:   []RuntimeDiagnostic{initialPi},
+		Installations: InstallationsFromDiagnostics([]RuntimeDiagnostic{initialPi}),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	backfillErr := errors.New("backfill discovery failed")
+	var recordedErrors []error
+	var discoverRuntimes [][]string
+	var published DiscoveryResult
+
+	err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+		Initial:               initial,
+		BackfillRuntimes:      []string{"codex", "claude", "antigravity"},
+		Discovery:             DiscoveryOptions{PreferredRuntime: "pi"},
+		RefreshInterval:       10 * time.Millisecond,
+		FullRefreshEveryTicks: 100,
+		Discover: func(_ context.Context, opts DiscoveryOptions) (DiscoveryResult, error) {
+			discoverRuntimes = append(discoverRuntimes, append([]string(nil), opts.Runtimes...))
+			if len(discoverRuntimes) == 1 {
+				return DiscoveryResult{}, backfillErr
+			}
+			full := []RuntimeDiagnostic{
+				{Type: "codex", Status: "ready", Protocol: "app-server", ExecutablePath: "/bin/codex", Models: []RuntimeModel{}},
+				{Type: "claude", Status: "not_installed", Protocol: "stream-json", Models: []RuntimeModel{}},
+				initialPi,
+				{Type: "antigravity", Status: "not_installed", Protocol: "acp", Models: []RuntimeModel{}},
+			}
+			return DiscoveryResult{Diagnostics: full, Installations: InstallationsFromDiagnostics(full)}, nil
+		},
+		OnError: func(err error) {
+			recordedErrors = append(recordedErrors, err)
+		},
+		OnChanged: func(next DiscoveryResult) error {
+			published = next
+			cancel()
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("MonitorRuntimeDiagnostics exited with %v, want context.Canceled", err)
+	}
+	if len(recordedErrors) != 1 || !errors.Is(recordedErrors[0], backfillErr) {
+		t.Fatalf("recordedErrors = %v, want [%v]", recordedErrors, backfillErr)
+	}
+	if len(discoverRuntimes) != 2 {
+		t.Fatalf("discover calls = %v, want 2 (backfill then full recovery)", discoverRuntimes)
+	}
+	if want := []string{"codex", "claude", "antigravity"}; !reflect.DeepEqual(discoverRuntimes[0], want) {
+		t.Fatalf("first discover runtimes = %v, want %v", discoverRuntimes[0], want)
+	}
+	if len(discoverRuntimes[1]) != 0 {
+		t.Fatalf("recovery discover runtimes = %v, want empty (full discovery)", discoverRuntimes[1])
+	}
+	if len(published.Diagnostics) != 4 || published.Diagnostics[0].Type != "codex" || published.Diagnostics[2].Type != "pi" {
+		t.Fatalf("recovered diagnostics = %+v", published.Diagnostics)
+	}
+}
+
+func TestRuntimeMonitorDebouncesTransientNotInstalledForReadyRuntime(t *testing.T) {
+	// Simulate a CLI executable that existed when initial ready state was probed,
+	// then briefly disappears (e.g. during self-update) and comes back, vs staying
+	// gone across two consecutive probes.
+	missingPath := filepath.Join(t.TempDir(), "codex")
+	ready := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "codex", Status: "ready", Protocol: "app-server",
+		EntryPath: missingPath, ExecutablePath: missingPath,
+		Models: []RuntimeModel{{ID: "gpt-5", Label: "GPT-5", AllowedReasoningEffort: []string{}}},
+	}}}
+	notInstalled := DiscoveryResult{Diagnostics: []RuntimeDiagnostic{{
+		Type: "codex", Status: "not_installed", Protocol: "app-server",
+		Models: []RuntimeModel{},
+		Error:  &DiagnosticError{Code: "RUNTIME_NOT_INSTALLED", Message: "Runtime executable not found"},
+	}}}
+
+	t.Run("single transient not_installed retains ready", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		calls := 0
+		var statuses []string
+		err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+			Initial: ready, RefreshInterval: 5 * time.Millisecond, FullRefreshEveryTicks: 1,
+			Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+				calls++
+				if calls == 1 {
+					return notInstalled, nil
+				}
+				if calls == 2 {
+					return ready, nil
+				}
+				// A second single transient miss after recovery must also be debounced.
+				if calls == 3 {
+					return notInstalled, nil
+				}
+				cancel()
+				return ready, nil
+			},
+			OnChanged: func(result DiscoveryResult) error {
+				statuses = append(statuses, result.Diagnostics[0].Status)
+				return nil
+			},
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("monitor exited with %v", err)
+		}
+		if len(statuses) != 0 {
+			t.Fatalf("published statuses = %v, want none on single transient not_installed", statuses)
+		}
+	})
+
+	t.Run("two consecutive not_installed probes publish not_installed", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		calls := 0
+		var statuses []string
+		err := MonitorRuntimeDiagnostics(ctx, RuntimeMonitorOptions{
+			Initial: ready, RefreshInterval: 5 * time.Millisecond, FullRefreshEveryTicks: 1,
+			Discover: func(context.Context, DiscoveryOptions) (DiscoveryResult, error) {
+				calls++
+				return notInstalled, nil
+			},
+			OnChanged: func(result DiscoveryResult) error {
+				statuses = append(statuses, result.Diagnostics[0].Status)
+				cancel()
+				return nil
+			},
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("monitor exited with %v", err)
+		}
+		if calls != transientRuntimeFailureThreshold {
+			t.Fatalf("discover calls = %d, want %d", calls, transientRuntimeFailureThreshold)
+		}
+		if !reflect.DeepEqual(statuses, []string{"not_installed"}) {
+			t.Fatalf("published statuses = %v, want [not_installed]", statuses)
+		}
+	})
+}

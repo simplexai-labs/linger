@@ -7,7 +7,6 @@ import type { ReactNode } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import { useT } from "@/i18n/use-translation";
-import { cn } from "@/lib/cn";
 
 import { localModelsMessages as m } from "./local-models.messages";
 
@@ -30,12 +29,7 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
       data-featured-spotlight="inkling-2-mini"
       data-in-catalog={hasEntry ? "true" : "false"}
     >
-      <div
-        className={cn(
-          "flex flex-col gap-2.5 bg-[var(--app-card-info-surface)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4",
-          hasEntry && "border-b border-border/80",
-        )}
-      >
+      <div className="flex flex-col gap-2.5 bg-[var(--app-card-info-surface)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           {!hasEntry ? (
             <span
@@ -47,9 +41,6 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
           ) : null}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="inline-flex h-5 items-center rounded-sm bg-[var(--app-mention-surface)] px-1.5 text-2xs font-semibold tracking-wide text-app-info uppercase">
-                {t(m.featuredNew)}
-              </span>
               <span className="font-medium text-app-info">
                 {t(m.featuredByThinkingMachines)}
               </span>
@@ -59,9 +50,6 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
                 {INKLING_TITLE}
               </h2>
             ) : null}
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t(m.featuredInklingSummary)}
-            </p>
             {!hasEntry ? (
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {t(m.featuredNotInCatalog)}

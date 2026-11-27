@@ -27,7 +27,7 @@ import type { Module, ModuleContext } from "./modules.js";
 const runExec = promisify(execFile);
 
 export interface BundleStoreOptions {
-  readonly home: string;
+  readonly home: string | (() => string);
   readonly seedDirectory?: string;
   readonly target?: string;
   /**
@@ -132,7 +132,11 @@ export class BundleStoreModule implements Module {
   }
 
   get home(): string {
-    return path.resolve(this.#options.home);
+    const raw =
+      typeof this.#options.home === "function"
+        ? this.#options.home()
+        : this.#options.home;
+    return path.resolve(raw);
   }
 
   get stateDir(): string {
@@ -289,7 +293,9 @@ export class BundleStoreModule implements Module {
       await rename(stagingDir, finalDir);
       return finalDir;
     } catch (error) {
-      await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(stagingDir, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
       throw error;
     }
   }
@@ -323,7 +329,9 @@ export class BundleStoreModule implements Module {
       await rename(stagingDir, finalDir);
       return finalDir;
     } catch (error) {
-      await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(stagingDir, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
       throw error;
     }
   }
@@ -334,7 +342,9 @@ export class BundleStoreModule implements Module {
    */
   async importSeed(seedDir: string): Promise<LocalReleaseDescriptor> {
     const manifestPath = path.join(seedDir, "seed-manifest.json");
-    const seed = JSON.parse(await readFile(manifestPath, "utf8")) as SeedManifest;
+    const seed = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as SeedManifest;
     const moduleIds: readonly BundleModuleId[] = ["web", "backend"];
 
     const nodeDepsEntry = seed.bundles["node-native-deps"];

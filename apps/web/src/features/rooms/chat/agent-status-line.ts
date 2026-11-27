@@ -4,7 +4,11 @@ import { useEffect, useEffectEvent, useReducer } from "react";
 export type AgentStatusLineContent =
   | { tone: "wait" }
   | {
-      tone: "live" | "muted" | "danger" | "warn";
+      /**
+       * `danger` and `warn` mark an ended Run; `waiting` an ended Run whose
+       * Agent still waits on a Human's decision card.
+       */
+      tone: "live" | "muted" | "danger" | "warn" | "waiting";
       text: string;
       /** The running Activity the line names, whose running time it shows. */
       runningActivityId?: string;
@@ -79,7 +83,9 @@ const INITIAL_STATE: AgentStatusLineState = {
 };
 
 const ended = (content: AgentStatusLineContent) =>
-  content.tone === "danger" || content.tone === "warn";
+  content.tone === "danger" ||
+  content.tone === "warn" ||
+  content.tone === "waiting";
 
 const contentKey = (content: AgentStatusLineContent) =>
   content.tone === "wait" ? "wait" : `${content.tone}:${content.text}`;

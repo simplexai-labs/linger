@@ -18,10 +18,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
-const setupLockName = "setup.lock"
+const setupLockName = computerconfig.SetupLockName
 
 type setupOptions struct {
 	callbackTimeout time.Duration
@@ -29,8 +30,6 @@ type setupOptions struct {
 	configPath      string
 	displayName     string
 	gatewayURL      string
-	maxRunsSet      bool
-	maxRuns         *int
 	// serverToken is a connection token generated on the Computers page; empty
 	// means browser authorization.
 	serverToken     string
@@ -83,6 +82,9 @@ func runComputerSetup(ctx context.Context, options setupOptions, deps setupDeps)
 		return setupResult{}, errors.New("Another Local Computer setup is active")
 	}
 	defer privatefs.ReleaseLock(lock)
+	if err := computerconfig.MigrateSetupConfig(normalized.configPath, normalized.stateDirectory); err != nil {
+		return setupResult{}, err
+	}
 	listeners := &listenerGroup{}
 	defer waitForListeners(listeners)
 	return runExclusiveSetup(ctx, normalized, deps, listeners)
@@ -98,15 +100,6 @@ func waitForListeners(listeners *listenerGroup) {
 }
 
 func runExclusiveSetup(ctx context.Context, normalized normalizedSetup, deps setupDeps, listeners *listenerGroup) (setupResult, error) {
-	if !normalized.maxRunsSet {
-		existing, err := readExistingMaxConcurrentOperations(normalized.configPath)
-		if err != nil {
-			return setupResult{}, err
-		}
-		if existing != nil {
-			normalized.maxRunsSet, normalized.maxRuns = true, existing
-		}
-	}
 	existingComputerID := ""
 	if normalized.token == nil {
 		var err error
@@ -270,17 +263,16 @@ func persistPendingRenewal(path string, bundle credentialBundle) error {
 // stagedConfig is the config file setup writes, in its key order.
 type stagedConfig struct {
 	// runner_id is the Computer ID key the Daemon config parser reads.
-	RunnerID                string             `json:"runner_id"`
-	CredentialExpiresAt     string             `json:"credential_expires_at"`
-	DisplayName             string             `json:"display_name"`
-	Gateway                 stagedGateway      `json:"gateway"`
-	MaxConcurrentOperations *int               `json:"max_concurrent_operations,omitempty"`
-	StateDirectory          string             `json:"state_directory"`
-	Codex                   *stagedCodex       `json:"codex,omitempty"`
-	RuntimePaths            map[string]string  `json:"runtime_paths"`
-	EnabledRuntimes         []string           `json:"enabled_runtimes,omitempty"`
-	WorkspaceGrants         []stagedGrant      `json:"workspace_grants"`
-	LocalModels             *stagedLocalModels `json:"local_models,omitempty"`
+	RunnerID            string             `json:"runner_id"`
+	CredentialExpiresAt string             `json:"credential_expires_at"`
+	DisplayName         string             `json:"display_name"`
+	Gateway             stagedGateway      `json:"gateway"`
+	StateDirectory      string             `json:"state_directory"`
+	Codex               *stagedCodex       `json:"codex,omitempty"`
+	RuntimePaths        map[string]string  `json:"runtime_paths"`
+	EnabledRuntimes     []string           `json:"enabled_runtimes,omitempty"`
+	WorkspaceGrants     []stagedGrant      `json:"workspace_grants"`
+	LocalModels         *stagedLocalModels `json:"local_models,omitempty"`
 }
 
 // stagedLocalModels is the config's local_models section
@@ -373,9 +365,6 @@ func stageSetup(normalized normalizedSetup, bundle credentialBundle) ([]byte, st
 			GrantID: "grant-" + hex.EncodeToString(digest[:])[:24], Label: "Linger managed workspace",
 			TenantID: bundle.TenantID, RootPath: normalized.managedWorkspacePath, Mode: "workspace-write", Scope: "owner",
 		}},
-	}
-	if normalized.maxRuns != nil {
-		config.MaxConcurrentOperations = normalized.maxRuns
 	}
 	if normalized.codexAuthFile != "" {
 		config.Codex = &stagedCodex{AuthFile: normalized.codexAuthFile}
@@ -514,9 +503,6 @@ func normalizeSetupOptions(options setupOptions, deps setupDeps) (normalizedSetu
 			return normalizedSetup{}, err
 		}
 	}
-	if options.maxRuns != nil && (*options.maxRuns < 1 || *options.maxRuns > 100) {
-		return normalizedSetup{}, newError(categoryConfiguration, "Maximum concurrent runs must be between 1 and 100")
-	}
 	normalized.displayName = strings.TrimSpace(options.displayName)
 	if normalized.token != nil {
 		normalized.displayName = strings.TrimSpace(normalized.token.DisplayName)
@@ -629,26 +615,6 @@ func readExistingComputerID(configPath string) (string, error) {
 		return "", newError(categoryConfiguration, "Existing Computer ID is invalid")
 	}
 	return computerID, nil
-}
-
-func readExistingMaxConcurrentOperations(configPath string) (*int, error) {
-	encoded, found, err := readOptionalOwnerFile(configPath, true)
-	if err != nil || !found {
-		return nil, err
-	}
-	var value map[string]json.RawMessage
-	if json.Unmarshal(encoded, &value) != nil {
-		return nil, newError(categoryConfiguration, "Existing Computer config is invalid")
-	}
-	raw, present := value["max_concurrent_operations"]
-	if !present {
-		return nil, nil
-	}
-	var maximum int
-	if json.Unmarshal(raw, &maximum) != nil || maximum < 1 || maximum > 100 {
-		return nil, newError(categoryConfiguration, "Existing maximum concurrent runs must be between 1 and 100")
-	}
-	return &maximum, nil
 }
 
 func atomicWriteOwnerFile(path string, data []byte) error {

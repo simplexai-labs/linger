@@ -2615,8 +2615,9 @@ const stagePiComputerTools = async (root: string): Promise<void> => {
   const tools = path.join(root, "cli/computer-tools");
   const piEntry = path.join(
     computerRoot,
-    "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    "node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js",
   );
+  const piBinRel = process.platform === "win32" ? "bin/pi.exe" : "bin/pi";
   await mkdir(path.join(root, "runtime/bin"), { recursive: true });
   await symlink(process.execPath, path.join(root, "runtime/bin/node"));
 
@@ -2630,12 +2631,13 @@ const stagePiComputerTools = async (root: string): Promise<void> => {
     "dist/wasi-shim.js",
   ];
   const generated: ReadonlyArray<readonly [string, string]> = [
+    [piBinRel, "#!/bin/sh\n"],
     [
       "node_modules/@earendil-works/pi-coding-agent/package.json",
       '{"type":"module"}\n',
     ],
     [
-      "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+      "node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js",
       `export * from ${JSON.stringify(pathToFileURL(piEntry).href)};\n`,
     ],
     [
@@ -2677,12 +2679,13 @@ const stagePiComputerTools = async (root: string): Promise<void> => {
       schema_version: 1,
       versions: {
         playwright: "0.0.83",
-        pi: "1.2.0",
+        pi: "1.5.2",
         cua: "0.35.4",
         quickjs: "3.6.2",
       },
       playwright_entry: "node_modules/@playwright/mcp/cli.js",
       pi_extension: "extensions/pi-mcp.mjs",
+      pi_entry: piBinRel,
       assets,
     }),
   );

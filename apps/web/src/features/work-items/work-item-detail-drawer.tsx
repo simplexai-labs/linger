@@ -91,7 +91,7 @@ export function WorkItemDetailDrawer({
       className="absolute inset-0 z-20 flex min-h-0 w-full flex-col overflow-hidden bg-app-surface lg:static lg:inset-auto lg:z-auto lg:w-[400px] lg:shrink-0 lg:border-l lg:border-app-border"
       data-voice-closable
     >
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-app-border px-5 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-2 px-5 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">
             {t(item.kind === "issue" ? m.issueNumber : m.taskNumber, {
@@ -128,7 +128,7 @@ export function WorkItemDetailDrawer({
           )}
         </div>
 
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 border-t border-app-border pt-4 text-xs">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 pt-4 text-xs">
           <dt className="text-muted-foreground">{t(m.priority)}</dt>
           <dd className="font-medium text-foreground">
             {capitalize(item.priority)}
@@ -256,10 +256,7 @@ function WorkItemCommentsList({
   const comments = commentsQuery.data?.items ?? [];
 
   return (
-    <section
-      aria-label={t(m.comments)}
-      className="space-y-3 border-t border-app-border pt-4"
-    >
+    <section aria-label={t(m.comments)} className="space-y-3 pt-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium text-muted-foreground">
           {comments.length
@@ -385,7 +382,7 @@ function WorkItemCommentForm({
 
   return (
     <form
-      className="shrink-0 space-y-2 border-t border-app-border bg-app-surface px-5 py-3"
+      className="shrink-0 space-y-2 bg-app-surface px-5 py-3"
       onSubmit={submitComment}
     >
       <textarea

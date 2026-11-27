@@ -30,6 +30,7 @@ import { prepareDependencies } from "@linger/local-installation/dependencies";
 import { readManagedModel } from "@linger/local-installation/managed-codex";
 import type { RunInstallation } from "./jobs.js";
 import type { RuntimeDescriptor } from "@linger/local-installation/managed-runtimes";
+import type { SourceInstallOptions } from "@linger/local-installation/source-checkout";
 import {
   formatRuntimeLookupTimings,
   instanceRuntime,
@@ -39,6 +40,7 @@ export function coreAdapter(
   home: string,
   sourceRepo: string,
   externalComputer = false,
+  launchVoiceToolsBackground?: SourceInstallOptions["launchVoiceToolsBackground"],
 ) {
   const instance = (name: string) => loadInstance({ name, home });
   const nativeLogin = new RuntimeLoginManager();
@@ -113,6 +115,9 @@ export function coreAdapter(
           home,
           repo: sourceRepo,
           externalComputer,
+          ...(launchVoiceToolsBackground !== undefined
+            ? { launchVoiceToolsBackground }
+            : {}),
           signal,
           onEvent,
           onRuntimeDescriptors: (value) => {

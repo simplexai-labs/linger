@@ -327,11 +327,11 @@ SELECT count(*) FROM active_room_members WHERE room_id=$1 AND role='owner';
 -- clock_timestamp keeps Messages written in one transaction in write order.
 -- Contexts and attachments arrive already validated, in their order.
 INSERT INTO messages(id, tenant_id, room_id, author_actor_id, body, segments, card_context_message_id, message_kind, local_run_id, notice, card_title, card_kind, created_at,
-                     reply_to_message_id, context_message_ids, attachments, fired_routine_id, fired_routine_instruction, human_waiting)
+                     reply_to_message_id, context_message_ids, attachments, fired_routine_id, fired_routine_instruction, human_waiting, continues)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, sqlc.narg(notice)::jsonb, sqlc.narg(card_title), sqlc.narg(card_kind), clock_timestamp(),
         sqlc.narg(reply_to_message_id), coalesce(sqlc.narg(context_message_ids)::text[],'{}'),
         coalesce(sqlc.narg(attachments)::jsonb,'[]'::jsonb), sqlc.narg(fired_routine_id), sqlc.narg(fired_routine_instruction),
-        sqlc.arg(human_waiting)::boolean)
+        sqlc.arg(human_waiting)::boolean, sqlc.arg(continues)::boolean)
 RETURNING id, tenant_id, room_id, author_actor_id, body, segments,
           card_context_message_id, message_kind, created_at, local_run_id, card_title;
 

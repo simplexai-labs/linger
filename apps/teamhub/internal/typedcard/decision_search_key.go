@@ -259,17 +259,21 @@ func searchKeyNoticeText(decisionID string, decision decisionRecord, answer deci
 	if alterEgo {
 		who, prefix = "The Sponsor", ""
 	}
+	// A connect request named its backend; a search without one named none.
+	requested := request.Backend
+	if request.Command == "" {
+		requested = view.Backend
+	}
 	payload := searchKeyPayload{Decision: "deny"}
 	text := who + " declined to add a web search key. Don't retry; tell the user web search needs a key in Connectors."
 	if alterEgo {
 		text = who + " declined to add a web search key. Don't retry; say in your final reply that web search needs a key in Connectors."
 	}
+	if requested != "" {
+		// Naming the backend keeps the Agent from reporting every backend lost.
+		text = who + " declined to add " + searchKeyName(requested) + ". Don't ask for it again; other backends are unaffected, and teamhub web list shows the ready ones."
+	}
 	if decision.Status == "answered" {
-		// A connect request named its backend; a search without one named none.
-		requested := request.Backend
-		if request.Command == "" {
-			requested = view.Backend
-		}
 		configured := answer.Backend
 		payload = searchKeyPayload{Decision: "configured", Backend: configured, Results: replay.Results, Page: replay.Page, ErrorCode: replay.ErrorCode}
 		text = who + " added " + searchKeyName(configured)

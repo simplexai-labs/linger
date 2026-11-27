@@ -319,9 +319,13 @@ func removePreviousWorkspaces(tx *sql.Tx, root string) error {
 	return nil
 }
 
-// Ensure brings the Context's workspace to the View the request names. A
-// workspace already at that digest is returned without any request; otherwise
-// the manifest and every file the workspace lacks are fetched and verified.
+// Ensure brings the Context's workspace to the View the request names. A ready
+// View at that digest is returned without any request once its workspace
+// directory, read-only links, and read-only projections are verified under the
+// store root. If the view root, workspace, or a read-only projection is missing
+// or relocated, Ensure logs a warning and rematerializes it; symlink, file-type,
+// and permission violations fail instead of rebuilding. Otherwise the manifest
+// and every file the workspace lacks are fetched and verified.
 func (s *ViewStore) Ensure(ctx context.Context, request ViewRequest, source ContentSource) (ViewRecord, error) {
 	if !viewDigestPattern.MatchString(request.ViewDigest) || request.ExecutionContextKey == "" {
 		return ViewRecord{}, ErrContextConflict
@@ -338,11 +342,21 @@ func (s *ViewStore) Ensure(ctx context.Context, request ViewRequest, source Cont
 	s.mu.Unlock()
 	if readErr == nil && !current.Unready && current.View.ViewDigest == request.ViewDigest &&
 		current.View.RuntimeInstanceID == request.RuntimeInstanceID && sameRequestOwner(current.View, request) {
-		if err := validateWorkspaceLinks(current.WorkspacePath, current.View.Mappings); err != nil {
+		rebuildReason, missingErr, err := s.validateReadyWorkspace(current)
+		if err != nil {
 			return ViewRecord{}, err
 		}
-		s.ensureAgentProject(current)
-		return current, nil
+		if rebuildReason == "" {
+			s.ensureAgentProject(current)
+			return current, nil
+		}
+		s.sharedTaskLogger().Warn("runner.context_view.missing_workspace_rebuild",
+			"agent_id", current.View.AgentID,
+			"execution_context_key", current.View.ExecutionContextKey,
+			"view_digest", current.View.ViewDigest,
+			"workspace_path", current.WorkspacePath,
+			"reason", rebuildReason,
+			"error", missingErr)
 	}
 	if readErr != nil && !errors.Is(readErr, sql.ErrNoRows) {
 		return ViewRecord{}, s.observeStorage(ctx, "ensure", readErr)
@@ -701,10 +715,141 @@ func (s *ViewStore) CurrentView(ctx context.Context, executionContextKey, viewDi
 	if viewDigest != "" && record.View.ViewDigest != viewDigest {
 		return ViewRecord{}, contextConflict("the workspace is at another View")
 	}
-	if err := validateWorkspaceLinks(record.WorkspacePath, record.View.Mappings); err != nil {
+	rebuildReason, missingErr, err := s.validateReadyWorkspace(record)
+	if err != nil {
 		return ViewRecord{}, err
 	}
+	if rebuildReason != "" {
+		if missingErr != nil {
+			return ViewRecord{}, fmt.Errorf("%w: workspace requires rebuild (%s): %w", ErrContextConflict, rebuildReason, missingErr)
+		}
+		return ViewRecord{}, contextConflict("workspace requires rebuild (%s)", rebuildReason)
+	}
 	return record, nil
+}
+
+// validateReadyWorkspace checks whether a ready View's workspace and read-only
+// projections exist under s.root and pass link validation. It returns a
+// non-empty rebuildReason (with nil err) only when the view root, workspace, or
+// a required read-only projection is missing on disk or relocated from another
+// store root and safe to rematerialize. Symlink, file-type, and permission
+// violations always return a non-nil err and never trigger a rebuild.
+func (s *ViewStore) validateReadyWorkspace(record ViewRecord) (rebuildReason string, missingErr error, err error) {
+	expected := contextWorkspace(s.root, record.View.ExecutionContextKey)
+	root, err := os.OpenRoot(s.root)
+	if errors.Is(err, os.ErrNotExist) {
+		return "view_root_missing", err, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	defer root.Close()
+	workspaceRelative, err := filepath.Rel(s.root, expected)
+	if err != nil {
+		return "", nil, err
+	}
+	if missing, checkErr := checkRealDirectoryPath(root, workspaceRelative); checkErr != nil {
+		return "", nil, checkErr
+	} else if missing != nil {
+		return "workspace_missing", missing, nil
+	}
+	if !sameWorkspacePath(record.WorkspacePath, expected) {
+		if _, statErr := os.Lstat(record.WorkspacePath); errors.Is(statErr, os.ErrNotExist) {
+			return "workspace_missing", statErr, nil
+		}
+		return "workspace_relocated", nil, nil
+	}
+	if err := validateWorkspaceLinks(expected, record.View.Mappings); err != nil {
+		return "", nil, err
+	}
+	workspaceRoot, err := root.OpenRoot(workspaceRelative)
+	if errors.Is(err, os.ErrNotExist) {
+		return "workspace_missing", err, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	defer workspaceRoot.Close()
+	checkedDirs := make(map[string]struct{})
+	for _, mapping := range record.View.Mappings {
+		if mapping.Access != "read_only" || mapping.TargetPath == "" {
+			continue
+		}
+		targetPath, err := safeJoin(expected, mapping.TargetPath)
+		if err != nil {
+			return "", nil, err
+		}
+		targetRel, err := filepath.Rel(expected, targetPath)
+		if err != nil {
+			return "", nil, err
+		}
+		if _, ok := checkedDirs[targetRel]; !ok {
+			if missing, checkErr := checkRealDirectoryPath(workspaceRoot, targetRel); checkErr != nil {
+				return "", nil, checkErr
+			} else if missing != nil {
+				return "projection_missing", missing, nil
+			}
+			checkedDirs[targetRel] = struct{}{}
+		}
+		for _, file := range mapping.Files {
+			filePath, err := safeJoin(targetPath, file.RelativePath)
+			if err != nil {
+				return "", nil, err
+			}
+			fileRel, err := filepath.Rel(expected, filePath)
+			if err != nil {
+				return "", nil, err
+			}
+			parentRel := filepath.Dir(fileRel)
+			if _, ok := checkedDirs[parentRel]; !ok {
+				if missing, checkErr := checkRealDirectoryPath(workspaceRoot, parentRel); checkErr != nil {
+					return "", nil, checkErr
+				} else if missing != nil {
+					return "projection_missing", missing, nil
+				}
+				checkedDirs[parentRel] = struct{}{}
+			}
+			info, err := workspaceRoot.Lstat(fileRel)
+			if errors.Is(err, os.ErrNotExist) {
+				return "projection_missing", err, nil
+			}
+			if err != nil {
+				return "", nil, err
+			}
+			if !info.Mode().IsRegular() {
+				return "", nil, errors.New("Context read-only projection target is not a regular file")
+			}
+		}
+	}
+	return "", nil, nil
+}
+
+// checkRealDirectoryPath inspects every path component of relative under root.
+// Walking component by component distinguishes a missing directory from a
+// regular-file or symlink intermediate component across platforms, including
+// Windows where statting beneath a regular file yields ERROR_PATH_NOT_FOUND.
+func checkRealDirectoryPath(root *os.Root, relative string) (missingErr error, err error) {
+	current := ""
+	for _, component := range strings.Split(filepath.Clean(relative), string(filepath.Separator)) {
+		if component == "." {
+			continue
+		}
+		if component == ".." || component == "" {
+			return nil, errors.New("Context directory escapes its root")
+		}
+		current = filepath.Join(current, component)
+		info, err := root.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return err, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !realDirectory(info) {
+			return nil, errors.New("Context directory is unsafe")
+		}
+	}
+	return nil, nil
 }
 
 // ForgetAgent stops the shared Task discovery of a removed Agent's Views. Its

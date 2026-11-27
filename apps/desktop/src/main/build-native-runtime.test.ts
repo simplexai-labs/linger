@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -8,14 +10,33 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import { afterEach, expect, it } from "vitest";
 
-import { copyExternals } from "../../scripts/build-native-runtime.mjs";
+import { NODE_RUNTIME_VERSION } from "../../../../scripts/local-computer-node-distributions.mjs";
+import * as buildNativeRuntimeModule from "../../scripts/build-native-runtime.mjs";
+import {
+  buildRuntime,
+  copyExternals,
+  RUNTIME_ARCHIVE,
+  RUNTIME_FILES,
+  RUNTIME_SCHEMA,
+  verifyRuntime,
+} from "../../scripts/build-native-runtime.mjs";
 import {
   resolveExternalPackageRoots,
   stageV2NodeNativeDeps,
 } from "../../scripts/stage-v2-node-native-deps.mjs";
+
+interface BuildNativeRuntimeExtras {
+  OPTIONAL_IMPORTS: Set<string>;
+  RUNTIME_PACKAGES: string[];
+  unusedPackageEntry(name: string, relativePath: string): boolean;
+}
+
+const { OPTIONAL_IMPORTS, RUNTIME_PACKAGES, unusedPackageEntry } =
+  buildNativeRuntimeModule as unknown as BuildNativeRuntimeExtras;
 
 const roots: string[] = [];
 afterEach(() => {
@@ -82,21 +103,18 @@ it("stages V2 per-target node-native-deps with real external packages, manifest,
   const rootsList = resolveExternalPackageRoots({
     imports: ["pdfjs-dist/legacy/build/pdf.mjs", "tsx", "node:fs", "sharp"],
     deployedDependencies: [
-      "@livekit/rtc-node",
+      "@livekit/rtc-ffi-bindings",
       "@livekit/local-inference",
       "pdfjs-dist",
-      "officeparser",
       "sharp",
       "word-extractor",
     ],
   });
   expect(rootsList).toEqual([
     "@livekit/local-inference",
-    "@livekit/rtc-node",
-    "officeparser",
+    "@livekit/rtc-ffi-bindings",
     "pdfjs-dist",
     "sharp",
-    "word-extractor",
   ]);
 
   const summary = await stageV2NodeNativeDeps({
@@ -104,7 +122,7 @@ it("stages V2 per-target node-native-deps with real external packages, manifest,
     outDir,
     targets: ["darwin-arm64"],
     nodeServicesDir: nsDir,
-    imports: ["pdfjs-dist/legacy/build/pdf.mjs", "officeparser", "sharp"],
+    imports: ["pdfjs-dist/legacy/build/pdf.mjs", "sharp"],
     runDeploy: async ({ deployDir }) => {
       const addPkg = (
         name: string,
@@ -132,22 +150,17 @@ it("stages V2 per-target node-native-deps with real external packages, manifest,
           name: "@linger/node-services",
           dependencies: {
             "@livekit/local-inference": "0.1.2",
-            officeparser: "8.2.0",
+            "@livekit/rtc-ffi-bindings": "0.13.0",
             "pdfjs-dist": "4.0.0",
             sharp: "0.34.0",
-            "word-extractor": "1.0.4",
           },
         }),
       );
       addPkg("pdfjs-dist", "4.0.0");
-      addPkg("officeparser", "8.2.0", {
-        "pdfjs-dist": "4.0.0",
-        "tesseract.js": "5.0.0",
-      });
+      addPkg("@livekit/rtc-ffi-bindings", "0.13.0");
       addPkg("tesseract.js", "5.0.0");
       addPkg("sharp", "0.34.0", {}, { "@img/sharp-darwin-arm64": "0.34.0" });
       addPkg("@img/sharp-darwin-arm64", "0.34.0");
-      addPkg("word-extractor", "1.0.4");
       addPkg(
         "@livekit/local-inference",
         "0.1.2",
@@ -161,7 +174,7 @@ it("stages V2 per-target node-native-deps with real external packages, manifest,
   expect(summary.targets).toEqual([
     {
       target: "darwin-arm64",
-      packageCount: 6,
+      packageCount: 5,
       excludedModels: ["@livekit/local-inference-darwin-arm64"],
     },
   ]);
@@ -169,28 +182,38 @@ it("stages V2 per-target node-native-deps with real external packages, manifest,
   const targetDir = path.join(outDir, "darwin-arm64");
   for (const pkg of [
     "pdfjs-dist",
-    "officeparser",
+    "@livekit/rtc-ffi-bindings",
     "sharp",
     "@img/sharp-darwin-arm64",
-    "word-extractor",
     "@livekit/local-inference",
   ]) {
-    expect(existsSync(path.join(targetDir, "node_modules", pkg, "package.json"))).toBe(true);
+    expect(
+      existsSync(path.join(targetDir, "node_modules", pkg, "package.json")),
+    ).toBe(true);
   }
-  expect(existsSync(path.join(targetDir, "node_modules", "tesseract.js"))).toBe(false);
+  expect(existsSync(path.join(targetDir, "node_modules", "tesseract.js"))).toBe(
+    false,
+  );
   expect(
     existsSync(
-      path.join(targetDir, "node_modules", "@livekit/local-inference-darwin-arm64"),
+      path.join(
+        targetDir,
+        "node_modules",
+        "@livekit/local-inference-darwin-arm64",
+      ),
     ),
   ).toBe(false);
 
   const manifest = JSON.parse(
-    readFileSync(path.join(targetDir, "node-native-deps-manifest.json"), "utf8"),
+    readFileSync(
+      path.join(targetDir, "node-native-deps-manifest.json"),
+      "utf8",
+    ),
   ) as { target: string; packageCount: number; layout: string };
   expect(manifest).toMatchObject({
     target: "darwin-arm64",
     layout: "shared-node-deps",
-    packageCount: 6,
+    packageCount: 5,
   });
 
   const nsPkg = JSON.parse(
@@ -205,8 +228,327 @@ it("stages V2 per-target node-native-deps with real external packages, manifest,
   const models = JSON.parse(
     readFileSync(path.join(nsDir, "models.json"), "utf8"),
   ) as { packages: Record<string, { group: string; version: string }> };
-  expect(models.packages["@livekit/local-inference-darwin-arm64"]).toMatchObject({
+  expect(
+    models.packages["@livekit/local-inference-darwin-arm64"],
+  ).toMatchObject({
     group: "voice",
     version: "0.1.2",
   });
+});
+
+const sha256 = (data: string | Buffer) =>
+  createHash("sha256").update(data).digest("hex");
+
+it("verifies archive and directory runtimes with shared node metadata and rejects tampered shared fields", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "build-native-runtime-verify-"));
+  roots.push(root);
+  const sourceSha = "a".repeat(64);
+  const nodeSha = "b".repeat(64);
+
+  // Windows archive layout with shared node.exe (no duplicate archive in runtime-win32-x64/).
+  const winDir = path.join(root, "runtime-win32-x64");
+  mkdirSync(winDir, { recursive: true });
+  const archiveBytes = Buffer.from("zstd-runtime");
+  writeFileSync(path.join(winDir, RUNTIME_ARCHIVE), archiveBytes);
+  const writeWinManifest = (node: Record<string, unknown>) =>
+    writeFileSync(
+      path.join(winDir, "manifest.json"),
+      JSON.stringify({
+        schema: RUNTIME_SCHEMA,
+        target: "win32-x64",
+        sourceArchiveSha256: sourceSha,
+        layout: "archive",
+        archive: {
+          file: RUNTIME_ARCHIVE,
+          sha256: sha256(archiveBytes),
+          bytes: archiveBytes.length,
+        },
+        node,
+      }),
+    );
+
+  writeWinManifest({
+    version: NODE_RUNTIME_VERSION,
+    shared: true,
+    binary: "runtime/bin/node.exe",
+    sha256: nodeSha,
+    bytes: 123_456,
+  });
+  await expect(
+    verifyRuntime(winDir, "win32-x64", sourceSha),
+  ).resolves.toMatchObject({
+    target: "win32-x64",
+    node: { shared: true, binary: "runtime/bin/node.exe" },
+  });
+
+  for (const badNode of [
+    {
+      version: "0.0.0",
+      shared: true,
+      binary: "runtime/bin/node.exe",
+      sha256: nodeSha,
+      bytes: 123_456,
+    },
+    {
+      version: NODE_RUNTIME_VERSION,
+      shared: true,
+      binary: "runtime/bin/node",
+      sha256: nodeSha,
+      bytes: 123_456,
+    },
+    {
+      version: NODE_RUNTIME_VERSION,
+      shared: true,
+      binary: "runtime/bin/node.exe",
+      sha256: "not-a-hex-digest",
+      bytes: 123_456,
+    },
+    {
+      version: NODE_RUNTIME_VERSION,
+      shared: true,
+      binary: "runtime/bin/node.exe",
+      sha256: nodeSha,
+      bytes: 0,
+    },
+    {
+      version: NODE_RUNTIME_VERSION,
+      shared: true,
+      binary: "runtime/bin/node.exe",
+      sha256: nodeSha,
+      bytes: 12.5,
+    },
+  ]) {
+    writeWinManifest(badNode);
+    await expect(verifyRuntime(winDir, "win32-x64", sourceSha)).rejects.toThrow(
+      "invalid shared node metadata",
+    );
+  }
+
+  // macOS directory layout with shared node binary (no runtime-darwin-arm64/node/ copy).
+  const macDir = path.join(root, "runtime-darwin-arm64");
+  const macRuntime = path.join(macDir, "runtime");
+  mkdirSync(macRuntime, { recursive: true });
+  const script = Buffer.from("export const ok = true;\n");
+  writeFileSync(path.join(macRuntime, "index.js"), script);
+  const filesJson = Buffer.from(
+    JSON.stringify({
+      schema: RUNTIME_SCHEMA,
+      target: "darwin-arm64",
+      sourceArchiveSha256: sourceSha,
+      files: {
+        "index.js": { bytes: script.length, sha256: sha256(script) },
+      },
+    }),
+  );
+  writeFileSync(path.join(macRuntime, RUNTIME_FILES), filesJson);
+  writeFileSync(
+    path.join(macDir, "manifest.json"),
+    JSON.stringify({
+      schema: RUNTIME_SCHEMA,
+      target: "darwin-arm64",
+      sourceArchiveSha256: sourceSha,
+      layout: "directory",
+      directory: {
+        file: `runtime/${RUNTIME_FILES}`,
+        sha256: sha256(filesJson),
+        bytes: filesJson.length,
+      },
+      node: {
+        version: NODE_RUNTIME_VERSION,
+        shared: true,
+        binary: "runtime/bin/node",
+        sha256: nodeSha,
+        bytes: 456_789,
+      },
+    }),
+  );
+  await expect(
+    verifyRuntime(macDir, "darwin-arm64", sourceSha),
+  ).resolves.toMatchObject({
+    target: "darwin-arm64",
+    node: { shared: true, binary: "runtime/bin/node" },
+  });
+
+  // Legacy non-shared node manifest still verifies the local file inside runtime-<target>/.
+  const legacyNode = Buffer.from("legacy-node");
+  mkdirSync(path.join(macDir, "node", "bin"), { recursive: true });
+  writeFileSync(path.join(macDir, "node", "bin", "node"), legacyNode);
+  writeFileSync(
+    path.join(macDir, "manifest.json"),
+    JSON.stringify({
+      schema: RUNTIME_SCHEMA,
+      target: "darwin-arm64",
+      sourceArchiveSha256: sourceSha,
+      layout: "directory",
+      directory: {
+        file: `runtime/${RUNTIME_FILES}`,
+        sha256: sha256(filesJson),
+        bytes: filesJson.length,
+      },
+      node: {
+        version: NODE_RUNTIME_VERSION,
+        file: "node/bin/node",
+        sha256: sha256(legacyNode),
+        bytes: legacyNode.length,
+      },
+    }),
+  );
+  await expect(
+    verifyRuntime(macDir, "darwin-arm64", sourceSha),
+  ).resolves.toMatchObject({
+    node: { file: "node/bin/node" },
+  });
+});
+
+it("refuses a shipped archive from another commit before touching output", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "build-native-runtime-"));
+  roots.push(root);
+  const repo = path.join(root, "repo");
+  mkdirSync(repo, { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  const archive = (file: string, ref: string) => {
+    const tar = execFileSync("git", [
+      "-C",
+      repo,
+      "archive",
+      "--format=tar",
+      "--prefix=linger-test/",
+      ref,
+    ]);
+    writeFileSync(file, gzipSync(tar));
+  };
+  writeFileSync(path.join(repo, "package.json"), '{"name":"linger"}\n');
+  git("init", "-q");
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "first",
+  );
+  const firstArchive = path.join(root, "first.tar.gz");
+  archive(firstArchive, "HEAD");
+  const treeArchive = path.join(root, "tree.tar.gz");
+  archive(treeArchive, "HEAD^{tree}");
+
+  writeFileSync(path.join(repo, "README.md"), "second\n");
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "second",
+  );
+  const secondArchive = path.join(root, "second.tar.gz");
+  archive(secondArchive, "HEAD");
+
+  const output = path.join(root, "existing-output");
+  mkdirSync(output, { recursive: true });
+  const sentinel = path.join(output, "sentinel.txt");
+  writeFileSync(sentinel, "keep");
+
+  await expect(
+    buildRuntime("win32-x64", firstArchive, output, {
+      shippedArchive: secondArchive,
+    }),
+  ).rejects.toThrow(
+    /Shipped source archive commit .* does not match build source archive/,
+  );
+  expect(existsSync(sentinel)).toBe(true);
+
+  await expect(
+    buildRuntime("win32-x64", firstArchive, output, {
+      shippedArchive: treeArchive,
+    }),
+  ).rejects.toThrow("does not record its commit");
+  expect(existsSync(sentinel)).toBe(true);
+});
+
+it("prunes unused browser viewer and non-legacy subtrees from pdfjs-dist", async () => {
+  expect(unusedPackageEntry("pdfjs-dist", "build")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "build/pdf.mjs")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "web")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "web/viewer.mjs")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "legacy/web")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "legacy/web/viewer.mjs")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "types")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "types/src/pdf.d.ts")).toBe(true);
+  expect(unusedPackageEntry("pdfjs-dist", "legacy/build/pdf.mjs")).toBe(false);
+  expect(unusedPackageEntry("pdfjs-dist", "cmaps/Adobe-GB1-UCS2.bcmap")).toBe(
+    false,
+  );
+  expect(unusedPackageEntry("pdfjs-dist", "standard_fonts/Helvetica.pfb")).toBe(
+    false,
+  );
+  expect(unusedPackageEntry("pdfjs-dist", "wasm/openjpeg.wasm")).toBe(false);
+  expect(unusedPackageEntry("other-package", "build/index.js")).toBe(false);
+  expect(unusedPackageEntry("other-package", "web/viewer.mjs")).toBe(false);
+
+  const root = mkdtempSync(path.join(tmpdir(), "build-native-runtime-pdfjs-"));
+  roots.push(root);
+  const pkgDir = path.join(root, "deploy/node_modules/pdfjs-dist");
+  const write = (rel: string, content = "") => {
+    const file = path.join(pkgDir, rel);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  };
+  write(
+    "package.json",
+    JSON.stringify({ name: "pdfjs-dist", version: "6.2.108" }),
+  );
+  write("LICENSE", "Apache-2.0");
+  write("README.md", "# pdfjs-dist");
+  write("legacy/build/pdf.mjs", "export const getDocument = () => {};");
+  write("legacy/build/pdf.mjs.map", "{}");
+  write("legacy/build/pdf.worker.mjs", "export const worker = true;");
+  write("cmaps/Adobe-GB1-UCS2.bcmap", "cmap");
+  write("standard_fonts/Helvetica.pfb", "font");
+  write("wasm/openjpeg.wasm", "wasm");
+  write("iccs/CGATS001Compat-v2-micro.icc", "icc");
+  write("image_decoders/pdf.image_decoders.mjs", "export {};");
+  write("build/pdf.mjs", "browser-only");
+  write("web/viewer.mjs", "browser-viewer");
+  write("legacy/web/viewer.mjs", "legacy-viewer");
+  write("types/src/pdf.d.ts", "export {};");
+
+  const output = path.join(root, "output");
+  await copyExternals(path.join(root, "deploy"), output, ["pdfjs-dist"]);
+
+  const outPkg = path.join(output, "node_modules/pdfjs-dist");
+  for (const kept of [
+    "package.json",
+    "LICENSE",
+    "legacy/build/pdf.mjs",
+    "legacy/build/pdf.worker.mjs",
+    "cmaps/Adobe-GB1-UCS2.bcmap",
+    "standard_fonts/Helvetica.pfb",
+    "wasm/openjpeg.wasm",
+    "iccs/CGATS001Compat-v2-micro.icc",
+    "image_decoders/pdf.image_decoders.mjs",
+  ]) {
+    expect(existsSync(path.join(outPkg, kept))).toBe(true);
+  }
+  for (const dropped of [
+    "build",
+    "web",
+    "legacy/web",
+    "types",
+    "legacy/build/pdf.mjs.map",
+    "README.md",
+  ]) {
+    expect(existsSync(path.join(outPkg, dropped))).toBe(false);
+  }
+});
+
+it("bundles word-extractor and ignores optional tesseract.js and canvas imports", () => {
+  expect(RUNTIME_PACKAGES).toEqual(["@livekit/local-inference"]);
+  expect(OPTIONAL_IMPORTS.has("tesseract.js")).toBe(true);
+  expect(OPTIONAL_IMPORTS.has("canvas")).toBe(true);
 });

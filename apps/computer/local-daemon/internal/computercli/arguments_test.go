@@ -72,8 +72,6 @@ Options:
   --enabled-runtime <type>     Enable only this Runtime; repeat for a subset (default: all)
   --token-stdin                Read the server connection token from standard input (hidden prompt in a terminal)
   --gateway-url <wss-url>      Override the Gateway URL
-  --max-concurrent-runs <n>    Limit concurrent runs (1-100)
-  --no-max-concurrent-runs     Remove the concurrent run limit
   --codex-auth <path>          Use this Codex auth.json
   --localmodels-python <path>  Run the localmodels tool with this Python; give
                                all four --localmodels-* options together

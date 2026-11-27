@@ -160,3 +160,42 @@ SELECT EXISTS(
   WHERE room_id=sqlc.arg(room_id)::text AND author_actor_id=sqlc.arg(human_actor_id)::text
     AND message_kind='conversation' AND room_seq IS NOT NULL AND card_context_message_id IS NULL
 )::boolean;
+
+-- name: LockExternalConnectionForAuthorizationSettlement :one
+-- Locks a Connection row while settling an authorizing connection_auth card.
+SELECT status,
+       (reauthorization_upstream_id IS NOT NULL)::boolean AS reauthorizing,
+       coalesce(status_error_code, '')::text AS status_error_code,
+       coalesce(remote_principal_key, '')::text AS remote_principal_key
+FROM external_connections
+WHERE id=sqlc.arg(id)::text
+  AND account_id=sqlc.arg(account_id)::text
+  AND provider=sqlc.arg(provider)::text
+FOR SHARE;
+
+-- name: LockCanonicalExternalConnectionForPrincipal :one
+-- Resolves the non-revoked canonical Connection that superseded a duplicate
+-- pending candidate during recovery.
+SELECT id,
+       status,
+       (reauthorization_upstream_id IS NOT NULL)::boolean AS reauthorizing
+FROM external_connections
+WHERE account_id=sqlc.arg(account_id)::text
+  AND provider=sqlc.arg(provider)::text
+  AND remote_principal_key=sqlc.arg(remote_principal_key)::text
+  AND status<>'revoked'
+FOR SHARE;
+
+-- name: FinishSettledConnectionAuthDecision :exec
+-- Finalizes a settled connection_auth decision, optionally rebinding
+-- answer.connection_id to the canonical Connection when a duplicate candidate
+-- recovered an existing account.
+UPDATE decisions
+SET status=sqlc.arg(status)::text,
+    answer=CASE
+      WHEN sqlc.arg(rebound_connection_id)::text<>''
+        THEN jsonb_set(coalesce(answer, '{}'::jsonb), '{connection_id}', to_jsonb(sqlc.arg(rebound_connection_id)::text))
+      ELSE answer
+    END,
+    finished_at=clock_timestamp()
+WHERE id=sqlc.arg(id)::text;

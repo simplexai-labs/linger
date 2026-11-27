@@ -98,7 +98,7 @@ case "$1 $2" in
   case "$account" in
     *'"method":"model/list"'*)
       echo '{"models":[{"slug":"gpt-runtime","context_window":272000}]}' > "$CODEX_HOME/models_cache.json"
-      echo '{"id":2,"result":{"data":[{"id":"gpt-runtime","model":"gpt-runtime","displayName":"GPT Runtime","isDefault":true,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"},{"reasoningEffort":"future"}]}]}}'
+      echo '{"id":2,"result":{"data":[{"id":"gpt-runtime","model":"gpt-runtime","displayName":"GPT Runtime","isDefault":true,"defaultReasoningEffort":"high","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"},{"reasoningEffort":"future"},{"reasoningEffort":"bad effort"}]}]}}'
       exit 0 ;;
   esac
       echo '{"id":2,"result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'
@@ -121,7 +121,7 @@ esac
 	diagnostic := result.Diagnostics[0]
 	if len(diagnostic.Models) != 1 || diagnostic.Models[0].ID != "gpt-runtime" ||
 		diagnostic.Models[0].DefaultReasoningEffort != "high" ||
-		len(diagnostic.Models[0].AllowedReasoningEffort) != 2 ||
+		!reflect.DeepEqual(diagnostic.Models[0].AllowedReasoningEffort, []string{"low", "high", "future"}) ||
 		!diagnostic.Models[0].IsDefault || diagnostic.Models[0].Link != linkSubscription ||
 		diagnostic.Models[0].ContextWindow != 272000 {
 		t.Fatalf("Codex diagnostic = %+v", diagnostic)
@@ -605,5 +605,306 @@ esac
 	}
 	if _, mutated := callerEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]; mutated {
 		t.Fatal("Discover mutated caller environment map")
+	}
+}
+
+func TestResolveExecutableEntryBundledPathsPrecedenceAndFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable permissions")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	userBin := filepath.Join(root, "user-bin")
+	emptyBin := filepath.Join(root, "empty-bin")
+	bundledBin := filepath.Join(root, "bundled-bin")
+	for _, dir := range []string{home, userBin, emptyBin, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userPi := filepath.Join(userBin, "pi")
+	bundledPi := filepath.Join(bundledBin, "pi")
+	configuredPi := filepath.Join(root, "configured-pi")
+	for _, file := range []string{userPi, bundledPi, configuredPi} {
+		if err := os.WriteFile(file, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// User PATH beats BundledPaths.
+	got, err := resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("user PATH vs bundled: got %q, %v; want %q", got, err, userPi)
+	}
+
+	// BundledPaths is used when PATH has no pi.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("empty PATH fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Valid ConfiguredPaths beats both PATH and BundledPaths.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": configuredPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != configuredPi {
+		t.Fatalf("valid configured vs PATH/bundled: got %q, %v; want %q", got, err, configuredPi)
+	}
+
+	// Stale ConfiguredPaths["pi"] falls back to PATH first, then BundledPaths.
+	stalePi := filepath.Join(root, "moved-app", "pi")
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": stalePi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("stale configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": stalePi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("stale configured fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Dangling symlink in ConfiguredPaths["pi"] also falls back to PATH first, then BundledPaths.
+	danglingPi := filepath.Join(root, "dangling-pi")
+	if err := os.Symlink(stalePi, danglingPi); err != nil {
+		t.Fatal(err)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": danglingPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("dangling symlink configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": danglingPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("dangling symlink configured fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Missing ConfiguredPaths for a non-bundled runtime keeps its explicit configured path
+	// (so diagnose reports not_installed instead of silently falling back to PATH).
+	staleCodex := filepath.Join(root, "missing-codex")
+	userCodex := filepath.Join(userBin, "codex")
+	if err := os.WriteFile(userCodex, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "codex", "codex", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"codex": staleCodex},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != staleCodex {
+		t.Fatalf("non-bundled configured path: got %q, %v; want %q", got, err, staleCodex)
+	}
+	if _, err := canonicalExecutable(got); err == nil {
+		t.Fatalf("missing configured non-bundled path %q unexpectedly canonicalized", got)
+	}
+}
+
+func TestResolveExecutableEntryManagedPathsPrecedenceAndFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable permissions")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	userBin := filepath.Join(root, "user-bin")
+	emptyBin := filepath.Join(root, "empty-bin")
+	managedBin := filepath.Join(root, "managed-bin")
+	bundledBin := filepath.Join(root, "bundled-bin")
+	for _, dir := range []string{home, userBin, emptyBin, managedBin, bundledBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userPi := filepath.Join(userBin, "pi")
+	managedPi := filepath.Join(managedBin, "pi")
+	bundledPi := filepath.Join(bundledBin, "pi")
+	configuredPi := filepath.Join(root, "configured-pi")
+	for _, file := range []string{userPi, managedPi, bundledPi, configuredPi} {
+		if err := os.WriteFile(file, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Valid ConfiguredPaths beats PATH, ManagedPaths, and BundledPaths.
+	got, err := resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": configuredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != configuredPi {
+		t.Fatalf("configured vs PATH/managed/bundled: got %q, %v; want %q", got, err, configuredPi)
+	}
+
+	// User PATH beats ManagedPaths and BundledPaths.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("user PATH vs managed/bundled: got %q, %v; want %q", got, err, userPi)
+	}
+
+	// ManagedPaths beats BundledPaths when user PATH has no pi.
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != managedPi {
+		t.Fatalf("managed vs bundled on empty PATH: got %q, %v; want %q", got, err, managedPi)
+	}
+
+	// Stale ManagedPaths falls through to BundledPaths.
+	staleManagedPi := filepath.Join(root, "missing-managed", "pi")
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": staleManagedPi},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("stale managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+
+	// Stale ConfiguredPaths falls back through PATH -> ManagedPaths -> BundledPaths.
+	staleConfiguredPi := filepath.Join(root, "missing-configured", "pi")
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	})
+	if err != nil || got != userPi {
+		t.Fatalf("stale configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != managedPi {
+		t.Fatalf("stale configured fallback to managed: got %q, %v; want %q", got, err, managedPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": managedPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != managedPi {
+		t.Fatalf("stale configured fallback to managed without bundled: got %q, %v; want %q", got, err, managedPi)
+	}
+	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
+		ManagedPaths:    map[string]string{"pi": staleManagedPi},
+		BundledPaths:    map[string]string{"pi": bundledPi},
+		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if err != nil || got != bundledPi {
+		t.Fatalf("stale configured and managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	}
+}
+
+func TestValidRuntimeReasoningEffortAndLegacyFilter(t *testing.T) {
+	for _, valid := range []string{"none", "minimal", "off", "low", "medium", "high", "xhigh", "max", "ultra", "custom_2", "tier-1", "a1234567890123456789"} {
+		if !ValidRuntimeReasoningEffort(valid) {
+			t.Fatalf("ValidRuntimeReasoningEffort(%q) = false, want true", valid)
+		}
+	}
+	for _, invalid := range []string{"", "-minimal", "_minimal", "bad effort", "high!", "a12345678901234567890"} {
+		if ValidRuntimeReasoningEffort(invalid) {
+			t.Fatalf("ValidRuntimeReasoningEffort(%q) = true, want false", invalid)
+		}
+	}
+
+	legacyOnly := []RuntimeDiagnostic{{
+		Type: "codex", Status: "ready",
+		Models: []RuntimeModel{{
+			ID:                     "gpt-5",
+			Label:                  "GPT-5",
+			AllowedReasoningEffort: []string{"low", "medium", "high"},
+			DefaultReasoningEffort: "medium",
+		}},
+	}}
+	if _, changed := FilterLegacyReasoningEfforts(legacyOnly); changed {
+		t.Fatal("legacy-only diagnostics reported changed")
+	}
+
+	dynamic := []RuntimeDiagnostic{{
+		Type: "codex", Status: "ready",
+		Models: []RuntimeModel{{
+			ID:                     "gpt-5",
+			Label:                  "GPT-5",
+			AllowedReasoningEffort: []string{"minimal", "low", "high", "custom_2"},
+			DefaultReasoningEffort: "minimal",
+		}},
+	}}
+	filtered, changed := FilterLegacyReasoningEfforts(dynamic)
+	if !changed {
+		t.Fatal("dynamic diagnostics were not filtered")
+	}
+	if !reflect.DeepEqual(filtered[0].Models[0].AllowedReasoningEffort, []string{"low", "high"}) {
+		t.Fatalf("filtered allowed = %v, want [low high]", filtered[0].Models[0].AllowedReasoningEffort)
+	}
+	if filtered[0].Models[0].DefaultReasoningEffort != "" {
+		t.Fatalf("filtered default = %q, want empty", filtered[0].Models[0].DefaultReasoningEffort)
+	}
+	if !reflect.DeepEqual(dynamic[0].Models[0].AllowedReasoningEffort, []string{"minimal", "low", "high", "custom_2"}) {
+		t.Fatalf("FilterLegacyReasoningEfforts mutated input: %v", dynamic[0].Models[0].AllowedReasoningEffort)
+	}
+}
+
+func TestNormalizeRuntimeModelsCapsReasoningEffortsAt32(t *testing.T) {
+	options := make([]native.EffortOption, 0, 40)
+	for i := range 40 {
+		options = append(options, native.EffortOption{Value: fmt.Sprintf("tier_%02d", i)})
+	}
+	models := normalizeRuntimeModels([]native.ModelOption{{
+		ID:      "gpt-many-efforts",
+		Label:   "GPT Many Efforts",
+		Default: true,
+		Effort: &native.EffortSupport{
+			Options: options,
+			Default: "tier_35",
+		},
+	}})
+	if len(models) != 1 {
+		t.Fatalf("models count = %d, want 1", len(models))
+	}
+	if len(models[0].AllowedReasoningEffort) != MaxRuntimeModelReasoningEfforts {
+		t.Fatalf("allowed efforts len = %d, want %d", len(models[0].AllowedReasoningEffort), MaxRuntimeModelReasoningEfforts)
+	}
+	if models[0].DefaultReasoningEffort != "" {
+		t.Fatalf("default effort outside capped 32 = %q, want empty", models[0].DefaultReasoningEffort)
+	}
+	if !ValidRuntimeModel(models[0]) {
+		t.Fatalf("normalized capped model failed ValidRuntimeModel: %+v", models[0])
+	}
+
+	overLimit := models[0]
+	overLimit.AllowedReasoningEffort = append(append([]string(nil), models[0].AllowedReasoningEffort...), "tier_32")
+	if ValidRuntimeModel(overLimit) {
+		t.Fatal("ValidRuntimeModel accepted 33 allowed reasoning efforts")
 	}
 }

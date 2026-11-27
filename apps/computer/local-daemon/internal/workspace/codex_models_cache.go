@@ -27,6 +27,9 @@ const (
 	codexModelsCacheMaxCandidates = 8
 	// codexModelsCacheTTL is how long Codex treats a fetched catalog as fresh.
 	codexModelsCacheTTL = 5 * time.Minute
+	// codexModelsCacheMaxSeedAge caps how old a cache may be and still be
+	// re-stamped as fresh; older caches are skipped so Codex refreshes live.
+	codexModelsCacheMaxSeedAge = time.Hour
 )
 
 // CodexModelsCachePeers names the Codex homes on this Computer whose models
@@ -52,8 +55,9 @@ type codexModelsCacheCandidate struct {
 }
 
 type codexModelsCacheEntry struct {
-	data      []byte
-	fetchedAt time.Time
+	data       []byte
+	fetchedAt  time.Time
+	originTime time.Time
 }
 
 type codexModelsCacheReport struct {
@@ -102,18 +106,21 @@ func planCodexModelsCacheSeed(root *os.Root, home, sourceHome, codexVersion stri
 	}
 	version := codexClientVersion(codexVersion)
 	own, ownOK := readCodexModelsCache(func() (*os.File, error) { return root.Open(codexModelsCacheName) }, version)
+	ownReusable := false
 	if ownOK {
 		report.hasOwn, report.ownAge = true, now.Sub(own.fetchedAt)
 		if report.ownAge < codexModelsCacheTTL {
 			report.outcome = "own_fresh"
 			return nil
 		}
+		ownReusable = now.Sub(own.originTime) <= codexModelsCacheMaxSeedAge
 	}
 	if sourceHome != "" {
 		peers.Homes = append(slices.Clone(peers.Homes), sourceHome)
 	}
 	// Candidates are newest first by mtime, which Codex sets when it writes the
-	// cache; the first usable one is the newest and the rest are never read.
+	// cache and seeding preserves from originTime; the first usable one within
+	// the seed age cap wins and the rest are never read.
 	var best *codexModelsCacheEntry
 	for _, candidate := range listCodexModelsCacheCandidates(home, peers) {
 		peerDir := filepath.Dir(candidate.path)
@@ -121,6 +128,9 @@ func planCodexModelsCacheSeed(root *os.Root, home, sourceHome, codexVersion stri
 			continue
 		}
 		if entry, ok := readCodexModelsCache(func() (*os.File, error) { return os.Open(candidate.path) }, version); ok {
+			if now.Sub(entry.originTime) > codexModelsCacheMaxSeedAge {
+				continue
+			}
 			best = &entry
 			break
 		}
@@ -128,11 +138,11 @@ func planCodexModelsCacheSeed(root *os.Root, home, sourceHome, codexVersion stri
 	outcome := "seeded"
 	switch {
 	case best != nil:
-		report.hasCandidate, report.cacheAge = true, now.Sub(best.fetchedAt)
-		if ownOK && own.fetchedAt.After(best.fetchedAt) {
+		report.hasCandidate, report.cacheAge = true, now.Sub(best.originTime)
+		if ownReusable && own.originTime.After(best.originTime) {
 			best, outcome = &own, "renewed"
 		}
-	case ownOK:
+	case ownReusable:
 		best, outcome = &own, "renewed"
 	default:
 		report.outcome = "no_candidate"
@@ -143,6 +153,12 @@ func planCodexModelsCacheSeed(root *os.Root, home, sourceHome, codexVersion stri
 		return err
 	}
 	if err := replaceProjectionFile(root, codexModelsCacheName, data); err != nil {
+		return err
+	}
+	// Preserve the upstream origin timestamp in file mtime so re-stamped copies
+	// neither renew indefinitely past codexModelsCacheMaxSeedAge nor outrank
+	// fresher caches written directly by Codex.
+	if err := root.Chtimes(codexModelsCacheName, best.originTime, best.originTime); err != nil {
 		return err
 	}
 	report.outcome = outcome
@@ -173,7 +189,7 @@ func codexClientVersion(version string) string {
 // readCodexAuthIdentity returns the account identity of a Codex auth.json. Its
 // contents are never logged.
 func readCodexAuthIdentity(path string) (codexAuthIdentity, bool) {
-	data, err := readCappedFile(func() (*os.File, error) { return os.Open(path) }, codexModelsCacheMaxBytes)
+	data, _, err := readCappedFile(func() (*os.File, error) { return os.Open(path) }, codexModelsCacheMaxBytes)
 	if err != nil {
 		return codexAuthIdentity{}, false
 	}
@@ -228,12 +244,19 @@ func listCodexModelsCacheCandidates(home string, peers CodexModelsCachePeers) []
 }
 
 func readCodexModelsCache(open func() (*os.File, error), version string) (codexModelsCacheEntry, bool) {
-	data, err := readCappedFile(open, codexModelsCacheMaxBytes)
+	data, modTime, err := readCappedFile(open, codexModelsCacheMaxBytes)
 	if err != nil {
 		return codexModelsCacheEntry{}, false
 	}
 	fetchedAt, ok := validCodexModelsCache(data, version)
-	return codexModelsCacheEntry{data: data, fetchedAt: fetchedAt}, ok
+	if !ok {
+		return codexModelsCacheEntry{}, false
+	}
+	originTime := fetchedAt
+	if !modTime.IsZero() && modTime.Before(fetchedAt) {
+		originTime = modTime
+	}
+	return codexModelsCacheEntry{data: data, fetchedAt: fetchedAt, originTime: originTime}, true
 }
 
 // validCodexModelsCache checks only the fields that select a cache. An empty
@@ -256,27 +279,28 @@ func validCodexModelsCache(data []byte, version string) (time.Time, bool) {
 	return fetchedAt, true
 }
 
-// readCappedFile reads a regular file no larger than limit bytes. The opener
-// decides whether links are followed; projected auth.json is a link.
-func readCappedFile(open func() (*os.File, error), limit int64) ([]byte, error) {
+// readCappedFile reads a regular file no larger than limit bytes and returns
+// its modification time. The opener decides whether links are followed;
+// projected auth.json is a link.
+func readCappedFile(open func() (*os.File, error), limit int64) ([]byte, time.Time, error) {
 	file, err := open()
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
+		return nil, time.Time{}, errors.New("not a regular file")
 	}
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if int64(len(data)) > limit {
-		return nil, errors.New("file exceeds size limit")
+		return nil, time.Time{}, errors.New("file exceeds size limit")
 	}
-	return data, nil
+	return data, info.ModTime(), nil
 }

@@ -708,6 +708,7 @@ func TestBrowserCallNotRunNamesACallThatNeverReachedChrome(t *testing.T) {
 	for err, want := range map[error]string{
 		errUserChromeRequired: "browser_connection_required",
 		errBrowserBusy:        "browser_busy",
+		errNoManagedBrowser:   "browser_unavailable",
 		errors.Join(errUserChromeRejected, errors.New("cleanup")): "browser_connection_invalid",
 		errors.New("page did not load"):                           "",
 		nil:                                                       "",
@@ -715,6 +716,52 @@ func TestBrowserCallNotRunNamesACallThatNeverReachedChrome(t *testing.T) {
 		if got := BrowserCallNotRun(err); got != want {
 			t.Fatalf("BrowserCallNotRun(%v) = %q, want %q", err, got, want)
 		}
+	}
+}
+
+// A Mac or Windows Computer without Chrome runs the Agent profile in Edge;
+// Chrome wins when it is installed.
+func TestManagedBrowserFallsBackToEdgeWithoutChrome(t *testing.T) {
+	home := t.TempDir()
+	var env []string
+	var edge, chrome string
+	switch runtime.GOOS {
+	case "darwin":
+		env = []string{"HOME=" + home}
+		edge = filepath.Join(home, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")
+		chrome = filepath.Join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+	case "windows":
+		env = []string{"LOCALAPPDATA=" + home}
+		edge = filepath.Join(home, "Microsoft", "Edge", "Application", "msedge.exe")
+		chrome = filepath.Join(home, "Google", "Chrome", "Application", "chrome.exe")
+	default:
+		t.Skip("the Edge fallback exists only on macOS and Windows")
+	}
+	if edgeExecutable(env) != "" {
+		t.Skip("this machine has Edge installed system-wide")
+	}
+	if err := os.MkdirAll(filepath.Dir(edge), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(edge, nil, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := edgeExecutable(env); got != edge {
+		t.Fatalf("edge = %q, want %q", got, edge)
+	}
+	if chromeExecutable(env) == "" {
+		if got := managedBrowserExecutable(env); got != edge {
+			t.Fatalf("without Chrome: %q, want %q", got, edge)
+		}
+		if err := os.MkdirAll(filepath.Dir(chrome), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(chrome, nil, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := managedBrowserExecutable(env), chromeExecutable(env); got != want || want == "" {
+		t.Fatalf("with Chrome: %q, want %q", got, want)
 	}
 }
 

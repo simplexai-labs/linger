@@ -196,6 +196,8 @@ export interface MessageComposerProps {
   }) => Promise<void>;
   /** Reports the open Document mention query so the owner can search the catalog. */
   onDocumentQueryChange?: (query: string | null) => void;
+  /** Asks the owner for more Documents once the `@` list is scrolled to its end. */
+  onLoadMoreDocuments?: () => void;
   onOpenDocument?: (document: MessageDocumentOption) => void;
   onOpenDocumentContext?: (context: RoomComposerDocumentContext) => void;
   onOpenProfile?: (actorId: string) => void;
@@ -281,6 +283,7 @@ function useMessageComposer(
     onCancelAttachment,
     onDocumentQueryChange,
     onDraftStateChange,
+    onLoadMoreDocuments,
     onVoiceModePresentation,
     onOpenDocument,
     onOpenDocumentContext,
@@ -424,6 +427,7 @@ function useMessageComposer(
     mentionTab: picker.mentionTab,
     mentions: currentReferences.mentions,
     messageError: draft.messageError,
+    onLoadMoreDocuments,
     onOpenDocument,
     onOpenDocumentContext,
     onCancel,
@@ -590,6 +594,7 @@ function ComposerPickerMenus({
     mentionListId,
     mentionQuery,
     mentionTab,
+    onLoadMoreDocuments,
     setMentionSelection,
     setMentionTab,
     skillOptions,
@@ -605,6 +610,7 @@ function ComposerPickerMenus({
           activeIndex={activeMentionIndex}
           items={atPickerItems}
           listId={mentionListId}
+          onReachEnd={mentionTab === "people" ? undefined : onLoadMoreDocuments}
           onSelect={insertAtPickerItem}
           onSelectionChange={setMentionSelection}
           onTabChange={(tab) => {
@@ -1274,7 +1280,7 @@ function ReplyContextPreview({
   return (
     <div
       aria-label={t(composerMessages.replyContext)}
-      className="mb-2 max-h-36 space-y-1 overflow-y-auto border-b border-app-border pb-2 pr-1"
+      className="mb-2 max-h-36 space-y-1 overflow-y-auto pb-2 pr-1"
     >
       {messages.map((message) => (
         <div
@@ -1657,7 +1663,7 @@ function ImageAttachmentDialog({
       onClose={onClose}
       size="xl"
     >
-      <div className="flex items-center justify-between border-b border-app-border px-3 py-2">
+      <div className="flex items-center justify-between px-3 py-2">
         <p className="truncate text-sm font-semibold text-app-ink">
           {file.name}
         </p>
@@ -1739,6 +1745,9 @@ function attachmentTokenPresentation(file: File) {
   };
 }
 
+/** Starts the next Docs page about two rows before the list runs out. */
+const MENTION_LIST_LOAD_MORE_THRESHOLD_PX = 96;
+
 const mentionTabMessages = {
   all: composerMessages.mentionTabAll,
   docs: composerMessages.mentionTabDocs,
@@ -1749,6 +1758,7 @@ function MentionMenu({
   activeIndex,
   items,
   listId,
+  onReachEnd,
   onSelect,
   onSelectionChange,
   onTabChange,
@@ -1758,6 +1768,8 @@ function MentionMenu({
   activeIndex: number;
   items: AtPickerItem[];
   listId: string;
+  /** Called when the list is scrolled, or keyboard-navigated, near its end. */
+  onReachEnd?: () => void;
   onSelect: (item: AtPickerItem) => void;
   onSelectionChange: (index: number) => void;
   onTabChange: (tab: MentionTab) => void;
@@ -1844,7 +1856,7 @@ function MentionMenu({
       ref={menuRef}
     >
       <div
-        className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-app-border bg-app-surface px-2 pt-2"
+        className="sticky top-0 z-10 flex shrink-0 gap-1 bg-app-surface px-2 pt-2"
         role="tablist"
       >
         {tabs.map((value) => (
@@ -1899,6 +1911,14 @@ function MentionMenu({
           aria-label={t(composerMessages.mentionPicker)}
           className="workspace-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5"
           id={listId}
+          onScroll={(event) => {
+            const list = event.currentTarget;
+            if (
+              list.scrollTop + list.clientHeight >=
+              list.scrollHeight - MENTION_LIST_LOAD_MORE_THRESHOLD_PX
+            )
+              onReachEnd?.();
+          }}
           ref={listRef}
           role="listbox"
         >
@@ -2030,7 +2050,7 @@ function SkillMenu({
   const selectedSkill = items[activeIndex];
   return (
     <div className="app-floating-enter absolute bottom-[calc(100%+8px)] left-0 z-30 flex max-h-[min(24rem,calc(100dvh-7rem))] w-[min(42rem,calc(100vw-1.5rem))] flex-col overflow-hidden bg-popover shadow-md [border-radius:var(--app-panel-radius)]">
-      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-app-border px-3">
+      <div className="flex min-h-11 shrink-0 items-center gap-2 px-3">
         <ActorAvatar
           actorId={agent.id}
           kind="agent"

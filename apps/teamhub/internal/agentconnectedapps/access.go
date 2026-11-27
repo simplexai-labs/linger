@@ -183,7 +183,8 @@ var readTools = map[string]bool{
 // preparatory writes before a confirmed send (drafts, chats, attachments),
 // archives, new folders, and the writes hosts send to their
 // permission reviewer ("judge" in the CLI's connectorWriteApproval), which
-// include paid media generation.
+// include paid media generation and Notion pages created or appended to,
+// which page history can undo. Notion edits replace content and stay held.
 var directWriteTools = map[string]bool{
 	"FAL_AI_SUBMIT_ASYNC_JOB":                              true,
 	"FAL_AI_UPLOAD_FILE":                                   true,
@@ -204,6 +205,8 @@ var directWriteTools = map[string]bool{
 	"HIGGSFIELD_MCP_GENERATE_VIDEO":                        true,
 	"HIGGSFIELD_MCP_MEDIA_CONFIRM":                         true,
 	"HIGGSFIELD_MCP_MEDIA_UPLOAD":                          true,
+	"NOTION_ADD_MULTIPLE_PAGE_CONTENT":                     true,
+	"NOTION_CREATE_NOTION_PAGE":                            true,
 	"OUTLOOK_ADD_MAIL_ATTACHMENT":                          true,
 	"OUTLOOK_CALENDAR_CREATE_EVENT":                        true,
 	"OUTLOOK_CANCEL_CALENDAR_EVENT":                        true,

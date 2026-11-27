@@ -1185,6 +1185,7 @@ type Message struct {
 	FiredRoutineInstruction pgtype.Text        `json:"fired_routine_instruction"`
 	CardKind                pgtype.Text        `json:"card_kind"`
 	HumanWaiting            bool               `json:"human_waiting"`
+	Continues               bool               `json:"continues"`
 }
 
 type MessageCard struct {
@@ -1498,6 +1499,24 @@ type RoomEvent struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type RoomHandoff struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	OriginRoomID string             `json:"origin_room_id"`
+	RoomID       string             `json:"room_id"`
+	HumanActorID string             `json:"human_actor_id"`
+	AgentActorID string             `json:"agent_actor_id"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type RoomHandoffReport struct {
+	MessageID      string             `json:"message_id"`
+	HandoffID      string             `json:"handoff_id"`
+	VoiceSessionID pgtype.Text        `json:"voice_session_id"`
+	ToldAt         pgtype.Timestamptz `json:"told_at"`
+}
+
 type RoomHistoryShare struct {
 	ID                       string             `json:"id"`
 	RoomID                   string             `json:"room_id"`
@@ -1596,6 +1615,29 @@ type RoutineEventDelivery struct {
 	Source          string             `json:"source"`
 	UpstreamEventID string             `json:"upstream_event_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type RuntimeLocalComputer struct {
+	ComputerID            string             `json:"computer_id"`
+	DisplayName           string             `json:"display_name"`
+	Status                string             `json:"status"`
+	CredentialGeneration  int64              `json:"credential_generation"`
+	ActiveOperations      int32              `json:"active_operations"`
+	RuntimeInventory      []byte             `json:"runtime_inventory"`
+	WorkspaceGrants       []byte             `json:"workspace_grants"`
+	RuntimeDiagnostics    []byte             `json:"runtime_diagnostics"`
+	LastSeenAt            pgtype.Timestamptz `json:"last_seen_at"`
+	RemovedAt             pgtype.Timestamptz `json:"removed_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	DaemonID              pgtype.Text        `json:"daemon_id"`
+	DaemonPublicKey       []byte             `json:"daemon_public_key"`
+	DaemonIdentityVersion int64              `json:"daemon_identity_version"`
+	Platform              pgtype.Text        `json:"platform"`
+	DaemonVersion         pgtype.Text        `json:"daemon_version"`
+	RecommendedVersion    pgtype.Text        `json:"recommended_version"`
+	OwnerTenantID         string             `json:"owner_tenant_id"`
+	OwnerActorID          string             `json:"owner_actor_id"`
 }
 
 type Skill struct {

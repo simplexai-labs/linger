@@ -61,13 +61,9 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 	if d.runtimeCleanupUnconfirmed(command.RuntimeType) {
 		return d.finishFailure(ctx, stream, command, cleanupUnconfirmedCode, cleanupUnconfirmedMessage)
 	}
-	admittedCount, contextBusy := d.operationOccupancy(identity)
-	capacityExhausted := d.capacity != nil && admittedCount >= *d.capacity
+	_, contextBusy := d.operationOccupancy(identity)
 	if stopped {
 		return d.finishFailure(ctx, stream, command, operationCodeRunnerStopped, "Agent Runner is locally stopped")
-	}
-	if capacityExhausted {
-		return d.finishAdmissionBusy(ctx, stream, command, "Local Computer capacity is exhausted")
 	}
 	if contextBusy {
 		return d.finishAdmissionBusy(ctx, stream, command, "Context already has an active Operation")
@@ -137,20 +133,21 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 	if prepared != nil {
 		prepared.suppressReceipt()
 	}
-	// Register before releasing admissionMu: drain, stop, capacity and Context
+	// Register before releasing admissionMu: drain, stop and Context
 	// occupancy must see this Operation from the moment it is accepted.
 	d.activeMu.Lock()
 	d.activeOperations[command.OperationID] = active
 	d.activeMu.Unlock()
 	acceptedRevision := d.authorityRevision
-	// Capture the welcomed failure-code feature before returning to the
-	// connection loop so a transient stream drop during gateway remount cannot
-	// downgrade an already-accepted Operation's failure code.
+	// Capture the welcomed feature flags before returning to the connection loop
+	// so a transient stream drop during gateway remount cannot downgrade an
+	// already-accepted Operation.
 	modelGatewayUnavailable := d.modelGatewayUnavailable.Load()
+	operationBackgroundWait := d.operationBackgroundWait.Load()
 	d.operationWG.Add(1)
 	go func() {
 		defer d.operationWG.Done()
-		d.startAcceptedOperation(operationCtx, command, spec, prepared, acceptedRevision, modelGatewayUnavailable, emitEvent, cancel)
+		d.startAcceptedOperation(operationCtx, command, spec, prepared, acceptedRevision, modelGatewayUnavailable, operationBackgroundWait, emitEvent, cancel)
 	}()
 	return acceptanceSendErr
 }

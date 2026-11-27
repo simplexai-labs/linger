@@ -276,6 +276,12 @@ export class WindowManagerModule implements Module {
     }
   }
 
+  hide(): void {
+    this.#pendingShow = false;
+    this.#clearRevealTimer();
+    if (this.#window && !this.#window.isDestroyed()) this.#window.hide();
+  }
+
   // Warms the default session HTTP cache with `/` HTML and `/assets/*` bundles
   // without mutating cookies or mounting a DOM.
   async prewarmAssets(origin: string): Promise<void> {
@@ -962,7 +968,7 @@ export class WindowManagerModule implements Module {
     // Back to setup from the server address form, or, from the start failure
     // page, setting this computer up again.
     if (url.pathname === "/setup" || url.pathname === "/reset") {
-      this.#window?.hide();
+      this.hide();
       if (url.pathname === "/reset") this.#ctx!.bus.emit("local-server.reset");
       else this.#ctx!.bus.emit("setup.open");
       return new Response(null, { status: 204 });

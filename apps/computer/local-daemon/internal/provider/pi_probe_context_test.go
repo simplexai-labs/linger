@@ -41,7 +41,7 @@ done
 				defer cancel(nil)
 				done := make(chan runtimeProbeOutcome, 1)
 				go func() {
-					done <- probePiAuthentication(ctx, program, map[string]string{"HOME": root, "PATH": root, "FIXTURE_STAGE": stage}, time.Second)
+					done <- probePiAuthentication(ctx, program, map[string]string{"HOME": root, "PATH": root, "FIXTURE_STAGE": stage}, time.Second, "")
 				}()
 				var encoded []byte
 				deadline := time.Now().Add(3 * time.Second)

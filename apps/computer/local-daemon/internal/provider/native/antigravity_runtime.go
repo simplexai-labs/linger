@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +24,23 @@ const (
 	antigravityDefaultModel = "antigravity-default"
 	antigravityEventBuffer  = 256
 )
+
+var (
+	errAntigravityWake          = errors.New("Antigravity woken by user input")
+	antigravityHookEndpointFunc = AntigravitySharedHookEndpoint
+	antigravityBeforeWakePrompt func()
+)
+
+func antigravityHookConfig(logger *slog.Logger) (*AntigravityHookEndpoint, []string) {
+	ep, err := antigravityHookEndpointFunc()
+	if err != nil {
+		if logger != nil {
+			logger.Warn("antigravity.hook_endpoint_unavailable", "error", err)
+		}
+		return nil, nil
+	}
+	return ep, []string{"--add-dir", ep.Dir()}
+}
 
 // antigravityQuietWindow is how long a session with no open tool call must
 // stay silent before a background continuation counts as finished.
@@ -92,7 +111,12 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	key := antigravityResidentKey(r.profile)
 	fence := captureReleaseFence(r.profile)
 	epoch := antigravityResidents.currentEpoch()
-	wantShape := antigravityShapeFor(program, r.profile, spec, mcpShape, mcpEligible)
+	hookEP, hookArgs := antigravityHookConfig(r.profile.Logger)
+	hookDir := ""
+	if hookEP != nil {
+		hookDir = hookEP.Dir()
+	}
+	wantShape := antigravityShapeFor(program, r.profile, spec, hookDir, mcpShape, mcpEligible)
 
 	if key != "" && antigravityResidents.enabled() {
 		proc, adopted, err := antigravityResidents.take(key, antigravityMismatch(wantShape, spec), r.profile.Logger, spec.Readiness)
@@ -139,7 +163,7 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 		}
 	}
 	runCtx, cancel := budgetContext(ctx, spec.Budget)
-	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil)
+	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil, hookArgs...)
 	if err != nil {
 		cancel()
 		front.Close()
@@ -151,6 +175,7 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	proc.res.bind(key, r.profile)
 	proc.res.bindEpoch(epoch)
 	proc.front = front
+	proc.hookEP = hookEP
 	proc.releaseTemp = releaseTemp
 	var parkShape *antigravityShape
 	if parkEligible {
@@ -165,7 +190,7 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	spec.Readiness.spawned()
 	spec.Readiness.session(spec.ResumeID != "")
 	go turn.drive(prompt, servers)
-	return &Run{Events: turn.events, Outcome: turn.outcome}, nil
+	return &Run{Events: turn.events, Outcome: turn.outcome, Steer: turn.steer}, nil
 }
 
 // reuse runs a turn on a taken resident process. stale reports that the
@@ -245,7 +270,7 @@ func (r *antigravityRuntime) reuse(
 		return retireStale()
 	}
 	go turn.drive(prompt, servers)
-	return &Run{Events: turn.events, Outcome: turn.outcome}, false, nil
+	return &Run{Events: turn.events, Outcome: turn.outcome, Steer: turn.steer}, false, nil
 }
 
 func newAntigravityTurn(
@@ -255,25 +280,51 @@ func newAntigravityTurn(
 	return &antigravityTurn{
 		profile: profile, spec: spec, proc: proc, runCtx: runCtx, cancel: cancel,
 		reused: reused, adopted: adopted, fence: fence, parkShape: parkShape,
+		turnID: "antigravity-turn-" + piRandomHex(12),
+		hookEP: proc.hookEP,
 		events: make(chan Event, antigravityEventBuffer), outcome: make(chan Outcome, 1),
-		tools: map[string]bool{}, requests: newModelRequestClock(GranularityDelta),
+		wakeCh: make(chan struct{}, 1), done: make(chan struct{}),
+		tools: map[string]BackgroundTool{}, phase: "running",
+		requests: newModelRequestClock(GranularityDelta),
 	}
+}
+
+type antigravitySteer struct {
+	text    string
+	done    chan error
+	claimed bool
+	once    sync.Once
+}
+
+func (s *antigravitySteer) resolve(err error) {
+	s.once.Do(func() { s.done <- err })
+}
+
+type acpPromptResult struct {
+	gen uint64
+	raw json.RawMessage
+	err error
 }
 
 // antigravityTurn is the one prompt of an Operation.
 type antigravityTurn struct {
-	profile   Profile
-	spec      RunSpec
-	proc      *acpProcess
-	runCtx    context.Context
-	cancel    context.CancelFunc
-	reused    bool
-	adopted   bool
-	fence     releaseFence
-	parkShape *antigravityShape
+	profile    Profile
+	spec       RunSpec
+	proc       *acpProcess
+	runCtx     context.Context
+	cancel     context.CancelFunc
+	reused     bool
+	adopted    bool
+	compaction bool
+	fence      releaseFence
+	parkShape  *antigravityShape
+	turnID     string
+	hookEP     *AntigravityHookEndpoint
 
 	events       chan Event
 	outcome      chan Outcome
+	wakeCh       chan struct{}
+	done         chan struct{}
 	emitMu       sync.RWMutex
 	eventsClosed bool
 	requests     *modelRequestClock
@@ -284,18 +335,91 @@ type antigravityTurn struct {
 	prompting bool
 	// replayedPrompts counts the user prompts session/load replayed.
 	replayedPrompts int
-	// background is set when the turn enters awaitBackground so the process is
+	// background is set when the turn enters background wait so the process is
 	// never parked with a background continuation in flight.
 	background bool
-	sessionID  string
-	textID     string
-	output     strings.Builder
-	tools      map[string]bool
+	// sawActivity records whether the prompted turn observed any reasoning,
+	// tool call, or plan. Antigravity surfaces some upstream refusals as a
+	// plain agent_message_chunk followed by end_turn with no usage or activity.
+	sawActivity    bool
+	phase          string
+	ended          bool
+	wokenByUser    bool
+	steers         []*antigravitySteer
+	unregisterHook func()
+	sessionID      string
+	preTokens      *int64
+	textID         string
+	output         strings.Builder
+	tools          map[string]BackgroundTool
 	// lastUpdate is when the prompted session last reported anything.
 	lastUpdate time.Time
 }
 
+func (t *antigravityTurn) unregister() {
+	t.mu.Lock()
+	unreg := t.unregisterHook
+	t.unregisterHook = nil
+	t.mu.Unlock()
+	if unreg != nil {
+		unreg()
+	}
+}
+
+func (t *antigravityTurn) triggerWake() {
+	select {
+	case t.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (t *antigravityTurn) takeSteersLocked() []*antigravitySteer {
+	if len(t.steers) == 0 {
+		return nil
+	}
+	steers := t.steers
+	for _, s := range steers {
+		s.claimed = true
+	}
+	t.steers = nil
+	return steers
+}
+
+func (t *antigravityTurn) rejectSteersLocked() {
+	actual := ""
+	for _, s := range t.steers {
+		s.resolve(&SteerError{
+			Effect:         "definitely_not_applied",
+			Reason:         "no_active_turn",
+			ExpectedTurnID: t.turnID,
+			ActualTurnID:   actual,
+			Message:        "Antigravity turn ended before applying the steered input",
+		})
+	}
+	t.steers = nil
+}
+
+func (t *antigravityTurn) snapshotToolsLocked() []BackgroundTool {
+	if len(t.tools) == 0 {
+		return nil
+	}
+	tools := make([]BackgroundTool, 0, len(t.tools))
+	for _, tool := range t.tools {
+		tools = append(tools, tool)
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		if !tools[i].StartedAt.Equal(tools[j].StartedAt) {
+			return tools[i].StartedAt.Before(tools[j].StartedAt)
+		}
+		return tools[i].CallID < tools[j].CallID
+	})
+	return tools
+}
+
 func (t *antigravityTurn) emit(event Event) {
+	if t.compaction {
+		return
+	}
 	t.emitMu.RLock()
 	defer t.emitMu.RUnlock()
 	if t.eventsClosed || t.runCtx.Err() != nil {
@@ -308,6 +432,12 @@ func (t *antigravityTurn) emit(event Event) {
 }
 
 func (t *antigravityTurn) finish(outcome Outcome) {
+	t.mu.Lock()
+	t.ended = true
+	t.rejectSteersLocked()
+	t.mu.Unlock()
+	t.unregister()
+	close(t.done)
 	t.cancel()
 	t.emitMu.Lock()
 	t.eventsClosed = true
@@ -315,6 +445,182 @@ func (t *antigravityTurn) finish(outcome Outcome) {
 	t.emitMu.Unlock()
 	t.outcome <- outcome
 	close(t.outcome)
+}
+
+func (t *antigravityTurn) steer(ctx context.Context, request SteerRequest) (SteerAck, error) {
+	if err := ctx.Err(); err != nil {
+		return SteerAck{}, err
+	}
+	t.mu.Lock()
+	if t.ended || t.runCtx.Err() != nil || request.ExpectedTurnID != t.turnID {
+		ended := t.ended
+		actual := t.turnID
+		if ended {
+			actual = ""
+		}
+		t.mu.Unlock()
+		reason := "no_active_turn"
+		if !ended && request.ExpectedTurnID != actual {
+			reason = "target_mismatch"
+		}
+		return SteerAck{}, &SteerError{
+			Effect:         "definitely_not_applied",
+			Reason:         reason,
+			ExpectedTurnID: request.ExpectedTurnID,
+			ActualTurnID:   actual,
+			Message:        "Antigravity has no matching active turn",
+		}
+	}
+	steer := &antigravitySteer{text: request.Input, done: make(chan error, 1)}
+	t.steers = append(t.steers, steer)
+	wake := t.phase == "waiting_background"
+	t.mu.Unlock()
+	if wake {
+		t.triggerWake()
+	}
+	select {
+	case err := <-steer.done:
+		if err != nil {
+			return SteerAck{}, err
+		}
+		return SteerAck{TurnID: t.turnID}, nil
+	case <-t.done:
+		select {
+		case err := <-steer.done:
+			if err != nil {
+				return SteerAck{}, err
+			}
+			return SteerAck{TurnID: t.turnID}, nil
+		default:
+		}
+		return SteerAck{}, &SteerError{
+			Effect:         "definitely_not_applied",
+			Reason:         "no_active_turn",
+			ExpectedTurnID: request.ExpectedTurnID,
+			ActualTurnID:   "",
+			Message:        "Antigravity turn ended before applying the steered input",
+		}
+	case <-ctx.Done():
+		t.mu.Lock()
+		withdrawn := false
+		if !steer.claimed {
+			if idx := slices.Index(t.steers, steer); idx >= 0 {
+				t.steers = slices.Delete(t.steers, idx, idx+1)
+				withdrawn = true
+			}
+		}
+		t.mu.Unlock()
+		if withdrawn {
+			return SteerAck{}, &SteerError{
+				Effect:         "definitely_not_applied",
+				Reason:         "no_active_turn",
+				ExpectedTurnID: request.ExpectedTurnID,
+				ActualTurnID:   t.turnID,
+				Message:        "Antigravity steer request was cancelled before delivery",
+			}
+		}
+		select {
+		case err := <-steer.done:
+			if err != nil {
+				return SteerAck{}, err
+			}
+			return SteerAck{TurnID: t.turnID}, nil
+		case <-t.done:
+			return SteerAck{}, &SteerError{
+				Effect:         "uncertain",
+				Reason:         "transport",
+				ExpectedTurnID: request.ExpectedTurnID,
+				ActualTurnID:   "",
+				Message:        "Antigravity steer delivery could not be confirmed",
+			}
+		}
+	}
+}
+
+func (t *antigravityTurn) onHook(_ context.Context, req AntigravityHookRequest) AntigravityHookResponse {
+	t.proc.noteTranscriptPath(req)
+	switch req.HookEventName {
+	case "PreInvocation":
+		t.mu.Lock()
+		if t.ended || t.runCtx.Err() != nil {
+			t.mu.Unlock()
+			return AntigravityHookResponse{}
+		}
+		emitResumed := false
+		trigger := "background_continuation"
+		if t.phase == "waiting_background" {
+			t.phase = "running"
+			if t.wokenByUser {
+				trigger = "user_input"
+				t.wokenByUser = false
+			}
+			emitResumed = true
+		} else if t.wokenByUser {
+			t.wokenByUser = false
+		}
+		steers := t.takeSteersLocked()
+		t.mu.Unlock()
+		if emitResumed {
+			if t.profile.Logger != nil {
+				t.profile.Logger.Info("antigravity.hook.background_resumed", "session_id", req.ConversationID, "trigger", trigger)
+			}
+			t.emit(Event{
+				Kind:              EventBackgroundResumed,
+				ObservedAt:        time.Now(),
+				BackgroundTrigger: trigger,
+			})
+		}
+		if len(steers) == 0 {
+			return AntigravityHookResponse{}
+		}
+		if t.profile.Logger != nil {
+			t.profile.Logger.Info("antigravity.hook.steer_injected", "session_id", req.ConversationID, "invocation_num", req.InvocationNum, "count", len(steers))
+		}
+		steps := make([]AntigravityInjectStep, 0, len(steers))
+		for _, s := range steers {
+			steps = append(steps, AntigravityInjectStep{UserMessage: s.text})
+			s.resolve(nil)
+		}
+		return AntigravityHookResponse{InjectSteps: steps}
+
+	case "Stop":
+		if req.FullyIdle == nil || *req.FullyIdle {
+			return AntigravityHookResponse{}
+		}
+		t.mu.Lock()
+		if t.ended || t.runCtx.Err() != nil {
+			t.mu.Unlock()
+			return AntigravityHookResponse{}
+		}
+		tools := t.snapshotToolsLocked()
+		hasSteers := len(t.steers) > 0
+		emitWaiting := false
+		if len(tools) > 0 {
+			if hasSteers {
+				// Wake immediately rather than advertising background idle wait when
+				// a steer is already waiting.
+			} else if t.phase != "waiting_background" {
+				t.phase = "waiting_background"
+				t.background = true
+				emitWaiting = true
+			}
+		}
+		t.mu.Unlock()
+		if len(tools) > 0 && hasSteers {
+			t.triggerWake()
+		} else if emitWaiting {
+			if t.profile.Logger != nil {
+				t.profile.Logger.Info("antigravity.hook.background_waiting", "session_id", req.ConversationID, "tool_count", len(tools))
+			}
+			t.emit(Event{
+				Kind:            EventBackgroundWaiting,
+				ObservedAt:      time.Now(),
+				BackgroundTools: tools,
+			})
+		}
+		return AntigravityHookResponse{}
+	}
+	return AntigravityHookResponse{}
 }
 
 func (t *antigravityTurn) park(outcome Outcome) bool {
@@ -349,6 +655,9 @@ func (t *antigravityTurn) drive(prompt string, servers []any) {
 		if outcome.Error == "" {
 			outcome.Error = "Antigravity turn was " + status
 		}
+		if outcome.PublicDetail == "" {
+			outcome.PublicDetail = outcome.Error
+		}
 	}
 	t.mu.Lock()
 	outcome.SessionID = t.sessionID
@@ -357,6 +666,7 @@ func (t *antigravityTurn) drive(prompt string, servers []any) {
 		return
 	}
 	t.proc.unbind(t)
+	exitedBeforeStop := !t.proc.alive()
 	confirmed := t.proc.stop()
 	outcome.ExitConfirmed = confirmed
 	outcome.ExitUnconfirmed = !confirmed
@@ -365,7 +675,7 @@ func (t *antigravityTurn) drive(prompt string, servers []any) {
 	} else {
 		antigravityResidents.hold(t.proc)
 	}
-	if outcome.Status == statusFailed && outcome.Diagnostics.empty() && t.proc.cmd.ProcessState != nil {
+	if outcome.Status == statusFailed && outcome.Diagnostics.empty() && exitedBeforeStop && t.proc.cmd.ProcessState != nil {
 		outcome.Diagnostics = processExitDiagnostics(t.proc.cmd.ProcessState)
 	}
 	t.finish(outcome)
@@ -377,7 +687,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	started := time.Now()
 	conn, spec := t.proc.conn, t.spec
 	failed := func(code, message string) Outcome {
-		return Outcome{Status: statusFailed, FailureCode: code, Error: message, ElapsedMs: time.Since(started).Milliseconds()}
+		return Outcome{Status: statusFailed, FailureCode: code, Error: message, PublicDetail: message, ElapsedMs: time.Since(started).Milliseconds()}
 	}
 	// A resumed session is known before agy loads it, which takes seconds,
 	// so the Run starts now; a new session reports its id once agy names it.
@@ -599,84 +909,293 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 		}
 	}
 
+	if t.hookEP != nil {
+		unreg := t.hookEP.Register(sessionID, t.onHook)
+		t.mu.Lock()
+		t.unregisterHook = unreg
+		t.mu.Unlock()
+	}
+	defer t.unregister()
+
 	t.mu.Lock()
 	t.prompting = true
 	t.mu.Unlock()
 	dispatched := time.Now()
-	t.requests.begin("", dispatched)
 	if !startedEarly {
 		t.started(sessionID, dispatched)
 	}
-	raw, err := conn.call(t.runCtx, "session/prompt", map[string]any{
-		"sessionId": sessionID,
-		"prompt":    []any{map[string]any{"type": "text", "text": prompt}},
-	})
-	if err != nil && t.runCtx.Err() != nil {
-		raw, err = t.cancelPrompt(sessionID)
+	modelName := spec.Model
+	if modelName == "" {
+		modelName = antigravityDefaultModel
 	}
-	if err != nil {
+	totalUsage := map[string]TokenCount{}
+	lastUsage := map[string]TokenCount{}
+	hasUsage := false
+	hasNonzeroUsage := false
+	results := make(chan acpPromptResult, 8)
+	var activeGen uint64 = 1
+	if err := t.launchPrompt(sessionID, prompt, activeGen, results); err != nil {
 		if errors.Is(err, errACPClosed) {
 			return failed("", "Antigravity exited before the turn finished")
 		}
 		return failed("", "Antigravity session/prompt failed: "+err.Error())
 	}
-	var result struct {
-		StopReason string             `json:"stopReason"`
-		Usage      *antigravityTokens `json:"usage"`
-	}
-	_ = json.Unmarshal(raw, &result)
-	if result.StopReason == "end_turn" {
-		switch err := t.awaitBackground(); {
-		case errors.Is(err, errACPClosed):
-			return failed("", "Antigravity exited before the turn finished")
-		case err != nil:
+
+	var stopReason string
+	for {
+		var res acpPromptResult
+		select {
+		case res = <-results:
+		case <-t.wakeCh:
+			_, wakeErr := t.sendWakePrompt(sessionID, &activeGen, results)
+			if wakeErr != nil {
+				if errors.Is(wakeErr, errACPClosed) {
+					return failed("", "Antigravity exited before the turn finished")
+				}
+				return failed("", "Antigravity session/prompt failed: "+wakeErr.Error())
+			}
+			continue
+		case <-t.runCtx.Done():
 			_, _ = t.cancelPrompt(sessionID)
-			result.StopReason = "cancelled"
+			return failed("", "Antigravity session/prompt failed: "+t.runCtx.Err().Error())
+		case <-t.proc.conn.closed:
+			select {
+			case res = <-results:
+			default:
+				return failed("", "Antigravity exited before the turn finished")
+			}
+		}
+		if res.err != nil {
+			if res.gen < activeGen {
+				if errors.Is(res.err, errACPClosed) {
+					return failed("", "Antigravity exited before the turn finished")
+				}
+				continue
+			}
+			if t.runCtx.Err() != nil {
+				_, _ = t.cancelPrompt(sessionID)
+			}
+			if errors.Is(res.err, errACPClosed) {
+				return failed("", "Antigravity exited before the turn finished")
+			}
+			return failed("", "Antigravity session/prompt failed: "+res.err.Error())
+		}
+		reason, gotUsage, nonzeroUsage := t.recordPromptUsage(modelName, res.raw, totalUsage, lastUsage)
+		if gotUsage {
+			hasUsage = true
+		}
+		if nonzeroUsage {
+			hasNonzeroUsage = true
+		}
+		if res.gen < activeGen {
+			continue
+		}
+		stopReason = reason
+		if stopReason != "end_turn" {
+			break
+		}
+		sentWakePrompt := false
+		for !sentWakePrompt {
+			t.mu.Lock()
+			openTools := t.snapshotToolsLocked()
+			hasSteers := len(t.steers) > 0
+			wasWaiting := t.phase == "waiting_background"
+			if len(openTools) == 0 {
+				if wasWaiting {
+					t.phase = "running"
+				}
+				t.mu.Unlock()
+				if wasWaiting {
+					t.emit(Event{Kind: EventBackgroundResumed, ObservedAt: time.Now(), BackgroundTrigger: "background_continuation"})
+				}
+				break
+			}
+			if hasSteers {
+				t.mu.Unlock()
+				sent, wakeErr := t.sendWakePrompt(sessionID, &activeGen, results)
+				if wakeErr != nil {
+					if errors.Is(wakeErr, errACPClosed) {
+						return failed("", "Antigravity exited before the turn finished")
+					}
+					return failed("", "Antigravity session/prompt failed: "+wakeErr.Error())
+				}
+				if sent {
+					sentWakePrompt = true
+					break
+				}
+				continue
+			}
+			emitWaiting := !wasWaiting
+			t.phase = "waiting_background"
+			t.background = true
+			// The continuation's text is a new message.
+			t.textID = ""
+			t.mu.Unlock()
+			if emitWaiting {
+				t.emit(Event{Kind: EventBackgroundWaiting, ObservedAt: time.Now(), BackgroundTools: openTools})
+			}
+			bgErr := t.awaitBackgroundOrWake()
+			if errors.Is(bgErr, errAntigravityWake) {
+				sent, wakeErr := t.sendWakePrompt(sessionID, &activeGen, results)
+				if wakeErr != nil {
+					if errors.Is(wakeErr, errACPClosed) {
+						return failed("", "Antigravity exited before the turn finished")
+					}
+					return failed("", "Antigravity session/prompt failed: "+wakeErr.Error())
+				}
+				if sent {
+					sentWakePrompt = true
+					break
+				}
+				continue
+			}
+			if errors.Is(bgErr, errACPClosed) {
+				return failed("", "Antigravity exited before the turn finished")
+			}
+			if bgErr != nil {
+				_, _ = t.cancelPrompt(sessionID)
+				stopReason = "cancelled"
+				break
+			}
+			t.mu.Lock()
+			stillWaiting := t.phase == "waiting_background"
+			if stillWaiting {
+				t.phase = "running"
+			}
+			t.mu.Unlock()
+			if stillWaiting {
+				t.emit(Event{Kind: EventBackgroundResumed, ObservedAt: time.Now(), BackgroundTrigger: "background_continuation"})
+			}
+			break
+		}
+		if !sentWakePrompt {
+			break
 		}
 	}
 	outcome := Outcome{ElapsedMs: time.Since(started).Milliseconds()}
 	t.mu.Lock()
 	// Untrimmed, as the reply Agent Service reads from the stream.
 	outcome.Output = t.output.String()
+	sawActivity := t.sawActivity
 	t.mu.Unlock()
-	if result.Usage != nil {
-		model := spec.Model
-		if model == "" {
-			model = antigravityDefaultModel
-		}
-		count := result.Usage.count()
-		outcome.Usage = map[string]TokenCount{model: count}
-		outcome.LastUsage = map[string]TokenCount{model: count}
-		response := t.requests.respond(ModelResponse{Model: model, Usage: count}, time.Now())
-		t.emit(Event{Kind: EventModelResponse, ObservedAt: time.Now(), Response: &response})
+	if hasUsage {
+		outcome.Usage = totalUsage
+		outcome.LastUsage = lastUsage
 	}
-	switch result.StopReason {
+	switch stopReason {
 	case "end_turn":
-		outcome.Status = statusCompleted
+		if !hasNonzeroUsage && !sawActivity {
+			outcome.Status = statusFailed
+			outcome.Error = strings.TrimSpace(outcome.Output)
+			if outcome.Error == "" {
+				outcome.Error = "Antigravity ended the turn without a model response"
+			}
+			outcome.PublicDetail = outcome.Error
+			outcome.Output = ""
+		} else {
+			outcome.Status = statusCompleted
+		}
 	case "cancelled":
 		outcome.Status, outcome.Error = statusAborted, "Antigravity turn was cancelled"
 	default:
-		outcome.Status, outcome.Error = statusFailed, "Antigravity stopped the turn: "+result.StopReason
+		outcome.Status, outcome.Error = statusFailed, "Antigravity stopped the turn: "+stopReason
+		outcome.PublicDetail = outcome.Error
 	}
 	return outcome
 }
 
-// awaitBackground holds a turn that ended while a tool call still runs.
-// Antigravity moves a long command to the background, ends the turn, and
-// continues on its own once the command finishes; the process stops when the
-// Run ends, so the Run waits for every open tool call and then for the
-// session to go quiet. It returns errACPClosed when Antigravity exits first
-// and the run context's error when the Run is cancelled first. After
-// antigravityBackgroundLimit the turn ends as it is, like a command that
-// never reports a terminal status.
-func (t *antigravityTurn) awaitBackground() error {
+func (t *antigravityTurn) launchPrompt(sessionID, text string, gen uint64, results chan<- acpPromptResult) error {
+	reply, release, err := t.proc.conn.sendRequest("session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"prompt":    []any{map[string]any{"type": "text", "text": text}},
+	})
+	if err != nil {
+		return err
+	}
+	t.requests.begin("", time.Now())
+	go func() {
+		raw, awaitErr := t.proc.conn.awaitReply(t.runCtx, reply, release)
+		results <- acpPromptResult{gen: gen, raw: raw, err: awaitErr}
+	}()
+	return nil
+}
+
+func (t *antigravityTurn) sendWakePrompt(sessionID string, activeGen *uint64, results chan<- acpPromptResult) (bool, error) {
+	if fn := antigravityBeforeWakePrompt; fn != nil {
+		fn()
+	}
+	t.mu.Lock()
+	steers := t.takeSteersLocked()
+	if len(steers) == 0 {
+		t.mu.Unlock()
+		return false, nil
+	}
+	wasWaiting := t.phase == "waiting_background"
+	t.phase = "running"
+	t.wokenByUser = true
+	t.textID = ""
+	t.mu.Unlock()
+	if wasWaiting {
+		t.emit(Event{
+			Kind:              EventBackgroundResumed,
+			ObservedAt:        time.Now(),
+			BackgroundTrigger: "user_input",
+		})
+	}
+	parts := make([]string, 0, len(steers))
+	for _, s := range steers {
+		parts = append(parts, s.text)
+	}
+	*activeGen++
+	if err := t.launchPrompt(sessionID, strings.Join(parts, "\n\n"), *activeGen, results); err != nil {
+		for _, s := range steers {
+			s.resolve(&SteerError{
+				Effect:         "definitely_not_applied",
+				Reason:         "transport",
+				ExpectedTurnID: t.turnID,
+				ActualTurnID:   t.turnID,
+				Message:        "Antigravity prompt wake could not be sent: " + err.Error(),
+			})
+		}
+		return false, err
+	}
+	for _, s := range steers {
+		s.resolve(nil)
+	}
+	return true, nil
+}
+
+func (t *antigravityTurn) recordPromptUsage(model string, raw json.RawMessage, total, last map[string]TokenCount) (string, bool, bool) {
+	var result struct {
+		StopReason string             `json:"stopReason"`
+		Usage      *antigravityTokens `json:"usage"`
+	}
+	_ = json.Unmarshal(raw, &result)
+	if result.Usage == nil {
+		return result.StopReason, false, false
+	}
+	count := result.Usage.count()
+	prev := total[model]
+	total[model] = TokenCount{
+		Input:      prev.Input + count.Input,
+		Output:     prev.Output + count.Output,
+		CacheRead:  prev.CacheRead + count.CacheRead,
+		CacheWrite: prev.CacheWrite + count.CacheWrite,
+		Reasoning:  prev.Reasoning + count.Reasoning,
+	}
+	last[model] = count
+	now := time.Now()
+	response := t.requests.respond(ModelResponse{Model: model, Usage: count}, now)
+	t.emit(Event{Kind: EventModelResponse, ObservedAt: now, Response: &response})
+	return result.StopReason, true, result.Usage.nonzero()
+}
+
+// awaitBackgroundOrWake holds a turn that ended while a tool call still runs,
+// waiting until all open tools finish and the session goes quiet, or until
+// new user input wakes the turn via wakeCh.
+func (t *antigravityTurn) awaitBackgroundOrWake() error {
 	t.mu.Lock()
 	open := len(t.tools) > 0
-	if open {
-		t.background = true
-		// The continuation's text is a new message.
-		t.textID = ""
-	}
 	t.mu.Unlock()
 	if !open {
 		return nil
@@ -690,6 +1209,8 @@ func (t *antigravityTurn) awaitBackground() error {
 	defer tick.Stop()
 	for {
 		select {
+		case <-t.wakeCh:
+			return errAntigravityWake
 		case <-t.runCtx.Done():
 			return t.runCtx.Err()
 		case <-t.proc.conn.closed:
@@ -747,6 +1268,10 @@ type antigravityTokens struct {
 	CachedWriteTokens int64 `json:"cachedWriteTokens"`
 }
 
+func (u antigravityTokens) nonzero() bool {
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.ThoughtTokens > 0 || u.CachedReadTokens > 0 || u.CachedWriteTokens > 0
+}
+
 // count maps ACP usage onto TokenCount, where Input excludes cache reads and
 // writes and Reasoning is part of Output.
 func (u antigravityTokens) count() TokenCount {
@@ -784,6 +1309,7 @@ type acpUpdate struct {
 	Status        string          `json:"status"`
 	RawInput      json.RawMessage `json:"rawInput"`
 	RawOutput     json.RawMessage `json:"rawOutput"`
+	Used          *int64          `json:"used,omitempty"`
 	Entries       []struct {
 		Content string `json:"content"`
 		Status  string `json:"status"`
@@ -797,7 +1323,7 @@ func (t *antigravityTurn) started(sessionID string, at time.Time) {
 		return
 	}
 	reused := t.reused
-	t.emit(Event{Kind: EventStatus, Status: "running", TurnID: "antigravity-turn-" + piRandomHex(12), SessionID: sessionID, ProcessReused: &reused, SentAt: at})
+	t.emit(Event{Kind: EventStatus, Status: "running", TurnID: t.turnID, SessionID: sessionID, ProcessReused: &reused, SentAt: at})
 }
 
 // resumeRefused marks an outcome whose retained session Antigravity does
@@ -820,12 +1346,23 @@ func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 	if !prompting && update.SessionUpdate == "user_message_chunk" {
 		t.replayedPrompts++
 	}
+	resumedFromWait := false
 	if prompting {
 		t.lastUpdate = observed
+		switch update.SessionUpdate {
+		case "agent_message_chunk", "agent_thought_chunk", "tool_call", "plan":
+			if t.phase == "waiting_background" {
+				t.phase = "running"
+				resumedFromWait = true
+			}
+		}
 	}
 	t.mu.Unlock()
 	if !prompting {
 		return
+	}
+	if resumedFromWait {
+		t.emit(Event{Kind: EventBackgroundResumed, ObservedAt: observed, BackgroundTrigger: "background_continuation"})
 	}
 	switch update.SessionUpdate {
 	case "agent_message_chunk":
@@ -847,23 +1384,41 @@ func (t *antigravityTurn) update(params json.RawMessage, observed time.Time) {
 		t.emit(Event{Kind: EventText, ObservedAt: observed, ID: id, ModelMessageID: update.MessageID, Body: text})
 	case "agent_thought_chunk":
 		if text := acpContentText(update.Content); text != "" {
+			t.mu.Lock()
+			t.sawActivity = true
+			t.mu.Unlock()
 			t.requests.item("", observed)
 			t.emit(Event{Kind: EventReasoning, ObservedAt: observed, ModelMessageID: update.MessageID, Body: text})
 		}
 	case "tool_call":
+		toolName := antigravityToolName(update)
+		callID := antigravityInvocationID(update.ToolCallID)
 		// Text after a tool call is a new message.
 		t.mu.Lock()
+		t.sawActivity = true
 		t.textID = ""
-		t.tools[update.ToolCallID] = true
+		t.tools[update.ToolCallID] = BackgroundTool{CallID: callID, ToolName: toolName, StartedAt: observed}
 		t.mu.Unlock()
 		t.emit(Event{
-			Kind: EventToolCall, ObservedAt: observed, ToolName: antigravityToolName(update), InvocationID: antigravityInvocationID(update.ToolCallID),
+			Kind: EventToolCall, ObservedAt: observed, ToolName: toolName, InvocationID: callID,
 			Input: antigravityInput(update.RawInput), ActivityKind: antigravityActivity(update.Kind), ActivityTitle: update.Title,
 		})
 		t.toolResult(update, observed)
 	case "tool_call_update":
 		t.toolResult(update, observed)
+	case "usage_update":
+		if t.compaction && update.Used != nil && *update.Used > 0 {
+			used := *update.Used
+			t.mu.Lock()
+			if t.preTokens == nil {
+				t.preTokens = &used
+			}
+			t.mu.Unlock()
+		}
 	case "plan":
+		t.mu.Lock()
+		t.sawActivity = true
+		t.mu.Unlock()
 		steps := make([]any, 0, len(update.Entries))
 		for _, entry := range update.Entries {
 			if entry.Content == "" {
@@ -886,7 +1441,7 @@ func (t *antigravityTurn) toolResult(update acpUpdate, observed time.Time) {
 		return
 	}
 	t.mu.Lock()
-	open := t.tools[update.ToolCallID]
+	_, open := t.tools[update.ToolCallID]
 	delete(t.tools, update.ToolCallID)
 	t.mu.Unlock()
 	if !open {
@@ -944,9 +1499,11 @@ func (t *antigravityTurn) permission(frame acpFrame) {
 		_ = t.proc.conn.respondError(frame.ID, -32602, "invalid permission request")
 		return
 	}
-	allow := true
-	if reviewer := t.spec.PermissionReviewer; reviewer != nil {
-		allow = reviewer.Review(t.runCtx, antigravityReview(request.ToolCall, t.spec.Dir)).Decision == permission.Allow
+	allow := !t.compaction
+	if allow {
+		if reviewer := t.spec.PermissionReviewer; reviewer != nil {
+			allow = reviewer.Review(t.runCtx, antigravityReview(request.ToolCall, t.spec.Dir)).Decision == permission.Allow
+		}
 	}
 	wanted := []string{"reject_once", "reject_always"}
 	if allow {
@@ -979,7 +1536,11 @@ func toolReview(runtime, tool string, isCommand bool, input map[string]any, work
 	command := ""
 	if isCommand {
 		command, _ = input["command"].(string)
-		tool = "Bash"
+		if tool == "powershell" {
+			tool = "PowerShell"
+		} else {
+			tool = "Bash"
+		}
 	}
 	request := permission.Request{Action: permission.Action{
 		Runtime: runtime, Surface: permission.Surface(tool, command), Tool: tool,

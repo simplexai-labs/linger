@@ -12,13 +12,14 @@
 //   runtime/node-services/node_modules/
 //   runtime/web/{dist/,static-host.mjs}
 //
-// They go to dist/installer/native/runtime-<target>/ as runtime.tar.zst beside
-// the Node.js archive, with a manifest of both. On macOS, where the app's
-// signature must cover every Mach-O file inside it, they go there as the
-// runtime/ folder beside node/bin/node instead, unpacked
-// (RUNTIME_LAYOUTS); packaging/mac/package.py signs them.
+// They go to dist/installer/native/runtime-<target>/ as runtime.tar.zst, with
+// a manifest pinning both the services and the shared Node.js binary shipped
+// once under resources/runtime/bin/ from Computer tools. On macOS, where the
+// app's signature must cover every Mach-O file inside it, the services go
+// there unpacked as runtime/ (RUNTIME_LAYOUTS); packaging/mac/package.py signs
+// both the services and the shared Node.js binary and refreshes the manifest.
 //
-//   node scripts/build-native-runtime.mjs --target win32-x64 --source linger-<label>.tar.gz
+//   node scripts/build-native-runtime.mjs --target win32-x64 --source linger-<label>.tar.gz [--shipped-source ARCHIVE] [--output DIR]
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import {
@@ -41,14 +42,16 @@ import zlib, { createZstdCompress } from "node:zlib";
 
 import { build } from "esbuild";
 
+import { nodeRuntimeEntry } from "../../../scripts/computer-tool-bundle.mjs";
 import {
   ensureNodeRuntimeArchive,
   NODE_RUNTIME_RELEASES,
   NODE_RUNTIME_VERSION,
 } from "../../../scripts/local-computer-node-distributions.mjs";
+import { extractNodeRuntime } from "../../../scripts/prepare-local-computer-release.mjs";
 import { run } from "./build-daemon.mjs";
 import { bundleNodeServices } from "./bundle-node-services.mjs";
-import { sourceCommit } from "./build-teamhub.mjs";
+import { resolveSourceArchive } from "./build-teamhub.mjs";
 
 const desktop = fileURLToPath(new URL("../", import.meta.url));
 
@@ -61,15 +64,14 @@ export const RUNTIME_FILES = "files.json";
 // Bumped when the layout above changes, so an older desktop refuses it.
 export const RUNTIME_SCHEMA = 1;
 
-// "archive": runtime.tar.zst and the Node.js release archive.
-// "directory": the runtime/ folder and node/ with the Node.js binary.
+// "archive": runtime.tar.zst.
+// "directory": the unpacked runtime/ folder (signed on macOS).
 export const RUNTIME_LAYOUTS = {
   "win32-x64": "archive",
   "linux-x64": "archive",
   "darwin-arm64": "directory",
 };
 export const RUNTIME_DIRECTORY = ROOT;
-export const NODE_DIRECTORY = "node";
 
 export const PLATFORMS = {
   "win32-x64": { os: "win32", cpu: "x64" },
@@ -79,7 +81,7 @@ export const PLATFORMS = {
 
 // Packages the services load at runtime by a name esbuild cannot see:
 // createRequire, require.resolve of data files, or a native binding.
-export const RUNTIME_PACKAGES = ["@livekit/local-inference", "word-extractor"];
+export const RUNTIME_PACKAGES = ["@livekit/local-inference"];
 // Packages that are model data rather than code: the installer leaves them
 // out and Node Services downloads them when a feature first needs them
 // (apps/node-services/src/model-packages.ts). Local models install
@@ -101,9 +103,13 @@ const MODEL_REGISTRIES = [
 export const OPTIONAL_IMPORTS = new Set([
   "@pdf-lib/fontkit",
   "bufferutil",
+  // jsdom probes optional native `canvas` inside a try/catch; we never install it.
+  "canvas",
   "pdf-lib",
   "pnpapi",
   "puppeteer",
+  // officeparser lazy-imports tesseract.js only when OCR is enabled; we always pass ocr: false.
+  "tesseract.js",
   // Only source files running under tsx register it.
   "tsx",
   "utf-8-validate",
@@ -114,6 +120,21 @@ export const OPTIONAL_IMPORTS = new Set([
 // wasm) only when a parse asks for OCR, and document-office-extract.ts
 // always passes `ocr: false`.
 const UNLOADED_PACKAGES = new Set(["tesseract.js"]);
+
+// Package subtrees that Node Services never loads at runtime (for example
+// browser viewer assets, non-legacy builds, and type declaration trees).
+const PACKAGE_UNUSED_SUBPATHS = {
+  "pdfjs-dist": ["build", "web", "legacy/web", "types"],
+};
+
+export function unusedPackageEntry(name, relativePath) {
+  const prefixes = PACKAGE_UNUSED_SUBPATHS[name];
+  if (!prefixes || !relativePath) return false;
+  return prefixes.some(
+    (prefix) =>
+      relativePath === prefix || relativePath.startsWith(`${prefix}/`),
+  );
+}
 
 export const runtimeDirectory = (target) =>
   path.join(desktop, "dist/installer/native", `runtime-${target}`);
@@ -178,7 +199,7 @@ export async function copyExternals(
       excluded.set(name, manifest.version);
       return;
     }
-    copied.set(directory, manifest.version);
+    copied.set(directory, { name, version: manifest.version });
     for (const dependency of Object.keys(manifest.dependencies ?? {}))
       await visit(dependency, directory, true);
     // Platform packages for other computers are not installed.
@@ -191,18 +212,22 @@ export async function copyExternals(
   for (const root of roots) await visit(root, deployed, true);
   if (missing.length)
     throw new Error(`Missing runtime packages: ${missing.join(", ")}`);
-  for (const directory of copied.keys())
+  for (const [directory, info] of copied)
     await cp(directory, path.join(output, path.relative(deployed, directory)), {
       recursive: true,
       // Nested packages are copied on their own when something needs them.
-      filter: (file) =>
-        !path
-          .relative(directory, file)
-          .split(path.sep)
-          .includes("node_modules") && !unused(file),
+      filter: (file) => {
+        const relative = path.relative(directory, file);
+        const normalized = relative.split(path.sep).join("/");
+        return (
+          !normalized.split("/").includes("node_modules") &&
+          !unused(file) &&
+          !unusedPackageEntry(info.name, normalized)
+        );
+      },
     });
   return {
-    packages: [...copied].map(([directory, version]) => ({
+    packages: [...copied].map(([directory, { version }]) => ({
       package: path.relative(deployed, directory).split(path.sep).join("/"),
       version,
     })),
@@ -261,34 +286,25 @@ const nodeCache = path.join(
   desktop,
   "../../.linger-runtime/node-distributions",
 );
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
-async function downloadNode(target, output) {
+// Computes the pinned Node.js binary's digest without copying a second Node.js
+// into runtime-<target>/; packaging ships the binary once under
+// resources/runtime/bin/ from Computer tools.
+async function sharedNodeMetadata(target, work) {
   const release = NODE_RUNTIME_RELEASES[target];
-  const file = path.join(output, release.archive);
   const cached = await ensureNodeRuntimeArchive(target, nodeCache);
-  await cp(cached, file);
+  const extracted = path.join(work, "node-binary");
+  await mkdir(extracted, { recursive: true });
+  await extractNodeRuntime(cached, extracted, release.archive);
+  const binary = nodeRuntimeEntry(target);
+  const fullPath = path.join(extracted, binary);
   return {
     version: NODE_RUNTIME_VERSION,
-    file: release.archive,
-    sha256: release.sha256,
-    bytes: (await stat(file)).size,
-  };
-}
-
-// bin/node and the license from a Node.js release tar.gz, into `output`/node.
-async function unpackNode(archive, output, work) {
-  const unpacked = path.join(work, "node-release");
-  await mkdir(unpacked);
-  await run("tar", ["-xzf", archive, "-C", unpacked, "--strip-components=1"]);
-  const node = path.join(output, NODE_DIRECTORY);
-  await mkdir(path.join(node, "bin"), { recursive: true });
-  await cp(path.join(unpacked, "bin/node"), path.join(node, "bin/node"));
-  await cp(path.join(unpacked, "LICENSE"), path.join(node, "LICENSE"));
-  const binary = path.join(node, "bin/node");
-  return {
-    file: `${NODE_DIRECTORY}/bin/node`,
-    sha256: await sha256File(binary),
-    bytes: (await stat(binary)).size,
+    shared: true,
+    binary,
+    sha256: await sha256File(fullPath),
+    bytes: (await stat(fullPath)).size,
   };
 }
 
@@ -313,8 +329,22 @@ export async function verifyRuntime(directory, target, sourceArchiveSha256) {
     throw new Error(`${directory} holds a Native runtime of another layout`);
   const items = [
     layout === "directory" ? manifest.directory : manifest.archive,
-    manifest.node,
   ];
+  if (manifest.node?.shared === true) {
+    if (
+      manifest.node.version !== NODE_RUNTIME_VERSION ||
+      manifest.node.binary !== nodeRuntimeEntry(target) ||
+      typeof manifest.node.sha256 !== "string" ||
+      !SHA256_HEX.test(manifest.node.sha256) ||
+      !Number.isSafeInteger(manifest.node.bytes) ||
+      manifest.node.bytes <= 0
+    )
+      throw new Error(
+        `${directory}/manifest.json has invalid shared node metadata`,
+      );
+  } else {
+    items.push(manifest.node);
+  }
   if (layout === "directory") {
     const files = JSON.parse(
       await readFile(path.join(directory, ROOT, RUNTIME_FILES), "utf8"),
@@ -338,12 +368,15 @@ export async function buildRuntime(
   target,
   archive,
   output = runtimeDirectory(target),
+  options = {},
 ) {
   const platform = PLATFORMS[target];
   if (!platform || !NODE_RUNTIME_RELEASES[target])
     throw new Error(`Unknown Native runtime target ${target}`);
-  const sourceArchiveSha256 = await sha256File(archive);
-  const commit = await sourceCommit(archive);
+  const { commit, sourceArchiveSha256 } = await resolveSourceArchive(
+    archive,
+    options.shippedArchive,
+  );
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const work = await mkdtemp(path.join(tmpdir(), "linger-runtime-"));
@@ -475,10 +508,10 @@ export async function buildRuntime(
         });
         return { bundled: bundledResult, packages: packagesResult };
       })(),
-      timed("node", () => downloadNode(target, output)),
+      timed("node", () => sharedNodeMetadata(target, work)),
     ]);
     const layout = RUNTIME_LAYOUTS[target];
-    let node = downloadedNode;
+    const node = downloadedNode;
     await timed("archive", async () => {
       const files = await listFiles(root);
       await writeFile(
@@ -545,12 +578,6 @@ export async function buildRuntime(
     let contents;
     if (layout === "directory") {
       await cp(root, path.join(output, ROOT), { recursive: true });
-      const release = path.join(output, node.file);
-      node = {
-        version: node.version,
-        ...(await unpackNode(release, output, work)),
-      };
-      await rm(release);
       const files = path.join(output, ROOT, RUNTIME_FILES);
       contents = {
         layout,
@@ -597,14 +624,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const value = (name) => args[args.indexOf(name) + 1];
   if (!args.includes("--target") || !args.includes("--source"))
     throw new Error(
-      "Usage: build-native-runtime.mjs --target win32-x64 --source ARCHIVE [--output DIR]",
+      "Usage: build-native-runtime.mjs --target win32-x64 --source ARCHIVE [--shipped-source ARCHIVE] [--output DIR]",
     );
+  const hasShipped = args.includes("--shipped-source");
+  const shippedArchive = hasShipped ? value("--shipped-source") : undefined;
+  if (hasShipped && !shippedArchive)
+    throw new Error("--shipped-source requires an archive path");
   console.log(
     JSON.stringify(
       await buildRuntime(
         value("--target"),
         value("--source"),
         args.includes("--output") ? path.resolve(value("--output")) : undefined,
+        shippedArchive ? { shippedArchive } : undefined,
       ),
       null,
       2,

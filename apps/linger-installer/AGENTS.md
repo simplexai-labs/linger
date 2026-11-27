@@ -75,25 +75,21 @@ person approved is ever applied, and a stack still not ready ends
 `LOCAL_MODELS_RECOVERY_REQUIRED` with the binding's reason codes in
 `details.reasons` (exposed on jobs as `errorReasons`) and any upstream stack
 guard or plan error code in `details.causeCode` (exposed on jobs as
-`errorCauseCode`). When the services already run, a setup whose
-Computer uses the local model source (`model-source.json` says `local`, or does
-not exist yet on a `local-models` setup) has its stack and saved library model
-checked (`restoreLocalModels`), since a quit stops the models but not the
-services: a stack that is not ready gets the same restore, an unloaded saved
-local model (`localmodels/` or `localmodels-library/`) is reloaded, and the local source is applied again;
-if that restore fails or throws (or a cold resume, including the first start after an app update onto a
-new checkout, cannot prepare the local model stack or reload its saved library
-model), the failure is logged
-and reported in the ready outcome's `details.localModelsDegraded` without
-failing the resume, so the person can still reach the workspace and the Models
-page. Resource-choice mismatches omit stale binding reason codes so Quick
-Install still triggers a replan. Both same-version resume (`restoreLocalModels`)
-and version upgrades from the saved setup choice leave the stack stopped when
-`model-source.json` was switched to `subscription` or `byok`; a saved BYOK
-source gets its Bifrost gateway mounted again from the saved configuration
-unless it already answers (`restoreByokSource`), and a failure is logged and
-reported in the ready outcome's `details.byokGateway` without failing the
-resume; the Computer mounts it again before the next Run on it.
+`errorCauseCode`). When the services already run, resume mounts a saved BYOK
+gateway first (`restoreByokSource`, since `source apply --mode byok` unloads
+local models before mounting BYOK) and then restores any local stack and
+previously loaded library models (`restoreLocalModels`), reporting any BYOK
+failure in `details.byokGateway`, any local-model failure in
+`details.localModelsDegraded`, and any reloaded models or revived stack in
+`details.localModelsRestored` / `details.restoredLocalModels` without failing
+the resume or letting a failure in one block restoring the other, so the person
+can still reach the workspace and the Models page. Resource-choice mismatches
+omit stale binding reason codes so Quick Install still triggers a replan. Both
+same-version resume and version upgrades from the saved setup choice leave the
+Quick Install stack stopped when `model-source.json` was switched to
+`subscription` or `byok` while still restoring any library models that were
+loaded before quit, crash, reboot, or upgrade stop (without switching
+`model-source.json`).
 A failed installation records the stage that caused it, even when native
 checkout preparation and runtime setup ran in parallel. A BYOK mount failure
 belongs to runtime and keeps the redacted provider error in the job.
@@ -108,10 +104,14 @@ the desktop's Computer follows them. The HTTP lookup writes one JSON line to
 stderr, `{"event":"installer.runtime_lookup_timings","instance",...,"timings"}`,
 whose `timings` holds `config`, `runtime`, `localModels`, `tool` and `total`
 in ms; the `--resume` outcome carries the same object as
-`runtimeLookupTimings` whenever the lookup ran. The desktop logs both at info
-as `local_server.installer_runtime_timings`, keyed on that event name and
-field shape, which are its contract. The route's response body does not carry
-these timings.
+`runtimeLookupTimings` whenever the lookup ran, plus `resumeTimings`
+(`path`, `probeMs`, optional `restoreLocalModelsMs` / `restoreByokGatewayMs` /
+`coldStartMs`, and `totalMs`), and logs `Resume timings (<path>, ms): ...`
+on stderr. The desktop logs `runtimeLookupTimings` (from both the HTTP lookup
+stderr event and `--resume`) at info as `local_server.installer_runtime_timings`,
+keyed on that event name and field shape, and logs `resumeTimings` at info as
+`local_server.installer_resume_timings`. The route's response body does not
+carry these timings.
 
 A desktop-owned install uses the selected runtime descriptor to return the
 paths on its live completed job and emits the same timings event. Listing jobs
@@ -135,7 +135,8 @@ JSON line with what failed. It needs nothing beside `installer.js`, so
 setup can run it from a copy on an earlier release's `Linger.exe`. It also
 stops what the pinned localmodels kit runs for each home: the model
 library's running loads (cancelled) and loaded models, the model controller, and the stack with its
-gateway (`stopLocalmodels`).
+gateway (`stopLocalmodels`), forwards `options.log` into `stopNativeSource`,
+and logs durations for the `manager`, `services`, and `localmodels` stop stages.
 
 `--stop-local-models` is the desktop's quit: in the default home and the
 location `desktop/local-server.json` names, it cancels the model library's
@@ -157,6 +158,16 @@ A missing pinned kit has nothing to stop.
 `--home` still owns the inspection tool cache and state. When `--home` fails
 Windows private-path validation, `--inspect` reports the `WINDOWS_PRIVATE_PATH_UNSAFE`
 code on stderr and writes `{ error, refusal }` on stdout before exiting nonzero.
+
+`--prepare-voice-tools --home <dir> --instance <name>` is the detached
+background worker spawned on cold first installs without voice provider keys
+(skipping legacy migration), wired explicitly by `serve` through
+`createVoiceToolsBackgroundLauncher(fileURLToPath(import.meta.url))`. It
+listens on stdin for `"go\n"` vs `"abort\n"`/EOF while extracting and verifying
+the bundled voice tools, cancels in-flight extraction on abort/EOF, and on
+`"go\n"` acquires `withInstanceLock(instance)` (waiting boundedly on
+`INSTANCE_BUSY`), checks that both `postgres` and `teamhub` are running and
+`livekit` is not yet running, and starts LiveKit.
 
 Every other mode first converts an install from before the rename to Linger
 (`migrateLegacyInstallation`); `--migrate` does only that and exits, for the

@@ -597,7 +597,7 @@ func TestPiToolActivityKinds(t *testing.T) {
 	}
 	want := map[string]string{
 		"read": ActivityRead, "edit": ActivityFileChange, "write": ActivityFileChange, "grep": ActivitySearch,
-		"bash": ActivityCommand, "mcp__browser__navigate": ActivityBrowse, "mcp__computer__run_actions": ActivityTool, "notebook": ActivityTool,
+		"bash": ActivityCommand, "powershell": ActivityCommand, "mcp__browser__navigate": ActivityBrowse, "mcp__computer__run_actions": ActivityTool, "notebook": ActivityTool,
 	}
 	seen := 0
 	for _, event := range events {
@@ -612,8 +612,8 @@ func TestPiToolActivityKinds(t *testing.T) {
 	if seen != len(want) {
 		t.Fatalf("tool calls = %d", seen)
 	}
-	if piToolActivities["find"] != ActivitySearch || piToolActivities["ls"] != ActivitySearch {
-		t.Fatal("find and ls are searches")
+	if piToolActivities["find"] != ActivitySearch || piToolActivities["ls"] != ActivitySearch || piToolActivities["powershell"] != ActivityCommand {
+		t.Fatal("find and ls are searches, and powershell is a command")
 	}
 }
 

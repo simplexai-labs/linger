@@ -244,13 +244,18 @@ func (c *mcpClient) close() error {
 	if c == nil {
 		return nil
 	}
-	c.closeOnce.Do(func() { _ = c.stdin.Close(); c.stop() })
+	c.closeOnce.Do(func() { c.stop(); _ = c.stdin.Close() })
 	select {
 	case <-c.exited:
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if c.err != nil && !errors.Is(c.err, context.Canceled) {
-			return errors.Join(mcpproxy.ErrCleanupUnconfirmed, fmt.Errorf("local MCP child cleanup failed: %w", c.err))
+		// process.Run joins cleanup failures when WaitEmpty fails. Only
+		// cancellation or a bare exit error from an intentionally stopped
+		// child confirms cleanup; a joined or other error remains unknown.
+		if c.err != nil && c.err != context.Canceled { //nolint:errorlint // A wrapped cause may also contain a cleanup failure.
+			if _, ok := c.err.(*exec.ExitError); !ok { //nolint:errorlint // Only a bare exit error confirms cleanup.
+				return errors.Join(mcpproxy.ErrCleanupUnconfirmed, fmt.Errorf("local MCP child cleanup failed: %w", c.err))
+			}
 		}
 		return nil
 	case <-time.After(10 * time.Second):

@@ -1,6 +1,6 @@
 {
   "name": "@linger/computer",
-  "version": "0.64.0",
+  "version": "0.66.0",
   "description": "Local Computer: resident Daemon, control CLI, and Runner Gateway transport.",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "node": ">=26.5.0 <27"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.5.2",
     "@playwright/mcp": "0.0.83",
     "quickjs-wasi": "3.6.2"
   },

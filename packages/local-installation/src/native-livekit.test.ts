@@ -1,5 +1,6 @@
+import { createSocket } from "node:dgram";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
 import {
@@ -43,7 +44,7 @@ test("an instance keeps its LiveKit ports and keys in an owner-only file", async
   expect(await prepareLiveKitSettings(root, new Set())).not.toEqual(settings);
 });
 
-test("LiveKit listens on loopback only, with Docker's names for its address", () => {
+test("LiveKit listens on loopback only on POSIX, with Docker's names for its address", () => {
   const settings = {
     httpPort: 30000,
     rtcPort: 30001,
@@ -56,14 +57,122 @@ test("LiveKit listens on loopback only, with Docker's names for its address", ()
     LIVEKIT_API_KEY: settings.apiKey,
     LIVEKIT_API_SECRET: settings.apiSecret,
   });
-  const config = liveKitConfig(settings);
-  expect(JSON.parse(config)).toMatchObject({
+  for (const platform of ["darwin", "linux"] as const) {
+    const config = liveKitConfig(settings, platform);
+    expect(JSON.parse(config)).toEqual({
+      port: 30000,
+      bind_addresses: ["127.0.0.1"],
+      // ICE/TCP would listen on every interface.
+      rtc: {
+        tcp_port: 0,
+        udp_port: 30001,
+        use_external_ip: false,
+        node_ip: "127.0.0.1",
+        enable_loopback_candidate: true,
+        ips: { includes: ["127.0.0.1/32"] },
+      },
+      logging: { level: "info" },
+    });
+    expect(config).not.toContain(settings.apiSecret);
+  }
+});
+
+test("LiveKit keeps signalling on loopback and advertises local interfaces with ICE-Lite on Windows", () => {
+  const settings = {
+    httpPort: 30000,
+    rtcPort: 30001,
+    apiKey: "APIabcdef123456",
+    apiSecret: "s".repeat(64),
+  };
+  const config = liveKitConfig(settings, "win32");
+  expect(JSON.parse(config)).toEqual({
     port: 30000,
     bind_addresses: ["127.0.0.1"],
-    // ICE/TCP would listen on every interface.
-    rtc: { tcp_port: 0, udp_port: 30001, node_ip: "127.0.0.1" },
+    rtc: {
+      tcp_port: 0,
+      udp_port: 30001,
+      use_external_ip: false,
+      enable_loopback_candidate: true,
+      use_ice_lite: true,
+    },
+    logging: { level: "info" },
   });
   expect(config).not.toContain(settings.apiSecret);
+});
+
+test("prepareLiveKitSettings moves a saved rtcPort taken on a non-loopback interface on Windows", async (context) => {
+  let socket: ReturnType<typeof createSocket> | undefined;
+  let takenPort: number | undefined;
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.internal || entry.family !== "IPv4" || !entry.address) continue;
+      const candidate = createSocket("udp4");
+      const bound = await new Promise<boolean>((resolve) => {
+        candidate.once("error", () => {
+          try {
+            candidate.close();
+          } catch {
+            // Already closed.
+          }
+          resolve(false);
+        });
+        candidate.bind(0, entry.address, () => resolve(true));
+      });
+      if (!bound) continue;
+      socket = candidate;
+      takenPort = candidate.address().port;
+      break;
+    }
+    if (takenPort !== undefined) break;
+  }
+  if (!socket || takenPort === undefined)
+    return context.skip(
+      "This computer has no bindable non-loopback IPv4 UDP address.",
+    );
+  try {
+    const root = await temp();
+    const initial = await prepareLiveKitSettings(
+      root,
+      new Set(),
+      undefined,
+      "darwin",
+    );
+    await writeFile(
+      path.join(root, "livekit.env"),
+      [
+        `LIVEKIT_HTTP_PORT=${initial.httpPort}`,
+        `LIVEKIT_RTC_PORT=${takenPort}`,
+        `LIVEKIT_API_KEY=${initial.apiKey}`,
+        `LIVEKIT_API_SECRET=${initial.apiSecret}`,
+      ].join("\n") + "\n",
+    );
+
+    const posixMoved: string[] = [];
+    const posixSettings = await prepareLiveKitSettings(
+      root,
+      new Set(),
+      (message) => posixMoved.push(message),
+      "darwin",
+    );
+    expect(posixSettings.rtcPort).toBe(takenPort);
+    expect(posixMoved).toEqual([]);
+
+    const winMoved: string[] = [];
+    const winSettings = await prepareLiveKitSettings(
+      root,
+      new Set(),
+      (message) => winMoved.push(message),
+      "win32",
+    );
+    expect(winSettings.rtcPort).not.toBe(takenPort);
+    expect(winMoved).toHaveLength(1);
+    expect(winMoved[0]).toContain(`Port ${takenPort}`);
+    expect((await readLiveKitSettings(root))?.rtcPort).toBe(
+      winSettings.rtcPort,
+    );
+  } finally {
+    await new Promise<void>((resolve) => socket.close(() => resolve()));
+  }
 });
 
 test.skipIf(process.platform === "win32")(

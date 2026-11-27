@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import {
+  chmod,
   cp,
   lstat,
   mkdir,
@@ -21,13 +23,16 @@ import { createGunzip } from "node:zlib";
 import tar from "tar-stream";
 import yauzl from "yauzl";
 
+const execFileAsync = promisify(execFile);
 const computerRoot = fileURLToPath(new URL("../", import.meta.url));
 export const COMPUTER_TOOL_VERSIONS = Object.freeze({
   playwright: "0.0.83",
-  pi: "1.2.0",
+  pi: "1.5.2",
   cua: "0.35.4",
   quickjs: "3.6.2",
 });
+export const piRuntimeEntry = (target) =>
+  target.startsWith("win32-") ? "bin/pi.exe" : "bin/pi";
 // The entry imports the three sibling modules. Plain scripts need no
 // optional QuickJS extensions; the bundled Pi also loads the base VM.
 const quickjsFiles = [
@@ -90,6 +95,119 @@ async function packageRoot(name, from) {
     if (manifest?.name === name) return realpath(candidate);
   }
   throw new Error(`Cannot resolve tool package ${name}`);
+}
+
+const piAllowedPaths = new Set([
+  "",
+  "package.json",
+  "LICENSE",
+  "dist",
+  "dist/bundle",
+  "dist/modes",
+  "dist/modes/interactive",
+  "dist/modes/interactive/theme",
+  "dist/modes/interactive/theme/dark.json",
+  "dist/modes/interactive/theme/light.json",
+  "dist/modes/interactive/assets",
+  "dist/modes/interactive/assets/clankolas.png",
+  "dist/core",
+  "dist/core/export-html",
+  "dist/core/export-html/template.css",
+  "dist/core/export-html/template.html",
+  "dist/core/export-html/template.js",
+  "dist/core/export-html/vendor",
+]);
+
+const piExternalRuntimePackages = ["jiti", "@silvia-odwyer/photon-node"];
+
+const piRequiredStagedFiles = [
+  "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+  "node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js",
+  "node_modules/jiti/package.json",
+  "node_modules/@silvia-odwyer/photon-node/package.json",
+];
+
+// Pi's dist/bundle/ already embeds its JS dependencies; copy only the bundle,
+// its runtime assets, and the two zero-dependency external packages it loads
+// dynamically (jiti for TS extensions and photon-node for WASM image resizing).
+async function stagePiRuntimePackages(destination, installed, versions) {
+  const piName = "@earendil-works/pi-coding-agent";
+  const source = await packageRoot(piName, computerRoot);
+  const manifest = JSON.parse(
+    await readFile(path.join(source, "package.json"), "utf8"),
+  );
+  if (manifest.version !== COMPUTER_TOOL_VERSIONS.pi)
+    throw new Error(`Expected ${piName}@${COMPUTER_TOOL_VERSIONS.pi}`);
+  const piTarget = path.join(destination, "node_modules", piName);
+  if (installed.has(piTarget)) {
+    if (installed.get(piTarget) !== source)
+      throw new Error(`Conflicting tool dependency ${piName}`);
+  } else {
+    installed.set(piTarget, source);
+    await cp(source, piTarget, {
+      recursive: true,
+      dereference: false,
+      filter: (entry) => {
+        const relative = path.relative(source, entry).split(path.sep).join("/");
+        if (piAllowedPaths.has(relative)) return true;
+        return (
+          (relative.startsWith("dist/bundle/") ||
+            relative.startsWith("dist/core/export-html/vendor/")) &&
+          !/\.(?:map|d\.[cm]?ts)$/u.test(relative)
+        );
+      },
+    });
+    versions.push({
+      name: piName,
+      version: manifest.version,
+      path: path.relative(destination, piTarget).split(path.sep).join("/"),
+    });
+  }
+  for (const depName of piExternalRuntimePackages) {
+    const depSource = await packageRoot(depName, source);
+    const depManifest = JSON.parse(
+      await readFile(path.join(depSource, "package.json"), "utf8"),
+    );
+    const depTarget = path.join(destination, "node_modules", depName);
+    if (installed.has(depTarget)) {
+      if (installed.get(depTarget) === depSource) continue;
+      throw new Error(`Conflicting tool dependency ${depName}`);
+    }
+    installed.set(depTarget, depSource);
+    await cp(depSource, depTarget, {
+      recursive: true,
+      dereference: false,
+      filter: (entry) => {
+        const relative = path.relative(depSource, entry);
+        if (!relative) return true;
+        const parts = relative.split(path.sep);
+        return (
+          !parts.some(
+            (part) =>
+              part === "node_modules" ||
+              part === ".git" ||
+              part === "README.md" ||
+              part === "__tests__" ||
+              part === "docs" ||
+              part === "examples" ||
+              part.startsWith("test"),
+          ) && !/\.(?:map|d\.[cm]?ts)$/u.test(entry)
+        );
+      },
+    });
+    versions.push({
+      name: depName,
+      version: depManifest.version,
+      path: path.relative(destination, depTarget).split(path.sep).join("/"),
+    });
+  }
+  for (const relative of piRequiredStagedFiles) {
+    const info = await lstat(path.join(destination, relative)).catch(
+      () => null,
+    );
+    if (!info?.isFile())
+      throw new Error(`Bundled Pi runtime asset is missing: ${relative}`);
+  }
 }
 
 // Preserve upstream modules and dynamic resources. Resolution uses only this
@@ -167,7 +285,6 @@ async function stagePackages(destination) {
   for (const [name, version] of [
     ["quickjs-wasi", COMPUTER_TOOL_VERSIONS.quickjs],
     ["@playwright/mcp", COMPUTER_TOOL_VERSIONS.playwright],
-    ["@earendil-works/pi-coding-agent", COMPUTER_TOOL_VERSIONS.pi],
   ]) {
     const source = await packageRoot(name, computerRoot);
     const manifest = JSON.parse(
@@ -177,6 +294,7 @@ async function stagePackages(destination) {
       throw new Error(`Expected ${name}@${version}`);
     await copyPackage(name, computerRoot, destination);
   }
+  await stagePiRuntimePackages(destination, installed, versions);
   return versions.sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -360,6 +478,62 @@ function assertPiExtensionLoader(packages) {
     throw new Error("jiti was not staged at the top of node_modules");
 }
 
+const posixPiLauncherScript = [
+  "#!/bin/sh",
+  "set -eu",
+  "self=$0",
+  'while [ -L "$self" ]; do',
+  '  link=$(readlink "$self")',
+  '  case "$link" in',
+  "    /*) self=$link ;;",
+  '    *) self=$(dirname -- "$self")/$link ;;',
+  "  esac",
+  "done",
+  'here=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd -P)',
+  'tools=$(dirname -- "$here")',
+  'for candidate in "$tools/../../runtime/bin/node" "$tools/../runtime/bin/node"; do',
+  '  if [ -x "$candidate" ]; then',
+  '    exec "$candidate" "$tools/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" "$@"',
+  "  fi",
+  "done",
+  'echo "linger bundled pi: runtime/bin/node not found" >&2',
+  "exit 127",
+  "",
+].join("\n");
+
+async function stagePiLauncher(root, target) {
+  await mkdir(path.join(root, "bin"), { recursive: true });
+  const output = path.join(root, piRuntimeEntry(target));
+  if (target.startsWith("win32-")) {
+    const goarch = target === "win32-arm64" ? "arm64" : "amd64";
+    await execFileAsync(
+      "go",
+      [
+        "build",
+        "-trimpath",
+        "-buildvcs=false",
+        "-ldflags",
+        "-s -w",
+        "-o",
+        output,
+        "./cmd/linger-pi-launcher",
+      ],
+      {
+        cwd: path.join(computerRoot, "local-daemon"),
+        env: {
+          ...process.env,
+          CGO_ENABLED: "0",
+          GOOS: "windows",
+          GOARCH: goarch,
+        },
+      },
+    );
+    return;
+  }
+  await writeFile(output, posixPiLauncherScript, { mode: 0o755 });
+  await chmod(output, 0o755);
+}
+
 export async function stageComputerTools(
   bundle,
   {
@@ -378,6 +552,7 @@ export async function stageComputerTools(
     path.join(computerRoot, "tools/pi-mcp.mjs"),
     path.join(root, "extensions/pi-mcp.mjs"),
   );
+  await stagePiLauncher(root, target);
   const cua = CUA_ARCHIVES[target];
   if (cua)
     await extractCua(
@@ -392,6 +567,7 @@ export async function stageComputerTools(
     target,
     playwright_entry: "node_modules/@playwright/mcp/cli.js",
     pi_extension: "extensions/pi-mcp.mjs",
+    pi_entry: piRuntimeEntry(target),
     cua_entry: cua?.entry ?? "",
     packages,
     assets,
@@ -421,6 +597,7 @@ export async function validatedComputerToolAssets(bundle, target) {
   if (
     manifest.playwright_entry !== "node_modules/@playwright/mcp/cli.js" ||
     manifest.pi_extension !== "extensions/pi-mcp.mjs" ||
+    manifest.pi_entry !== piRuntimeEntry(target) ||
     manifest.cua_entry !== (CUA_ARCHIVES[target]?.entry ?? "")
   )
     throw new Error("Invalid Computer tool entrypoints");
@@ -434,12 +611,16 @@ export async function validatedComputerToolAssets(bundle, target) {
   for (const required of [
     manifest.playwright_entry,
     manifest.pi_extension,
+    manifest.pi_entry,
     ...QUICKJS_TOOL_ASSETS,
     ...(CUA_ARCHIVES[target]?.required ?? []),
   ]) {
     if (!required || !expected.some((asset) => asset.path === required))
       throw new Error("Computer tool entrypoint is missing");
   }
+  const piAsset = expected.find((asset) => asset.path === manifest.pi_entry);
+  if (!target.startsWith("win32-") && !(piAsset.mode & 0o111))
+    throw new Error("Computer tool Pi entrypoint is not executable");
   return [
     "cli/computer-tools/manifest.json",
     ...expected.map((asset) => `cli/computer-tools/${asset.path}`),

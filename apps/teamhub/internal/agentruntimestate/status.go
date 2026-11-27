@@ -378,7 +378,8 @@ func normalizeOfferedPresentationEvent(raw json.RawMessage) (normalizedPresentat
 	switch discriminator.Type {
 	case "status.changed":
 		var event workingStatusEvent
-		if strictJSON(raw, &event) != nil || event.Type != "status.changed" || event.Status != "queued" && event.Status != "working" && event.Status != "thinking" ||
+		if strictJSON(raw, &event) != nil || event.Type != "status.changed" ||
+			event.Status != "queued" && event.Status != "working" && event.Status != "thinking" && event.Status != "waiting_background" ||
 			event.Title != nil && ((event.Status != "thinking" && event.Status != "queued") || strings.TrimSpace(*event.Title) == "" || len([]rune(*event.Title)) > 50000) {
 			return normalizedPresentationEvent{}, ErrInvalid
 		}

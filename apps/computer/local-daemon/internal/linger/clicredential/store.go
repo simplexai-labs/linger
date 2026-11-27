@@ -5,7 +5,6 @@
 package clicredential
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -153,6 +152,9 @@ func (s *Store) Lookup(tenantID, agentID string) (Installation, error) {
 	if err := s.checkDirectory(agentDirectory); err != nil {
 		return Installation{}, err
 	}
+	if err := privatefs.EnsureDir(agentDirectory); err != nil {
+		return Installation{}, fmt.Errorf("prepare TeamHub CLI credential directory: %w", err)
+	}
 	profile, hasProfile, err := readProfile(agentDirectory)
 	if err != nil {
 		return Installation{}, err
@@ -170,6 +172,14 @@ func (s *Store) Lookup(tenantID, agentID string) (Installation, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return Installation{}, errors.New("TeamHub CLI credential path is invalid")
+	}
+	if err := privatefs.ProtectFile(credentialPath); errors.Is(err, fs.ErrNotExist) {
+		return Installation{}, ErrNotInstalled
+	} else if err != nil {
+		return Installation{}, fmt.Errorf("protect TeamHub CLI credential file: %w", err)
+	}
+	if err := privatefs.ProtectFile(filepath.Join(agentDirectory, stateFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Installation{}, fmt.Errorf("protect TeamHub CLI credential state: %w", err)
 	}
 	return Installation{CredentialPath: credentialPath, Profile: profile}, nil
 }
@@ -189,6 +199,9 @@ func (s *Store) Current(tenantID, agentID string) (Stored, bool, error) {
 	} else if err != nil {
 		return Stored{}, false, err
 	}
+	if err := privatefs.EnsureDir(agentDirectory); err != nil {
+		return Stored{}, false, fmt.Errorf("prepare TeamHub CLI credential directory: %w", err)
+	}
 	current, hasState, err := readState(agentDirectory)
 	if err != nil || !hasState || current.AssignmentRevision == 0 {
 		return Stored{}, false, err
@@ -197,7 +210,8 @@ func (s *Store) Current(tenantID, agentID string) (Stored, bool, error) {
 	if err != nil || !hasProfile {
 		return Stored{}, false, err
 	}
-	info, err := os.Lstat(filepath.Join(agentDirectory, credentialFile))
+	credentialPath := filepath.Join(agentDirectory, credentialFile)
+	info, err := os.Lstat(credentialPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Stored{}, false, nil
 	}
@@ -206,6 +220,11 @@ func (s *Store) Current(tenantID, agentID string) (Stored, bool, error) {
 	}
 	if !info.Mode().IsRegular() {
 		return Stored{}, false, errors.New("TeamHub CLI credential path is invalid")
+	}
+	if err := privatefs.ProtectFile(credentialPath); errors.Is(err, fs.ErrNotExist) {
+		return Stored{}, false, nil
+	} else if err != nil {
+		return Stored{}, false, fmt.Errorf("protect TeamHub CLI credential file: %w", err)
 	}
 	return Stored{SHA256: current.SHA256, AssignmentRevision: current.AssignmentRevision, Profile: profile}, true, nil
 }
@@ -280,7 +299,11 @@ func (s *Store) ensureDirectory(dir string) error {
 }
 
 func readState(agentDirectory string) (state, bool, error) {
-	data, err := privatefs.ReadFile(filepath.Join(agentDirectory, stateFile), maxStateBytes)
+	path := filepath.Join(agentDirectory, stateFile)
+	if err := privatefs.ProtectFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return state{}, false, fmt.Errorf("protect TeamHub CLI credential state: %w", err)
+	}
+	data, err := privatefs.ReadFile(path, maxStateBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return state{}, false, nil
 	}
@@ -295,7 +318,11 @@ func readState(agentDirectory string) (state, bool, error) {
 }
 
 func readProfile(agentDirectory string) (Profile, bool, error) {
-	data, err := privatefs.ReadFile(filepath.Join(agentDirectory, profileFile), maxProfileSize)
+	path := filepath.Join(agentDirectory, profileFile)
+	if err := privatefs.ProtectFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Profile{}, false, fmt.Errorf("protect TeamHub CLI profile: %w", err)
+	}
+	data, err := privatefs.ReadFile(path, maxProfileSize)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Profile{}, false, nil
 	}
@@ -312,28 +339,12 @@ func readProfile(agentDirectory string) (Profile, bool, error) {
 // writeAtomic publishes a complete owner-only file. The rename replaces the
 // previous content at the same path, and the directory sync makes it durable.
 func writeAtomic(directory, name string, content []byte) error {
-	var nonce [8]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
+	target := filepath.Join(directory, name)
+	if err := privatefs.ProtectFile(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("protect TeamHub CLI credential file: %w", err)
 	}
-	temporary := filepath.Join(directory, "."+name+"."+hex.EncodeToString(nonce[:])+".tmp")
-	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	if err := privatefs.WriteFile(target, content, false); err != nil {
 		return fmt.Errorf("write TeamHub CLI credential file: %w", err)
-	}
-	defer os.Remove(temporary)
-	_, err = file.Write(content)
-	if err == nil {
-		err = file.Sync()
-	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return fmt.Errorf("write TeamHub CLI credential file: %w", err)
-	}
-	if err := os.Rename(temporary, filepath.Join(directory, name)); err != nil {
-		return fmt.Errorf("publish TeamHub CLI credential file: %w", err)
 	}
 	return syncDirectory(directory)
 }

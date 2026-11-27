@@ -22,8 +22,11 @@ from urllib.parse import urlsplit, unquote
 
 # Answers go to a private copy of stdout; fd 1 becomes stderr, so a child
 # such as xdotool never writes a line the daemon would take as an answer.
-protocol = os.fdopen(os.dup(1), "w", buffering=1)
-os.dup2(2, 1)
+if __name__ == "__main__":
+    protocol = os.fdopen(os.dup(1), "w", buffering=1)
+    os.dup2(2, 1)
+else:
+    protocol = sys.stdout
 
 
 outcome = "unsupported"
@@ -105,11 +108,48 @@ def tree(root):
     return result, cut
 
 
+def gnome_overview_active():
+    """Whether GNOME Shell's Activities Overview is open.
+
+    On GNOME 42 X11, clearing Overview search with a single Escape can restore
+    _NET_ACTIVE_WINDOW to a background window while Overview stays open and
+    still captures raw keyboard input. Query org.gnome.Shell OverviewActive over
+    the session D-Bus (NO_AUTO_START, 300 ms timeout); non-GNOME desktops or an
+    unavailable bus return False cleanly.
+    """
+    gio = globals().get("Gio")
+    glib = globals().get("GLib")
+    if gio is None or glib is None:
+        return False
+    try:
+        bus = gio.bus_get_sync(gio.BusType.SESSION, None)
+        result = bus.call_sync(
+            "org.gnome.Shell",
+            "/org/gnome/Shell",
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            glib.Variant("(ss)", ("org.gnome.Shell", "OverviewActive")),
+            glib.VariantType.new("(v)"),
+            gio.DBusCallFlags.NO_AUTO_START,
+            300,
+            None,
+        )
+        value = result.unpack()[0]
+        if hasattr(value, "unpack"):
+            value = value.unpack()
+        return bool(value)
+    except Exception:
+        return False
+
+
 def active_window():
-    """The active X11 window, or "" when the desktop has none, as right after
-    a GNOME login before anything was clicked."""
+    """The active X11 window, or "" when the desktop has none (e.g. right
+    after a GNOME login) or GNOME Shell's Activities Overview is open."""
+    if gnome_overview_active():
+        return ""
     found = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True, timeout=5)
-    return found.stdout.strip() if found.returncode == 0 else ""
+    window = found.stdout.strip() if found.returncode == 0 else ""
+    return "" if window == "0" else window
 
 
 def active_pid():
@@ -583,8 +623,9 @@ def stop_driver(*_):
         raise SystemExit(0)
 
 
-signal.signal(signal.SIGTERM, stop_driver)
-signal.signal(signal.SIGINT, stop_driver)
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, stop_driver)
+    signal.signal(signal.SIGINT, stop_driver)
 
 
 # Window classes of terminal emulators, matched case-insensitively: xterm,
@@ -751,23 +792,24 @@ def native_action(name, args):
     return b""
 
 
-for line in sys.stdin:
-    request = json.loads(line)
-    if "id" not in request: continue
-    rpc_id = request["id"]
-    method = request.get("method")
-    if method == "initialize":
-        send_rpc({"jsonrpc":"2.0","id":rpc_id,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"linger-native-linux","version":"1"}}})
-    elif method == "tools/list":
-        send_rpc({"jsonrpc":"2.0","id":rpc_id,"result":{"tools":[{"name":"action","inputSchema":{"type":"object"}}]}})
-    elif method == "tools/call":
-        outcome = "unsupported"
-        try:
-            if request["params"]["name"] != "action": raise ValueError("unknown tool")
-            values = request["params"]["arguments"]
-            result = native_action(values["command"], values.get("args", []))
-            if result is not None: reply({"status":"confirmed","output_base64":base64.b64encode(result).decode()})
-        except Exception as error:
-            reply({"status":outcome,"error":str(error)})
-    else:
-        send_rpc({"jsonrpc":"2.0","id":rpc_id,"error":{"code":-32601,"message":"method not found"}})
+if __name__ == "__main__":
+    for line in sys.stdin:
+        request = json.loads(line)
+        if "id" not in request: continue
+        rpc_id = request["id"]
+        method = request.get("method")
+        if method == "initialize":
+            send_rpc({"jsonrpc":"2.0","id":rpc_id,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"linger-native-linux","version":"1"}}})
+        elif method == "tools/list":
+            send_rpc({"jsonrpc":"2.0","id":rpc_id,"result":{"tools":[{"name":"action","inputSchema":{"type":"object"}}]}})
+        elif method == "tools/call":
+            outcome = "unsupported"
+            try:
+                if request["params"]["name"] != "action": raise ValueError("unknown tool")
+                values = request["params"]["arguments"]
+                result = native_action(values["command"], values.get("args", []))
+                if result is not None: reply({"status":"confirmed","output_base64":base64.b64encode(result).decode()})
+            except Exception as error:
+                reply({"status":outcome,"error":str(error)})
+        else:
+            send_rpc({"jsonrpc":"2.0","id":rpc_id,"error":{"code":-32601,"message":"method not found"}})

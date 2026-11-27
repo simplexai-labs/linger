@@ -1,3 +1,4 @@
+import { suppressFollowUpClick } from "@/components/ui/suppress-follow-up-click";
 import { ArrowUp01Icon } from "@hugeicons/core-free-icons";
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 
@@ -86,7 +87,10 @@ export function BackgroundTasksPill({
   useEffect(() => {
     if (!open) return;
     const closeOutside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      if (root.current?.contains(event.target as Node)) return;
+      // The paired click would otherwise reach the control underneath.
+      if ((event.button ?? 0) === 0) suppressFollowUpClick(event);
+      setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);

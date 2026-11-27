@@ -158,3 +158,28 @@ describe("message output", () => {
     expect(rendered).not.toContain("Duplicate request");
   });
 });
+
+it("preserves Room report routing in readable message output", () => {
+  const route = {
+    handoff_id: "handoff_one",
+    room_id: "room_travel",
+    room_name: "Travel",
+    state: "waiting_for_user",
+  };
+  const rendered = renderMessageRead({
+    mode: "messages",
+    messages: [
+      {
+        message_id: "message_report",
+        inbox_id: "room:room_direct",
+        author: "Linger",
+        author_kind: "agent",
+        author_actor_id: "actor_linger",
+        body: "What is the budget?",
+        room_handoff: route,
+      },
+    ],
+    has_more: false,
+  });
+  expect(rendered).toContain(`room_handoff=${JSON.stringify(route)}`);
+});

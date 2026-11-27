@@ -1,12 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,7 +10,8 @@ import VoiceModeMiniWindow, {
   sessionMessages,
 } from "./voice-mode-mini-window";
 import type { VoiceModeSession } from "./voice-mode-session";
-import { closeVoicePip, openVoicePip, resetVoicePipForTest } from "./voice-pip";
+import { openVoicePip, resetVoicePipForTest } from "./voice-pip";
+import { voiceWindowAction } from "./voice-ui-bridge";
 
 const startedAt = "2026-10-02T03:00:00.000Z";
 const message = (
@@ -103,7 +97,8 @@ function LocationProbe() {
   return <span data-testid="location">{useLocation().pathname}</span>;
 }
 
-function renderWindow() {
+/** Renders the window with its conversation open, unless only the island. */
+function renderWindow({ conversation = true } = {}) {
   const client = new QueryClient();
   const runtime = createTestTeamHubRuntime();
   const tree = () => (
@@ -119,11 +114,18 @@ function renderWindow() {
     </QueryClientProvider>
   );
   const view = render(tree());
+  if (conversation)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show Voice Mode conversation" }),
+    );
   // The session stand-in has no subscribers: render again to show a change.
   return Object.assign(view, { refresh: () => view.rerender(tree()) });
 }
 
-/** A stand-in for the browser's picture-in-picture window. */
+/**
+ * A stand-in for the desktop app's floating window: only the desktop app
+ * floats Voice Mode. `remove` puts the page back as it was.
+ */
 function installFakeVoicePip() {
   const frame = window.document.createElement("iframe");
   window.document.body.append(frame);
@@ -134,15 +136,24 @@ function installFakeVoicePip() {
     addEventListener: (type: string, listener: () => void) => {
       if (type === "pagehide") listeners.push(listener);
     },
+    removeEventListener: () => undefined,
     // A closed window is gone; the next request opens a fresh one.
     close: vi.fn(() => listeners.splice(0).forEach((listener) => listener())),
   };
-  const requestWindow = vi.fn(async () => pipWindow as unknown as Window);
-  Object.defineProperty(window, "documentPictureInPicture", {
-    configurable: true,
-    value: { requestWindow },
-  });
-  return { document, frame, pipWindow, requestWindow };
+  const open = vi.fn(() => pipWindow as unknown as Window);
+  const originalOpen = window.open;
+  window.open = open;
+  const desktop = window as { lingerDesktop?: unknown };
+  desktop.lingerDesktop = {
+    voiceWindow: { showMainWindow: vi.fn(async () => {}) },
+  };
+  const remove = () => {
+    window.open = originalOpen;
+    delete desktop.lingerDesktop;
+    frame.remove();
+    resetVoicePipForTest();
+  };
+  return { document, open, pipWindow, remove };
 }
 
 describe("Voice Mode mini window", () => {
@@ -156,14 +167,12 @@ describe("Voice Mode mini window", () => {
     expect(within(log).getByText("Working…")).toBeInTheDocument();
     expect(within(log).getByText("and the tests")).toBeInTheDocument();
     expect(within(log).queryByText("Before voice")).toBeNull();
-    expect(
-      screen.getByRole("region", { name: "Voice Mode window" }),
-    ).toHaveTextContent("Codex");
   });
 
   it("shows the live reply and turns its sound off apart from the microphone", async () => {
     voice.session!.live = {
       soundOff: false,
+      waking: false,
       transcript: [
         { id: "lt_1", speaker: "you", text: "When is the meeting tomorrow" },
         {
@@ -193,6 +202,7 @@ describe("Voice Mode mini window", () => {
   it("fades in each phrase of a reply as it arrives, and nothing already said", async () => {
     voice.session!.live = {
       soundOff: false,
+      waking: false,
       transcript: [
         { id: "lt_0:reply", speaker: "live", text: "Said before." },
         {
@@ -215,6 +225,7 @@ describe("Voice Mode mini window", () => {
     expect(fading()).toEqual([]);
     voice.session!.live = {
       soundOff: false,
+      waking: false,
       transcript: [
         { id: "lt_0:reply", speaker: "live", text: "Said before." },
         {
@@ -244,6 +255,7 @@ describe("Voice Mode mini window", () => {
     try {
       voice.session!.live = {
         soundOff: false,
+        waking: false,
         transcript: [{ id: "lt_1", speaker: "you", text: "What is next" }],
       };
       renderWindow();
@@ -273,6 +285,7 @@ describe("Voice Mode mini window", () => {
     );
     voice.session!.live = {
       soundOff: false,
+      waking: false,
       transcript: [{ id: "lt_1", speaker: "you", text: "What is next" }],
     };
     renderWindow();
@@ -316,6 +329,7 @@ describe("Voice Mode mini window", () => {
     };
     voice.session!.live = {
       soundOff: true,
+      waking: false,
       transcript: [
         { id: "lt_1", speaker: "you", text: "Scroll down a bit" },
         { id: "lt_1:reply", speaker: "live", text: "Sure, scrolling for you." },
@@ -366,13 +380,55 @@ describe("Voice Mode mini window", () => {
     expect(voice.retry).toHaveBeenCalledOnce();
   });
 
-  it("shows Another Me beating while listening and turning while speaking", () => {
+  it("shows Another Me swelling with the voice while listening", () => {
     voice.level = 0.5;
     renderWindow();
     const avatar = document.querySelector("[data-voice-avatar]")!;
     expect(avatar).toHaveAttribute("data-listening");
     expect(avatar).toHaveAttribute("data-speaking");
+    expect(avatar).not.toHaveAttribute("data-waking");
     expect(avatar.querySelector("[role='img'], img")).not.toBeNull();
+  });
+
+  it("wakes up until the live model itself is connected", () => {
+    voice.level = 0.5;
+    voice.session!.state = {
+      ...voice.session!.state,
+      microphoneActive: false,
+      status: "connecting",
+    };
+    const view = renderWindow({ conversation: false });
+    const island = screen.getByTitle("Open this conversation");
+    expect(island).toHaveTextContent("Waking up");
+    const avatar = document.querySelector("[data-voice-avatar]")!;
+    expect(avatar).toHaveAttribute("data-waking");
+    expect(avatar).not.toHaveAttribute("data-listening");
+    // Every control is already there; only the state says it wakes up.
+    for (const name of [
+      "Mute Voice Mode",
+      "Show Voice Mode conversation",
+      "End Voice Mode",
+    ])
+      expect(
+        screen.getByRole("button", { name }).closest("[inert]"),
+      ).toBeNull();
+
+    // The microphone is heard, but the live model is still connecting.
+    voice.session!.state = {
+      ...voice.session!.state,
+      microphoneActive: true,
+      status: "listening",
+    };
+    voice.session!.live = { soundOff: false, transcript: [], waking: true };
+    view.refresh();
+    expect(island).toHaveTextContent("Waking up");
+    expect(avatar).toHaveAttribute("data-waking");
+
+    voice.session!.live = { soundOff: false, transcript: [], waking: false };
+    view.refresh();
+    expect(island).toHaveTextContent("Listening");
+    expect(avatar).not.toHaveAttribute("data-waking");
+    expect(avatar).toHaveAttribute("data-listening");
   });
 
   it("rests the avatar while muted", () => {
@@ -384,228 +440,170 @@ describe("Voice Mode mini window", () => {
     expect(avatar).not.toHaveAttribute("data-speaking");
   });
 
-  it("expands and shrinks the window", () => {
-    renderWindow();
+  it("opens as the island alone and shows the conversation under it on request", () => {
+    renderWindow({ conversation: false });
     const panel = screen.getByRole("region", { name: "Voice Mode window" });
-    expect(panel).toHaveStyle({ width: "320px" });
-    expect(panel).toHaveStyle({
-      maxHeight: "calc(min(480px, 70dvh, 100dvh - 68px) + 36px)",
+    expect(panel).toHaveAttribute("data-size", "island");
+    // One width open or shut, so nothing on the island jumps sideways.
+    expect(panel).toHaveStyle({ width: "360px" });
+    expect(screen.queryByRole("log")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Resize Voice Mode window" }),
+    ).toBeNull();
+    const show = screen.getByRole("button", {
+      name: "Show Voice Mode conversation",
     });
+    expect(show).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(show);
+    expect(panel).toHaveAttribute("data-size", "conversation");
+    expect(panel).toHaveStyle({ width: "360px" });
+    expect(
+      screen.getByRole("log", { name: "Voice Mode conversation" }),
+    ).toHaveStyle({ maxHeight: "calc(min(480px, 70dvh, 100dvh - 80px))" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Expand Voice Mode window" }),
+      screen.getByRole("button", { name: "Hide Voice Mode conversation" }),
     );
-    expect(panel).toHaveStyle({ width: "560px" });
-    expect(panel).toHaveStyle({
-      maxHeight: "calc(min(760px, 86dvh, 100dvh - 68px) + 36px)",
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Shrink Voice Mode window" }),
-    );
-    expect(panel).toHaveStyle({ width: "320px" });
-    expect(panel).toHaveStyle({
-      maxHeight: "calc(min(480px, 70dvh, 100dvh - 68px) + 36px)",
-    });
+    expect(panel).toHaveAttribute("data-size", "island");
+    expect(screen.queryByRole("log")).toBeNull();
   });
 
   it("floats over other windows as the one Voice Mode window", async () => {
     const fake = installFakeVoicePip();
     try {
-      renderWindow();
+      renderWindow({ conversation: false });
       await act(() => openVoicePip("voice-mode"));
+      expect(fake.open).toHaveBeenCalledOnce();
       const floating = within(fake.document.body);
       await floating.findByRole("region", { name: "Voice Mode window" });
       expect(
         screen.queryByRole("region", { name: "Voice Mode window" }),
       ).not.toBeInTheDocument();
-      // The desktop sizes, places, and closes that window, so it shows no
-      // size or close button and no resize grip of its own, only the way
-      // back.
+      // The floated window is the island alone, like the window in the page;
+      // its arrow grows the window to show the conversation, inside the click.
+      expect(floating.queryByRole("log")).toBeNull();
+      const resizeTo = vi.fn();
+      Object.assign(fake.pipWindow, {
+        innerHeight: 96,
+        innerWidth: 360,
+        outerHeight: 124,
+        outerWidth: 360,
+        resizeTo,
+        screen: { availHeight: 900, availWidth: 1400 },
+      });
+      fireEvent.click(
+        floating.getByRole("button", { name: "Show Voice Mode conversation" }),
+      );
       expect(
-        floating.queryByRole("button", { name: "Expand Voice Mode window" }),
-      ).not.toBeInTheDocument();
+        floating.getByRole("log", { name: "Voice Mode conversation" }),
+      ).toBeInTheDocument();
+      expect(resizeTo).toHaveBeenLastCalledWith(360, 480 + 28);
+      fireEvent.click(
+        floating.getByRole("button", { name: "Hide Voice Mode conversation" }),
+      );
+      expect(resizeTo).toHaveBeenLastCalledWith(360 + 0, 48 + 28);
+      expect(floating.queryByRole("log")).toBeNull();
       expect(
         floating.queryByRole("button", { name: "Resize Voice Mode window" }),
       ).not.toBeInTheDocument();
+      // The call is the whole window: no bar above the conversation.
       expect(
-        floating.getByRole("button", { name: "Return Voice Mode to Linger" }),
-      ).toHaveAttribute("title", "Back to Linger; Voice Mode continues");
-      expect(
-        floating.queryByRole("button", { name: "End Voice Mode" }),
+        floating.queryByRole("button", { name: /Return Voice Mode/ }),
       ).not.toBeInTheDocument();
+      expect(
+        floating.getByRole("button", { name: "End Voice Mode" }),
+      ).toBeInTheDocument();
 
-      // The desktop's close button ends Voice Mode instead of leaving a
-      // second window behind in the page, also when the page was already in
-      // front and takes the focus back.
-      const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-      act(() => fake.pipWindow.close());
-      // While it tells a close from back to tab, nothing flashes up in the
+      // The window's close button ends Voice Mode, even as the main window
+      // comes to the front, instead of leaving a second window behind in the
       // page.
-      expect(
-        screen.queryByRole("region", { name: "Voice Mode window" }),
-      ).not.toBeInTheDocument();
-      await waitFor(() => expect(voice.exit).toHaveBeenCalledOnce());
-      expect(
-        screen.queryByRole("region", { name: "Voice Mode window" }),
-      ).not.toBeInTheDocument();
-      focused.mockRestore();
-    } finally {
-      fake.frame.remove();
-      Reflect.deleteProperty(window, "documentPictureInPicture");
-      resetVoicePipForTest();
-    }
-  });
-
-  it("floats the call again from the window inside the page", async () => {
-    const fake = installFakeVoicePip();
-    try {
-      renderWindow();
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole("button", { name: "Float Voice Mode window" }),
-        );
-        await fake.requestWindow.mock.results[0]?.value;
-      });
-      await within(fake.document.body).findByRole("region", {
-        name: "Voice Mode window",
-      });
-      expect(fake.requestWindow).toHaveBeenCalledOnce();
-      expect(
-        screen.queryByRole("region", { name: "Voice Mode window" }),
-      ).not.toBeInTheDocument();
-      expect(voice.exit).not.toHaveBeenCalled();
-      // The page takes the window back before the test removes its frame.
-      act(() => closeVoicePip("voice-mode"));
-    } finally {
-      fake.frame.remove();
-      Reflect.deleteProperty(window, "documentPictureInPicture");
-      resetVoicePipForTest();
-    }
-  });
-
-  it("keeps the call when the desktop's back to tab button returns to the page", async () => {
-    const fake = installFakeVoicePip();
-    const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    try {
-      renderWindow();
-      await act(() => openVoicePip("voice-mode"));
-      // Back to tab brings this page from the background to the front.
       act(() => {
         fake.pipWindow.close();
         document.dispatchEvent(new Event("visibilitychange"));
       });
-      // The call goes on in the window inside the page, on its conversation.
-      await waitFor(() =>
-        expect(screen.getByTestId("location")).toHaveTextContent(
-          "/t/tenant-northstar/rooms/room-voice/chat",
-        ),
-      );
-      expect(voice.exit).not.toHaveBeenCalled();
+      expect(voice.exit).toHaveBeenCalledOnce();
       expect(
-        screen.getByRole("region", { name: "Voice Mode window" }),
-      ).toBeInTheDocument();
+        screen.queryByRole("region", { name: "Voice Mode window" }),
+      ).not.toBeInTheDocument();
     } finally {
-      focused.mockRestore();
-      fake.frame.remove();
-      Reflect.deleteProperty(window, "documentPictureInPicture");
-      resetVoicePipForTest();
+      fake.remove();
     }
   });
 
-  it("returns from the browser's floating window by its return button", async () => {
+  it("moves a floated window's height frame by frame, shutting over the conversation", async () => {
     const fake = installFakeVoicePip();
-    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     try {
-      renderWindow();
+      renderWindow({ conversation: false });
       await act(() => openVoicePip("voice-mode"));
       const floating = within(fake.document.body);
-      await act(async () => {
-        fireEvent.click(
-          await floating.findByRole("button", {
-            name: "Return Voice Mode to Linger",
-          }),
-        );
-      });
-      // The tab comes to the front and the call goes on in the window inside
-      // the page, on the conversation it started in.
-      expect(focus).toHaveBeenCalledOnce();
-      expect(fake.pipWindow.close).toHaveBeenCalledOnce();
-      await waitFor(() =>
-        expect(screen.getByTestId("location")).toHaveTextContent(
-          "/t/tenant-northstar/rooms/room-voice/chat",
-        ),
-      );
-      expect(
-        screen.getByRole("region", { name: "Voice Mode window" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: "Return Voice Mode to Linger" }),
-      ).not.toBeInTheDocument();
-      expect(voice.exit).not.toHaveBeenCalled();
-    } finally {
-      focus.mockRestore();
-      fake.frame.remove();
-      Reflect.deleteProperty(window, "documentPictureInPicture");
-      resetVoicePipForTest();
-    }
-  });
-
-  it("returns from the desktop app's window by its own button, and ends when that window closes", async () => {
-    const fake = installFakeVoicePip();
-    const open = vi.fn(() => fake.pipWindow as unknown as Window);
-    const showMain = vi.fn(async () => {});
-    const originalOpen = window.open;
-    window.open = open;
-    const desktop = window as { lingerDesktop?: unknown };
-    desktop.lingerDesktop = {
-      voiceWindow: { showMainWindow: showMain },
-    };
-    try {
-      renderWindow();
-      await act(() => openVoicePip("voice-mode"));
-      const floating = within(fake.document.body);
-      await act(async () => {
-        fireEvent.click(
-          await floating.findByRole("button", {
-            name: "Return Voice Mode to Linger",
-          }),
-        );
-      });
-      expect(showMain).toHaveBeenCalledOnce();
-      // The call goes on in the window inside the page, on its conversation,
-      // with no return button there.
-      await waitFor(() =>
-        expect(screen.getByTestId("location")).toHaveTextContent(
-          "/t/tenant-northstar/rooms/room-voice/chat",
-        ),
-      );
-      expect(
-        screen.getByRole("region", { name: "Voice Mode window" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: "Return Voice Mode to Linger" }),
-      ).not.toBeInTheDocument();
-      expect(voice.exit).not.toHaveBeenCalled();
-
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole("button", { name: "Float Voice Mode window" }),
-        );
-      });
-      expect(open).toHaveBeenCalledTimes(2);
-      expect(fake.requestWindow).not.toHaveBeenCalled();
       await floating.findByRole("region", { name: "Voice Mode window" });
-      // The window's close button ends Voice Mode even as the main window
-      // comes to the front.
-      act(() => {
-        fake.pipWindow.close();
-        document.dispatchEvent(new Event("visibilitychange"));
+      const frames: FrameRequestCallback[] = [];
+      const heights: number[] = [];
+      const size = { innerHeight: 96, outerHeight: 124 };
+      // Live sizes: the window reports what it was last resized to.
+      Object.defineProperties(fake.pipWindow, {
+        innerHeight: { get: () => size.innerHeight },
+        outerHeight: { get: () => size.outerHeight },
       });
-      await waitFor(() => expect(voice.exit).toHaveBeenCalledOnce());
-      expect(showMain).toHaveBeenCalledOnce();
+      Object.assign(fake.pipWindow, {
+        cancelAnimationFrame: () => undefined,
+        innerWidth: 360,
+        outerWidth: 360,
+        performance: { now: () => 0 },
+        requestAnimationFrame: (callback: FrameRequestCallback) =>
+          frames.push(callback),
+        resizeTo: (_width: number, height: number) => {
+          heights.push(height);
+          size.outerHeight = height;
+          size.innerHeight = height - 28;
+        },
+        screen: { availHeight: 900, availWidth: 1400 },
+      });
+      const run = (now: number) => act(() => frames.shift()?.(now));
+      fireEvent.click(
+        floating.getByRole("button", { name: "Show Voice Mode conversation" }),
+      );
+      expect(floating.getByRole("log")).toBeInTheDocument();
+      run(140);
+      run(280);
+      // Eased toward the open height (fast first), landing on it.
+      expect(heights[0]).toBeGreaterThan(124 + (508 - 124) / 2);
+      expect(heights.at(-1)).toBe(508);
+      fireEvent.click(
+        floating.getByRole("button", { name: "Hide Voice Mode conversation" }),
+      );
+      run(140);
+      // The conversation stays while the window shuts over it.
+      expect(floating.getByRole("log")).toBeInTheDocument();
+      run(280);
+      expect(heights.at(-1)).toBe(76);
+      expect(floating.queryByRole("log")).toBeNull();
+      // Saying "expand" folds it open just as the arrow does.
+      act(() => {
+        voiceWindowAction("expand");
+      });
+      run(280);
+      expect(heights.at(-1)).toBe(508);
+      expect(floating.getByRole("log")).toBeInTheDocument();
+      act(() => fake.pipWindow.close());
     } finally {
-      window.open = originalOpen;
-      delete desktop.lingerDesktop;
-      fake.frame.remove();
+      fake.remove();
+    }
+  });
+
+  it("stays in the page in a browser, whose floating window it cannot style", async () => {
+    const requestWindow = vi.fn();
+    Object.defineProperty(window, "documentPictureInPicture", {
+      configurable: true,
+      value: { requestWindow },
+    });
+    try {
+      renderWindow({ conversation: false });
+      await act(() => openVoicePip("voice-mode"));
+      expect(requestWindow).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("region", { name: "Voice Mode window" }),
+      ).toHaveAttribute("data-size", "island");
+    } finally {
       Reflect.deleteProperty(window, "documentPictureInPicture");
       resetVoicePipForTest();
     }
@@ -616,13 +614,13 @@ describe("Voice Mode mini window", () => {
     const panel = screen.getByRole("region", { name: "Voice Mode window" });
     const onScreen = vi
       .spyOn(panel, "getBoundingClientRect")
-      .mockReturnValue(new DOMRect(600, 100, 320, 300));
+      .mockReturnValue(new DOMRect(600, 100, 360, 300));
     const grip = screen.getByRole("button", {
       name: "Resize Voice Mode window",
     });
-    fireEvent.pointerDown(grip, { button: 0, clientX: 920, clientY: 400 });
-    fireEvent.pointerMove(grip, { clientX: 960, clientY: 500 });
-    expect(panel).toHaveStyle({ height: "400px", width: "360px" });
+    fireEvent.pointerDown(grip, { button: 0, clientX: 960, clientY: 400 });
+    fireEvent.pointerMove(grip, { clientX: 1000, clientY: 500 });
+    expect(panel).toHaveStyle({ height: "400px", width: "400px" });
     expect(panel).toHaveAttribute("data-size", "custom");
     // The corner stops 16px short of the page's edge, as a drag does.
     fireEvent.pointerMove(grip, { clientX: 5000, clientY: 5000 });
@@ -631,11 +629,11 @@ describe("Voice Mode mini window", () => {
       width: `${window.innerWidth - 16 - 600}px`,
     });
     fireEvent.pointerMove(grip, { clientX: 0, clientY: 0 });
-    expect(panel).toHaveStyle({ height: "200px", width: "260px" });
+    expect(panel).toHaveStyle({ height: "200px", width: "360px" });
     fireEvent.pointerUp(grip);
     // A move after the drag ended changes nothing.
     fireEvent.pointerMove(grip, { clientX: 960, clientY: 500 });
-    expect(panel).toHaveStyle({ height: "200px", width: "260px" });
+    expect(panel).toHaveStyle({ height: "200px", width: "360px" });
 
     // The left edge moves that side and keeps the right one where it was.
     const left = panel.querySelector('[data-resize-edge="w"]')!;
@@ -643,17 +641,17 @@ describe("Voice Mode mini window", () => {
     fireEvent.pointerMove(left, { clientX: 500, clientY: 900 });
     fireEvent.pointerUp(left);
     expect(panel).toHaveStyle({ height: "300px", left: "500px" });
-    expect(panel).toHaveStyle({ width: "420px" });
+    expect(panel).toHaveStyle({ width: "460px" });
 
     // Arrow keys on the grip resize too.
-    onScreen.mockReturnValue(new DOMRect(500, 100, 420, 300));
+    onScreen.mockReturnValue(new DOMRect(500, 100, 460, 300));
     fireEvent.keyDown(grip, { key: "ArrowRight" });
-    expect(panel).toHaveStyle({ height: "300px", width: "428px" });
+    expect(panel).toHaveStyle({ height: "300px", width: "468px" });
     fireEvent.keyDown(grip, { key: "ArrowUp", shiftKey: true });
-    expect(panel).toHaveStyle({ height: "268px", width: "420px" });
+    expect(panel).toHaveStyle({ height: "268px", width: "460px" });
   });
 
-  it("goes back to a preset size from a dragged one", () => {
+  it("keeps a dragged size as the conversation closes and opens again", () => {
     renderWindow();
     const panel = screen.getByRole("region", { name: "Voice Mode window" });
     vi.spyOn(panel, "getBoundingClientRect").mockReturnValue(
@@ -663,19 +661,21 @@ describe("Voice Mode mini window", () => {
       name: "Resize Voice Mode window",
     });
     fireEvent.pointerDown(grip, { button: 0, clientX: 520, clientY: 400 });
-    fireEvent.pointerMove(grip, { clientX: 800, clientY: 400 });
+    fireEvent.pointerMove(grip, { clientX: 800, clientY: 500 });
     fireEvent.pointerUp(grip);
-    expect(panel).toHaveStyle({ width: "600px" });
-    // Wider than the expanded preset, so the button offers the compact one.
+    expect(panel).toHaveStyle({ height: "400px", width: "600px" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Shrink Voice Mode window" }),
+      screen.getByRole("button", { name: "Hide Voice Mode conversation" }),
     );
-    expect(panel).toHaveStyle({ width: "320px" });
-    expect(panel).toHaveStyle({
-      maxHeight: "calc(min(480px, 70dvh, 100dvh - 68px) + 36px)",
-    });
+    // Closed, the island keeps the width the Human gave the window.
+    expect(panel).toHaveStyle({ width: "600px" });
     expect(panel.style.height).toBe("");
-    expect(panel).toHaveAttribute("data-size", "compact");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show Voice Mode conversation" }),
+    );
+    // Open again, it comes back at the Human's size, not the preset.
+    expect(panel).toHaveStyle({ height: "400px", width: "600px" });
+    expect(panel).toHaveAttribute("data-size", "custom");
   });
 
   it("cannot be dragged out of the viewport, and moves back in when it grows or the viewport shrinks", () => {
@@ -696,14 +696,13 @@ describe("Voice Mode mini window", () => {
     const panel = screen.getByRole("region", { name: "Voice Mode window" });
     let height = 300;
     Object.defineProperty(panel, "offsetHeight", { get: () => height });
-    const title = screen.getByText("Voice Mode", {
-      selector: ".voice-window-title",
-    });
+    // The island is the window's bar.
+    const title = panel.querySelector("header")!;
     fireEvent.pointerDown(title, { button: 0, clientX: 800, clientY: 90 });
     fireEvent.pointerMove(window, { clientX: 5000, clientY: 5000 });
     fireEvent.pointerUp(window);
     expect(panel).toHaveStyle({
-      left: `${window.innerWidth - 320 - 16}px`,
+      left: `${window.innerWidth - 360 - 16}px`,
       top: `${window.innerHeight - 300 - 16}px`,
     });
     fireEvent.pointerDown(title, { button: 0, clientX: 800, clientY: 500 });
@@ -748,16 +747,13 @@ describe("Voice Mode mini window", () => {
     );
   });
 
-  it("opens compact every time, even after it was expanded", () => {
+  it("opens as the island every time, even after the conversation was open", () => {
     const first = renderWindow();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand Voice Mode window" }),
-    );
     first.unmount();
-    renderWindow();
+    renderWindow({ conversation: false });
     expect(
       screen.getByRole("region", { name: "Voice Mode window" }),
-    ).toHaveStyle({ width: "320px" });
+    ).toHaveAttribute("data-size", "island");
   });
 
   it("names its controls apart from the Room composer's", () => {
@@ -784,7 +780,7 @@ describe("Voice Mode mini window", () => {
 
   it("leaves at once when Voice Mode ends, while the session drains", () => {
     voice.session!.closing = true;
-    renderWindow();
+    renderWindow({ conversation: false });
     expect(
       screen.queryByRole("region", { name: "Voice Mode window" }),
     ).toBeNull();

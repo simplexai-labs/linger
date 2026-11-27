@@ -90,7 +90,6 @@ export function RoomHistoryShareDialog({
   });
   return (
     <ModalDialog
-      description={t(m.shareDescription)}
       onClose={() => {
         if (!create.isPending) onClose();
       }}
@@ -171,7 +170,7 @@ export function RoomHistoryShareDialog({
             {(create.error ?? revoke.error ?? issueLink.error)?.message}
           </p>
         ) : null}
-        <section className="mt-7 border-t border-app-border pt-5">
+        <section className="mt-7 pt-5">
           <div>
             <h3 className="text-sm font-semibold text-app-ink">
               {t(m.sharedSnapshots)}

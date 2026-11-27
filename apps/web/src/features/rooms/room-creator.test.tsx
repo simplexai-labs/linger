@@ -1,8 +1,4 @@
-import {
-  onlineManager,
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { onlineManager, QueryClientProvider } from "@tanstack/react-query";
 import {
   fireEvent,
   render,
@@ -10,12 +6,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { RoomAddMembersDialog } from "./members/room-add-members-dialog";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defineGlobalProperty } from "@/test/global-properties";
 
 import { createAppQueryClient } from "@/app/query-client";
+import { teamHubData } from "@/features/teamhub/teamhub-api";
+import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
+import { defineGlobalProperty } from "@/test/global-properties";
 import {
   acceptRoomCreation,
   acceptRoomMembers,
@@ -27,10 +24,9 @@ import {
   TeamHubTestServer,
   type TestRouteHandler,
 } from "@/test/teamhub-test-server";
-import { teamHubData } from "@/features/teamhub/teamhub-api";
-import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 
-import { RoomCreateDialog } from "./room-create-dialog";
+import { RoomAddMembersDialog } from "./members/room-add-members-dialog";
+import { RoomCreator } from "./room-creator";
 
 describe("Room creation", () => {
   beforeEach(() => {
@@ -53,61 +49,127 @@ describe("Room creation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses the authored compact form without a secondary cancel action", async () => {
+  it("creates a New Room right away and opens it for adding members", async () => {
     const runtime = createTestTeamHubRuntime();
     acceptRoomCreation(runtime);
-    acceptRoomMembers(runtime);
+    const onClose = vi.fn();
 
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <TeamHubRuntimeProvider runtime={runtime}>
-          <MemoryRouter>
-            <RoomCreateDialog onClose={vi.fn()} tenantId="tenant-northstar" />
-          </MemoryRouter>
-        </TeamHubRuntimeProvider>
-      </QueryClientProvider>,
-    );
+    renderCreator(runtime, onClose);
 
-    expect(screen.getByLabelText("Room name")).toHaveClass("ui-field-control");
-    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByLabelText(/Description/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Add members" })).toBeNull();
     expect(
-      screen.getByRole("button", { name: /^Create Room$/ }),
-    ).toBeInTheDocument();
+      await screen.findByText("New Room room-created-1 opened"),
+    ).toBeVisible();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(await postedNames(runtime)).toEqual(["New Room"]);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("retries the same Room creation after an ambiguous failure", async () => {
+  it("moves to the next numbered name when the default name is taken", async () => {
     const runtime = createTestTeamHubRuntime();
-    acceptRoomCreation(runtime);
-    acceptRoomMembers(runtime);
+    const rooms = new TeamHubTestServer();
+    acceptRoomCreation({ ...runtime, server: rooms });
+    runtime.server.on(
+      "POST",
+      "/v0/tenants/{tenantId}/rooms",
+      ({ body, request }) =>
+        (body as { name: string }).name === "New Room"
+          ? teamHubErrorResponse(409, "ROOM_NAME_TAKEN")
+          : rooms.fetch(request),
+    );
 
-    const createRoom = vi.fn<TestRouteHandler>(() => {
-      throw new Error("Connection closed before confirmation.");
-    });
+    renderCreator(runtime);
+
+    expect(
+      await screen.findByText("New Room room-created-1 opened"),
+    ).toBeVisible();
+    expect(await postedNames(runtime)).toEqual(["New Room", "New Room 2"]);
+  });
+
+  it("retries the same name after an unconfirmed failure and treats it taken as created", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const createRoom = vi
+      .fn<TestRouteHandler>()
+      .mockImplementationOnce(() => {
+        throw new Error("Connection closed before confirmation.");
+      })
+      .mockImplementationOnce(() =>
+        teamHubErrorResponse(409, "ROOM_NAME_TAKEN"),
+      );
     runtime.server.on("POST", "/v0/tenants/{tenantId}/rooms", createRoom);
+    const onClose = vi.fn();
 
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <TeamHubRuntimeProvider runtime={runtime}>
-          <MemoryRouter>
-            <RoomCreateDialog onClose={vi.fn()} tenantId="tenant-northstar" />
-          </MemoryRouter>
-        </TeamHubRuntimeProvider>
-      </QueryClientProvider>,
-    );
+    renderCreator(runtime, onClose);
 
-    fireEvent.change(screen.getByLabelText("Room name"), {
-      target: { value: "release-room" },
+    const dialog = await screen.findByRole("dialog", {
+      name: "Couldn't create the Room",
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Create Room$/ }));
-    await screen.findByText(/did not confirm whether this Room was created/);
-    fireEvent.click(screen.getByRole("button", { name: /^Create Room$/ }));
+    expect(
+      within(dialog).getByText(/did not confirm whether this Room was created/),
+    ).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
 
-    await waitFor(() => expect(createRoom).toHaveBeenCalledTimes(2));
-    expect(createRoom.mock.calls[1]![0].body).toEqual(
-      createRoom.mock.calls[0]![0].body,
-    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(await postedNames(runtime)).toEqual(["New Room", "New Room"]);
+    expect(screen.queryByText(/ opened$/)).toBeNull();
+  });
+
+  it("treats a gateway error as unconfirmed, so a taken retry makes no second Room", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const createRoom = vi
+      .fn<TestRouteHandler>()
+      .mockImplementationOnce(() => new Response(null, { status: 504 }))
+      .mockImplementationOnce(() =>
+        teamHubErrorResponse(409, "ROOM_NAME_TAKEN"),
+      );
+    runtime.server.on("POST", "/v0/tenants/{tenantId}/rooms", createRoom);
+    const onClose = vi.fn();
+
+    renderCreator(runtime, onClose);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Couldn't create the Room",
+    });
+    expect(
+      within(dialog).getByText(/did not confirm whether this Room was created/),
+    ).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(await postedNames(runtime)).toEqual(["New Room", "New Room"]);
+  });
+
+  it("shows a definite TeamHub error and tries again on Retry", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const rooms = new TeamHubTestServer();
+    acceptRoomCreation({ ...runtime, server: rooms });
+    const createRoom = vi
+      .fn<TestRouteHandler>(({ request }) => rooms.fetch(request))
+      .mockImplementationOnce(() =>
+        teamHubErrorResponse(
+          403,
+          "FORBIDDEN",
+          "You cannot create Rooms in this Tenant.",
+        ),
+      );
+    runtime.server.on("POST", "/v0/tenants/{tenantId}/rooms", createRoom);
+    const onClose = vi.fn();
+
+    renderCreator(runtime, onClose);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Couldn't create the Room",
+    });
+    expect(
+      within(dialog).getByText("You cannot create Rooms in this Tenant."),
+    ).toBeVisible();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry" }));
+
+    expect(
+      await screen.findByText("New Room room-created-1 opened"),
+    ).toBeVisible();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(await postedNames(runtime)).toEqual(["New Room", "New Room"]);
   });
 
   it("adds Humans and Agents in a separate dialog after the Room already exists", async () => {
@@ -309,100 +371,75 @@ describe("Room creation", () => {
   it("attempts Room creation when the browser connectivity hint is offline", async () => {
     const runtime = createTestTeamHubRuntime();
     acceptRoomCreation(runtime);
-    acceptRoomMembers(runtime);
+    onlineManager.setOnline(false);
 
-    render(
-      <QueryClientProvider client={createAppQueryClient()}>
-        <TeamHubRuntimeProvider runtime={runtime}>
-          <MemoryRouter>
-            <RoomCreateDialog onClose={vi.fn()} tenantId="tenant-northstar" />
-          </MemoryRouter>
-        </TeamHubRuntimeProvider>
-      </QueryClientProvider>,
-    );
-    window.dispatchEvent(new Event("offline"));
+    renderCreator(runtime);
 
-    fireEvent.change(screen.getByLabelText("Room name"), {
-      target: { value: "connectivity-hint-room" },
-    });
-    expect(screen.getByRole("button", { name: /^Create Room$/ })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: /^Create Room$/ }));
-    await waitFor(() =>
-      expect(
-        runtime.server.requestsTo("POST", "/v0/tenants/{tenantId}/rooms"),
-      ).toHaveLength(1),
-    );
+    expect(
+      await screen.findByText("New Room room-created-1 opened"),
+    ).toBeVisible();
+    expect(await postedNames(runtime)).toEqual(["New Room"]);
   });
 
   it("rejects a created Room outside the active Tenant before navigation", async () => {
     const runtime = createTestTeamHubRuntime();
-    acceptRoomCreation(runtime);
-    acceptRoomMembers(runtime);
-
-    const onClose = vi.fn();
     const existingRoom = await getRoom(runtime, "room-all");
     runtime.server.on("POST", "/v0/tenants/{tenantId}/rooms", () => ({
       ...existingRoom,
       id: "room-foreign",
       tenant_id: "tenant-foreign",
     }));
+    const onClose = vi.fn();
 
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <TeamHubRuntimeProvider runtime={runtime}>
-          <MemoryRouter>
-            <RoomCreateDialog onClose={onClose} tenantId="tenant-northstar" />
-          </MemoryRouter>
-        </TeamHubRuntimeProvider>
-      </QueryClientProvider>,
-    );
-
-    fireEvent.change(screen.getByLabelText("Room name"), {
-      target: { value: "foreign-room" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^Create Room$/ }));
+    renderCreator(runtime, onClose);
 
     await expect(
       screen.findByText("The requested TeamHub resource is unavailable."),
     ).resolves.toBeVisible();
     expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it("shows a specific error when the Room name is already taken", async () => {
-    const runtime = createTestTeamHubRuntime();
-    acceptRoomCreation(runtime);
-    acceptRoomMembers(runtime);
-
-    runtime.server.on("POST", "/v0/tenants/{tenantId}/rooms", () =>
-      teamHubErrorResponse(
-        409,
-        "ROOM_NAME_TAKEN",
-        "a Room with this name already exists",
-      ),
-    );
-
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <TeamHubRuntimeProvider runtime={runtime}>
-          <MemoryRouter>
-            <RoomCreateDialog onClose={vi.fn()} tenantId="tenant-northstar" />
-          </MemoryRouter>
-        </TeamHubRuntimeProvider>
-      </QueryClientProvider>,
-    );
-
-    fireEvent.change(screen.getByLabelText("Room name"), {
-      target: { value: "room-all" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /^Create Room$/ }));
-
-    await expect(
-      screen.findByText(
-        "You already have a Room with this name. Choose a different name.",
-      ),
-    ).resolves.toBeVisible();
+    expect(screen.queryByText(/ opened$/)).toBeNull();
   });
 });
+
+function renderCreator(runtime: TestTeamHubRuntime, onClose = vi.fn()) {
+  render(
+    <QueryClientProvider client={createAppQueryClient()}>
+      <TeamHubRuntimeProvider runtime={runtime}>
+        <MemoryRouter>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <RoomCreator onClose={onClose} tenantId="tenant-northstar" />
+              }
+            />
+            <Route
+              path="/t/:tenantId/rooms/:roomId/chat"
+              element={<OpenedRoomProbe />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </TeamHubRuntimeProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Stands in for the Room shell, which opens add-members from `newRoomId`. */
+function OpenedRoomProbe() {
+  const location = useLocation();
+  const state = location.state as { newRoomId?: string } | null;
+  return <p>New Room {state?.newRoomId} opened</p>;
+}
+
+function postedNames(runtime: TestTeamHubRuntime) {
+  return Promise.all(
+    runtime.server
+      .requestsTo("POST", "/v0/tenants/{tenantId}/rooms")
+      .map(
+        async (request) => ((await request.json()) as { name: string }).name,
+      ),
+  );
+}
 
 function createRoom(runtime: TestTeamHubRuntime, name: string) {
   return teamHubData(

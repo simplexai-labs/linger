@@ -1,4 +1,8 @@
-import { Add01Icon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  ArrowLeft01Icon,
+  LaptopIcon,
+} from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
@@ -6,9 +10,11 @@ import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { Select, SelectItem } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { appNames } from "@/features/local-computer/computer-readiness";
+import {
+  appNames,
+  runtimeStatusLabels,
+} from "@/features/local-computer/computer-readiness";
 import { ComputerSetupInstructions } from "@/features/local-computer/computer-setup-instructions";
 import { computerSetupMessages } from "@/features/local-computer/computer-setup.messages";
 import {
@@ -23,8 +29,10 @@ import { LocalRuntimeInstallGuidance } from "@/features/local-computer/local-run
 import { LocalRuntimeUpdateGuidance } from "@/features/local-computer/local-runtime-update-guidance";
 import {
   classifyPiLocalModelsState,
+  piAuthRequiredStatusMessage,
   PiRuntimeSetupGuidance,
 } from "@/features/local-computer/pi-runtime-setup-guidance";
+import { RuntimeLogo } from "@/features/local-computer/runtime-logo";
 import { ServerConnection } from "@/features/local-computer/server-connection";
 import { localModelsQueryOptions } from "@/features/local-models/local-models-queries";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -33,7 +41,6 @@ import type {
   TeamHubLocalComputerPage,
   TeamHubLocalRuntimeType,
 } from "@/features/teamhub/teamhub-types";
-import type { Message } from "@/i18n/messages";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
 import {
@@ -43,22 +50,21 @@ import {
 import { AgentCreationProgress } from "./agent-creation-progress";
 import { createAgentMessages } from "./create-agent.messages";
 import { runtimeModelLabel } from "./members/runtime-model-label";
+import {
+  ComputerStatus,
+  EffortSegments,
+  OptionList,
+  Placeholder,
+  SettingRow,
+  StatusDot,
+} from "./members/runtime-setting-rows";
+import { reasoningEffortLabel } from "./members/use-agent-model-selection";
 
 const localRuntimeLabels: Record<TeamHubLocalRuntimeType, string> = {
   claude: "Claude Code",
   codex: "Codex",
   pi: "Pi",
   antigravity: "Antigravity",
-};
-
-const effortLabels: Record<TeamHubAgentReasoningEffort, Message<string>> = {
-  none: createAgentMessages.effortNone,
-  low: createAgentMessages.effortLow,
-  medium: createAgentMessages.effortMedium,
-  high: createAgentMessages.effortHigh,
-  xhigh: createAgentMessages.effortExtraHigh,
-  max: createAgentMessages.effortMaximum,
-  ultra: createAgentMessages.effortUltra,
 };
 
 export function QuickCreateLocalAgentDialog({
@@ -183,14 +189,26 @@ export function QuickCreateLocalAgentDialog({
       : undefined;
   const localModels = useQuery({
     ...localModelsQueryOptions(client, tenantId, selectedComputerId),
+    // The Runtime list words Pi's status from its local models, so they load
+    // whenever Pi waits on them, not only once Pi is the chosen Runtime.
     enabled: Boolean(
       !setupOpen &&
       selectedComputerId &&
-      selectedRuntime?.type === "pi" &&
-      selectedRuntime.status === "authentication_required",
+      selectedComputer?.runtimes.some(
+        (runtime) =>
+          runtime.type === "pi" && runtime.status === "authentication_required",
+      ),
     ),
   });
   const piModelsState = classifyPiLocalModelsState(localModels.data);
+
+  // One row opens at a time; all start closed on the chosen defaults.
+  const [openRow, setOpenRow] = useState<
+    "computer" | "runtime" | "model" | "effort"
+  >();
+  function toggle(row: "computer" | "runtime" | "model" | "effort") {
+    setOpenRow((current) => (current === row ? undefined : row));
+  }
 
   function selectComputer(value: string) {
     setComputerId(value);
@@ -232,11 +250,6 @@ export function QuickCreateLocalAgentDialog({
       onClose={onClose}
       size="md"
       title={t(createAgentMessages.title)}
-      description={t(
-        setupOpen
-          ? createAgentMessages.connectDescription
-          : createAgentMessages.chooseDescription,
-      )}
       footer={
         !pending ? (
           <>
@@ -287,7 +300,9 @@ export function QuickCreateLocalAgentDialog({
         ) : undefined
       }
     >
-      <div className="space-y-4 px-5 py-4">
+      <div
+        className={`min-w-0 ${pending || computers.error || setupOpen ? "space-y-4 px-5 py-4" : "space-y-1 px-3 pb-2"}`}
+      >
         {pending ? (
           <div className="flex justify-center px-4 py-3">
             <AgentCreationProgress stage="preparing" />
@@ -336,137 +351,187 @@ export function QuickCreateLocalAgentDialog({
           </>
         ) : (
           <>
-            <div>
-              <div className="mb-1.5 flex items-center justify-between gap-3">
-                <span className="text-sm font-medium">
-                  {t(createAgentMessages.computer)}
-                </span>
-                {cliInstallAvailable ? (
-                  <Button
-                    size="compact"
-                    tone="ghost"
-                    onClick={() =>
-                      setConnection({
-                        knownIds: new Set(
-                          computers.data?.items.map(
-                            (computer) => computer.computer_id,
-                          ),
-                        ),
-                      })
-                    }
-                  >
-                    <span className="inline-flex items-center gap-1.5 text-app-info">
-                      <Icon icon={Add01Icon} size={14} />{" "}
-                      {t(createAgentMessages.connectNewComputer)}
+            <SettingRow
+              label={t(createAgentMessages.computer)}
+              onToggle={() => toggle("computer")}
+              open={openRow === "computer"}
+              value={
+                selectedComputer ? (
+                  <>
+                    <span className="truncate">
+                      {selectedComputer.display_name}
                     </span>
-                  </Button>
-                ) : null}
-              </div>
-              <Select
-                id="local-agent-computer"
-                aria-label={t(createAgentMessages.computer)}
-                className="min-w-0 w-full"
-                onValueChange={selectComputer}
-                placeholder={t(createAgentMessages.selectComputer)}
+                    <ComputerStatus computer={selectedComputer} />
+                  </>
+                ) : (
+                  <Placeholder>
+                    {t(createAgentMessages.selectComputer)}
+                  </Placeholder>
+                )
+              }
+            >
+              <OptionList
+                label={t(createAgentMessages.computer)}
+                onChange={(value) => {
+                  selectComputer(value);
+                  setOpenRow(undefined);
+                }}
+                options={selectableComputers.map((computer) => ({
+                  description: <ComputerStatus computer={computer} labelled />,
+                  label: computer.display_name,
+                  leading: (
+                    <Icon
+                      className="shrink-0 text-muted-foreground"
+                      icon={LaptopIcon}
+                    />
+                  ),
+                  value: computer.computer_id,
+                }))}
                 value={selectedComputerId}
-              >
-                {selectableComputers.map((computer) => (
-                  <SelectItem
-                    key={computer.computer_id}
-                    value={computer.computer_id}
-                  >
-                    {computer.status === "online"
-                      ? computer.display_name
-                      : t(createAgentMessages.offlineComputer, {
-                          name: computer.display_name,
-                        })}
-                  </SelectItem>
-                ))}
-              </Select>
-              {selectedComputer?.status === "offline" ? (
-                <p className="mt-1.5 text-xs text-app-muted" role="status">
-                  {t(createAgentMessages.offlineComputerHint)}
-                </p>
+              />
+              {cliInstallAvailable ? (
+                <Button
+                  className="mt-1"
+                  size="compact"
+                  tone="ghost"
+                  onClick={() => {
+                    setOpenRow(undefined);
+                    setConnection({
+                      knownIds: new Set(
+                        computers.data?.items.map(
+                          (computer) => computer.computer_id,
+                        ),
+                      ),
+                    });
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1.5 text-app-info">
+                    <Icon icon={Add01Icon} size={14} />{" "}
+                    {t(createAgentMessages.connectNewComputer)}
+                  </span>
+                </Button>
               ) : null}
-            </div>
+            </SettingRow>
+            {selectedComputer?.status === "offline" ? (
+              <p className="px-2.5 pb-1 text-xs text-app-muted" role="status">
+                {t(createAgentMessages.offlineComputerHint)}
+              </p>
+            ) : null}
             {selectedComputer ? (
               <>
-                <div>
-                  <span className="mb-1.5 block text-sm font-medium">
-                    {t(createAgentMessages.runtime)}
-                  </span>
-                  <Select
-                    aria-label={t(createAgentMessages.runtime)}
-                    className="min-w-0 w-full"
-                    disabled={!selectedComputer.runtimes.length}
-                    placeholder={t(createAgentMessages.noRuntimes)}
-                    value={selectedRuntime?.type ?? ""}
-                    onValueChange={(value) => {
+                <SettingRow
+                  disabled={!selectedComputer.runtimes.length}
+                  label={t(createAgentMessages.runtime)}
+                  onToggle={() => toggle("runtime")}
+                  open={openRow === "runtime"}
+                  value={
+                    selectedRuntime ? (
+                      <>
+                        <RuntimeLogo type={selectedRuntime.type} />
+                        <span className="truncate">
+                          {localRuntimeLabels[selectedRuntime.type]}
+                        </span>
+                      </>
+                    ) : (
+                      <Placeholder>
+                        {t(createAgentMessages.noRuntimes)}
+                      </Placeholder>
+                    )
+                  }
+                >
+                  <OptionList
+                    label={t(createAgentMessages.runtime)}
+                    onChange={(value) => {
                       setRuntimeType(value as TeamHubLocalRuntimeType);
                       setModelId("");
                       setEffort(undefined);
+                      setOpenRow(undefined);
                     }}
-                  >
-                    {selectedComputer.runtimes.map((runtime) => (
-                      <SelectItem key={runtime.type} value={runtime.type}>
-                        {localRuntimeLabels[runtime.type]}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <div>
-                    <span className="mb-1.5 block text-sm font-medium">
-                      {t(createAgentMessages.model)}
-                    </span>
-                    <Select
-                      aria-label={t(createAgentMessages.model)}
-                      className="min-w-0 w-full"
-                      disabled={!modelOptions.length}
-                      placeholder={t(createAgentMessages.noModels)}
-                      value={selectedModel?.id ?? ""}
-                      onValueChange={(value) => {
-                        setModelId(value);
-                        setEffort(undefined);
-                      }}
-                    >
-                      {modelOptions.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {runtimeModelLabel(model, t)}
-                        </SelectItem>
-                      ))}
-                    </Select>
-                  </div>
-                  {selectedRuntime?.type === "pi" && modelOptions.length > 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      <RichMessage
-                        message={createAgentMessages.manageModels}
-                        tags={{ link: modelsLink }}
-                      />
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <span className="mb-1.5 block text-sm font-medium">
-                    {t(createAgentMessages.thinkingEffort)}
-                  </span>
-                  <Select
-                    aria-label={t(createAgentMessages.thinkingEffort)}
-                    className="min-w-0 w-full"
-                    disabled={!allowedEfforts.length}
-                    placeholder={t(createAgentMessages.effortNotSupported)}
-                    value={selectedEffort ?? ""}
-                    onValueChange={(value) =>
-                      setEffort(value as TeamHubAgentReasoningEffort)
-                    }
-                  >
-                    {allowedEfforts.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {t(effortLabels[value])}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </div>
+                    options={selectedComputer.runtimes.map((runtime) => ({
+                      description: (
+                        <>
+                          <StatusDot
+                            tone={runtime.status === "ready" ? "ok" : "warn"}
+                          />
+                          {t(
+                            runtime.type === "pi" &&
+                              runtime.status === "authentication_required"
+                              ? piAuthRequiredStatusMessage(piModelsState)
+                              : runtimeStatusLabels[runtime.status],
+                          )}
+                        </>
+                      ),
+                      label: localRuntimeLabels[runtime.type],
+                      leading: <RuntimeLogo type={runtime.type} />,
+                      value: runtime.type,
+                    }))}
+                    value={selectedRuntime?.type ?? ""}
+                  />
+                </SettingRow>
+                <SettingRow
+                  disabled={!modelOptions.length}
+                  label={t(createAgentMessages.model)}
+                  onToggle={() => toggle("model")}
+                  open={openRow === "model"}
+                  value={
+                    selectedModel ? (
+                      <span className="truncate">
+                        {runtimeModelLabel(selectedModel, t)}
+                      </span>
+                    ) : (
+                      <Placeholder>
+                        {t(createAgentMessages.noModels)}
+                      </Placeholder>
+                    )
+                  }
+                >
+                  <OptionList
+                    label={t(createAgentMessages.model)}
+                    onChange={(value) => {
+                      setModelId(value);
+                      setEffort(undefined);
+                      setOpenRow(undefined);
+                    }}
+                    options={modelOptions.map((model) => ({
+                      label: runtimeModelLabel(model, t),
+                      value: model.id,
+                    }))}
+                    value={selectedModel?.id ?? ""}
+                  />
+                </SettingRow>
+                {selectedRuntime?.type === "pi" && modelOptions.length > 0 ? (
+                  <p className="px-2.5 pb-1 text-xs text-muted-foreground">
+                    <RichMessage
+                      message={createAgentMessages.manageModels}
+                      tags={{ link: modelsLink }}
+                    />
+                  </p>
+                ) : null}
+                <SettingRow
+                  disabled={!allowedEfforts.length}
+                  label={t(createAgentMessages.thinkingEffort)}
+                  onToggle={() => toggle("effort")}
+                  open={openRow === "effort"}
+                  value={
+                    selectedEffort ? (
+                      <span className="truncate">
+                        {reasoningEffortLabel(selectedEffort, t)}
+                      </span>
+                    ) : (
+                      <Placeholder>
+                        {t(createAgentMessages.effortNotSupported)}
+                      </Placeholder>
+                    )
+                  }
+                >
+                  <EffortSegments
+                    efforts={allowedEfforts}
+                    label={t(createAgentMessages.thinkingEffort)}
+                    labelOf={(value) => reasoningEffortLabel(value, t)}
+                    onChange={setEffort}
+                    value={selectedEffort}
+                  />
+                </SettingRow>
                 {!selectedModel && !loginRuntime ? (
                   selectedComputer &&
                   selectedRuntime?.status === "incompatible" ? (
@@ -475,7 +540,6 @@ export function QuickCreateLocalAgentDialog({
                       diagnosticMessage={selectedRuntime.message}
                       platform={selectedComputer.platform}
                       runtimeType={selectedRuntime.type}
-                      version={selectedRuntime.version}
                     />
                   ) : selectedComputer &&
                     selectedRuntime?.status === "unknown" ? (

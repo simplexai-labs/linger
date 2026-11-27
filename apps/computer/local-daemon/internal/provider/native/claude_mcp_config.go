@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 const (
@@ -13,25 +16,34 @@ const (
 )
 
 // claudeWriteMCPConfig writes a managed MCP configuration into a fresh
-// private temp directory and returns the file path.
-func claudeWriteMCPConfig(config []byte) (string, error) {
-	dir, err := os.MkdirTemp("", claudeMCPDirPrefix)
+// private temp directory and returns the file path and its cleanup function.
+// When baseDir is non-empty, it allocates a lock-tracked directory inside
+// baseDir via PrepareOperationTemp so the path stays under the Daemon's
+// private state directory rather than system TEMP.
+func claudeWriteMCPConfig(baseDir string, config []byte) (string, func(), error) {
+	root, removeRoot, err := localworkspace.PrivateTempRoot(baseDir, claudeMCPDirPrefix)
 	if err != nil {
-		return "", err
+		return "", nil, err
+	}
+	dir, err := os.MkdirTemp(root, claudeMCPDirPrefix)
+	if err != nil {
+		_ = removeRoot()
+		return "", nil, err
+	}
+	if err := privatefs.EnsureDir(dir); err != nil {
+		_ = removeRoot()
+		return "", nil, err
 	}
 	path := filepath.Join(dir, claudeMCPFileName)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err == nil {
-		_, err = file.Write(config)
-		if closeErr := file.Close(); err == nil {
-			err = closeErr
-		}
+	if err := privatefs.WriteFile(path, config, true); err != nil {
+		_ = removeRoot()
+		return "", nil, err
 	}
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return "", err
+	cleanup := func() {
+		claudeRemoveMCPConfig(path)
+		_ = removeRoot()
 	}
-	return path, nil
+	return path, cleanup, nil
 }
 
 // claudeRemoveMCPConfig removes the directory claudeWriteMCPConfig made, or

@@ -12,6 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { x as extract } from "tar";
 import { orderByRegion } from "@linger/service-kit";
 import { downloadVerified } from "./download.js";
@@ -25,6 +26,7 @@ import {
 import { downloadInRegion, resolveRegion } from "./region.js";
 import { extractZip } from "./zip.js";
 import {
+  INSTANCE_BUSY,
   privateDirectory,
   withInstanceLock,
   type Instance,
@@ -33,6 +35,14 @@ import { runProcess } from "./process.js";
 import { validatePublishedServiceSource } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
 import { renameRetrying } from "./fs-retry.js";
+import {
+  readSettledStamps,
+  runBounded,
+  settledStampMatches,
+  sha256File,
+  writeSettledStamps,
+  type SettledStamps,
+} from "./verified-stamps.js";
 
 const postgresPrograms = [
   "postgres",
@@ -235,27 +245,106 @@ function safePath(name: string) {
       )
   );
 }
-async function digest(file: string) {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(file)) hash.update(chunk);
-  return hash.digest("hex");
-}
-async function tree(
+const COMPONENT_HASH_CONCURRENCY = 32;
+const componentStampsFile = (directory: string) => `${directory}.verified.json`;
+
+async function collectTreeEntries(
   directory: string,
   prefix = "",
-): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
+  out: string[] = [],
+): Promise<string[]> {
   for (const entry of await readdir(path.join(directory, prefix), {
     withFileTypes: true,
   })) {
     const name = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (name === ".simplex-files.json") continue;
-    if (entry.isDirectory()) Object.assign(result, await tree(directory, name));
-    else if (entry.isFile())
-      result[name] = await digest(path.join(directory, name));
+    if (entry.isDirectory()) await collectTreeEntries(directory, name, out);
+    else if (entry.isFile()) out.push(name);
     else throw new Error("Unsafe native dependency cache entry.");
   }
-  return result;
+  return out;
+}
+
+async function hashTree(directory: string): Promise<{
+  hashes: Record<string, string>;
+  stamps: SettledStamps;
+}> {
+  const entries = await collectTreeEntries(directory);
+  const rawHashes: Record<string, string> = {};
+  const rawStamps: SettledStamps = {};
+  await runBounded(entries, COMPONENT_HASH_CONCURRENCY, async (name) => {
+    const file = path.join(directory, name);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink())
+      throw new Error("Unsafe native dependency cache entry.");
+    rawHashes[name] = await sha256File(file);
+    rawStamps[name] = [info.size, info.mtimeMs, info.ctimeMs];
+  });
+  return {
+    hashes: Object.fromEntries(entries.map((name) => [name, rawHashes[name]!])),
+    stamps: Object.fromEntries(entries.map((name) => [name, rawStamps[name]!])),
+  };
+}
+
+async function verifyCachedTree(
+  directory: string,
+  manifestFile: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const manifestInfo = await lstat(manifestFile);
+  if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink())
+    throw new Error("Unsafe native dependency cache manifest.");
+  const manifestText = await readFile(manifestFile, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestText);
+  } catch {
+    throw new Error(
+      "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error(
+      "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+    );
+  const expected = parsed as Record<string, unknown>;
+  const expectedKeys = Object.keys(expected);
+  const actualEntries = await collectTreeEntries(directory);
+  if (
+    actualEntries.length !== expectedKeys.length ||
+    actualEntries.some((name) => typeof expected[name] !== "string")
+  )
+    throw new Error(
+      "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+    );
+  const manifestDigest = createHash("sha256")
+    .update(manifestText)
+    .digest("hex");
+  const stampPath = componentStampsFile(directory);
+  const known = await readSettledStamps(stampPath, manifestDigest);
+  const nowMs = Date.now();
+  const nextStamps: SettledStamps = {};
+  let hashed = 0;
+  await runBounded(actualEntries, COMPONENT_HASH_CONCURRENCY, async (name) => {
+    signal.throwIfAborted();
+    const file = path.join(directory, name);
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink())
+      throw new Error("Unsafe native dependency cache entry.");
+    const seen = known?.[name];
+    if (settledStampMatches(seen, info, nowMs)) {
+      nextStamps[name] = seen!;
+      return;
+    }
+    hashed += 1;
+    if ((await sha256File(file)) !== expected[name])
+      throw new Error(
+        "Native dependency cache integrity mismatch; remove the damaged component and retry.",
+      );
+    nextStamps[name] = [info.size, info.mtimeMs, info.ctimeMs];
+  });
+  if (hashed > 0 || !known)
+    await writeSettledStamps(stampPath, manifestDigest, nextStamps);
 }
 type Artifact = (
   | {
@@ -317,10 +406,16 @@ async function copyVerified(
       `The bundled ${label} archive does not match its checksum. Install Linger again.`,
     );
 }
+export interface AcquireArtifactLockOptions {
+  lockWaitMs?: number;
+  lockPollMs?: number;
+}
 /**
  * Content-addressed, locked installs: unverified or partial trees never
  * become executable inputs. With `home`, a download tries the sources in its
- * region first (region.ts).
+ * region first (region.ts). Locks per artifact key so concurrent component
+ * preparations do not contend, and waits boundedly on INSTANCE_BUSY for an
+ * in-progress preparation of the same artifact.
  */
 export async function acquireNativeArtifact(
   base: string,
@@ -329,6 +424,7 @@ export async function acquireNativeArtifact(
   onProgress?: (completed: number, total?: number) => void,
   fetcher: typeof fetch = fetch,
   home?: string,
+  lockOptions: AcquireArtifactLockOptions = {},
 ) {
   const digestLength =
     artifact.algorithm === "sha256"
@@ -374,106 +470,115 @@ export async function acquireNativeArtifact(
     );
   signal.throwIfAborted();
   await privateDirectory(base);
-  return withInstanceLock({ root: base } as Instance, async () => {
-    // Older installers verify the unmodified archive under its bare digest.
-    const directory = path.join(
-      base,
-      artifact.windowsPostgres ? `${artifact.digest}-utf8` : artifact.digest,
-    );
-    const exists = await lstat(directory).catch((error) => {
-      if (error.code === "ENOENT") return;
-      throw error;
-    });
-    if (exists) {
-      await privateDirectory(directory);
-      const manifestFile = path.join(directory, ".simplex-files.json");
-      const manifestInfo = await lstat(manifestFile);
-      if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink())
-        throw new Error("Unsafe native dependency cache manifest.");
-      const manifest = await readFile(manifestFile, "utf8");
-      if (manifest !== JSON.stringify(await tree(directory)))
-        throw new Error(
-          "Native dependency cache integrity mismatch; remove the damaged component and retry.",
-        );
-      return directory;
-    }
-    const stage = path.join(base, `pending-${randomUUID()}`),
-      archive = path.join(
-        base,
-        `${randomUUID()}.${artifact.format === "zip" ? "zip" : "tgz"}`,
-      );
-    await privateDirectory(stage);
+  // Older installers verify the unmodified archive under its bare digest.
+  const key = artifact.windowsPostgres
+    ? `${artifact.digest}-utf8`
+    : artifact.digest;
+  const locksBase = path.join(base, ".locks");
+  const lockDir = path.join(locksBase, key);
+  await privateDirectory(locksBase);
+  await privateDirectory(lockDir);
+  const lockWaitMs = lockOptions.lockWaitMs ?? 120_000;
+  const lockPollMs = lockOptions.lockPollMs ?? 200;
+  const lockDeadline = Date.now() + lockWaitMs;
+  for (;;) {
+    signal.throwIfAborted();
+    let acquired = false;
     try {
-      if (artifact.file !== undefined)
-        await copyVerified({
-          ...artifact,
-          file: artifact.file,
-          output: archive,
-          signal,
-          onProgress,
+      return await withInstanceLock({ root: lockDir } as Instance, async () => {
+        acquired = true;
+        const directory = path.join(base, key);
+        const exists = await lstat(directory).catch((error) => {
+          if (error.code === "ENOENT") return;
+          throw error;
         });
-      else if (home)
-        await downloadInRegion(
-          home,
-          { ...artifact, output: archive, signal, onProgress },
-          fetcher,
-        );
-      else
-        await downloadVerified(
-          { ...artifact, output: archive, signal, onProgress },
-          fetcher,
-        );
-      let expanded = 0;
-      let archiveError: Error | undefined;
-      const admit = (relative: string, type: string, size: number) => {
-        if (
-          !safePath(relative) ||
-          !["File", "Directory"].includes(type) ||
-          relative === ".simplex-files.json"
-        ) {
-          archiveError = new Error("Unsafe native dependency archive.");
-          return false;
+        if (exists) {
+          await privateDirectory(directory);
+          const manifestFile = path.join(directory, ".simplex-files.json");
+          await verifyCachedTree(directory, manifestFile, signal);
+          return directory;
         }
-        expanded += size;
-        if (expanded > 2 * 1024 ** 3) {
-          archiveError = new Error(
-            "Native dependency archive exceeds extraction limit.",
+        const stage = path.join(base, `pending-${randomUUID()}`),
+          archive = path.join(
+            base,
+            `${randomUUID()}.${artifact.format === "zip" ? "zip" : "tgz"}`,
           );
-          return false;
-        }
-        return !archiveError;
-      };
-      if (artifact.format === "zip")
-        await extractZip(archive, stage, (entry) =>
-          admit(entry.name, entry.directory ? "Directory" : "File", entry.size),
-        );
-      else
-        await extract({
-          file: archive,
-          cwd: stage,
-          strict: true,
-          preservePaths: false,
-          filter: (name, entry) => {
-            const type =
-              "type" in entry
-                ? entry.type
-                : entry.isDirectory()
-                  ? "Directory"
-                  : entry.isFile()
-                    ? "File"
-                    : "Unsupported";
-            const relative = name.replace(/^\.\//, "").replace(/\/$/, "");
-            if (!relative && type === "Directory") return true;
-            return admit(relative, type, entry.size);
-          },
-        });
-      if (archiveError) throw archiveError;
-      if (artifact.windowsPostgres) {
-        // initdb relaunches itself and starts postgres through narrow Win32 APIs.
-        for (const program of postgresPrograms)
-          await writeFile(
-            path.join(stage, "bin", `${program}.exe.manifest`),
-            `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        await privateDirectory(stage);
+        try {
+          if (artifact.file !== undefined)
+            await copyVerified({
+              ...artifact,
+              file: artifact.file,
+              output: archive,
+              signal,
+              onProgress,
+            });
+          else if (home)
+            await downloadInRegion(
+              home,
+              { ...artifact, output: archive, signal, onProgress },
+              fetcher,
+            );
+          else
+            await downloadVerified(
+              { ...artifact, output: archive, signal, onProgress },
+              fetcher,
+            );
+          let expanded = 0;
+          let archiveError: Error | undefined;
+          const admit = (relative: string, type: string, size: number) => {
+            if (
+              !safePath(relative) ||
+              !["File", "Directory"].includes(type) ||
+              relative === ".simplex-files.json"
+            ) {
+              archiveError = new Error("Unsafe native dependency archive.");
+              return false;
+            }
+            expanded += size;
+            if (expanded > 2 * 1024 ** 3) {
+              archiveError = new Error(
+                "Native dependency archive exceeds extraction limit.",
+              );
+              return false;
+            }
+            return !archiveError;
+          };
+          if (artifact.format === "zip")
+            await extractZip(archive, stage, (entry) =>
+              admit(
+                entry.name,
+                entry.directory ? "Directory" : "File",
+                entry.size,
+              ),
+            );
+          else
+            await extract({
+              file: archive,
+              cwd: stage,
+              strict: true,
+              preservePaths: false,
+              filter: (name, entry) => {
+                const type =
+                  "type" in entry
+                    ? entry.type
+                    : entry.isDirectory()
+                      ? "Directory"
+                      : entry.isFile()
+                        ? "File"
+                        : "Unsupported";
+                const relative = name.replace(/^\.\//, "").replace(/\/$/, "");
+                if (!relative && type === "Directory") return true;
+                return admit(relative, type, entry.size);
+              },
+            });
+          if (archiveError) throw archiveError;
+          if (artifact.windowsPostgres) {
+            // initdb relaunches itself and starts postgres through narrow Win32 APIs.
+            for (const program of postgresPrograms)
+              await writeFile(
+                path.join(stage, "bin", `${program}.exe.manifest`),
+                `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity name="Linger.PostgreSQL.${program}" version="1.0.0.0" type="win32"/>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -483,22 +588,46 @@ export async function acquireNativeArtifact(
   </application>
 </assembly>
 `,
-            { flag: "wx" },
+                { flag: "wx" },
+              );
+          }
+          const { hashes, stamps } = await hashTree(stage);
+          const manifestBody = JSON.stringify(hashes);
+          await writeFile(
+            path.join(stage, ".simplex-files.json"),
+            manifestBody,
+            { mode: 0o600, flag: "wx" },
           );
-      }
-      await writeFile(
-        path.join(stage, ".simplex-files.json"),
-        JSON.stringify(await tree(stage)),
-        { mode: 0o600, flag: "wx" },
+          signal.throwIfAborted();
+          await renameRetrying(stage, directory, { signal });
+          const manifestDigest = createHash("sha256")
+            .update(manifestBody)
+            .digest("hex");
+          await writeSettledStamps(
+            componentStampsFile(directory),
+            manifestDigest,
+            stamps,
+          );
+          return directory;
+        } finally {
+          await rm(archive, { force: true });
+          await rm(stage, { recursive: true, force: true });
+        }
+      });
+    } catch (error) {
+      if (
+        acquired ||
+        (error as { code?: unknown } | null)?.code !== INSTANCE_BUSY
+      )
+        throw error;
+      if (Date.now() >= lockDeadline) throw error;
+      await delay(
+        Math.min(lockPollMs, Math.max(1, lockDeadline - Date.now())),
+        undefined,
+        { signal },
       );
-      signal.throwIfAborted();
-      await renameRetrying(stage, directory, { signal });
-      return directory;
-    } finally {
-      await rm(archive, { force: true });
-      await rm(stage, { recursive: true, force: true });
     }
-  });
+  }
 }
 const npmSources = {
   pnpm: {
@@ -813,17 +942,19 @@ export async function prepareNativeDependencies(options: {
       `postgres (PostgreSQL) ${postgres.postgresVersion}`,
     ],
   ];
-  for (const [command, args, expected] of checks) {
-    const result = await runProcess(command, args, {
-      env,
-      signal: options.signal,
-      timeoutMs: 30000,
-    });
-    if (result.code !== 0 || result.stdout.trim() !== expected)
-      throw new Error(
-        "A verified private native tool could not execute the required version on this host.",
-      );
-  }
+  await Promise.all(
+    checks.map(async ([command, args, expected]) => {
+      const result = await runProcess(command, args, {
+        env,
+        signal: options.signal,
+        timeoutMs: 30000,
+      });
+      if (result.code !== 0 || result.stdout.trim() !== expected)
+        throw new Error(
+          "A verified private native tool could not execute the required version on this host.",
+        );
+    }),
+  );
   return {
     env,
     postgresBin: path.join(pg, "bin"),
@@ -841,17 +972,7 @@ export async function prepareNativeDependencies(options: {
     registries,
   };
 }
-/**
- * The verified LiveKit server and ffmpeg for this computer, from
- * LINGER_NATIVE_VOICE_TOOLS_JSON; undefined when the distribution has none
- * for it, and Native voice stays off.
- */
-export async function prepareNativeVoiceTools(options: {
-  home: string;
-  signal: AbortSignal;
-  onEvent?: (event: InstallerEvent) => void;
-  fetcher?: typeof fetch;
-}): Promise<{ bin: string; livekit: string } | undefined> {
+function parseNativeVoiceToolsForHost(): NativeVoiceTools | undefined {
   const target = `${process.platform}-${process.arch}`;
   const raw = process.env.LINGER_NATIVE_VOICE_TOOLS_JSON;
   if (!raw) return undefined;
@@ -863,7 +984,77 @@ export async function prepareNativeVoiceTools(options: {
   } catch {
     throw new Error("Native voice tools distribution metadata is invalid.");
   }
-  const tools = sources.find((source) => source.target === target);
+  return sources.find((source) => source.target === target);
+}
+export interface NativeVoiceToolsPlan {
+  bin: string;
+  livekit: string;
+  prepared: boolean;
+  damaged: boolean;
+}
+/**
+ * Deterministic voice tools locations for this computer without extracting
+ * the archive; `prepared` is true when the component manifest and executables
+ * already exist as regular files, and `damaged` is true when the component
+ * directory exists on disk without all required files.
+ */
+export async function resolveNativeVoiceToolsPlan(
+  home: string,
+): Promise<NativeVoiceToolsPlan | undefined> {
+  const tools = parseNativeVoiceToolsForHost();
+  if (!tools) return undefined;
+  const directory = path.join(
+    path.resolve(home),
+    "tools",
+    "native",
+    "components",
+    tools.sha256,
+  );
+  const bin = path.join(directory, "bin");
+  const exe = process.platform === "win32" ? ".exe" : "";
+  const livekit = path.join(bin, `livekit-server${exe}`);
+  const dirExists = await lstat(directory).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    },
+  );
+  const required = [
+    path.join(directory, ".simplex-files.json"),
+    livekit,
+    path.join(bin, `ffmpeg${exe}`),
+    path.join(bin, `ffprobe${exe}`),
+  ];
+  const exists = await Promise.all(
+    required.map((file) =>
+      stat(file).then(
+        (info) => info.isFile(),
+        () => false,
+      ),
+    ),
+  );
+  const prepared = exists.every(Boolean);
+  if (!prepared && tools.file !== undefined) {
+    const archiveInfo = await stat(tools.file).catch(() => undefined);
+    if (!archiveInfo?.isFile()) {
+      throw new Error("Bundled native voice tools archive is missing.");
+    }
+  }
+  return { bin, livekit, prepared, damaged: dirExists && !prepared };
+}
+/**
+ * The verified LiveKit server and ffmpeg for this computer, from
+ * LINGER_NATIVE_VOICE_TOOLS_JSON; undefined when the distribution has none
+ * for it, and Native voice stays off.
+ */
+export async function prepareNativeVoiceTools(options: {
+  home: string;
+  signal: AbortSignal;
+  onEvent?: (event: InstallerEvent) => void;
+  fetcher?: typeof fetch;
+}): Promise<{ bin: string; livekit: string } | undefined> {
+  const tools = parseNativeVoiceToolsForHost();
   if (!tools) return undefined;
   const nativeRoot = path.join(path.resolve(options.home), "tools/native");
   await privateDirectory(path.resolve(options.home));
@@ -911,16 +1102,21 @@ export async function prepareNativeVoiceTools(options: {
     ["ffmpeg", `ffmpeg version ${tools.ffmpegVersion} `],
     ["ffprobe", `ffprobe version ${tools.ffmpegVersion} `],
   ];
-  for (const [program, expected] of checks) {
-    const result = await runProcess(
-      path.join(bin, `${program}${exe}`),
-      [program === "livekit-server" ? "--version" : "-version"],
-      { signal: options.signal, timeoutMs: 30000 },
-    );
-    if (result.code !== 0 || !`${result.stdout.trim()}\n`.startsWith(expected))
-      throw new Error(
-        "A verified private voice tool could not execute the required version on this host.",
+  await Promise.all(
+    checks.map(async ([program, expected]) => {
+      const result = await runProcess(
+        path.join(bin, `${program}${exe}`),
+        [program === "livekit-server" ? "--version" : "-version"],
+        { signal: options.signal, timeoutMs: 30000 },
       );
-  }
+      if (
+        result.code !== 0 ||
+        !`${result.stdout.trim()}\n`.startsWith(expected)
+      )
+        throw new Error(
+          "A verified private voice tool could not execute the required version on this host.",
+        );
+    }),
+  );
   return { bin, livekit: path.join(bin, `livekit-server${exe}`) };
 }

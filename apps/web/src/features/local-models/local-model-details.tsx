@@ -61,12 +61,10 @@ const segmentColors = ["bg-rain-500", "bg-lichen-500", "bg-sun-500"] as const;
 const componentColor = "bg-muted-foreground/40";
 
 function Fact({
-  bordered = true,
   children,
   className,
   label,
 }: {
-  bordered?: boolean;
   children: ReactNode;
   className?: string;
   label: string;
@@ -75,7 +73,6 @@ function Fact({
     <div
       className={cn(
         "flex min-h-9 items-center gap-3 py-1.5 text-sm",
-        bordered && "border-t border-border/70",
         className,
       )}
     >
@@ -206,7 +203,6 @@ export function ModelFacts({
   disabled = false,
   entry,
   hasPrimaryAssignAction = false,
-  hasReadyAlternatives = false,
   onAssignAgent,
   onRecheck,
   onUpdateDriver,
@@ -219,7 +215,6 @@ export function ModelFacts({
   disabled?: boolean;
   entry: ModelEntry;
   hasPrimaryAssignAction?: boolean;
-  hasReadyAlternatives?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
   onRecheck?: () => void;
   onUpdateDriver?: () => void;
@@ -296,17 +291,14 @@ export function ModelFacts({
           )}
         >
           {model.error ? (
-            <Fact
-              bordered={false}
-              label={t(stopped ? m.factLastDownload : m.factLastLoad)}
-            >
+            <Fact label={t(stopped ? m.factLastDownload : m.factLastLoad)}>
               <span className="text-app-danger">
                 {modelErrorCopy(model.error, t)}
               </span>
             </Fact>
           ) : null}
           {status === "unavailable" ? (
-            <Fact bordered={Boolean(model.error)} label={t(m.factWhyNot)}>
+            <Fact label={t(m.factWhyNot)}>
               <div className="grid gap-2">
                 <span
                   className={
@@ -352,11 +344,6 @@ export function ModelFacts({
                         <Icon icon={LinkSquare02Icon} size={14} />
                       </a>
                     </div>
-                    {hasReadyAlternatives ? (
-                      <p className="text-xs text-muted-foreground">
-                        {t(m.driverOtherModelsReady)}
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -366,7 +353,7 @@ export function ModelFacts({
       ) : null}
       {model.note ? (
         <div className="my-1.5 rounded-lg border border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)] px-3 py-0.5">
-          <Fact bordered={false} label={t(m.factNote)}>
+          <Fact label={t(m.factNote)}>
             <span className="text-app-warning">
               {modelNoteCopy(
                 model.note.code,
@@ -640,11 +627,6 @@ export function AdvancedDialog({
   return (
     <ModalDialog
       closeOnBackdrop
-      description={
-        host
-          ? [host.os_label, host.engine_label].filter(Boolean).join(" · ")
-          : undefined
-      }
       onClose={onClose}
       size="md"
       title={t(m.detailsOf, { name: view.computer.display_name })}
@@ -655,7 +637,7 @@ export function AdvancedDialog({
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
               {t(m.factMemory)}
             </h3>
-            <div className="divide-y divide-border rounded-xl border border-border bg-app-canvas/40 px-3.5">
+            <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
               {view.pools.map((pool) => (
                 <PoolBar
                   colorOf={colorOf}
@@ -707,7 +689,13 @@ export function AdvancedDialog({
               {t(m.hardware)}
             </h3>
             <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
-              <Fact bordered={false} label={t(m.factMemory)}>
+              {host.os_label ? (
+                <Fact label={t(m.factSystem)}>{host.os_label}</Fact>
+              ) : null}
+              {host.engine_label ? (
+                <Fact label={t(m.factEngine)}>{host.engine_label}</Fact>
+              ) : null}
+              <Fact label={t(m.factMemory)}>
                 {formatGigabytes(host.ram_total_bytes, t)}
               </Fact>
               {host.gpus.map((gpu) => (

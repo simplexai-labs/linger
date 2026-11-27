@@ -1,15 +1,16 @@
 import { RoomHistoryShareDialog } from "./sharing/room-history-share-dialog";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Delete02Icon,
   Link01Icon,
   Logout01Icon,
-  PencilEdit01Icon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import { teamHubData } from "@/features/teamhub/teamhub-api";
+import { TeamHubError } from "@/features/teamhub/teamhub-client";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
@@ -17,11 +18,17 @@ import { roomDialogMessages } from "./room-dialogs.messages";
 import { roomSettingsMessages as m } from "./room-settings.messages";
 import { sidePanelMessages } from "./task-sidebar/side-panel.messages";
 import {
+  requireRoomScope,
+  roomQueryKey,
   roomQueryOptions,
   roomMembersQueryOptions,
   teamHubIdentityQueryOptions,
+  tenantRoomsQueryKey,
 } from "./room-queries";
-import { RoomSettingsDialog } from "./room-settings-dialog";
+import {
+  PanelFooterAction,
+  PanelFooterActions,
+} from "./members/panel-footer-actions";
 import { RoomAvatar } from "./members/room-avatar";
 import { RoomMembersSection } from "./members/room-members-section";
 import { RoomDeleteDialog } from "./room-delete-dialog";
@@ -83,7 +90,6 @@ function RoomSettingsContent({
   room: TeamHubRoom;
   owner: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -92,54 +98,18 @@ function RoomSettingsContent({
   const groupRoom = room.kind === "room";
   return (
     <div
-      className="workspace-scrollbar h-full overflow-y-auto"
+      className="agent-settings-column workspace-scrollbar flex h-full min-h-0 flex-col gap-8 overflow-y-auto bg-sidebar/50 pb-4 [scrollbar-gutter:stable_both-edges]"
       data-testid="panel-room-settings"
     >
-      {editing ? (
-        <RoomSettingsDialog
-          key={room.id}
-          embedded
-          room={room}
-          tenantId={room.tenant_id}
-          onClose={() => setEditing(false)}
-          onDelete={() => setDeleting(true)}
-        />
-      ) : (
-        <header className="flex flex-col items-center px-5 pb-4 pt-6 text-center">
-          <RoomAvatar members={members} size="lg" />
-          <div className="mt-3 flex max-w-full items-center gap-1">
-            <h2 className="truncate text-base font-semibold leading-5 text-foreground">
-              {room.name}
-            </h2>
-            {owner ? (
-              <button
-                aria-label={t(m.editDetails)}
-                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                onClick={() => setEditing(true)}
-                title={t(m.editDetails)}
-                type="button"
-              >
-                <Icon icon={PencilEdit01Icon} size={14} />
-              </button>
-            ) : null}
-          </div>
-          {room.description ? (
-            <p className="mt-1 line-clamp-2 text-xs leading-[18px] text-app-muted">
-              {room.description}
-            </p>
-          ) : null}
-          {groupRoom ? (
-            <p className="mt-1.5 text-xs tabular-nums text-app-muted">
-              {t(sidePanelMessages.memberCount, { count: members.length })}
-            </p>
-          ) : null}
-        </header>
-      )}
+      <RoomHeader
+        groupRoom={groupRoom}
+        members={members}
+        canRename={owner}
+        onShare={owner ? () => setSharing(true) : undefined}
+        room={room}
+      />
       {groupRoom ? (
         <>
-          <h3 className="px-5 pt-2 text-xs font-medium text-app-muted">
-            {t(m.members)}
-          </h3>
           <Suspense
             fallback={
               <p role="status" className="p-5 text-sm text-app-muted">
@@ -153,40 +123,37 @@ function RoomSettingsContent({
               tenantId={room.tenant_id}
             />
           </Suspense>
-          <div className="mx-5 mt-2 space-y-2 border-t border-app-border pb-5 pt-4">
-            {owner ? (
-              <Button className="w-full" onClick={() => setSharing(true)}>
-                <Icon icon={Link01Icon} size={16} />
-                {t(m.shareConversation)}
-              </Button>
-            ) : null}
-            {room.participation === "left" ? (
+          {room.participation === "left" ? (
+            <div className="px-3">
               <RoomRejoinBanner room={room} />
-            ) : (
-              <Button
-                data-voice-risk="never"
-                className="w-full"
-                onClick={() => {
-                  leave.reset();
-                  setLeaving(true);
-                }}
-              >
-                <Icon icon={Logout01Icon} size={16} />
-                {t(m.leaveRoom)}
-              </Button>
-            )}
-            {owner ? (
-              <Button
-                data-voice-risk="never"
-                className="w-full"
-                onClick={() => setDeleting(true)}
-                tone="danger"
-              >
-                <Icon icon={Delete02Icon} size={16} />
-                {t(roomDialogMessages.deleteRoom)}
-              </Button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
+          {owner || room.participation !== "left" ? (
+            <PanelFooterActions label={t(m.roomActions)}>
+              {room.participation === "left" ? null : (
+                <PanelFooterAction
+                  data-voice-risk="never"
+                  onClick={() => {
+                    leave.reset();
+                    setLeaving(true);
+                  }}
+                >
+                  <Icon icon={Logout01Icon} size={14} />
+                  {t(m.leaveRoom)}
+                </PanelFooterAction>
+              )}
+              {owner ? (
+                <PanelFooterAction
+                  danger
+                  data-voice-risk="never"
+                  onClick={() => setDeleting(true)}
+                >
+                  <Icon icon={Delete02Icon} size={14} />
+                  {t(roomDialogMessages.deleteRoom)}
+                </PanelFooterAction>
+              ) : null}
+            </PanelFooterActions>
+          ) : null}
         </>
       ) : null}
       {sharing ? (
@@ -240,5 +207,140 @@ function RoomSettingsContent({
         </ModalDialog>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The Room's identity, laid out like an Agent's: the name renames in place
+ * and Share sits in the corner where an Agent has Publish.
+ */
+function RoomHeader({
+  canRename,
+  groupRoom,
+  members,
+  onShare,
+  room,
+}: {
+  canRename: boolean;
+  groupRoom: boolean;
+  members: TeamHubActorRef[];
+  onShare?: () => void;
+  room: TeamHubRoom;
+}) {
+  const t = useT();
+  const { client } = useTeamHubRuntime();
+  const queryClient = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(room.name);
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (renaming) nameInput.current?.select();
+  }, [renaming]);
+  const rename = useMutation({
+    mutationFn: (name: string) =>
+      teamHubData(
+        client.api.PATCH("/v0/rooms/{roomId}", {
+          params: { path: { roomId: room.id } },
+          body: { name },
+        }),
+      ).then((updated) => requireRoomScope(updated, room.tenant_id, room.id)),
+    onSuccess: async (updated) => {
+      queryClient.setQueryData(roomQueryKey(room.tenant_id, room.id), {
+        ...updated,
+        participation: room.participation,
+      });
+      setRenaming(false);
+      await queryClient.invalidateQueries({
+        queryKey: tenantRoomsQueryKey(room.tenant_id),
+      });
+    },
+  });
+  function save() {
+    const name = draft.trim();
+    if (!name || name === room.name) {
+      setDraft(room.name);
+      setRenaming(false);
+      return;
+    }
+    if (!rename.isPending) rename.mutate(name);
+  }
+  const renameError = rename.error
+    ? rename.error instanceof TeamHubError
+      ? rename.error.code === "ROOM_NAME_TAKEN"
+        ? t(roomDialogMessages.nameTaken)
+        : rename.error.message
+      : t(m.saveUnconfirmed)
+    : undefined;
+  return (
+    <header className="relative mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pt-8 text-center">
+      {onShare ? (
+        <div className="absolute right-3 top-3">
+          <button
+            className="agent-publish-button"
+            onClick={onShare}
+            title={t(m.shareConversation)}
+            type="button"
+          >
+            <Icon icon={Link01Icon} size={14} />
+            {t(m.share)}
+          </button>
+        </div>
+      ) : null}
+      <RoomAvatar members={members} size="lg" />
+      {renaming ? (
+        <input
+          aria-label={t(m.name)}
+          ref={nameInput}
+          className="mt-2.5 max-w-full rounded-md bg-card px-2 text-center text-[15px] font-semibold leading-5 text-foreground shadow-outline outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+          disabled={rename.isPending}
+          maxLength={120}
+          onBlur={save}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              rename.reset();
+              setDraft(room.name);
+              setRenaming(false);
+            }
+          }}
+          value={draft}
+        />
+      ) : canRename ? (
+        <h2 className="mt-2.5 max-w-full text-[15px] font-semibold leading-5 text-foreground">
+          <button
+            aria-label={t(m.renameRoom, { name: room.name })}
+            className="max-w-full break-words rounded-md px-2 py-0.5 hover:bg-sidebar-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+            onClick={() => {
+              rename.reset();
+              setDraft(room.name);
+              setRenaming(true);
+            }}
+            type="button"
+          >
+            {room.name}
+          </button>
+        </h2>
+      ) : (
+        <h2 className="mt-2.5 break-words text-[15px] font-semibold leading-5 text-foreground">
+          {room.name}
+        </h2>
+      )}
+      {renaming && renameError ? (
+        <p className="mt-1 text-xs text-app-danger" role="alert">
+          {renameError}
+        </p>
+      ) : null}
+      {room.description ? (
+        <p className="mt-1 line-clamp-2 max-w-[22rem] text-xs leading-[18px] text-muted-foreground">
+          {room.description}
+        </p>
+      ) : null}
+      {groupRoom ? (
+        <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+          {t(sidePanelMessages.memberCount, { count: members.length })}
+        </p>
+      ) : null}
+    </header>
   );
 }

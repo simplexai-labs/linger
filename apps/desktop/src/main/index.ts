@@ -1,10 +1,5 @@
 import { execFile } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -198,6 +193,7 @@ async function main(): Promise<void> {
   };
   const loginShell = resolveLoginShell(log);
   const shellDaemonPath = daemonExecutable();
+  const nodeBinaryName = process.platform === "win32" ? "node.exe" : "node";
   const bundleStoreRef: { current?: BundleStoreModule } = {};
   const activeDaemonExecutable = async (): Promise<string> => {
     if (process.env.LINGER_COMPUTER_DAEMON) {
@@ -214,6 +210,9 @@ async function main(): Promise<void> {
     inspectEnv: inspectEnv(loginShell),
     macosVersion: () => process.getSystemVersion(),
     installerDirectory: path.join(here, "../installer"),
+    bundledNodePath: app.isPackaged
+      ? path.join(process.resourcesPath, "runtime", "bin", nodeBinaryName)
+      : path.join(here, "../computer/runtime/bin", nodeBinaryName),
     ...(__SOURCE_ARCHIVE__ ? { sourceArchive: __SOURCE_ARCHIVE__ } : {}),
     ...(__SOURCE_DEPENDENCIES__
       ? { sourceDependencies: __SOURCE_DEPENDENCIES__ }
@@ -277,7 +276,7 @@ async function main(): Promise<void> {
     preload: path.join(here, "../preload/setup.cjs"),
     version: VERSION,
     defaultDisplayName,
-    show: !background && needsSetup,
+    show: () => !background && !config.get().computerId,
     loginItem: {
       get: () => app.getLoginItemSettings().openAtLogin,
       set: (on) =>
@@ -314,6 +313,8 @@ async function main(): Promise<void> {
       ? updateInstallFor(process.platform, process.execPath, existsSync)
       : undefined,
     downloadDirectory: path.join(userData, "updates"),
+    prepareUpdate: (stagedPath, signal) =>
+      localServer.prepareUpdateTool(stagedPath, signal),
     announce: (state) => {
       if (!Notification.isSupported()) return;
       const notice = new Notification(updateNotice(state, language.t));
@@ -355,8 +356,9 @@ async function main(): Promise<void> {
           },
         }
       : undefined;
+  const activeLocalHome = await localServer.activeHome();
   const initialDaemon = await resolveColdStartDaemonLaunch({
-    home,
+    home: activeLocalHome,
     shellDaemonPath,
     shellTeamhubCliDirectory: path.join(here, "../teamhub-cli"),
     resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
@@ -427,7 +429,7 @@ async function main(): Promise<void> {
     (!app.isPackaged && process.env.LINGER_ENABLE_BUNDLE_UPDATER === "1");
 
   const bundleStore = new BundleStoreModule({
-    home,
+    home: () => localServer.home,
     seedDirectory,
     target: bundleTarget,
     shouldImportSeed: isLocalServerMode,
@@ -465,16 +467,18 @@ async function main(): Promise<void> {
       existsSync(process.env.LINGER_TEST_BUSY_FILE)
         ? 1
         : 0),
-    ...(healthGateTimeoutMs !== undefined && Number.isFinite(healthGateTimeoutMs)
+    ...(healthGateTimeoutMs !== undefined &&
+    Number.isFinite(healthGateTimeoutMs)
       ? { healthGateTimeoutMs }
       : {}),
-    ...(healthGateIntervalMs !== undefined && Number.isFinite(healthGateIntervalMs)
+    ...(healthGateIntervalMs !== undefined &&
+    Number.isFinite(healthGateIntervalMs)
       ? { healthGateIntervalMs }
       : {}),
     backupDatabase: process.env.TEAMHUB_DATABASE_URL
       ? async (appVersion) => {
           const relFile = `instances/desktop/backups/pre-${appVersion}.dump`;
-          const absFile = path.join(home, relFile);
+          const absFile = path.join(bundleStore.home, relFile);
           mkdirSync(path.dirname(absFile), { recursive: true });
           const pgDumpBin = process.env.LINGER_PG_DUMP_BIN || "pg_dump";
           await runExec(pgDumpBin, [
@@ -492,7 +496,7 @@ async function main(): Promise<void> {
       : undefined,
     restoreDatabase: process.env.TEAMHUB_DATABASE_URL
       ? async (relFile) => {
-          const absFile = path.join(home, relFile);
+          const absFile = path.join(bundleStore.home, relFile);
           const pgRestoreBin =
             process.env.LINGER_PG_RESTORE_BIN || "pg_restore";
           await runExec(pgRestoreBin, [
@@ -542,7 +546,10 @@ async function main(): Promise<void> {
       if (changed.includes("web")) {
         servicesToSwitch.push("web");
       }
-      if (servicesToSwitch.length > 0 && (await localServer.hasLocalInstance())) {
+      if (
+        servicesToSwitch.length > 0 &&
+        (await localServer.hasLocalInstance())
+      ) {
         // P0-4: Delegate service release switching (`teamhub`, `node-services`,
         // and/or `web`) exclusively through installer.js so PID tracking &
         // uninstall --stop stay under a single lifecycle owner while PostgreSQL
@@ -552,8 +559,9 @@ async function main(): Promise<void> {
         });
       }
       if (changed.includes("backend")) {
+        const currentStoreHome = bundleStore.home;
         const daemonDir = path.join(
-          home,
+          currentStoreHome,
           release.modules.backend.path,
           "computer-daemon",
         );
@@ -565,7 +573,7 @@ async function main(): Promise<void> {
         );
         if (existsSync(daemonExe)) {
           const toolsNode = resolveToolsNodePath({
-            home,
+            home: currentStoreHome,
             releaseInfraNode: release.infra.node,
             resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
             isPackaged: app.isPackaged,
@@ -614,7 +622,7 @@ async function main(): Promise<void> {
       }
       if (changed.includes("backend")) {
         const toolsNode = resolveToolsNodePath({
-          home,
+          home: bundleStore.home,
           resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
           isPackaged: app.isPackaged,
         });
@@ -641,7 +649,8 @@ async function main(): Promise<void> {
     },
     buildHealthProbes: (_release, changed) => {
       const origin = config.get().serverUrl;
-      const localOrigin = origin && isLoopbackOrigin(origin) ? origin : undefined;
+      const localOrigin =
+        origin && isLoopbackOrigin(origin) ? origin : undefined;
       return buildV2HealthProbes({
         changed,
         localOrigin,

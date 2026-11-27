@@ -1,13 +1,20 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { existsSync } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { sleep } from "@linger/service-kit";
 import { x as extract } from "tar";
-import { downloadInRegion, resolveRegion } from "./region.js";
+import {
+  downloadInRegion,
+  formatRegionDownloadEvent,
+  resolveRegion,
+} from "./region.js";
 import {
   atomicPrivate,
+  INSTANCE_BUSY,
   privateDirectory,
   readPrivate,
   withInstanceLock,
@@ -21,6 +28,13 @@ import {
 } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
 import { renameRetrying } from "./fs-retry.js";
+import {
+  ensureStableBundledPi,
+  resolveBundledPi,
+  withBundledPiPath,
+  type BundledPi,
+} from "./bundled-pi.js";
+import { runBounded, sha256File } from "./verified-stamps.js";
 export type LocalmodelsToolSource = PublishedServiceSource & {
   sourceCommit: string;
   manifestSha256: string;
@@ -34,7 +48,10 @@ interface ToolManifest {
   moduleDir: string;
   assets: Record<string, string>;
 }
-type Options = ProcessOptions & { onEvent?: (event: InstallerEvent) => void };
+type Options = ProcessOptions & {
+  onEvent?: (event: InstallerEvent) => void;
+  bundledPi?: BundledPi | null;
+};
 export function validateToolSource(value: unknown): LocalmodelsToolSource {
   const source = validatePublishedServiceSource(value);
   const extra = value as LocalmodelsToolSource;
@@ -69,11 +86,6 @@ function safeRelative(name: string): boolean {
           /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(p),
       )
   );
-}
-async function digest(file: string) {
-  const h = createHash("sha256");
-  for await (const chunk of createReadStream(file)) h.update(chunk);
-  return h.digest("hex");
 }
 async function verifyDirectory(
   directory: string,
@@ -187,37 +199,22 @@ async function verify(
     writable.push(manifestFile);
   const stamps: Stamps = {};
   let hashed = 0;
-  let next = 0;
-  const worker = async () => {
-    while (next < assets.length) {
-      const [name, expected] = assets[next++]!;
-      if (!/^[a-f0-9]{64}$/.test(expected))
-        throw new Error("Upstream tool payload checksum mismatch.");
-      const { file, info } = await regular(directory, name, checkedDirs);
-      if (process.platform === "win32" && info.mode & 0o200)
-        writable.push(file);
-      const stamp: [number, number] = [info.size, info.mtimeMs];
-      const seen = known[name];
-      if (!seen || seen[0] !== stamp[0] || seen[1] !== stamp[1]) {
-        hashed += 1;
-        if ((await digest(file)) !== expected)
-          throw new Error("Upstream tool payload checksum mismatch.");
-      }
-      stamps[name] = stamp;
-    }
-  };
   // Recovery may move or remove this kit, so wait for all active reads even
   // when one worker has already found a mismatched asset.
-  let failure: { reason: unknown } | undefined;
-  await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, assets.length) }, () =>
-      worker().catch((error: unknown) => {
-        next = assets.length;
-        failure ??= { reason: error };
-      }),
-    ),
-  );
-  if (failure) throw failure.reason;
+  await runBounded(assets, CONCURRENCY, async ([name, expected]) => {
+    if (!/^[a-f0-9]{64}$/.test(expected))
+      throw new Error("Upstream tool payload checksum mismatch.");
+    const { file, info } = await regular(directory, name, checkedDirs);
+    if (process.platform === "win32" && info.mode & 0o200) writable.push(file);
+    const stamp: [number, number] = [info.size, info.mtimeMs];
+    const seen = known[name];
+    if (!seen || seen[0] !== stamp[0] || seen[1] !== stamp[1]) {
+      hashed += 1;
+      if ((await sha256File(file)) !== expected)
+        throw new Error("Upstream tool payload checksum mismatch.");
+    }
+    stamps[name] = stamp;
+  });
   return {
     python: path.join(directory, ...m.python.split("/")),
     pythonRel: m.python,
@@ -282,12 +279,18 @@ async function unpack(archive: string, directory: string) {
  */
 async function setKitMode(directory: string, sealed: boolean) {
   if (process.platform === "win32") return;
+  if (!sealed) await chmod(directory, 0o700);
+  const subdirs: string[] = [];
+  const files: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) await setKitMode(file, sealed);
-    else if (sealed && entry.isFile())
-      await chmod(file, (await lstat(file)).mode & 0o500);
+    if (entry.isDirectory()) subdirs.push(file);
+    else if (sealed && entry.isFile()) files.push(file);
   }
+  await runBounded(files, CONCURRENCY, async (file) => {
+    await chmod(file, (await lstat(file)).mode & 0o500);
+  });
+  for (const subdir of subdirs) await setKitMode(subdir, sealed);
   await chmod(directory, sealed ? 0o500 : 0o700);
 }
 /** The Windows read-only attribute prevents CPython from replacing a verified cache file. */
@@ -325,10 +328,18 @@ async function installedKit(directory: string, source: LocalmodelsToolSource) {
   if (tool.hashed > 0) await writeStamps(directory, source, tool.stamps);
   return location(tool);
 }
+interface ToolPrepareDependencies {
+  source?: LocalmodelsToolSource;
+  fetcher?: typeof fetch;
+  lockPollMs?: number;
+  lockWaitMs?: number;
+}
+const KIT_LOCK_POLL_MS = 250;
+const KIT_LOCK_WAIT_MS = 10 * 60_000;
 async function prepareLocalmodelsTool(
   home: string,
   options: Options = {},
-  dependencies: { source?: LocalmodelsToolSource; fetcher?: typeof fetch } = {},
+  dependencies: ToolPrepareDependencies = {},
 ) {
   const pinned = dependencies.source ?? pinnedToolSource();
   if (!pinned)
@@ -347,103 +358,181 @@ async function prepareLocalmodelsTool(
   } catch {
     // An altered kit is replaced below, under the publication lock.
   }
+  const signal = options.signal ?? new AbortController().signal;
   const lock = path.join(base, "lock");
   await privateDirectory(lock);
-  return withInstanceLock({ root: lock } as Instance, async () => {
-    let damaged = false;
+  const lockPollMs = dependencies.lockPollMs ?? KIT_LOCK_POLL_MS;
+  const lockWaitMs = dependencies.lockWaitMs ?? KIT_LOCK_WAIT_MS;
+  const lockDeadline = Date.now() + lockWaitMs;
+  let waited = false;
+  for (;;) {
+    signal.throwIfAborted();
     try {
       const tool = await installedKit(directory, source);
       if (tool) return tool;
-    } catch (error) {
-      if (/owned directory/.test((error as Error).message)) throw error;
-      damaged = true;
+    } catch {
+      // An altered kit is replaced below, under the publication lock.
     }
-    const signal = options.signal ?? new AbortController().signal;
-    signal.throwIfAborted();
-    if (damaged) {
-      // Re-fetch the same pinned kit; the altered copy is moved aside first so
-      // the published path only ever holds a verified kit.
-      const invalid = path.join(base, `invalid-${randomUUID()}`);
-      // macOS also requires the source directory to be writable when moving
-      // a sealed directory. Ownership was checked above; reopen only its root
-      // before quarantine, then reopen descendants at the quarantined path.
-      if (process.platform !== "win32") await chmod(directory, 0o700);
-      await renameRetrying(directory, invalid, { signal });
-      await setKitMode(invalid, false);
-      await rm(invalid, { recursive: true, force: true });
-    }
-    const stage = path.join(base, `pending-${randomUUID()}`);
-    await privateDirectory(stage);
-    const archive = path.join(base, `${randomUUID()}.tgz`);
+    let acquired = false;
     try {
-      options.onEvent?.({
-        kind: "stage",
-        stage: "preflight",
-        state: "running",
-        message: damaged
-          ? "Repairing the model and Harness installation tool…"
-          : "Preparing the model and Harness installation tool…",
+      return await withInstanceLock({ root: lock } as Instance, async () => {
+        acquired = true;
+        let damaged = false;
+        try {
+          const tool = await installedKit(directory, source);
+          if (tool) return tool;
+        } catch (error) {
+          if (/owned directory/.test((error as Error).message)) throw error;
+          damaged = true;
+        }
+        signal.throwIfAborted();
+        if (damaged) {
+          // Re-fetch the same pinned kit; the altered copy is moved aside first so
+          // the published path only ever holds a verified kit.
+          const invalid = path.join(base, `invalid-${randomUUID()}`);
+          // macOS also requires the source directory to be writable when moving
+          // a sealed directory. Ownership was checked above; reopen only its root
+          // before quarantine, then reopen descendants at the quarantined path.
+          if (process.platform !== "win32") await chmod(directory, 0o700);
+          await renameRetrying(directory, invalid, { signal });
+          await setKitMode(invalid, false);
+          await rm(invalid, { recursive: true, force: true });
+        }
+        const stage = path.join(base, `pending-${randomUUID()}`);
+        await privateDirectory(stage);
+        const archive = path.join(base, `${randomUUID()}.tgz`);
+        try {
+          options.onEvent?.({
+            kind: "stage",
+            stage: "preflight",
+            state: "running",
+            message: damaged
+              ? "Repairing the model and Harness installation tool…"
+              : "Preparing the model and Harness installation tool…",
+          });
+          const downloadStartedAt = Date.now();
+          await downloadInRegion(
+            home,
+            {
+              url: source.url,
+              mirrors: source.mirrors,
+              output: archive,
+              algorithm: "sha256",
+              digest: source.sha256,
+              maxBytes: source.bytes,
+              signal,
+              onEvent: (event) =>
+                options.onEvent?.({
+                  kind: "log",
+                  stage: "preflight",
+                  message: `${formatRegionDownloadEvent(event)}\n`,
+                }),
+              onProgress: (completed, total) =>
+                options.onEvent?.({
+                  kind: "stage",
+                  stage: "preflight",
+                  state: "running",
+                  message:
+                    "Downloading the model and Harness installation tool…",
+                  progress: { completed, total, unit: "bytes" },
+                }),
+            },
+            dependencies.fetcher,
+          );
+          const unpackStartedAt = Date.now();
+          await unpack(archive, stage);
+          // The kit is an npm tarball: its files sit under package/.
+          const kit = path.join(stage, "package");
+          const verifyStartedAt = Date.now();
+          const tool = await verify(kit, source);
+          const verifiedAt = Date.now();
+          if (process.platform !== "win32") await chmod(tool.python, 0o700);
+          // The kit manifest is private state; publisher bytes stay unchanged for digest checks.
+          const manifest = path.join(kit, "tool.json");
+          const body = await readFile(manifest, "utf8");
+          // A read-only archive manifest cannot be replaced on Windows until
+          // it is writable. Seal the replacement as well as the verified assets.
+          if (
+            process.platform === "win32" &&
+            !tool.writable.includes(manifest)
+          ) {
+            await chmod(manifest, 0o600);
+            tool.writable.push(manifest);
+          }
+          await atomicPrivate(manifest, body);
+          await sealWindowsFiles(tool.writable);
+          signal.throwIfAborted();
+          await renameRetrying(kit, directory, { signal });
+          // Every file and stamp was just verified inside the locked private stage
+          // before this atomic rename, so only confirm the published entry path.
+          const { file: publishedPython } = await regular(
+            directory,
+            tool.pythonRel,
+          );
+          await setKitMode(directory, true);
+          await writeStamps(directory, source, tool.stamps);
+          const seconds = (ms: number) => (ms / 1000).toFixed(1);
+          options.onEvent?.({
+            kind: "log",
+            stage: "preflight",
+            message: `localmodels kit prepared (s): download ${seconds(unpackStartedAt - downloadStartedAt)}, unpack ${seconds(verifyStartedAt - unpackStartedAt)}, verify ${seconds(verifiedAt - verifyStartedAt)}.\n`,
+          });
+          return {
+            python: publishedPython,
+            moduleDir: path.join(directory, tool.moduleDirRel),
+            sourceCommit: tool.sourceCommit,
+          };
+        } finally {
+          await rm(stage, { recursive: true, force: true });
+          await rm(archive, { force: true });
+        }
       });
-      await downloadInRegion(
-        home,
-        {
-          url: source.url,
-          mirrors: source.mirrors,
-          output: archive,
-          algorithm: "sha256",
-          digest: source.sha256,
-          maxBytes: source.bytes,
-          signal,
-          onProgress: (completed, total) =>
-            options.onEvent?.({
-              kind: "stage",
-              stage: "preflight",
-              state: "running",
-              message: "Downloading the model and Harness installation tool…",
-              progress: { completed, total, unit: "bytes" },
-            }),
-        },
-        dependencies.fetcher,
-      );
-      await unpack(archive, stage);
-      // The kit is an npm tarball: its files sit under package/.
-      const kit = path.join(stage, "package");
-      const tool = await verify(kit, source);
-      if (process.platform !== "win32") await chmod(tool.python, 0o700);
-      // The kit manifest is private state; publisher bytes stay unchanged for digest checks.
-      const manifest = path.join(kit, "tool.json");
-      const body = await readFile(manifest, "utf8");
-      // A read-only archive manifest cannot be replaced on Windows until
-      // it is writable. Seal the replacement as well as the verified assets.
-      if (process.platform === "win32" && !tool.writable.includes(manifest)) {
-        await chmod(manifest, 0o600);
-        tool.writable.push(manifest);
+    } catch (error) {
+      if (
+        acquired ||
+        (error as { code?: unknown } | null)?.code !== INSTANCE_BUSY
+      )
+        throw error;
+      if (Date.now() >= lockDeadline) throw error;
+      if (!waited) {
+        waited = true;
+        options.onEvent?.({
+          kind: "stage",
+          stage: "preflight",
+          state: "running",
+          message:
+            "Waiting for the model and Harness installation tool download already in progress…",
+        });
+        options.onEvent?.({
+          kind: "log",
+          stage: "preflight",
+          message:
+            "Waiting for another process preparing the localmodels kit…\n",
+        });
       }
-      await atomicPrivate(manifest, body);
-      await sealWindowsFiles(tool.writable);
-      signal.throwIfAborted();
-      await renameRetrying(kit, directory, { signal });
-      // Every file and stamp was just verified inside the locked private stage
-      // before this atomic rename, so only confirm the published entry path.
-      const { file: publishedPython } = await regular(
-        directory,
-        tool.pythonRel,
+      await delay(
+        Math.min(lockPollMs, Math.max(1, lockDeadline - Date.now())),
+        undefined,
+        { signal },
       );
-      await setKitMode(directory, true);
-      await writeStamps(directory, source, tool.stamps);
-      return {
-        python: publishedPython,
-        moduleDir: path.join(directory, tool.moduleDirRel),
-        sourceCommit: tool.sourceCommit,
-      };
-    } finally {
-      await rm(stage, { recursive: true, force: true });
-      await rm(archive, { force: true });
     }
-  });
+  }
 }
 type ToolLocation = Awaited<ReturnType<typeof prepareLocalmodelsTool>>;
 const preparing = new Map<string, Promise<ToolLocation>>();
+const verifiedToolSession = new AsyncLocalStorage<Map<string, ToolLocation>>();
+
+/**
+ * Reuses already-verified localmodels tool locations across sequential calls in
+ * one installation or resume run so the kit's assets are not re-statted for
+ * each CLI invocation.
+ */
+export function withLocalmodelsToolCache<T>(run: () => Promise<T>): Promise<T> {
+  const existing = verifiedToolSession.getStore();
+  if (existing) return run();
+  return verifiedToolSession.run(new Map(), run);
+}
+
 function configuredDevTool(): ToolLocation | undefined {
   const python = process.env.LINGER_LOCALMODELS_DEV_PYTHON?.trim();
   const moduleDir = process.env.LINGER_LOCALMODELS_DEV_MODULE_DIR?.trim();
@@ -457,7 +546,7 @@ function configuredDevTool(): ToolLocation | undefined {
 export async function ensureLocalmodelsTool(
   home: string,
   options: Options = {},
-  dependencies: { source?: LocalmodelsToolSource; fetcher?: typeof fetch } = {},
+  dependencies: ToolPrepareDependencies = {},
 ): Promise<ToolLocation> {
   options.signal?.throwIfAborted();
   const devTool = configuredDevTool();
@@ -468,16 +557,22 @@ export async function ensureLocalmodelsTool(
   )
     return devTool;
   const key = `${path.resolve(home)}:${JSON.stringify(dependencies.source ?? pinnedToolSource())}`;
+  const sessionCache = verifiedToolSession.getStore();
+  const cached = sessionCache?.get(key);
+  if (cached && existsSync(cached.python)) return cached;
   const running = preparing.get(key);
   if (running) {
     const result = await running;
     options.signal?.throwIfAborted();
+    sessionCache?.set(key, result);
     return result;
   }
   const task = prepareLocalmodelsTool(home, options, dependencies);
   preparing.set(key, task);
   try {
-    return await task;
+    const result = await task;
+    sessionCache?.set(key, result);
+    return result;
   } finally {
     preparing.delete(key);
   }
@@ -502,6 +597,7 @@ interface BifrostAddressDependencies {
 
 interface RunCommandControl extends BifrostAddressDependencies {
   allocateBifrostAddr?: boolean;
+  resolveBundledPi?: typeof resolveBundledPi;
 }
 
 const STRIPPED_LOCALMODELS_ENVIRONMENT = new Set([
@@ -561,6 +657,118 @@ function parseLoopbackBifrostAddress(
  */
 export function localmodelsPlanFile(home: string): string {
   return path.join(path.resolve(home), "runtime", "localmodels", "plan.json");
+}
+/**
+ * Records library model IDs that were active before a quit or upgrade stop so
+ * the next launch reloads them even after `stopLocalmodels` resets them to
+ * `idle` (or an empty array when the stop ran with downloaded models all idle).
+ */
+export function localmodelsResumeModelsFile(home: string): string {
+  return path.join(
+    path.resolve(home),
+    "runtime",
+    "localmodels",
+    "resume-models.json",
+  );
+}
+const RESUME_MODELS_SCHEMA = "linger.localmodels-resume/v1";
+const LIBRARY_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/;
+
+/** Reports whether `id` is a valid localmodels library model identifier. */
+export function isLibraryModelId(id: unknown): id is string {
+  return typeof id === "string" && LIBRARY_MODEL_ID_PATTERN.test(id);
+}
+
+/** Filters valid library model IDs and deduplicates them in order. */
+export function uniqueLibraryModelIds(values: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!isLibraryModelId(value) || seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+/**
+ * Reads the persisted model list saved before a quit or upgrade stop, or
+ * undefined when no valid record exists.
+ */
+export async function readResumeLocalModels(
+  home: string,
+): Promise<string[] | undefined> {
+  try {
+    const raw = await readPrivate(localmodelsResumeModelsFile(home));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { schema?: unknown; models?: unknown };
+    if (
+      parsed?.schema !== RESUME_MODELS_SCHEMA ||
+      !Array.isArray(parsed.models)
+    )
+      return undefined;
+    return uniqueLibraryModelIds(parsed.models);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Atomically persists the library model IDs to restore on the next launch.
+ */
+export async function writeResumeLocalModels(
+  home: string,
+  models: readonly string[],
+): Promise<void> {
+  const file = localmodelsResumeModelsFile(home);
+  await privateDirectory(path.dirname(file));
+  await atomicPrivate(
+    file,
+    JSON.stringify({
+      schema: RESUME_MODELS_SCHEMA,
+      models: uniqueLibraryModelIds(models),
+    }),
+  );
+}
+
+/** Removes any persisted post-stop local model resume record. */
+export async function clearResumeLocalModels(home: string): Promise<void> {
+  await rm(localmodelsResumeModelsFile(home), { force: true });
+}
+
+/**
+ * Reads localmodels' own per-model records under `<state>/library/models/*.json`
+ * and returns IDs whose on-disk state is `loaded`. Used to recover models that
+ * were active before a reboot or crash (when `stopLocalmodels` never ran)
+ * without spawning Python on homes with no loaded models.
+ */
+export async function readOnDiskLoadedLibraryModels(
+  home: string,
+): Promise<string[]> {
+  const modelsDir = path.join(
+    localmodelsStateDirectory(home),
+    "library",
+    "models",
+  );
+  let entries;
+  try {
+    entries = await readdir(modelsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names = entries
+    .filter((entry) => !entry.isDirectory() && entry.name.endsWith(".json"))
+    .map((entry) => entry.name)
+    .sort();
+  const loaded: string[] = [];
+  for (const name of names) {
+    const record = await readOwnedJson(path.join(modelsDir, name));
+    if (!record) continue;
+    const state = field(record, "state");
+    const id = field(record, "id");
+    if (state === "loaded" && isLibraryModelId(id)) loaded.push(id);
+  }
+  return uniqueLibraryModelIds(loaded);
 }
 /**
  * Records the shared tools directory a home kept from before per-home
@@ -781,7 +989,10 @@ export async function runLocalmodels(
   home: string,
   args: string[],
   options: Options = {},
-  dependencies: { run?: typeof runProcess } & BifrostAddressDependencies = {},
+  dependencies: {
+    run?: typeof runProcess;
+    resolveBundledPi?: typeof resolveBundledPi;
+  } & BifrostAddressDependencies = {},
 ) {
   return runLocalmodelsCommand(
     home,
@@ -793,6 +1004,7 @@ export async function runLocalmodels(
       allocateBifrostAddr: !isReadOnlyOrStopCommand(args),
       portFree: dependencies.portFree,
       freePort: dependencies.freePort,
+      resolveBundledPi: dependencies.resolveBundledPi,
     },
   );
 }
@@ -861,18 +1073,156 @@ async function localmodelsIsolation(
   };
 }
 
-async function runLocalmodelsCommand(
+export interface BifrostPrefetchResult {
+  ok: boolean;
+  cached?: boolean;
+  unsupported?: boolean;
+  version?: string;
+  name?: string;
+  bytes?: number;
+  message?: string;
+}
+
+const PREFETCH_BIFROST_PYTHON = `
+import json, os, platform, sys
+from pathlib import Path
+from localmodels import gateway_bifrost, harness, hosts
+
+tools_dir = Path(os.path.expanduser(hosts.tools_dir()))
+lock = harness.load_lock()
+if "bifrost" not in lock:
+    print(json.dumps({"ok": False, "unsupported": True, "message": "the tool lock has no Bifrost"}))
+    sys.exit(0)
+machine = platform.machine().lower()
+arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64"}.get(machine, machine)
+try:
+    build = harness.tool_build(lock["bifrost"]["builds"], sys.platform, arch, "Bifrost")
+except harness.HarnessError as exc:
+    print(json.dumps({"ok": False, "unsupported": True, "message": str(exc)}))
+    sys.exit(0)
+artifact = harness.tool_artifact(build)
+version = lock["bifrost"]["version"]
+actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools_dir), lock)
+bifrost_action = next((a for a in actions if a["tool"] == "bifrost"), None)
+if bifrost_action is None:
+    raise harness.HarnessError("Bifrost plan did not return a bifrost action")
+archive = Path(harness.archive_files(tools_dir, artifact)[0])
+already_cached = (
+    bifrost_action["action"] == "reuse"
+    or (archive.is_file() and harness.digest(str(archive)) == artifact["sha256"])
+)
+if not already_cached:
+    harness._fetch(tools_dir, artifact, lambda _line: None)
+print(json.dumps({
+    "ok": True,
+    "cached": already_cached,
+    "version": version,
+    "name": artifact["name"],
+    "bytes": artifact["size_bytes"],
+}))
+`.trim();
+
+/**
+ * Downloads the pinned Bifrost archive into localmodels' per-home archive
+ * cache using the kit's own locked fetch helper, without writing owned.json,
+ * allocating a port, or starting the gateway.
+ */
+export async function prefetchLocalmodelsBifrost(
   home: string,
-  args: string[],
+  options: Options = {},
+  dependencies: {
+    run?: typeof runProcess;
+    ensureTool?: typeof ensureLocalmodelsTool;
+  } = {},
+): Promise<BifrostPrefetchResult> {
+  options.signal?.throwIfAborted();
+  const tool = await (dependencies.ensureTool ?? ensureLocalmodelsTool)(
+    home,
+    options,
+  );
+  options.signal?.throwIfAborted();
+  const env = await localmodelsEnvironment(
+    home,
+    tool,
+    ["source", "status"],
+    options,
+    { allocateBifrostAddr: false },
+  );
+  options.signal?.throwIfAborted();
+  const run = dependencies.run ?? runProcess;
+  let result: Awaited<ReturnType<typeof runProcess>>;
+  try {
+    result = await run(
+      tool.python,
+      ["-P", "-s", "-c", PREFETCH_BIFROST_PYTHON],
+      {
+        ...options,
+        cwd: tool.moduleDir,
+        env,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs ?? 10 * 60_000,
+      },
+    );
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+  options.signal?.throwIfAborted();
+  if (result.code !== 0) {
+    return {
+      ok: false,
+      message: result.stderr.trim().slice(-500) || `exit ${result.code}`,
+    };
+  }
+  const lastLine = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1);
+  if (!lastLine) {
+    return { ok: false, message: "Bifrost prefetch returned no output." };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lastLine);
+  } catch {
+    return { ok: false, message: "Bifrost prefetch returned invalid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      message: "Bifrost prefetch returned an unexpected payload.",
+    };
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.ok !== "boolean") {
+    return { ok: false, message: "Bifrost prefetch payload is missing ok." };
+  }
+  return {
+    ok: record.ok,
+    ...(typeof record.cached === "boolean" ? { cached: record.cached } : {}),
+    ...(typeof record.unsupported === "boolean"
+      ? { unsupported: record.unsupported }
+      : {}),
+    ...(typeof record.version === "string" ? { version: record.version } : {}),
+    ...(typeof record.name === "string" ? { name: record.name } : {}),
+    ...(typeof record.bytes === "number" && Number.isFinite(record.bytes)
+      ? { bytes: record.bytes }
+      : {}),
+    ...(typeof record.message === "string" ? { message: record.message } : {}),
+  };
+}
+
+async function localmodelsEnvironment(
+  home: string,
+  tool: ToolLocation,
+  args: readonly string[],
   options: Options,
-  loadTool: () => Promise<ToolLocation | undefined>,
-  run: typeof runProcess = runProcess,
-  control: RunCommandControl = {},
-) {
-  const startedAt = Date.now();
-  const tool = await loadTool();
-  if (!tool) throw new Error("The installed localmodels tool kit is missing.");
-  const checkedAt = Date.now();
+  control: RunCommandControl,
+): Promise<NodeJS.ProcessEnv> {
   const state = localmodelsStateDirectory(home);
   await privateDirectory(state);
   const isolation = await localmodelsIsolation(home, args, control);
@@ -893,13 +1243,64 @@ async function runLocalmodelsCommand(
   delete env.PYTHONHOME;
   delete env.PYTHONSTARTUP;
   delete env.PYTHONINSPECT;
+  return env;
+}
+
+async function runLocalmodelsCommand(
+  home: string,
+  args: string[],
+  options: Options,
+  loadTool: () => Promise<ToolLocation | undefined>,
+  run: typeof runProcess = runProcess,
+  control: RunCommandControl = {},
+) {
+  const startedAt = Date.now();
+  const tool = await loadTool();
+  if (!tool) throw new Error("The installed localmodels tool kit is missing.");
+  const checkedAt = Date.now();
+  const env = await localmodelsEnvironment(home, tool, args, options, control);
+  const isSetupInspect = args[0] === "setup" && args[1] === "inspect";
+  const resolvedBundledPi =
+    options.bundledPi !== undefined
+      ? (options.bundledPi ?? undefined)
+      : isSetupInspect
+        ? undefined
+        : await (control.resolveBundledPi ?? resolveBundledPi)();
+  const bundledPi = resolvedBundledPi
+    ? await ensureStableBundledPi(home, resolvedBundledPi)
+    : undefined;
+  const effectiveEnv = bundledPi
+    ? await withBundledPiPath(env, { home, bundledPi })
+    : env;
   const harnessApply = args[0] === "harness" && args[1] === "apply";
+  const sourceApply = args[0] === "source" && args[1] === "apply";
   const label =
     args[0] === "gateway"
       ? "Downloading the application model gateway"
-      : args[0] === "source" && args[1] === "apply"
+      : sourceApply
         ? "Downloading the model gateway"
         : "Downloading the selected Harness";
+  type LocalmodelsPhase = "download" | "extract" | "verify" | "install";
+  const phaseMs: Partial<Record<LocalmodelsPhase, number>> = {};
+  let activePhase: LocalmodelsPhase | undefined;
+  let phaseStartedAt: number | undefined;
+  let lastDownloadAt: number | undefined;
+  let downloadRetries = 0;
+  let downloadSwitches = 0;
+  const closePhase = (at: number) => {
+    if (!activePhase || phaseStartedAt === undefined) return;
+    phaseMs[activePhase] =
+      (phaseMs[activePhase] ?? 0) + Math.max(0, at - phaseStartedAt);
+    activePhase = undefined;
+    phaseStartedAt = undefined;
+  };
+  const enterPhase = (phase: LocalmodelsPhase, at: number) => {
+    if (activePhase === phase) return;
+    closePhase(at);
+    activePhase = phase;
+    phaseStartedAt = at;
+    phaseMs[phase] ??= 0;
+  };
   let pending = "";
   const onOutput = (chunk: string) => {
     options.onOutput?.(chunk);
@@ -915,6 +1316,11 @@ async function runLocalmodelsCommand(
         continue;
       }
       if (value?.kind === "stage" && value.stage === "download") {
+        const now = Date.now();
+        if (value.state === "retrying") downloadRetries += 1;
+        else if (value.state === "switching") downloadSwitches += 1;
+        enterPhase("download", now);
+        lastDownloadAt = now;
         const message = downloadStageMessage(value, label, harnessApply);
         if (message)
           options.onEvent?.({
@@ -926,6 +1332,13 @@ async function runLocalmodelsCommand(
         continue;
       }
       if (harnessApply && value?.kind === "stage") {
+        const now = Date.now();
+        const key = `${String(value.stage)}:${String(value.state)}`;
+        if (key === "extract:running") enterPhase("extract", now);
+        else if (key === "verify:running") enterPhase("verify", now);
+        else if (key === "install:running") enterPhase("install", now);
+        else if (key === "install:succeeded" || key === "reuse:succeeded")
+          closePhase(now);
         const messages: Record<string, string> = {
           "extract:running":
             "Extracting Harness files and applying private permissions…",
@@ -936,8 +1349,7 @@ async function runLocalmodelsCommand(
           "reuse:succeeded":
             "Reusing the existing Harness; checking runtime status…",
         };
-        const message =
-          messages[`${String(value.stage)}:${String(value.state)}`];
+        const message = messages[key];
         if (message)
           options.onEvent?.({
             kind: "stage",
@@ -965,6 +1377,9 @@ async function runLocalmodelsCommand(
           value.completed > value.total)
       )
         continue;
+      const now = Date.now();
+      enterPhase("download", now);
+      lastDownloadAt = now;
       options.onEvent?.({
         kind: "stage",
         stage: "runtime",
@@ -988,14 +1403,46 @@ async function runLocalmodelsCommand(
     {
       ...options,
       cwd: tool.moduleDir,
-      env,
+      env: effectiveEnv,
       onOutput,
     },
   );
+  const endedAt = Date.now();
+  let postDownloadMs: number | undefined;
+  if (
+    sourceApply &&
+    activePhase === "download" &&
+    lastDownloadAt !== undefined
+  ) {
+    closePhase(lastDownloadAt);
+    postDownloadMs = Math.max(0, endedAt - lastDownloadAt);
+  } else {
+    closePhase(endedAt);
+  }
   const seconds = (ms: number) => (ms / 1000).toFixed(1);
+  const parts: string[] = [];
+  if (phaseMs.download !== undefined)
+    parts.push(`download ${seconds(phaseMs.download)}s`);
+  if (downloadRetries > 0) parts.push(`retries ${downloadRetries}`);
+  if (downloadSwitches > 0) parts.push(`switches ${downloadSwitches}`);
+  if (phaseMs.extract !== undefined)
+    parts.push(`extract ${seconds(phaseMs.extract)}s`);
+  if (phaseMs.verify !== undefined)
+    parts.push(`verify ${seconds(phaseMs.verify)}s`);
+  if (phaseMs.install !== undefined)
+    parts.push(`install ${seconds(phaseMs.install)}s`);
+  if (postDownloadMs !== undefined)
+    parts.push(`post-download ${seconds(postDownloadMs)}s`);
+  if (parts.length > 0) {
+    options.onEvent?.({
+      kind: "log",
+      stage: "runtime",
+      message: `localmodels ${args.slice(0, 2).join(" ")} phases: ${parts.join(", ")}.\n`,
+    });
+  }
   options.onEvent?.({
     kind: "log",
-    message: `localmodels ${args.slice(0, 2).join(" ")}: tool checked in ${seconds(checkedAt - startedAt)}s, ran in ${seconds(Date.now() - checkedAt)}s.\n`,
+    message: `localmodels ${args.slice(0, 2).join(" ")}: tool checked in ${seconds(checkedAt - startedAt)}s, ran in ${seconds(endedAt - checkedAt)}s.\n`,
   });
   return result;
 }
@@ -1068,6 +1515,7 @@ export async function stopLocalmodels(
   ) => {
     options.signal.throwIfAborted();
     options.log?.(`Stopping the local models (localmodels ${name}).`);
+    const startedAt = Date.now();
     const result = await run(home, args, {
       signal: options.signal,
       timeoutMs: 30_000,
@@ -1081,6 +1529,12 @@ export async function stopLocalmodels(
         stderr: "",
       };
     });
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+    options.log?.(
+      result.code === 0
+        ? `Stopped localmodels ${name} in ${elapsed}s.`
+        : `localmodels ${name} failed in ${elapsed}s.`,
+    );
     if (report && result.code !== 0)
       failed.push(`localmodels ${name}: ${stopFailure(result)}`);
     return result;
@@ -1101,9 +1555,33 @@ export async function stopLocalmodels(
   };
   if (status.code === 0) {
     let last = status.stdout;
+    const allModels = libraryModels(last, () => true);
     const loading = libraryModelsIn(last, "loading");
-    if (!unloadableLibraryModels(last) || !loading)
+    const resumable = resumableLibraryModels(last);
+    if (!unloadableLibraryModels(last) || !loading || !resumable)
       failed.push("localmodels library status: no model list");
+    // Record active models before cancelling or unloading so the next launch
+    // restores them across quit, reboot, or upgrade stops regardless of active
+    // model source mode. Never wipe an already-pending non-empty list when a
+    // chained stop (such as Windows setup `--stop` after a quit) finds models
+    // already idle.
+    if (resumable) {
+      try {
+        const existing = await readResumeLocalModels(home);
+        if (resumable.length > 0) {
+          await writeResumeLocalModels(home, [
+            ...resumable,
+            ...(existing ?? []),
+          ]);
+        } else if (allModels && allModels.length > 0 && !existing?.length) {
+          await writeResumeLocalModels(home, []);
+        }
+      } catch (error) {
+        options.log?.(
+          `Could not record local models for next launch: ${error instanceof Error ? error.message : String(error)}.`,
+        );
+      }
+    }
     // A load left running would make its model resident after the app is
     // gone. A cancel that fails because the load just finished is not a
     // failure: that model is unloaded below.
@@ -1184,11 +1662,7 @@ function libraryModels(
     if (!Array.isArray(models)) return undefined;
     return models.flatMap(
       (model: { id?: unknown; state?: unknown; error?: unknown }) => {
-        if (
-          typeof model?.id !== "string" ||
-          !/^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/.test(model.id)
-        )
-          return [];
+        if (!isLibraryModelId(model?.id)) return [];
         return include({ id: model.id, state: model.state, error: model.error })
           ? [model.id]
           : [];
@@ -1206,6 +1680,13 @@ function libraryModelsIn(
 ): string[] | undefined {
   return libraryModels(stdout, (model) => model.state === state);
 }
+function isRecoverableFailedLibraryModel(error: unknown): boolean {
+  const errorCode =
+    error && typeof error === "object"
+      ? (error as { code?: unknown }).code
+      : undefined;
+  return !isStoppedDownloadErrorCode(errorCode);
+}
 // The ids of the models `library status` reports as loaded or failed after a
 // server/load failure (excluding stopped downloads, which hold no library
 // record to unload), or undefined when its output is not a status report.
@@ -1213,12 +1694,19 @@ function unloadableLibraryModels(stdout: string): string[] | undefined {
   return libraryModels(stdout, (model) => {
     if (model.state === "loaded") return true;
     if (model.state !== "failed") return false;
-    const errorCode =
-      model.error && typeof model.error === "object"
-        ? (model.error as { code?: unknown }).code
-        : undefined;
-    return !isStoppedDownloadErrorCode(errorCode);
+    return isRecoverableFailedLibraryModel(model.error);
   });
+}
+// The ids of models active before stop that should be restored on next launch:
+// loaded, currently loading, or failed after a server/load failure (excluding
+// stopped downloads).
+function resumableLibraryModels(stdout: string): string[] | undefined {
+  const ids = libraryModels(stdout, (model) => {
+    if (model.state === "loaded" || model.state === "loading") return true;
+    if (model.state !== "failed") return false;
+    return isRecoverableFailedLibraryModel(model.error);
+  });
+  return ids ? uniqueLibraryModelIds(ids) : undefined;
 }
 // A failed step's structured cause: the library's error code, the tool's
 // error, or its exit status.
@@ -1290,7 +1778,8 @@ export async function readPublishedTool(
   try {
     value = JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return;
     throw error;
   }
   if (value.localmodelsTool === undefined) return;

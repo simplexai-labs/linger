@@ -19,7 +19,6 @@ type Hello struct {
 	Identity           Identity
 	Signature          []byte
 	SentAt             time.Time
-	Capacity           *int
 	Runtimes           []string
 	RuntimeDiagnostics json.RawMessage
 	Capabilities       []string

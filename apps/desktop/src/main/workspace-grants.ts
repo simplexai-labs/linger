@@ -13,6 +13,11 @@ export interface WorkspaceGrantsOptions {
   readonly defaultDirectory?: string;
 }
 
+export interface DefaultWorkspaceGrantFailure {
+  readonly directory: string;
+  readonly error: string;
+}
+
 export class WorkspaceGrantsModule implements Module {
   readonly name = "WorkspaceGrants";
   readonly dependsOn = ["Config"];
@@ -20,6 +25,7 @@ export class WorkspaceGrantsModule implements Module {
   #ctx: ModuleContext | undefined;
   #offComputerChanged: (() => void) | undefined;
   #ensuringDefault: Promise<void> | undefined;
+  #defaultFailure: DefaultWorkspaceGrantFailure | undefined;
 
   constructor(options: WorkspaceGrantsOptions) {
     this.#options = options;
@@ -41,6 +47,10 @@ export class WorkspaceGrantsModule implements Module {
     return [...this.#ctx!.config.get().workspaceGrants];
   }
 
+  defaultFailure(): DefaultWorkspaceGrantFailure | undefined {
+    return this.#defaultFailure;
+  }
+
   async pick(): Promise<WorkspaceGrant | null> {
     const picked = await this.#options.pickDirectory();
     if (!picked) return null;
@@ -53,7 +63,10 @@ export class WorkspaceGrantsModule implements Module {
     if (!(await stat(resolved)).isDirectory())
       throw new Error("Workspace must be a directory");
     const existing = this.list().find((g) => g.path === resolved);
-    if (existing) return existing;
+    if (existing) {
+      this.#defaultFailure = undefined;
+      return existing;
+    }
     const grant: WorkspaceGrant = {
       grantId: `grant_${randomUUID()}`,
       path: resolved,
@@ -62,6 +75,7 @@ export class WorkspaceGrantsModule implements Module {
       createdAt: new Date().toISOString(),
     };
     ctx.config.update({ workspaceGrants: [...this.list(), grant] });
+    this.#defaultFailure = undefined;
     ctx.bus.emit("grants.changed");
     ctx.log.info("workspace_grant.added", { grant_id: grant.grantId });
     return grant;
@@ -79,14 +93,25 @@ export class WorkspaceGrantsModule implements Module {
 
   async #ensureDefault(): Promise<void> {
     const directory = this.#options.defaultDirectory;
-    if (!directory || this.list().length > 0) return;
+    if (!directory) return;
+    if (this.list().length > 0) {
+      this.#defaultFailure = undefined;
+      return;
+    }
     try {
       await mkdir(directory, { recursive: true, mode: 0o755 });
       await this.add(directory);
+      this.#defaultFailure = undefined;
     } catch (error) {
-      this.#ctx!.log.warn("workspace_grant.default_failed", {
-        error: String(error),
+      const reason = error instanceof Error ? error.message : String(error);
+      this.#ctx!.log.error("workspace_grant.default_failed", {
+        directory,
+        error: reason,
       });
+      this.#defaultFailure = {
+        directory,
+        error: reason,
+      };
     }
   }
 

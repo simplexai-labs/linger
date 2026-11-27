@@ -88,7 +88,7 @@ export function MessageActivitiesPanelTab({
         hidden={hidden || undefined}
         inert={hidden || undefined}
       >
-        <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-app-border px-4 py-2">
+        <header className="flex min-h-14 shrink-0 items-center gap-2.5 px-4 py-2">
           {onBack ? (
             <button
               aria-label={back}
@@ -160,12 +160,12 @@ export function MessageActivitiesPanelTab({
           ) : activities.data.records.length > 0 ? (
             <section className="bg-card">
               {!activities.data.has_native_turn ? (
-                <p className="border-b border-app-border px-4 py-2 text-xs text-app-muted">
+                <p className="px-4 py-2 text-xs text-app-muted">
                   {t(m.onlyLinkedToolRecords)}
                 </p>
               ) : null}
               {activities.data.truncated ? (
-                <p className="border-b border-app-border px-4 py-2 text-xs text-app-muted">
+                <p className="px-4 py-2 text-xs text-app-muted">
                   {t(m.turnTruncated, { limit: 10_000 })}
                 </p>
               ) : null}

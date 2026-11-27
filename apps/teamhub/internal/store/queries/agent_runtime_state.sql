@@ -643,7 +643,8 @@ WHERE context_key=sqlc.arg(context_key)::text
 -- conversation Message or decision card attributed to the Run, a queued
 -- presentation sequence attributed to the Run, or an unattributed conversation
 -- Message, presentation sequence, or emoji Reaction written by the Agent in
--- the Room or its Threads during the Run. Excluding rows attributed to another
+-- the Room or its Threads during the Run. A Message the Agent sent with
+-- --continuing is an acknowledgement, not the reply. Excluding rows attributed to another
 -- Run prevents delayed bubbles from an earlier sequence from satisfying this
 -- Run. The unattributed sequence and reaction branches have no (room_id,
 -- created_at) index; this query runs only on the suspected-missing-reply path
@@ -674,6 +675,7 @@ SELECT (
         FROM messages message
         WHERE message.local_run_id=target_run.run_id
           AND message.message_kind='conversation'
+          AND NOT message.continues
     )
     OR EXISTS (
         SELECT 1
@@ -689,6 +691,7 @@ SELECT (
             WHERE message.tenant_id=target_run.tenant_id
               AND message.author_actor_id=target_run.agent_actor_id
               AND message.message_kind='conversation'
+              AND NOT message.continues
               AND message.local_run_id IS NULL
               AND message.created_at>=target_run.started_at
               AND (target_run.finished_at IS NULL OR message.created_at<=target_run.finished_at)
@@ -755,6 +758,7 @@ reply_room AS (
     FROM target_run
     JOIN messages message ON message.local_run_id=target_run.run_id
     WHERE message.message_kind='conversation'
+      AND NOT message.continues
     UNION
     SELECT sequence.room_id
     FROM target_run
@@ -767,6 +771,7 @@ reply_room AS (
      AND message.author_actor_id=target_run.agent_actor_id
     WHERE target_run.started_at IS NOT NULL
       AND message.message_kind='conversation'
+      AND NOT message.continues
       AND message.local_run_id IS NULL
       AND message.created_at>=target_run.started_at
       AND (target_run.finished_at IS NULL OR message.created_at<=target_run.finished_at)
@@ -842,24 +847,12 @@ SELECT * FROM agent_local_runs
 WHERE context_key=sqlc.arg(context_key)::text AND status='running'
 LIMIT 1;
 
--- name: QueuedAgentRunInputOrigins :many
--- Every claimable queued Run, without locking it or returning message bodies:
--- the Run claimed next serves them all, so it waits as the most urgent.
-WITH queued_run AS (
-    SELECT run.run_id FROM agent_local_runs run
+-- name: HasClaimableAgentRun :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_local_runs run
     WHERE run.context_key=sqlc.arg(context_key)::text AND run.status='queued'
       AND agent_document_run_claimable(run.run_id,run.context_key)
-)
-SELECT DISTINCT (input.payload ? 'acceptedNotification')::boolean AS notification,
-       coalesce(input.payload->'acceptedNotification'->>'inboxId' LIKE 'taskmeta:%', false)::boolean AS task_inbox,
-       coalesce(msg.value->>'authorType', '')::text AS author_type,
-       coalesce(msg.value->>'messageKind', '')::text AS message_kind,
-       coalesce(msg.value->>'firedRoutine' = 'true', false)::boolean AS fired_routine,
-       coalesce(msg.value->>'humanWaiting' = 'true', false)::boolean AS human_waiting
-FROM queued_run
-JOIN agent_local_run_inputs relation ON relation.run_id=queued_run.run_id AND relation.relation='initial'
-JOIN agent_runtime_inputs input ON input.context_key=relation.context_key AND input.input_id=relation.input_id
-LEFT JOIN LATERAL jsonb_array_elements(input.payload->'acceptedNotification'->'messages') AS msg(value) ON true;
+)::boolean;
 
 -- name: ClaimAgentLocalRun :one
 UPDATE agent_local_runs
@@ -1078,7 +1071,7 @@ LIMIT 1;
 
 -- name: ListAgentRuntimeLocalComputers :many
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE status<>'removed'
 ORDER BY display_name,computer_id;
 
@@ -1100,7 +1093,7 @@ ORDER BY registration.agent_management_id;
 
 -- name: ListOwnedLocalComputers :many
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE owner_tenant_id=sqlc.arg(tenant_id)::text
   AND owner_actor_id=sqlc.arg(owner_actor_id)::text
   AND status<>'removed'
@@ -1108,26 +1101,26 @@ ORDER BY computer_id;
 
 -- name: GetAgentRuntimeLocalComputer :one
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE computer_id=sqlc.arg(computer_id)::text;
 
 -- name: LockAgentRuntimeLocalComputer :one
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE computer_id=sqlc.arg(computer_id)::text
 FOR UPDATE;
 
 -- name: InsertAgentRuntimeLocalComputer :one
-INSERT INTO local_computers(
-    computer_id,display_name,status,capacity,owner_tenant_id,owner_actor_id
+INSERT INTO runtime_local_computers(
+    computer_id,display_name,status,owner_tenant_id,owner_actor_id
 ) VALUES(
-    sqlc.arg(computer_id)::text,sqlc.arg(display_name)::text,'offline',1,
+    sqlc.arg(computer_id)::text,sqlc.arg(display_name)::text,'offline',
     sqlc.arg(owner_tenant_id)::text,sqlc.arg(owner_actor_id)::text
 )
 RETURNING *;
 
 -- name: RotateAgentRuntimeLocalComputerCredential :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET display_name=sqlc.arg(display_name)::text,
     credential_generation=credential_generation+1,
     status='offline',updated_at=clock_timestamp()
@@ -1137,10 +1130,9 @@ WHERE computer_id=sqlc.arg(computer_id)::text
 RETURNING *;
 
 -- name: ObserveAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET display_name=sqlc.arg(display_name)::text,
     status=sqlc.arg(status)::text,
-    capacity=sqlc.narg(capacity)::integer,
     platform=COALESCE(sqlc.narg(platform)::text,platform),
     runtime_inventory=sqlc.arg(runtime_inventory)::jsonb,
     runtime_diagnostics=sqlc.arg(runtime_diagnostics)::jsonb,
@@ -1153,7 +1145,7 @@ WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
 RETURNING *;
 
 -- name: TouchAgentRuntimeLocalComputer :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status=sqlc.arg(status)::text,
     runtime_inventory=COALESCE(sqlc.narg(runtime_inventory)::jsonb,runtime_inventory),
     runtime_diagnostics=COALESCE(sqlc.narg(runtime_diagnostics)::jsonb,runtime_diagnostics),
@@ -1167,7 +1159,7 @@ WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
 RETURNING *;
 
 -- name: MarkAgentRuntimeLocalComputersOffline :many
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status='offline',active_operations=0,updated_at=clock_timestamp()
 WHERE status IN ('online','upgrade_required')
 RETURNING *;
@@ -1175,7 +1167,7 @@ RETURNING *;
 -- name: RemoveAgentRuntimeLocalComputer :one
 -- A Daemon keeps its identity key across pairings, so the removed Computer
 -- frees its Daemon Identity for the next Computer that machine pairs as.
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET status='removed',removed_at=clock_timestamp(),updated_at=clock_timestamp(),
     daemon_id=NULL,daemon_public_key=NULL
 WHERE computer_id=sqlc.arg(computer_id)::text AND status<>'removed'
@@ -1186,7 +1178,7 @@ DELETE FROM local_computer_enrollments
 WHERE requested_computer_id=sqlc.arg(computer_id)::text;
 
 -- name: BindAgentRuntimeLocalComputerDaemonIdentity :one
-UPDATE local_computers
+UPDATE runtime_local_computers
 SET daemon_id=sqlc.arg(daemon_id)::text,
     daemon_public_key=sqlc.arg(daemon_public_key)::bytea,
     daemon_identity_version=sqlc.arg(identity_version)::bigint,
@@ -1205,7 +1197,7 @@ RETURNING *;
 
 -- name: LockAgentRuntimeLocalComputerByDaemonID :one
 SELECT *
-FROM local_computers
+FROM runtime_local_computers
 WHERE daemon_id=sqlc.arg(daemon_id)::text
   AND status<>'removed'
 FOR UPDATE;

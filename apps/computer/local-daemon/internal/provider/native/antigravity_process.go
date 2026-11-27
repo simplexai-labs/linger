@@ -50,6 +50,7 @@ type acpProcess struct {
 	caps        acpCapabilities
 	shape       *antigravityShape
 	front       *mcpFront
+	hookEP      *AntigravityHookEndpoint
 	releaseTemp func() error
 	releaseOnce sync.Once
 	fixedHandle func(acpFrame)
@@ -57,6 +58,7 @@ type acpProcess struct {
 	mu                sync.Mutex
 	turn              *antigravityTurn
 	sessionID         string
+	transcriptPath    string
 	systemPromptHash  string
 	defaultModel      string
 	defaultEffort     string
@@ -147,6 +149,17 @@ func (p *acpProcess) unbind(t *antigravityTurn) {
 	p.mu.Lock()
 	if p.turn == t {
 		p.turn = nil
+	}
+	p.mu.Unlock()
+}
+
+func (p *acpProcess) noteTranscriptPath(req AntigravityHookRequest) {
+	if p == nil || req.TranscriptPath == "" {
+		return
+	}
+	p.mu.Lock()
+	if p.sessionID == "" || p.sessionID == req.ConversationID {
+		p.transcriptPath = req.TranscriptPath
 	}
 	p.mu.Unlock()
 }

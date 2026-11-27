@@ -122,15 +122,11 @@ export function RecordingEntry({
     if (!voice || !anotherMeRoomId || pending || voiceInputBusy) return;
     setPending(true);
     setError(undefined);
-    // Only this click may open the window that floats over other apps;
-    // the browser allows it for a few seconds after, enough to load it.
+    // Keep the desktop window open request attached to the initiating click.
     const startRecording = async () => {
       const pip = import("../chat/voice-mode/voice-pip");
-      // A new Meeting opens expanded, even if the browser remembers a small
-      // window from a recording that ended while minimized.
-      const opened = pip.then(({ openVoicePip }) =>
-        openVoicePip("recording", { preferInitialWindowPlacement: true }),
-      );
+      // A new Meeting opens expanded in the desktop app's own window.
+      const opened = pip.then(({ openVoicePip }) => openVoicePip("recording"));
       try {
         await voice.selectTargetRoom?.(anotherMeRoomId);
         await opened;

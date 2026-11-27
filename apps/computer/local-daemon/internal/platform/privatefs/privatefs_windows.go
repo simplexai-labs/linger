@@ -477,6 +477,9 @@ func EnsureDir(path string) error {
 		return err
 	}
 	defer file.Close()
+	if validateHandle(file, "directory", true) == nil {
+		return nil
+	}
 	var info windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(windows.Handle(file.Fd()), &info); err != nil {
 		return err
@@ -525,18 +528,18 @@ func ProtectDirectory(path string) error {
 			continue
 		}
 		file := filepath.Join(path, entry.Name())
-		if err := protectFile(file); err != nil {
+		if err := ProtectFile(file); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("%s: %w", file, err)
 		}
 	}
 	return nil
 }
 
-func protectFile(path string) error {
+// ProtectFile tightens an existing regular file owned by the current user to a
+// protected owner-only DACL. Reparse points, directories, hard-linked files,
+// and files owned by another user are refused without modification.
+func ProtectFile(path string) error {
 	file, err := openHandle(path, windows.FILE_READ_ATTRIBUTES|windows.WRITE_DAC, windows.OPEN_EXISTING, nil)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}
@@ -544,7 +547,18 @@ func protectFile(path string) error {
 	if validateHandle(file, "file", true) == nil {
 		return nil
 	}
-	sd, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	handle := windows.Handle(file.Fd())
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
+		return err
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return errors.New("private path is a reparse point")
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 || info.NumberOfLinks != 1 {
+		return errors.New("private path type or link count is unsafe")
+	}
+	sd, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
 		return err
 	}
@@ -561,7 +575,7 @@ func protectFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := windows.SetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+	if err := windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
 		return fmt.Errorf("protect private file: %w", err)
 	}
 	return validateHandle(file, "file", true)

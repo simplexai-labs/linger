@@ -12,9 +12,10 @@ import (
 )
 
 type eventProjection struct {
-	operationID string
-	canYield    bool
-	tools       map[string]string
+	operationID            string
+	canYield               bool
+	supportsBackgroundWait bool
+	tools                  map[string]string
 	// quiet holds tool calls that stay in history without a Room activity.
 	quiet map[string]bool
 	// receipts holds the tool calls that create a Task, whose output is
@@ -34,6 +35,60 @@ type eventProjection struct {
 // title. Thinking without a title gets one from its text, the way Codex
 // titles its reasoning summaries.
 func (projection *eventProjection) project(message native.Event) []any {
+	if message.Kind == native.EventBackgroundWaiting {
+		if !projection.supportsBackgroundWait {
+			return nil
+		}
+		projection.thinking, projection.thinkingTitle = false, ""
+		projection.reasoning, projection.titled = "", false
+		observedAt := message.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		tools := make([]map[string]any, 0, len(message.BackgroundTools))
+		for _, tool := range message.BackgroundTools {
+			toolName := clip(tool.ToolName, 200)
+			if toolName == "" {
+				toolName = "provider_tool"
+			}
+			callID := tool.CallID
+			if callID == "" {
+				callID = stableEventID("call", projection.operationID+"\x00"+toolName)
+			}
+			startedAt := tool.StartedAt
+			if startedAt.IsZero() {
+				startedAt = observedAt
+			}
+			tools = append(tools, map[string]any{
+				"call_id":            callID,
+				"tool_name":          toolName,
+				"started_at_unix_ms": startedAt.UnixMilli(),
+			})
+		}
+		return []any{map[string]any{
+			"type":                "run.background_waiting",
+			"observed_at_unix_ms": observedAt.UnixMilli(),
+			"tools":               tools,
+		}}
+	}
+	if message.Kind == native.EventBackgroundResumed {
+		if !projection.supportsBackgroundWait {
+			return nil
+		}
+		observedAt := message.ObservedAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		trigger := message.BackgroundTrigger
+		if trigger != "user_input" {
+			trigger = "background_continuation"
+		}
+		return []any{map[string]any{
+			"type":                "run.background_resumed",
+			"observed_at_unix_ms": observedAt.UnixMilli(),
+			"trigger":             trigger,
+		}}
+	}
 	if message.Kind == native.EventModelResponse {
 		if message.Response == nil {
 			return nil
@@ -41,11 +96,24 @@ func (projection *eventProjection) project(message native.Event) []any {
 		return []any{modelResponded(*message.Response, message.ObservedAt)}
 	}
 	if message.Kind == native.EventReasoning {
-		if message.Title == "" && message.Body != "" && !projection.titled {
-			projection.reasoning += message.Body
-			if title, ok := native.ReasoningTitle(projection.reasoning, false); ok {
-				message.Title, projection.titled, projection.reasoning = title, true, ""
+		if message.Title == "" && !projection.titled {
+			if message.Body != "" {
+				projection.reasoning += message.Body
 			}
+			if projection.reasoning != "" {
+				if title, ok := native.ReasoningTitle(projection.reasoning, message.Complete); ok {
+					message.Title, projection.titled, projection.reasoning = title, true, ""
+				}
+			}
+		}
+		if message.Complete {
+			projection.reasoning, projection.titled = "", false
+			if message.Title == "" {
+				return nil
+			}
+		}
+		if message.Title != "" {
+			projection.reasoning = ""
 		}
 		if projection.thinking && (message.Title == "" || message.Title == projection.thinkingTitle) {
 			return nil
@@ -53,19 +121,25 @@ func (projection *eventProjection) project(message native.Event) []any {
 		projection.thinking, projection.thinkingTitle = true, message.Title
 		return []any{normalizeMessage(message, projection.operationID)}
 	}
+	if message.Kind == native.EventToolCallStart {
+		var events []any
+		if status := projection.takePendingReasoningTitle(); status != nil {
+			events = append(events, status)
+		}
+		if projection.thinking {
+			projection.thinking, projection.thinkingTitle = false, ""
+			events = append(events, map[string]any{"type": "status.changed", "status": "working"})
+		}
+		return events
+	}
 	events := projection.projectActivity(message)
 	if len(events) == 0 {
 		return events
 	}
 	// Thinking that ends before a title was delimited is titled whole.
 	var lead []any
-	pending := projection.reasoning
-	projection.reasoning, projection.titled = "", false
-	if title, _ := native.ReasoningTitle(pending, true); title != "" && title != projection.thinkingTitle {
-		if safe := thinkingTitle(title); safe != "" {
-			projection.thinking, projection.thinkingTitle = true, title
-			lead = append(lead, map[string]any{"type": "status.changed", "status": "thinking", "title": safe})
-		}
+	if status := projection.takePendingReasoningTitle(); status != nil {
+		lead = append(lead, status)
 	}
 	if projection.thinking {
 		switch events[0].(map[string]any)["type"] {
@@ -77,6 +151,43 @@ func (projection *eventProjection) project(message native.Event) []any {
 		}
 	}
 	return append(lead, events...)
+}
+
+func (projection *eventProjection) takePendingReasoningTitle() any {
+	pending := projection.reasoning
+	projection.reasoning, projection.titled = "", false
+	if title, _ := native.ReasoningTitle(pending, true); title != "" && title != projection.thinkingTitle {
+		if safe := thinkingTitle(title); safe != "" {
+			projection.thinking, projection.thinkingTitle = true, title
+			return map[string]any{"type": "status.changed", "status": "thinking", "title": safe}
+		}
+	}
+	return nil
+}
+
+func (projection *eventProjection) hasPendingReasoning() bool {
+	return !projection.titled && projection.reasoning != ""
+}
+
+func (projection *eventProjection) flushReasoning() []any {
+	if !projection.hasPendingReasoning() {
+		return nil
+	}
+	title, ok := native.ReasoningTitle(projection.reasoning, true)
+	if !ok || title == "" {
+		return nil
+	}
+	safe := thinkingTitle(title)
+	if safe == "" {
+		return nil
+	}
+	projection.titled = true
+	projection.reasoning = ""
+	if projection.thinking && title == projection.thinkingTitle {
+		return nil
+	}
+	projection.thinking, projection.thinkingTitle = true, title
+	return []any{map[string]any{"type": "status.changed", "status": "thinking", "title": safe}}
 }
 
 func (projection *eventProjection) projectActivity(message native.Event) []any {
@@ -135,7 +246,7 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 			projection.quiet[callID] = true
 			return []any{event}
 		}
-		if _, command := inputCommand(input); createsTask(command) {
+		if _, command := inputCommand(input); createsTaskFor(command, strings.EqualFold(message.ToolName, "powershell")) {
 			if projection.receipts == nil {
 				projection.receipts = make(map[string]bool)
 			}

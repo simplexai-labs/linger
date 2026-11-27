@@ -41,7 +41,10 @@ export type ServiceFeature =
   | "local_models_concurrency_probe"
   | "local_model_unavailable"
   | "model_gateway_unavailable"
-  | "local_models_external_holders";
+  | "local_models_external_holders"
+  | "runtime_failure_detail"
+  | "operation_background_wait"
+  | "dynamic_reasoning_efforts";
 export type JsonValue =
   | null
   | boolean
@@ -58,6 +61,7 @@ export type AgentRunnerEnsure = AgentRunnerWireIdentity & {
   registration_id: Id;
   assignment_revision: PositiveInteger;
 };
+export type ReasoningEffort = string;
 export type AgentRunnerRemove = AgentRunnerWireIdentity & {
   type: "agent_runner.remove";
 };
@@ -728,6 +732,20 @@ export type RunEvent =
       path: string;
     }
   | {
+      type: "run.background_waiting";
+      observed_at_unix_ms: NonNegativeInteger;
+      tools: {
+        call_id: Id;
+        tool_name: string;
+        started_at_unix_ms: NonNegativeInteger;
+      }[];
+    }
+  | {
+      type: "run.background_resumed";
+      observed_at_unix_ms: NonNegativeInteger;
+      trigger: "background_continuation" | "user_input";
+    }
+  | {
       type: "run.completed";
     }
   | {
@@ -905,14 +923,7 @@ export interface AgentRunnerWireIdentity {
 export interface RuntimeConfig {
   type: "codex" | "claude" | "pi" | "antigravity";
   model?: string;
-  reasoning_effort?:
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra";
+  reasoning_effort?: ReasoningEffort;
 }
 export interface AgentCliProfile {
   url: string;
@@ -1027,7 +1038,7 @@ export interface ProviderPrepareRunContext {
   stop_hook?: boolean;
 }
 /**
- * Compacts the native session of the process parked for this Context with the Runtime's own compaction. It never starts a process; without a parked process the answer is no_process.
+ * Compacts the native session of the process parked for this Context with the Runtime's own compaction. It never starts a process; without a parked process the answer is no_process. Pi and Antigravity compaction are sent only to Computer releases that decode them.
  */
 export interface SessionCompact {
   type: "execute";
@@ -1037,7 +1048,7 @@ export interface SessionCompact {
   runner_id: Id;
   connection_epoch: PositiveInteger;
   agent_id: Id;
-  runtime_type: "codex" | "claude";
+  runtime_type: "codex" | "claude" | "pi" | "antigravity";
   execution_context_key: ExecutionContextKey;
   instructions?: string;
   kind: "session_compact";
@@ -1192,7 +1203,7 @@ export interface RunnerHello {
   runtime_registrations: RuntimeRegistrationObservation[];
   sent_at: Timestamp;
   /**
-   * Optional Computer-wide active Operation limit. Omission means unlimited.
+   * Deprecated. Older Computers can report a locally enforced Operation limit. The gateway schedules by model endpoint.
    */
   capacity?: number;
   /**
@@ -1238,23 +1249,11 @@ export interface RuntimeDiagnostic {
 export interface RuntimeModel {
   id: string;
   label: string;
-  allowed_reasoning_effort: (
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra"
-  )[];
-  default_reasoning_effort?:
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra";
+  /**
+   * @maxItems 32
+   */
+  allowed_reasoning_effort: ReasoningEffort[];
+  default_reasoning_effort?: ReasoningEffort;
   /**
    * Context length in tokens, from the gateway on the Runtime's API link, the window declared to Claude on its API link, or the Runtime's own catalog; absent when unknown.
    */
@@ -2142,14 +2141,7 @@ export interface ModelSourceStatus {
   /**
    * After apply, the reasoning effort runtime_model needs; absent when it offers none.
    */
-  reasoning_effort?:
-    | "none"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max"
-    | "ultra";
+  reasoning_effort?: string;
   gateway_url?: string;
   byok: ByokSummary;
 }
@@ -2290,6 +2282,7 @@ export interface RuntimeExecutionFailure {
     | "network_error"
     | "rate_limited"
     | "model_unavailable"
+    | "model_not_offered"
     | "local_model_unavailable"
     | "model_gateway_unavailable"
     | "context_too_long"
@@ -2298,6 +2291,7 @@ export interface RuntimeExecutionFailure {
     | "execution_failed";
   runtime_type: "codex" | "claude" | "pi" | "antigravity";
   runtime_version?: string;
+  detail?: string;
 }
 export interface RuntimeFailureDiagnostics {
   exitCode?: number;

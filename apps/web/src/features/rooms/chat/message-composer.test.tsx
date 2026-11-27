@@ -921,6 +921,41 @@ describe("MessageComposer", () => {
     expect(screen.getByRole("option", { name: /Launch plan/ })).toBeVisible();
   });
 
+  it("asks for more Documents once the list scrolls to its end", () => {
+    const onLoadMoreDocuments = vi.fn();
+    render(
+      <MessageComposer
+        documentOptions={[
+          {
+            documentId: "document-plan",
+            name: "Launch plan",
+            updatedAt: new Date(2026, 8, 9).toISOString(),
+          },
+        ]}
+        onLoadMoreDocuments={onLoadMoreDocuments}
+        onSend={vi.fn()}
+      />,
+    );
+    const editor = screen.getByLabelText<HTMLTextAreaElement>("Message Room");
+    fireEvent.change(editor, { target: { selectionStart: 1, value: "@" } });
+    const listbox = screen.getByRole("listbox");
+    Object.defineProperties(listbox, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 2000 },
+    });
+    listbox.scrollTop = 100;
+    fireEvent.scroll(listbox);
+    expect(onLoadMoreDocuments).not.toHaveBeenCalled();
+    listbox.scrollTop = 1580;
+    fireEvent.scroll(listbox);
+    expect(onLoadMoreDocuments).toHaveBeenCalledOnce();
+
+    // The People tab lists no Documents to page through.
+    fireEvent.keyDown(editor, { key: "ArrowRight" });
+    fireEvent.scroll(screen.getByRole("listbox"));
+    expect(onLoadMoreDocuments).toHaveBeenCalledOnce();
+  });
+
   it("uses roving tab focus with Left, Right, Home, and End", () => {
     render(<MessageComposer onSend={vi.fn()} />);
     const editor = screen.getByLabelText<HTMLTextAreaElement>("Message Room");

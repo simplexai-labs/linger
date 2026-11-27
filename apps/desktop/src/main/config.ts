@@ -28,6 +28,9 @@ export type SavedEnrollment = z.infer<typeof savedEnrollment>;
 // are dropped on read.
 const desktopConfig = z.object({
   serverUrl: z.string().url().optional(),
+  // Whether serverUrl points to a local server installed by this app, used to
+  // detect an orphaned local config when the installation home is missing.
+  localServer: z.boolean().optional(),
   displayName: z.string().optional(),
   computerId: z.string().optional(),
   tenantId: z.string().optional(),

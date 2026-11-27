@@ -150,6 +150,9 @@ func TestBrowserConnectionDetailSendsTheUserToConnectChrome(t *testing.T) {
 			t.Fatalf("%s: %q", code, detail)
 		}
 	}
+	if detail, ok := BrowserConnectionDetail("browser_unavailable"); !ok || !strings.Contains(detail, "Google Chrome") || strings.Contains(detail, "Connect Chrome") {
+		t.Fatalf("browser_unavailable: %q", detail)
+	}
 	if _, ok := BrowserConnectionDetail("outcome_unknown"); ok {
 		t.Fatal("an unknown outcome is not a missing connection")
 	}

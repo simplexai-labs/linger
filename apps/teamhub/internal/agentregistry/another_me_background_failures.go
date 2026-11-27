@@ -26,34 +26,69 @@ func (s *Service) RecordAnotherMeBackgroundCall(ctx context.Context, tenantID, a
 	}
 	defer tx.Rollback(ctx)
 	queries := s.queries.WithTx(tx)
-	var changed bool
 	if failed {
 		reason = anotherMeBackgroundFailureReason(reason)
 		var row store.RecordAnotherMeBackgroundFailureRow
 		row, err = queries.RecordAnotherMeBackgroundFailure(ctx, store.RecordAnotherMeBackgroundFailureParams{
 			AgentActorID: agentActorID, TenantID: tenantID, Reason: reason,
 		})
-		changed = row.ConsecutiveFailures == AnotherMeBackgroundFailureThreshold ||
-			(row.ConsecutiveFailures > AnotherMeBackgroundFailureThreshold && row.PreviousReason != reason)
-	} else {
-		var count int32
-		count, err = queries.ClearAnotherMeBackgroundFailures(ctx, store.ClearAnotherMeBackgroundFailuresParams{
-			AgentActorID: agentActorID, TenantID: tenantID,
-		})
-		changed = count >= AnotherMeBackgroundFailureThreshold
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if row.ConsecutiveFailures == AnotherMeBackgroundFailureThreshold ||
+			(row.ConsecutiveFailures > AnotherMeBackgroundFailureThreshold && row.PreviousReason != reason) {
+			if err := createTenantAnotherMeDeliveries(ctx, queries, tenantID); err != nil {
+				return err
+			}
+		}
+		return tx.Commit(ctx)
 	}
+	if err := clearAnotherMeBackgroundFailuresTx(ctx, queries, tenantID, agentActorID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// anotherMeRuntimeTarget is the persisted or requested execution target of an
+// Agent whose change invalidates a recorded Another Me background failure streak.
+type anotherMeRuntimeTarget struct {
+	computerID       string
+	runtimeType      string
+	workspaceGrantID string
+	model            string
+	reasoningEffort  string
+}
+
+// shouldClearAnotherMeBackgroundFailures reports whether a Runtime placement,
+// workspace grant, model, or reasoning-effort change for an Another Me
+// invalidates any recorded failure streak from its prior execution target.
+func shouldClearAnotherMeBackgroundFailures(agentType string, current, next anotherMeRuntimeTarget) bool {
+	if agentType != "anotherme" {
+		return false
+	}
+	return current != next
+}
+
+// clearAnotherMeBackgroundFailuresTx deletes any recorded background failure
+// streak for an Another Me inside an open transaction and publishes an
+// another-me invalidation hint when a visible banner was cleared.
+func clearAnotherMeBackgroundFailuresTx(ctx context.Context, queries *store.Queries, tenantID, agentActorID string) error {
+	count, err := queries.ClearAnotherMeBackgroundFailures(ctx, store.ClearAnotherMeBackgroundFailuresParams{
+		AgentActorID: agentActorID, TenantID: tenantID,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if changed {
-		if err := createTenantAnotherMeDeliveries(ctx, queries, tenantID); err != nil {
-			return err
-		}
+	if count >= AnotherMeBackgroundFailureThreshold {
+		return createTenantAnotherMeDeliveries(ctx, queries, tenantID)
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // anotherMeBackgroundFailureReason keeps a reason code clients know and

@@ -429,6 +429,12 @@ components:
       properties:
         invocation_id:
           $ref: "#/components/schemas/AgentInvocationId"
+        handoff_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        handoff_state:
+          type: string
+          enum: [working, waiting_for_user, completed]
+          description: State of the identified Room handoff after this report; requires handoff_id.
         messages:
           type: array
           description: Ordered private messages persisted atomically in the Direct Room.
@@ -453,6 +459,8 @@ components:
       properties:
         invocation_id:
           $ref: "#/components/schemas/AgentInvocationId"
+        handoff_id:
+          $ref: "./common.yaml#/components/schemas/Id"
         room_id:
           $ref: "./common.yaml#/components/schemas/Id"
         instruction:
@@ -844,13 +852,14 @@ components:
           description: Canonical Room payload frozen independently from caller input.
     AgentCreationApprovalResponse:
       type: object
-      description: Durable pending Room creation approval request.
+      description: >-
+        A submitted Room creation. TeamHub creates the Room at once, owned by the Agent's
+        Sponsor; a submission replayed from an earlier pending approval card still reports
+        that card.
       additionalProperties: false
       required:
         - accepted
         - status
-        - creation_approval_request_id
-        - message_id
       properties:
         accepted:
           type: boolean
@@ -858,14 +867,39 @@ components:
           description: Whether TeamHub accepted and durably persisted the Creation request.
         status:
           type: string
-          const: pending_approval
-          description: Initial lifecycle state while awaiting a Human decision.
+          enum: [created, pending_approval]
+          description: >-
+            created when the Room exists; pending_approval for a replayed submission whose
+            approval card still awaits a Human decision.
+        room_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+          description: The created Room, present when status is created.
+        skipped_artifacts:
+          type: array
+          description: >-
+            Requested Documents not delivered to the created Room, each with the reason;
+            present when status is created.
+          items:
+            $ref: "#/components/schemas/AgentRoomCreationSkippedArtifact"
         creation_approval_request_id:
           $ref: "./common.yaml#/components/schemas/Id"
-          description: Stable identifier of the Creation approval request fact.
+          description: Stable identifier of the Creation approval request; present when status is pending_approval.
         message_id:
           $ref: "./common.yaml#/components/schemas/Id"
-          description: Stable identifier of the Human approval card message.
+          description: Stable identifier of the Human approval card message; present when status is pending_approval.
+    AgentRoomCreationSkippedArtifact:
+      type: object
+      description: A requested Document the created Room did not receive.
+      additionalProperties: false
+      required:
+        - document_id
+        - reason
+      properties:
+        document_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        reason:
+          type: string
+          description: Why the Document was not delivered.
     AgentCreateTaskRequest:
       type: object
       description: >-

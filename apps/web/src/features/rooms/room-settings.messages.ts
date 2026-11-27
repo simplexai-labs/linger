@@ -7,26 +7,22 @@ import { defineMessages } from "@/i18n/messages";
 export const roomSettingsMessages = defineMessages("roomSettings", {
   loading: "Loading Room settings...",
   loadFailed: "Room settings could not be loaded.",
-  editDetails: "Edit Room details",
   members: "Members",
   loadingMembers: "Loading members...",
   shareConversation: "Share conversation",
+  share: "Share",
+  renameRoom: "Rename {name}",
   leaveRoom: "Leave Room",
   leaveDescription:
     "You will stop receiving messages from this room and cannot send messages until you rejoin. Your role, existing access and message history stay the same. You can rejoin at any time.",
   leave: "Leave",
 
   name: "Name",
-  description: "Description",
-  roomDescription: "Room description",
-  descriptionPlaceholder: "What is this Room for?",
-  saveChanges: "Save changes",
-  detailsDescription: "Update the name and description shown to Room members.",
-  deleteDescription: "Deleting this Room revokes access for every member.",
   saveUnconfirmed:
     "TeamHub did not confirm whether these Room changes were committed. Check the Room settings before you retry.",
 
   roomMembers: "Room members",
+  roomActions: "Room actions",
   // The tag on an Agent the person looking at the list created.
   yours: "Yours",
   roleOwner: "owner",
@@ -62,7 +58,6 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   membersLoadFailed: "Some members could not be loaded.",
   noMatchingMembers: "No matching members.",
 
-  shareDescription: "Create a read-only snapshot for sharing or debugging.",
   shareNotice:
     "Anyone with the link can read messages sent up to now, without signing in. New messages and later changes are not included. Files appear as cards; source documents stay private.",
   conversationLink: "Conversation link",

@@ -28,7 +28,6 @@ export function LocalRuntimeAuthenticationGuidance({
           message={computerSetupMessages.signInGuidance}
           tags={{ code: (text) => <code className="font-mono">{text}</code> }}
           values={{
-            app,
             command: signInCommand(runtimeType, computer, desktop),
             computer: computerName,
           }}

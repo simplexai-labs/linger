@@ -260,7 +260,7 @@ const agentGet = definition(
 const agentCreate = definition(
   ["agent", "create"],
   "create_agent",
-  "Create a General Agent in this Room; a Direct Room needs the sponsor's card.",
+  "Create a General Agent of your sponsor; it joins this Room when your sponsor is a member.",
   {
     "--name": flag("Stable role-oriented Agent name."),
     "--description": flag("Optional Human-facing description."),
@@ -280,8 +280,9 @@ const agentCreate = definition(
     approval: "confirm",
     unavailableInTask: agentsUnavailableInTask,
     notes: [
-      "Outside a Direct Room the new Agent joins this Room at once; wake it there with an Agent reference.",
-      "In a Direct Room the sponsor first approves a confirmation card in the chat; TeamHub then creates the Agent and sends you the result, or the denial and its reason.",
+      "In a Room your sponsor is in, the new Agent joins it at once; wake it there with an Agent reference.",
+      "In your sponsor's Direct Room TeamHub creates the Agent at once without adding it to that chat; the sponsor finds it in their own chat with it.",
+      "In a Room your sponsor is not in, the sponsor first approves a confirmation card; TeamHub then creates the Agent and sends you the result, or the denial and its reason.",
     ],
   },
 );
@@ -319,7 +320,7 @@ const agentUpdate = definition(
     approval: "confirm",
     unavailableInTask: agentsUnavailableInTask,
     notes: [
-      "TeamHub applies the change at once only to an uninitialized Agent in this Room. Otherwise the sponsor approves a confirmation card in the chat; TeamHub then applies it and sends you the result, or the denial and its reason.",
+      "A change of only --name or --description applies at once. A prompt change applies at once only to an uninitialized Agent in this Room; otherwise the sponsor approves a confirmation card in the chat, and TeamHub then applies it and sends you the result, or the denial and its reason.",
     ],
   },
 );
@@ -825,7 +826,7 @@ const skillPublish = definition(
 const roomCreate = definition(
   ["room", "create"],
   "create_room",
-  "Request Human approval for a Room and its first message.",
+  "Create a collaboration Room with its members and first message; your sponsor owns it.",
   {
     "--name": flag("Proposed Room name."),
     ...creationOptions,
@@ -923,6 +924,7 @@ const roomHandoff = definition(
     "--inbox": flag(
       "room:<room-id> of another Room where you and your Human are both members. Run teamhub message read --list-inboxes and match kind=room entries to resolve a Room name to its room:<room-id>.",
     ),
+    "--handoff": flag("Existing handoff ID when continuing the same request."),
     ...bodyOptions,
   },
   async (args, reader) => {
@@ -944,6 +946,9 @@ const roomHandoff = definition(
     return {
       input: await validate("hand_off_to_room", {
         room_id: room[1],
+        ...(option(args, "--handoff")
+          ? { handoff_id: option(args, "--handoff") }
+          : {}),
         instruction: await markdownBodySource(args, reader),
       }),
     };
@@ -955,6 +960,7 @@ const roomHandoff = definition(
     notes: [
       "Only Another Me, from its direct chat with its Human, in a turn the Human started by writing to it or deciding one of its cards.",
       "When your Human names a Room without its room_id, run teamhub message read --list-inboxes first and match kind=room entries to resolve the Room name to room:<room-id>; if multiple Rooms share the same name, ask your Human to clarify before handing off.",
+      "Private reports carry room_handoff metadata; use its room_id and --handoff handoff_id when passing the Human's answer back.",
       "The instruction is hidden from that Room. You there are woken with it, read that Room, and post and @ the Agents yourself; the direct chat's messages are not copied.",
       "Results come back to the direct chat through teamhub message direct.",
     ],

@@ -180,12 +180,13 @@ func TestComputerComingOnlineCreatesAnotherMeOnce(t *testing.T) {
 // becomes ready while it stays online does.
 func TestAnotherMeWaitsForAReadyRuntimeWithoutAJob(t *testing.T) {
 	allowParallelIntegrationTest(t)
-	env, _, _ := newAnotherMeEnv(t)
+	env, alice, _ := newAnotherMeEnv(t)
 	seedAnotherMeComputers(t, env.pool)
 	computerID := anotherMeFixtureComputerID(acmeTenant, "actor_acme_alice")
 	if _, err := env.pool.Exec(t.Context(), `
 		UPDATE local_computers
 		SET status='offline',last_seen_at=now()-interval '1 minute',
+		    platform='win32',
 		    runtime_diagnostics=jsonb_build_array(jsonb_build_object('type','codex','status','not_installed','protocol','app-server','checked_at',to_jsonb(now())))
 		WHERE computer_id=$1
 	`, computerID); err != nil {
@@ -194,6 +195,15 @@ func TestAnotherMeWaitsForAReadyRuntimeWithoutAJob(t *testing.T) {
 	touchAnotherMeComputer(t, env, computerID, nil)
 	if actorID := anotherMeActorID(t, env, acmeTenant, "actor_acme_alice"); actorID != "" {
 		t.Fatalf("Another Me created without a ready Runtime: %s", actorID)
+	}
+	anotherMePath := "/v0/tenants/" + acmeTenant + "/another-me"
+	status, _, body := env.request(alice, http.MethodGet, anotherMePath, nil, "")
+	if status != http.StatusOK ||
+		!containsJSONText(body, `"reason":"no_ready_runtime_with_models"`) ||
+		!containsJSONText(body, `"computer_id":"`+computerID+`"`) ||
+		!containsJSONText(body, `"status":"not_installed"`) ||
+		!containsJSONText(body, `"model_count":0`) {
+		t.Fatalf("Another Me blocker while online without ready runtime status=%d body=%s", status, body)
 	}
 	if got := countRows(t, env, `SELECT count(*) FROM river_job WHERE kind LIKE 'another_me.%' OR kind LIKE 'maintenance.another_me%'`); got != 0 {
 		t.Fatalf("Another Me jobs=%d want=0", got)
@@ -204,6 +214,10 @@ func TestAnotherMeWaitsForAReadyRuntimeWithoutAJob(t *testing.T) {
 	}})
 	if actorID := anotherMeActorID(t, env, acmeTenant, "actor_acme_alice"); actorID == "" {
 		t.Fatal("a Runtime that became ready created no Another Me")
+	}
+	status, _, body = env.request(alice, http.MethodGet, anotherMePath, nil, "")
+	if status != http.StatusOK || containsJSONText(body, `"placement_blocker"`) || !containsJSONText(body, `"agent_actor_id"`) {
+		t.Fatalf("Another Me after runtime ready status=%d body=%s", status, body)
 	}
 }
 

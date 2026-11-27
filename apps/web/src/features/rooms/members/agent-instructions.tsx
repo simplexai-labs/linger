@@ -49,7 +49,7 @@ export function AgentInstructions({
       ariaLabel={t(agentInfoMessages.agentInstructions)}
       label={t(agentInfoMessages.instructions)}
     >
-      <div className="border-t border-border px-3.5 py-3">
+      <div className="px-3.5 py-3">
         {presented ? (
           <p
             aria-label={t(agentInfoMessages.instructionsContent)}

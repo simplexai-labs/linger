@@ -1,7 +1,6 @@
 import {
   AlertCircleIcon,
   ArrowDown01Icon,
-  ArrowUp01Icon,
   Cancel01Icon,
   Loading03Icon,
   Mic01Icon,
@@ -18,12 +17,14 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
+import { AutoHeight } from "@/components/ui/auto-height";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import { useT } from "@/i18n/use-translation";
+import { cn } from "@/lib/cn";
 import {
   isTranscriptRecoveryPaused,
   useOptionalVoiceControl,
@@ -60,7 +61,7 @@ export interface RecordingPanels {
  */
 export function VoiceFocusSurface({
   autoStart = false,
-  fill = false,
+  height,
   floating = "page",
   onExit,
   onFloat,
@@ -71,9 +72,8 @@ export function VoiceFocusSurface({
   view,
 }: {
   autoStart?: boolean;
-  /** The in-page window has a height of its own, which the surface fills
-   *  instead of growing with its transcript. */
-  fill?: boolean;
+  /** The expanded in-page height chosen by dragging, including both bars. */
+  height?: number;
   /** A picture-in-picture window fills its own window instead of floating. */
   floating?: "page" | "pip";
   onExit: () => void;
@@ -117,6 +117,9 @@ export function VoiceFocusSurface({
   const pauseState = pause.captureId === capture?.id ? pause : { pausedMs: 0 };
   const paused = pauseState.pausedAt !== undefined;
   const [confirmingStop, setConfirmingStop] = useState(false);
+  // Keep the body in place while its height animates closed.
+  const [lastView, setLastView] = useState<RecordingView>("transcript");
+  if (view && view !== lastView) setLastView(view);
   // Keep recording and Escape hand focus back to Stop once it is shown again.
   const stopButton = useRef<HTMLButtonElement>(null);
   const focusStopAfterConfirm = useRef(false);
@@ -252,8 +255,9 @@ export function VoiceFocusSurface({
     onExit();
   };
   const standbyOrMic = standby || voice.composerMicrophoneActive;
-  // Before a recording runs, the window always shows how to start it.
-  const shown: RecordingView | undefined = panels ? view : "transcript";
+  // Window controls are available before the Capture arrives too.
+  const shown = onViewChange || panels ? view : "transcript";
+  const bodyView = panels ? (view ?? lastView) : "transcript";
   const pip = floating === "pip";
   // A minimized window is one row tall, in the page or floating, and a page
   // window can sit at the bottom of the viewport; Stop asks inside that row,
@@ -381,8 +385,9 @@ export function VoiceFocusSurface({
       className={`${styles.titleBar} ${pip ? "bg-app-canvas" : "voice-window-title rounded-t-2xl"}`}
       onPointerDown={pip ? undefined : onMoveStart}
     >
-      {panels ? (
+      {onViewChange ? (
         <button
+          aria-expanded={Boolean(shown)}
           aria-label={t(shown ? m.minimize : m.open)}
           className={styles.windowButton}
           disabled={confirmingStop}
@@ -390,11 +395,13 @@ export function VoiceFocusSurface({
           title={t(shown ? m.minimizeHint : m.open)}
           type="button"
         >
-          {shown ? (
-            <Icon icon={ArrowDown01Icon} />
-          ) : (
-            <Icon icon={ArrowUp01Icon} />
-          )}
+          <Icon
+            className={cn(
+              "transition-transform duration-300 motion-reduce:transition-none",
+              shown && "rotate-180",
+            )}
+            icon={ArrowDown01Icon}
+          />
         </button>
       ) : null}
       <span className="flex-1">{pip ? null : t(m.meeting)}</span>
@@ -423,6 +430,132 @@ export function VoiceFocusSurface({
       ) : null}
     </div>
   );
+  const body = (
+    <div
+      className={cn(
+        "flex min-h-0 flex-col",
+        pip
+          ? "flex-1"
+          : height === undefined
+            ? "max-h-[min(664px,calc(100dvh-188px))]"
+            : "max-h-[calc(100dvh-128px)]",
+      )}
+      style={{
+        height:
+          !pip && height !== undefined ? Math.max(0, height - 92) : undefined,
+      }}
+    >
+      {panels ? (
+        <div
+          aria-label={t(m.views)}
+          className="flex shrink-0 items-center gap-1 px-4 py-2"
+          role="tablist"
+        >
+          {tabs.map((tab) => (
+            <button
+              aria-selected={bodyView === tab.id}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] leading-[18px] font-medium transition-colors focus:outline-none focus-visible:shadow-[0_0_0_2px_var(--app-ring)] ${
+                bodyView === tab.id
+                  ? "bg-app-surface-soft text-app-ink"
+                  : "text-app-muted hover:bg-app-surface-soft/50 hover:text-app-ink"
+              }`}
+              key={tab.id}
+              onClick={() => onViewChange?.(tab.id)}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <VoiceFocusNotices
+        gapCount={capture?.gap_count ?? 0}
+        gapDurationMs={capture?.gap_duration_ms ?? 0}
+        finalizing={finalizing}
+        notice={notice}
+        onReconnect={
+          Boolean(livekit) && captureActive && inputInterrupted
+            ? () => void run(reconnect)
+            : undefined
+        }
+        onRetryStop={
+          voice.retryStop
+            ? () => void run(() => voice.retryStop?.() ?? Promise.resolve())
+            : undefined
+        }
+        reconnecting={actionPending}
+        statusMessage={statusMessage}
+        subtitle={subtitle}
+        surfaceError={surfaceError}
+      />
+      {/* Kept mounted behind the other views so its scroll position survives. */}
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        hidden={bodyView !== "transcript"}
+      >
+        <VoiceTranscriptViewport
+          revealLatestKey={
+            captureStatus === "recovering" && capture
+              ? `${capture.id}:${recoveryFailed ? "failed" : "recovering"}`
+              : undefined
+          }
+          key={capture?.id ?? "idle"}
+        >
+          <div className="flex w-full flex-col items-center gap-4 px-5 py-3">
+            <div
+              aria-label={t(m.transcript)}
+              aria-live="polite"
+              className="w-full space-y-1"
+              role="log"
+            >
+              {visibleItems.map((item) => (
+                <VoiceFocusTranscriptRow item={item} key={item.id} />
+              ))}
+              {partial ? (
+                <div className="flex gap-2 rounded-lg px-2.5 py-1.5 text-sm leading-5 text-app-muted">
+                  <Icon
+                    icon={Loading03Icon}
+                    className="mt-[3px] shrink-0 animate-spin text-app-muted"
+                    size={14}
+                  />
+                  <span className="min-w-0 italic">{partial}</span>
+                </div>
+              ) : null}
+              {visibleItems.length === 0 && !partial ? (
+                <p className="py-3 text-center text-[12px] leading-[18px] text-app-muted">
+                  {t(
+                    idle
+                      ? m.transcriptPlaceholder
+                      : listeningForSpeech
+                        ? m.listening
+                        : m.noTranscript,
+                  )}
+                </p>
+              ) : null}
+              {canStart ? (
+                <div className="flex justify-center pt-1">
+                  <Button onClick={() => void arm()} tone="primary">
+                    <Icon icon={Mic01Icon} size={16} />
+                    {t(
+                      captureFailed || recoveryFailed
+                        ? m.startNewRecording
+                        : m.startRecording,
+                    )}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+            {captureStatus === "recovering" && capture ? (
+              <VoiceRecoveryPanel capture={capture} />
+            ) : null}
+          </div>
+        </VoiceTranscriptViewport>
+      </div>
+      {panels && bodyView === "ask" ? panels.ask : null}
+      {panels?.askComposer}
+    </div>
+  );
   return (
     <>
       {titleBar}
@@ -431,9 +564,7 @@ export function VoiceFocusSurface({
         className={
           pip
             ? "relative flex min-h-0 flex-1 flex-col bg-app-canvas text-app-ink"
-            : `relative flex min-h-0 flex-col overflow-hidden rounded-b-2xl bg-app-canvas text-app-ink ${styles.window} ${
-                fill ? "flex-1" : "max-h-[min(720px,calc(100dvh-132px))]"
-              }`
+            : `relative flex min-h-0 flex-col overflow-hidden rounded-b-2xl bg-app-canvas text-app-ink ${styles.window}`
         }
         data-paused={paused || undefined}
       >
@@ -518,120 +649,16 @@ export function VoiceFocusSurface({
             {confirmation}
           </div>
         ) : null}
-        {shown ? (
-          <>
-            {panels ? (
-              <div
-                aria-label={t(m.views)}
-                className="flex shrink-0 items-center gap-1 border-b border-app-border px-4 py-2"
-                role="tablist"
-              >
-                {tabs.map((tab) => (
-                  <button
-                    aria-selected={shown === tab.id}
-                    className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] leading-[18px] font-medium transition-colors focus:outline-none focus-visible:shadow-[0_0_0_2px_var(--app-ring)] ${
-                      shown === tab.id
-                        ? "bg-app-surface-soft text-app-ink"
-                        : "text-app-muted hover:bg-app-surface-soft/50 hover:text-app-ink"
-                    }`}
-                    key={tab.id}
-                    onClick={() => onViewChange?.(tab.id)}
-                    role="tab"
-                    type="button"
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <VoiceFocusNotices
-              gapCount={capture?.gap_count ?? 0}
-              gapDurationMs={capture?.gap_duration_ms ?? 0}
-              finalizing={finalizing}
-              notice={notice}
-              onReconnect={
-                Boolean(livekit) && captureActive && inputInterrupted
-                  ? () => void run(reconnect)
-                  : undefined
-              }
-              onRetryStop={
-                voice.retryStop
-                  ? () =>
-                      void run(() => voice.retryStop?.() ?? Promise.resolve())
-                  : undefined
-              }
-              reconnecting={actionPending}
-              statusMessage={statusMessage}
-              subtitle={subtitle}
-              surfaceError={surfaceError}
-            />
-            {/* Kept mounted behind the other views so its scroll position survives. */}
-            <div
-              className="flex min-h-0 flex-1 flex-col"
-              hidden={shown !== "transcript"}
-            >
-              <VoiceTranscriptViewport
-                revealLatestKey={
-                  captureStatus === "recovering" && capture
-                    ? `${capture.id}:${recoveryFailed ? "failed" : "recovering"}`
-                    : undefined
-                }
-                key={capture?.id ?? "idle"}
-              >
-                <div className="flex w-full flex-col items-center gap-4 px-5 py-3">
-                  <div
-                    aria-label={t(m.transcript)}
-                    aria-live="polite"
-                    className="w-full space-y-1"
-                    role="log"
-                  >
-                    {visibleItems.map((item) => (
-                      <VoiceFocusTranscriptRow item={item} key={item.id} />
-                    ))}
-                    {partial ? (
-                      <div className="flex gap-2 rounded-lg px-2.5 py-1.5 text-sm leading-5 text-app-muted">
-                        <Icon
-                          icon={Loading03Icon}
-                          className="mt-[3px] shrink-0 animate-spin text-app-muted"
-                          size={14}
-                        />
-                        <span className="min-w-0 italic">{partial}</span>
-                      </div>
-                    ) : null}
-                    {visibleItems.length === 0 && !partial ? (
-                      <p className="py-3 text-center text-[12px] leading-[18px] text-app-muted">
-                        {t(
-                          idle
-                            ? m.transcriptPlaceholder
-                            : listeningForSpeech
-                              ? m.listening
-                              : m.noTranscript,
-                        )}
-                      </p>
-                    ) : null}
-                    {canStart ? (
-                      <div className="flex justify-center pt-1">
-                        <Button onClick={() => void arm()} tone="primary">
-                          <Icon icon={Mic01Icon} size={16} />
-                          {t(
-                            captureFailed || recoveryFailed
-                              ? m.startNewRecording
-                              : m.startRecording,
-                          )}
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-                  {captureStatus === "recovering" && capture ? (
-                    <VoiceRecoveryPanel capture={capture} />
-                  ) : null}
-                </div>
-              </VoiceTranscriptViewport>
-            </div>
-            {panels && shown === "ask" ? panels.ask : null}
-            {panels?.askComposer}
-          </>
-        ) : null}
+        <AutoHeight
+          className={
+            pip
+              ? "flex min-h-0 flex-1 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1"
+              : undefined
+          }
+          open={Boolean(shown)}
+        >
+          {body}
+        </AutoHeight>
       </section>
     </>
   );

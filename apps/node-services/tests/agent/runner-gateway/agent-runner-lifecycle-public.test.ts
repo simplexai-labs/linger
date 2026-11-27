@@ -284,7 +284,7 @@ describe("RunnerGateway", () => {
       },
       peer,
     );
-    expect(() =>
+    expect(
       gateway.requireLocalPlacement(
         {
           type: "local",
@@ -298,7 +298,9 @@ describe("RunnerGateway", () => {
         "gpt-5.6",
         "ultra",
       ),
-    ).toThrow("reasoning effort is unavailable");
+    ).toMatchObject({
+      id: "gpt-5.6",
+    });
 
     const options = {
       placement: {

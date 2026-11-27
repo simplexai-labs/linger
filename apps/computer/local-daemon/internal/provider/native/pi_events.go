@@ -15,8 +15,11 @@ type piEventFrame struct {
 	Type                  string          `json:"type"`
 	Message               json.RawMessage `json:"message"`
 	AssistantMessageEvent *struct {
-		Type  string `json:"type"`
-		Delta string `json:"delta"`
+		Type     string `json:"type"`
+		Delta    string `json:"delta"`
+		Content  string `json:"content"`
+		ID       string `json:"id"`
+		ToolName string `json:"toolName"`
 	} `json:"assistantMessageEvent"`
 	ToolName   string          `json:"toolName"`
 	ToolCallID string          `json:"toolCallId"`
@@ -73,6 +76,9 @@ func (t *piTurn) apply(event piEventFrame, observed time.Time) {
 			t.mu.Lock()
 			t.textID = "pi-text-" + piRandomHex(12)
 			t.filter = piMarkupFilter{}
+			t.thinkingOpen = false
+			t.sawThinkingDelta = false
+			t.thinkingClosed = false
 			t.mu.Unlock()
 		}
 	case "message_update":
@@ -115,7 +121,30 @@ func (t *piTurn) noteFailure(message string) {
 	}
 	t.mu.Lock()
 	t.failure = message
+	t.aborted = false
 	t.mu.Unlock()
+}
+
+func (t *piTurn) finishThinking(content string, observed time.Time) {
+	t.mu.Lock()
+	if t.thinkingClosed {
+		t.mu.Unlock()
+		return
+	}
+	open, sawDelta := t.thinkingOpen, t.sawThinkingDelta
+	if !open && content == "" {
+		t.mu.Unlock()
+		return
+	}
+	t.thinkingOpen = false
+	t.sawThinkingDelta = false
+	t.thinkingClosed = true
+	t.mu.Unlock()
+	body := ""
+	if !sawDelta {
+		body = content
+	}
+	t.emit(Event{Kind: EventReasoning, ObservedAt: observed, Body: body, Complete: true})
 }
 
 func (t *piTurn) applyDelta(event piEventFrame, observed time.Time) {
@@ -134,8 +163,30 @@ func (t *piTurn) applyDelta(event piEventFrame, observed time.Time) {
 		if visible != "" {
 			t.emit(Event{Kind: EventText, ObservedAt: observed, ID: id, Body: visible})
 		}
+	case "thinking_start":
+		t.mu.Lock()
+		t.thinkingOpen = true
+		t.sawThinkingDelta = false
+		t.thinkingClosed = false
+		t.mu.Unlock()
 	case "thinking_delta":
+		t.mu.Lock()
+		t.thinkingOpen = true
+		t.sawThinkingDelta = true
+		t.thinkingClosed = false
+		t.mu.Unlock()
 		t.emit(Event{Kind: EventReasoning, ObservedAt: observed, Body: update.Delta})
+	case "thinking_end":
+		t.finishThinking(update.Content, observed)
+	case "text_start":
+		t.finishThinking("", observed)
+	case "toolcall_start":
+		t.finishThinking("", observed)
+		invocationID := ""
+		if update.ID != "" {
+			invocationID = piInvocationID(update.ID)
+		}
+		t.emit(Event{Kind: EventToolCallStart, ObservedAt: observed, ToolName: update.ToolName, InvocationID: invocationID, ActivityKind: activityForNamedTool(update.ToolName, piToolActivities)})
 	}
 }
 
@@ -143,6 +194,7 @@ func (t *piTurn) applyMessageEnd(message piWireMessage, observed time.Time) {
 	if message.Role != "assistant" {
 		return
 	}
+	t.finishThinking("", observed)
 	t.mu.Lock()
 	rest, id := t.filter.flush(), t.textID
 	if id == "" && rest != "" {
@@ -155,7 +207,8 @@ func (t *piTurn) applyMessageEnd(message piWireMessage, observed time.Time) {
 		t.output = piFilterMarkup(t.output)
 	}
 	t.failure = ""
-	if message.StopReason == "error" || message.StopReason == "aborted" {
+	t.aborted = message.StopReason == "aborted"
+	if message.StopReason == "error" || t.aborted {
 		t.failure = message.ErrorMessage
 		if t.failure == "" {
 			t.failure = "Pi assistant message stopped: " + message.StopReason
@@ -208,13 +261,14 @@ func piMessageText(content json.RawMessage) string {
 // piToolActivities classifies Pi's built-in tools; MCP tools follow their
 // server and anything else is a generic tool.
 var piToolActivities = map[string]string{
-	"read":  ActivityRead,
-	"edit":  ActivityFileChange,
-	"write": ActivityFileChange,
-	"grep":  ActivitySearch,
-	"find":  ActivitySearch,
-	"ls":    ActivitySearch,
-	"bash":  ActivityCommand,
+	"read":       ActivityRead,
+	"edit":       ActivityFileChange,
+	"write":      ActivityFileChange,
+	"grep":       ActivitySearch,
+	"find":       ActivitySearch,
+	"ls":         ActivitySearch,
+	"bash":       ActivityCommand,
+	"powershell": ActivityCommand,
 }
 
 // piInvocationID hashes the whole native call id, so composite ids that

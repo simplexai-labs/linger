@@ -308,11 +308,7 @@ export function AgentSkillUploadPanel({
         </ul>
       ) : (
         <SettingsRow icon={<Icon icon={BookOpen01Icon} size={16} />}>
-          <SettingsRowText
-            description={t(agentInfoMessages.noSkillsBody)}
-            muted
-            title={t(agentInfoMessages.noSkillsTitle)}
-          />
+          <SettingsRowText muted title={t(agentInfoMessages.noSkillsTitle)} />
         </SettingsRow>
       )}
       {onToggleExpanded ? (
@@ -379,7 +375,7 @@ function SkillLibraryDialog({
       title={t(agentInfoMessages.addSkill)}
     >
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="border-b border-app-border px-4 py-3">
+        <div className="px-4 py-3">
           <input
             aria-label={t(agentInfoMessages.searchSkills)}
             className="h-9 w-full rounded-lg border border-border bg-card px-3 text-sm outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-app-placeholder hover:border-border-hover focus:border-foreground focus:ring-2 focus:ring-ring"

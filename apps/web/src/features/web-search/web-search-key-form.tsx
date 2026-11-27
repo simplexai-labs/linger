@@ -67,7 +67,7 @@ export function WebSearchKeyForm({
   const error = mutation.error
     ? describeKeyError(mutation.error, backend, t)
     : null;
-  const hasHint = !compact || Boolean(backend.key_url);
+  const hasHint = Boolean(backend.key_url);
   const hintId = `${inputId}-hint`;
   const errorId = `${inputId}-error`;
   const describedBy =
@@ -122,28 +122,24 @@ export function WebSearchKeyForm({
           {error}
         </p>
       ) : null}
-      {hasHint ? (
+      {backend.key_url ? (
         <p className="text-xs text-app-muted" id={hintId}>
-          {backend.key_url ? (
-            <RichMessage
-              message={compact ? m.getKeyAt : m.getKeyAtStored}
-              tags={{
-                link: (site) => (
-                  <a
-                    className="text-app-link hover:underline"
-                    href={backend.key_url}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
-                    {site} <span aria-hidden="true">↗</span>
-                  </a>
-                ),
-              }}
-              values={{ site: webSearchKeySite(backend.key_url) }}
-            />
-          ) : compact ? null : (
-            t(m.storedEncrypted)
-          )}
+          <RichMessage
+            message={m.getKeyAt}
+            tags={{
+              link: (site) => (
+                <a
+                  className="text-app-link hover:underline"
+                  href={backend.key_url}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  {site} <span aria-hidden="true">↗</span>
+                </a>
+              ),
+            }}
+            values={{ site: webSearchKeySite(backend.key_url) }}
+          />
         </p>
       ) : null}
     </form>

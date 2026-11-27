@@ -449,6 +449,48 @@ describe("BYOK localmodels integration", () => {
       vi.useRealTimers();
     }
   });
+
+  it("logs separate elapsed timings for runtime preparation and gateway mount", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      const home = await makeHome();
+      const events: { kind: string; stage?: string; message: string }[] = [];
+      const outcome = await prepareByokRuntime(
+        {
+          baseUrl: "https://api.example.com",
+          path: "/v1",
+          endpoint: "/responses",
+          protocol: "openai-responses",
+          modelId: "gpt-4o",
+          runtime: "codex",
+        },
+        {
+          home,
+          signal: new AbortController().signal,
+          onEvent: (event) => events.push(event),
+        },
+        {
+          prepareNative: async () => {
+            vi.advanceTimersByTime(1_300);
+            return { code: 0, state: "ready", message: "ok" };
+          },
+          localmodels: async () => {
+            vi.advanceTimersByTime(2_700);
+            return { code: 0, stdout: "{}", stderr: "" };
+          },
+        },
+      );
+      expect(outcome).toMatchObject({ code: 0, state: "ready" });
+      expect(events).toContainEqual({
+        kind: "log",
+        stage: "runtime",
+        message: "BYOK preparation timings (s): runtime 1.3, gateway 2.7.\n",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 async function writeSource(home: string, source: unknown): Promise<void> {
@@ -499,6 +541,109 @@ describe("prepareByokNativeRuntime", () => {
       "reuseInstalled",
     );
     expect(prepareNative.mock.calls[1]?.[1]).not.toHaveProperty("onDescriptor");
+    expect(prepareNative.mock.calls[1]?.[1]).toMatchObject({
+      skipHarnessWhenBundledPiMatches: true,
+    });
+  });
+
+  it("enables bundled Pi harness fast-bind only for pi and skips harness plan/apply during prepareByokRuntime", async () => {
+    const prepareNative = vi.fn<typeof prepareRuntime>(async () => ({
+      code: 0,
+      state: "ready",
+      message: "ok",
+    }));
+    const base = {
+      home: await makeHome(),
+      signal: new AbortController().signal,
+      onEvent: () => {},
+    };
+    await prepareByokNativeRuntime("pi", base, { prepareNative });
+    await prepareByokNativeRuntime("claude", base, { prepareNative });
+    await prepareByokNativeRuntime("codex", base, { prepareNative });
+    expect(
+      prepareNative.mock.calls.map(([runtime, opts]) => [
+        runtime,
+        opts.skipHarnessWhenBundledPiMatches,
+      ]),
+    ).toEqual([
+      ["pi", true],
+      ["claude", false],
+      ["codex", false],
+    ]);
+
+    // End-to-end prepareByokRuntime with pi skips harness plan/apply when bundled Pi matches
+    // while still running `source apply --mode byok --runtime pi`.
+    const home = await makeHome();
+    const isolatedUserHome = path.join(home, "user-home");
+    const bundledBin = path.join(home, "bundled-pi", "bin");
+    const bundledExe = path.join(
+      bundledBin,
+      process.platform === "win32" ? "pi.exe" : "pi",
+    );
+    await fs.mkdir(isolatedUserHome, { recursive: true });
+    await fs.mkdir(bundledBin, { recursive: true });
+    await fs.writeFile(bundledExe, "#!/bin/sh\n", { mode: 0o755 });
+
+    const calls: string[][] = [];
+    const localmodels = vi.fn(async (_home: string, args: string[]) => {
+      calls.push(args);
+      return { code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" };
+    });
+    const probeRuntimes = vi.fn();
+    const descriptors: unknown[] = [];
+
+    const outcome = await prepareByokRuntime(
+      {
+        baseUrl: "https://api.example.com",
+        path: "/v1",
+        endpoint: "/chat/completions",
+        protocol: "openai-chat",
+        apiKey: "sk-test",
+        modelId: "gpt-4o",
+        runtime: "pi",
+      },
+      {
+        home,
+        signal: new AbortController().signal,
+        onEvent: () => {},
+        env: {
+          HOME: isolatedUserHome,
+          USERPROFILE: isolatedUserHome,
+          PATH: "",
+          SIMPLEX_PI_PATH: "",
+          LINGER_PI_PATH: "",
+        },
+        onDescriptor: (descriptor) => descriptors.push(descriptor),
+      },
+      {
+        localmodels,
+        probeRuntimes,
+        run: async () => ({ code: 0, stdout: "1.5.2\n", stderr: "" }),
+        resolveBundledPi: async () => ({
+          binDir: bundledBin,
+          executable: bundledExe,
+          version: "1.5.2",
+        }),
+      },
+    );
+
+    expect(outcome).toMatchObject({ code: 0, state: "ready" });
+    expect(probeRuntimes).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.slice(0, 6)).toEqual([
+      "source",
+      "apply",
+      "--mode",
+      "byok",
+      "--runtime",
+      "pi",
+    ]);
+    expect(descriptors).toHaveLength(1);
+    expect(descriptors[0]).toMatchObject({
+      runtime: "pi",
+      installed: true,
+      version: "1.5.2",
+    });
   });
 });
 

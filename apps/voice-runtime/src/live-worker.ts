@@ -23,6 +23,7 @@ import {
 
 import {
   alertNote,
+  roomReportNote,
   browserNote,
   taskNote,
   updateCue,
@@ -54,6 +55,8 @@ import { liveInputRate, xaiSpeedTool } from "./xai-live.js";
 
 export const liveDataTopic = "linger.voice.live";
 export const liveReplyTrackName = "linger-live-reply";
+/** "1" while the provider session is open, "0" while it opens or reconnects. */
+export const providerReadyAttribute = "linger.voice_provider_ready";
 const replySampleRate = 24_000;
 const replyChunkSamples = 480;
 /** Local speech this long means the user is talking (16 kHz samples). */
@@ -116,7 +119,7 @@ const confirmPausedSpeechSamples = 16_000 * 0.32;
  * windows and this gate in none.
  */
 const otherSpeakerDb = 10;
-/** Playback's minimum speech level before the user's level is known. */
+/** Minimum speech level before this microphone's foreground level is known. */
 const faintestSpeechDb = -50;
 /** An open gate stays open this much below its threshold, for word tails. */
 const levelHysteresisDb = 6;
@@ -134,7 +137,7 @@ const resumeQuietSamples = 16_000 * 0.4;
 const rearmQuietWindows = 3;
 /** Short utterances close to the learned voice level can reach the provider before a local pause. */
 const nearVoiceMarginDb = 6;
-const shortSpeechSamples = 16_000 * 0.096;
+const shortSpeechSamples = 16_000 * 0.192;
 /** Release a tentative pause if the microphone stops delivering evidence. */
 const pauseIdleTimeoutMs = 2_500;
 /** Reply audio kept after it reaches the track: more than AudioSource's 1 s queue. */
@@ -243,6 +246,8 @@ interface Reply {
   /** The words of an update as actually spoken. */
   spokenText?: string;
   finished?: boolean;
+  /** Forced termination ends the reply without completing its report. */
+  generationCompleted?: boolean;
   outputStarted?: boolean;
   /** Further audio chunks may arrive even when the playout queue temporarily drains. */
   streamingAudio?: boolean;
@@ -256,6 +261,10 @@ interface Reply {
   quietWindowsToRearm?: number;
   /** The provider may hear the rest of this microphone utterance during playback. */
   inputAdmitted?: boolean;
+  /** Speech measured during this reply, never carried over from its input turn. */
+  interruptionSamples?: number;
+  /** Retained for delayed provider confirmation of an admitted short utterance. */
+  interruptionAdmitted?: boolean;
   /** This onset has reached the user's near-voice level in at least one window. */
   nearVoiceOnset?: boolean;
 }
@@ -549,11 +558,15 @@ export class LiveVoiceWorker {
   /** Local quiet since the user last spoke, in the detector's samples. */
   private quietRunSamples = 0;
   /** The microphone is sent as silence; see quietGateSamples. */
-  private gated = false;
+  private gated = true;
   /** The user's speech level on this track, in dBFS; see otherSpeakerDb. */
   private userLevelDb?: number;
+  private lastInputLevelDb?: number;
+  private lastSpeechThresholdDb?: number;
   /** The last window was the user's speech. */
   private userSpeaking = false;
+  /** Speech below the level gate must not return through the onset buffer. */
+  private rejectedSpeech = false;
   /** Microphone frames held while gated, newest last. */
   private preRoll: Int16Array[] = [];
   private preRollHeld = 0;
@@ -633,6 +646,23 @@ export class LiveVoiceWorker {
     this.sessionReady = new Promise((resolve) => {
       this.markSessionReady = resolve;
     });
+  }
+
+  /**
+   * Tells the browser whether the provider session is open. The call already
+   * listens before then (speech waits in the input buffer), so this only lets
+   * the browser say it is still waking up; it never gates audio.
+   */
+  private announceProviderReady() {
+    const local = this.ctx?.room.localParticipant;
+    if (!local) return;
+    void withTimeout(
+      local.setAttributes({
+        [providerReadyAttribute]: this.session ? "1" : "0",
+      }),
+      1_000,
+      "Voice provider readiness timed out",
+    ).catch(() => undefined);
   }
 
   /** Logs one connect stage once, in ms since the job entry began. */
@@ -720,6 +750,7 @@ export class LiveVoiceWorker {
       this.timing("room_connected");
       const local = room.localParticipant;
       if (!local) throw new Error("Voice Runtime participant is unavailable");
+      this.announceProviderReady();
       this.source = new AudioSource(replySampleRate, 1);
       await local.publishTrack(
         LocalAudioTrack.createAudioTrack(liveReplyTrackName, this.source),
@@ -729,6 +760,7 @@ export class LiveVoiceWorker {
       this.session = await opening;
       if (this.muted) this.session.mute();
       this.markSessionReady();
+      this.announceProviderReady();
       this.timing("session_ready");
       // The call opens with the user, as a person lets the caller start.
       this.userFirstUntil =
@@ -835,6 +867,7 @@ export class LiveVoiceWorker {
           this.queuedUpdates.unshift(...this.pendingSpeech.updates);
         this.clearPendingSpeech();
         this.session = undefined;
+        this.announceProviderReady();
         await new Promise((resolve) =>
           setTimeout(
             resolve,
@@ -843,6 +876,7 @@ export class LiveVoiceWorker {
         );
         try {
           this.session = await this.connectSession();
+          this.announceProviderReady();
           this.flushNotes();
           this.flushUpdates();
         } catch (reconnectError) {
@@ -855,7 +889,7 @@ export class LiveVoiceWorker {
 
   private onProviderEvent(event: LiveEvent) {
     switch (event.type) {
-      case "speech_started":
+      case "speech_started": {
         this.hearing = true;
         this.heardSince ??= Date.now();
         this.repliedSinceSpeech = false;
@@ -864,9 +898,22 @@ export class LiveVoiceWorker {
         // final; what it says and calls then belongs to this new turn, so a
         // yes said here confirms what an earlier turn asked.
         if (event.itemId) this.ensureTurn(event.itemId);
-        if (this.activePlayback() || this.pendingSpeech)
+        const playback = this.activePlayback();
+        if (playback && this.detector && !playback.interruptionAdmitted) {
+          log().info(
+            {
+              voice_session_id: this.voiceSessionId,
+              last_input_level_db: this.lastInputLevelDb,
+              speech_threshold_db: this.lastSpeechThresholdDb,
+              reference_level_db: this.userLevelDb,
+              speech_duration_ms: (playback.interruptionSamples ?? 0) / 16,
+            },
+            "voice.live.barge_in_unconfirmed",
+          );
+        } else if (playback || this.pendingSpeech)
           this.interrupt(false, "provider");
         return;
+      }
       case "transcript_delta":
         this.publish({
           type: "user_partial",
@@ -1168,6 +1215,7 @@ export class LiveVoiceWorker {
     }
     this.reply = undefined;
     reply.finished = true;
+    reply.generationCompleted = !force;
     this.requeueUnheardUpdates(reply);
     this.reportSpokenText(reply);
     if (!reply.speech) {
@@ -1191,13 +1239,40 @@ export class LiveVoiceWorker {
   }
 
   private reportSpokenText(reply: Reply) {
-    if (reply.speech && reply.speechStarted)
+    if (reply.speech && reply.speechStarted) {
+      const messageIds = reply.speech.updates.flatMap((update) =>
+        update.roomReport ? [update.roomReport.message_id] : [],
+      );
+      if (
+        reply.generationCompleted &&
+        !reply.interrupted &&
+        messageIds.length &&
+        reply.spokenText?.trim()
+      ) {
+        this.track(
+          this.client
+            .executeLiveToolCall({
+              voice_session_id: this.voiceSessionId,
+              turn_id: reply.speech.turnId,
+              call_id: `ack_${reply.speech.speechId}`,
+              name: "ack_room_reports",
+              arguments: JSON.stringify({ message_ids: messageIds }),
+            })
+            .catch(() => {
+              log().warn(
+                { voiceSessionId: this.voiceSessionId },
+                "Room report speech acknowledgement failed",
+              );
+            }),
+        );
+      }
       this.publish({
         type: "reply_done",
         turn_id: reply.speech.turnId,
         speech_id: reply.speech.speechId,
         text: reply.spokenText ?? "",
       });
+    }
   }
 
   private cancelReply(reply: Reply) {
@@ -1410,6 +1485,10 @@ export class LiveVoiceWorker {
     log().info(
       {
         voiceSessionId: this.voiceSessionId,
+        last_input_level_db: this.lastInputLevelDb,
+        speech_threshold_db: this.lastSpeechThresholdDb,
+        reference_level_db: this.userLevelDb,
+        speech_duration_ms: (reply.interruptionSamples ?? 0) / 16,
         heldMs: Math.round(
           (back.reduce((total, frame) => total + frame.pcm.length, 0) /
             replySampleRate) *
@@ -1477,12 +1556,17 @@ export class LiveVoiceWorker {
     )
       return;
     const pausedSince = this.paused?.since;
+    const playback = this.activePlayback();
     this.endPause();
     if (source)
       log().info(
         {
           voiceSessionId: this.voiceSessionId,
           bargeIn: source,
+          last_input_level_db: this.lastInputLevelDb,
+          speech_threshold_db: this.lastSpeechThresholdDb,
+          reference_level_db: this.userLevelDb,
+          speech_duration_ms: (playback?.interruptionSamples ?? 0) / 16,
           ...(pausedSince === undefined
             ? {}
             : { pausedMs: Date.now() - pausedSince }),
@@ -2017,8 +2101,16 @@ export class LiveVoiceWorker {
       this.voiceSessionId,
       AbortSignal.timeout(5_000),
     );
-    const { notes, updates } = this.tasks.apply(list.tasks, list.alerts);
+    const { notes, updates } = this.tasks.apply(
+      list.tasks,
+      list.alerts,
+      list.room_reports,
+    );
     for (const note of notes) {
+      if (note.roomReport) {
+        this.note(roomReportNote(note.roomReport));
+        continue;
+      }
       const chunks = note.replies.flatMap((reply) => noteChunks(reply));
       for (const [index, chunk] of chunks.entries())
         this.note(
@@ -2256,6 +2348,19 @@ export class LiveVoiceWorker {
     // Another microphone has a level of its own.
     this.userLevelDb = undefined;
     this.userSpeaking = false;
+    this.rejectedSpeech = false;
+    this.gated = true;
+    this.quietRunSamples = 0;
+    this.speechRunSamples = 0;
+    this.preRoll = [];
+    this.preRollHeld = 0;
+    const playback = this.activePlayback();
+    if (playback) {
+      playback.interruptionSamples = 0;
+      playback.interruptionAdmitted = false;
+      playback.inputAdmitted = false;
+      playback.nearVoiceOnset = false;
+    }
     const epoch = this.nextEpoch++;
     const generation = Number(
       participant.attributes?.["linger.voice_generation"] ?? 0,
@@ -2290,6 +2395,7 @@ export class LiveVoiceWorker {
               "linger.voice_ready_track": trackSid,
               "linger.voice_ready_at": String(Date.now()),
               "linger.voice_purpose": "chat_live",
+              [providerReadyAttribute]: this.session ? "1" : "0",
             }),
             1_000,
             "Voice input readiness timed out",
@@ -2364,10 +2470,12 @@ export class LiveVoiceWorker {
       await session.appendAudio(frame);
       return;
     }
-    this.preRoll.push(frame);
-    this.preRollHeld += frame.length;
-    while (this.preRollHeld - this.preRoll[0]!.length >= preRollSamples)
-      this.preRollHeld -= this.preRoll.shift()!.length;
+    if (!this.rejectedSpeech) {
+      this.preRoll.push(frame);
+      this.preRollHeld += frame.length;
+      while (this.preRollHeld - this.preRoll[0]!.length >= preRollSamples)
+        this.preRollHeld -= this.preRoll.shift()!.length;
+    }
     await session.appendAudio(new Int16Array(frame.length));
   }
 
@@ -2377,7 +2485,10 @@ export class LiveVoiceWorker {
    * while playback is paused can retire the reply. The provider owns turn ends.
    */
   private async detectSpeech(frame: Int16Array, signal?: AbortSignal) {
-    if (!this.detector) return;
+    if (!this.detector) {
+      this.gated = false;
+      return;
+    }
     const session = this.session;
     const inputMetrics = this.inputMetrics;
     const receivedAt = Date.now();
@@ -2407,6 +2518,14 @@ export class LiveVoiceWorker {
     if (playback && !playback.inputAdmitted) this.gated = true;
     for (const window of activity) {
       const speech = this.isUserSpeech(window, playback);
+      this.rejectedSpeech = window.speech && !speech;
+      if (this.rejectedSpeech) {
+        // Do not send a rejected voice during the silence grace period, or
+        // replay its buffered lead-in when foreground speech next opens the gate.
+        this.gated = true;
+        this.preRoll = [];
+        this.preRollHeld = 0;
+      }
       if (playback?.quietWindowsToRearm !== undefined) {
         if (speech) playback.quietWindowsToRearm = rearmQuietWindows;
         else if (--playback.quietWindowsToRearm === 0)
@@ -2425,6 +2544,10 @@ export class LiveVoiceWorker {
       this.speechRunSamples = speech
         ? this.speechRunSamples + detectorWindowSamples
         : 0;
+      if (playback)
+        playback.interruptionSamples = speech
+          ? (playback.interruptionSamples ?? 0) + detectorWindowSamples
+          : 0;
       if (playback && !playback.inputAdmitted) {
         playback.nearVoiceOnset =
           speech &&
@@ -2432,8 +2555,9 @@ export class LiveVoiceWorker {
             (this.userLevelDb !== undefined &&
               window.levelDb >= this.userLevelDb - nearVoiceMarginDb));
         playback.inputAdmitted =
-          this.speechRunSamples >=
+          (playback.interruptionSamples ?? 0) >=
           (playback.nearVoiceOnset ? shortSpeechSamples : pauseSpeechSamples);
+        if (playback.inputAdmitted) playback.interruptionAdmitted = true;
       }
       if (speech) {
         this.quietRunSamples = 0;
@@ -2455,8 +2579,10 @@ export class LiveVoiceWorker {
           this.interrupt(false, "local");
       } else if (
         speech &&
-        this.speechRunSamples >= pauseSpeechSamples &&
-        this.speechRunSamples - detectorWindowSamples < pauseSpeechSamples
+        playback &&
+        (playback.interruptionSamples ?? 0) >= pauseSpeechSamples &&
+        (playback.interruptionSamples ?? 0) - detectorWindowSamples <
+          pauseSpeechSamples
       )
         this.pausePlayback();
       else if (!speech && this.quietRunSamples >= resumeQuietSamples)
@@ -2465,8 +2591,8 @@ export class LiveVoiceWorker {
   }
 
   /**
-   * During playback, quieter speech counts as quiet and pauses nothing.
-   * Otherwise Silero alone gates input, so a stale level cannot mute a turn.
+   * Apply the same level margin while listening and during playback. Silero
+   * detects speech, not who is speaking; volume is only a foreground heuristic.
    */
   private isUserSpeech({ speech, levelDb }: SpeechActivity, playback?: Reply) {
     const learned = this.userLevelDb;
@@ -2480,7 +2606,9 @@ export class LiveVoiceWorker {
         faintestSpeechDb,
         learned === undefined ? faintestSpeechDb : learned - otherSpeakerDb,
       ) - (followTail ? levelHysteresisDb : 0);
-    this.userSpeaking = speech && (!playback || levelDb >= threshold);
+    this.lastInputLevelDb = levelDb;
+    this.lastSpeechThresholdDb = threshold;
+    this.userSpeaking = speech && levelDb >= threshold;
     if (
       this.userSpeaking &&
       (!playback || playback.inputAdmitted || learned === undefined)

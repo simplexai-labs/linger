@@ -111,6 +111,7 @@ async function enabledButton(name: string) {
 
 describe("Chat connection authorization", () => {
   afterEach(() => {
+    delete (window as { lingerDesktop?: unknown }).lingerDesktop;
     vi.restoreAllMocks();
     resetLanguageForTest();
   });
@@ -810,4 +811,204 @@ describe("Chat connection authorization", () => {
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
     },
   );
+
+  it("creates a fresh connection instead of reusing a pending connect_url in desktop mode", async () => {
+    (
+      window as {
+        lingerDesktop?: {
+          connectorOAuth?: {
+            prepare: () => Promise<string>;
+            onReturn: () => () => void;
+          };
+        };
+      }
+    ).lingerDesktop = {
+      connectorOAuth: {
+        prepare: vi
+          .fn()
+          .mockResolvedValue(
+            "http://127.0.0.1:43210/oauth/connector/" + "b".repeat(48),
+          ),
+        onReturn: vi.fn(() => () => {}),
+      },
+    };
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const { runtime, decision, connection } = await setup(
+      card,
+      "alice",
+      false,
+      "active",
+      [{ id: "notion-pending", status: "pending" }],
+    );
+    const getConnection = vi.spyOn(runtime.client, "getExternalConnection");
+    const create = vi
+      .spyOn(runtime.client, "createExternalConnection")
+      .mockResolvedValue({
+        ...connection,
+        id: "notion-fresh",
+        status: "pending",
+        connect_url: "https://connect.example.test/fresh",
+        connect_expires_at: "2999-01-01T00:00:00Z",
+      });
+
+    fireEvent.click(await enabledButton("Connect Notion"));
+    await waitFor(() =>
+      expect(decision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionId: "notion-fresh",
+          decision: "approve",
+        }),
+      ),
+    );
+    expect(create).toHaveBeenCalledWith("notion");
+    expect(getConnection).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith(
+      "https://connect.example.test/fresh",
+      "linger_composio_oauth",
+      expect.any(String),
+    );
+  });
+
+  it("recreates a pending connection instead of reusing it after a failed approve in desktop mode", async () => {
+    (
+      window as {
+        lingerDesktop?: {
+          connectorOAuth?: {
+            prepare: () => Promise<string>;
+            onReturn: () => () => void;
+          };
+        };
+      }
+    ).lingerDesktop = {
+      connectorOAuth: {
+        prepare: vi
+          .fn()
+          .mockResolvedValue(
+            "http://127.0.0.1:43210/oauth/connector/" + "c".repeat(48),
+          ),
+        onReturn: vi.fn(() => () => {}),
+      },
+    };
+    vi.spyOn(window, "open").mockReturnValue(null);
+    const { runtime, decision, connection } = await setup(card, "alice", false);
+    const getConnection = vi.spyOn(runtime.client, "getExternalConnection");
+    const create = vi
+      .spyOn(runtime.client, "createExternalConnection")
+      .mockResolvedValueOnce({
+        ...connection,
+        id: "notion-first",
+        status: "pending",
+        connect_url: "https://connect.example.test/first",
+        connect_expires_at: "2999-01-01T00:00:00Z",
+      })
+      .mockResolvedValueOnce({
+        ...connection,
+        id: "notion-second",
+        status: "pending",
+        connect_url: "https://connect.example.test/second",
+        connect_expires_at: "2999-01-01T00:00:00Z",
+      });
+    decision
+      .mockRejectedValueOnce(new Error("temporary decision error"))
+      .mockResolvedValueOnce(undefined);
+
+    fireEvent.click(await enabledButton("Connect Notion"));
+    expect(await screen.findByText("temporary decision error")).toBeVisible();
+
+    fireEvent.click(await enabledButton("Connect Notion"));
+    await waitFor(() =>
+      expect(decision).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          connectionId: "notion-second",
+          decision: "approve",
+        }),
+      ),
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(getConnection).not.toHaveBeenCalled();
+  });
+
+  it("resumes an open pending feishu_mail connection in desktop mode instead of creating a new one", async () => {
+    (
+      window as {
+        lingerDesktop?: {
+          connectorOAuth?: {
+            prepare: () => Promise<string>;
+            onReturn: () => () => void;
+          };
+        };
+      }
+    ).lingerDesktop = {
+      connectorOAuth: {
+        prepare: vi
+          .fn()
+          .mockResolvedValue(
+            "http://127.0.0.1:43210/oauth/connector/" + "d".repeat(48),
+          ),
+        onReturn: vi.fn(() => () => {}),
+      },
+    };
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const feishuCard: Card = {
+      ...card,
+      connection_auth: { app_key: "feishu_mail" },
+    };
+    const { runtime, decision, connection } = await setup(
+      feishuCard,
+      "alice",
+      false,
+      "active",
+      [
+        {
+          id: "feishu-pending",
+          provider: "feishu_mail",
+          status: "pending",
+        },
+      ],
+      true,
+      (runtime) => {
+        const notion = runtime.seed.externalSources.apps.find(
+          (app) => app.key === "notion",
+        )!;
+        runtime.seed.externalSources.apps.push({
+          ...notion,
+          key: "feishu_mail",
+          display_name: "Feishu Mail",
+        });
+        runtime.server.on(
+          "GET",
+          "/v0/external-apps/feishu-mail/setup",
+          () => new Response(null, { status: 204 }),
+        );
+      },
+    );
+    const getConnection = vi
+      .spyOn(runtime.client, "getExternalConnection")
+      .mockResolvedValue({
+        ...connection,
+        id: "feishu-pending",
+        provider: "feishu_mail",
+        status: "pending",
+        connect_url: "https://connect.example.test/feishu-device",
+        connect_expires_at: "2999-01-01T00:00:00Z",
+      });
+    const create = vi.spyOn(runtime.client, "createExternalConnection");
+
+    fireEvent.click(await enabledButton("Connect Feishu Mail"));
+    await waitFor(() =>
+      expect(decision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionId: "feishu-pending",
+          decision: "approve",
+        }),
+      ),
+    );
+    expect(getConnection).toHaveBeenCalledWith("feishu-pending");
+    expect(create).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith(
+      "https://connect.example.test/feishu-device",
+      "linger_composio_oauth",
+      expect.any(String),
+    );
+  });
 });

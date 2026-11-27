@@ -23,7 +23,6 @@ import { decisionCardHeading } from "./card-prompts";
 import { CardActions, CardError, CardRow } from "./approval-card-parts";
 import { CardBox, CardDone, type ReceiptTone } from "./card-shell";
 import { cardsMessages } from "./cards.messages";
-import { connectedAppDisplayName } from "./connected-app-names";
 import type { DecisionMessageCard } from "./decision-card";
 import type { RoomCardDecision } from "./room-message-card-contract";
 
@@ -85,13 +84,6 @@ export function ProviderKeyDecision({
         label={t(cardsMessages.labelComposioKey)}
       >
         <CardRow
-          detail={
-            appKey
-              ? t(cardsMessages.neededToConnect, {
-                  app: connectedAppDisplayName(appKey),
-                })
-              : t(cardsMessages.everyAppNeedsIt)
-          }
           icon={<Icon icon={Key01Icon} size={16} />}
           title={t(cardsMessages.composioApiKey)}
         />
@@ -127,9 +119,6 @@ export function ProviderKeyDecision({
         <ModalDialog
           className="app-key-dialog"
           closeOnBackdrop
-          description={t(cardsMessages.continuesOnceKeySaved, {
-            agent: card.requester.display_name,
-          })}
           onClose={() => setOpen(false)}
           size="md"
           title={t(cardsMessages.addComposioKeyTitle)}

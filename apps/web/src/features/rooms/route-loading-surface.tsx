@@ -1,4 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { LibraryOverviewSkeleton } from "@/features/library/library-loading-skeletons";
+import {
+  sectionHasSidebar,
+  workspaceSection,
+} from "@/features/library/library-section";
 import type { TeamHubRoomListItem } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
@@ -86,7 +91,7 @@ export function AuthenticatedRouteLoading({
       ) : route.kind === "dashboard" ? (
         <DashboardLoading />
       ) : route.kind === "library" ? (
-        <LibraryLoading />
+        <LibraryLoading pathname={pathname} />
       ) : route.kind === "document" ? (
         <DocumentLoading />
       ) : (
@@ -166,7 +171,7 @@ function RoomLoading() {
 /** Mirrors the Room header's geometry: avatar, title, members and actions. */
 function RoomHeaderLoading() {
   return (
-    <header className="room-chat-header room-header flex h-(--app-header-height) shrink-0 items-center gap-3.5 border-b border-transparent bg-app-surface pl-2.5 pr-4">
+    <header className="room-chat-header room-header flex h-(--app-header-height) shrink-0 items-center gap-3.5 bg-app-surface pl-2.5 pr-4">
       <Skeleton className="size-8 shrink-0 rounded-[10px]" />
       <Skeleton className="h-3.5 w-32" />
       <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -234,7 +239,7 @@ function ChatLoading() {
 function DashboardLoading() {
   return (
     <div className="flex min-h-0 flex-1 flex-col" aria-hidden="true">
-      <header className="shrink-0 border-b border-border/60 px-5 py-4 sm:px-8">
+      <header className="shrink-0 px-5 py-4 sm:px-8">
         <Skeleton className="h-6 w-32" />
         <Skeleton className="mt-2 h-3 w-20" />
       </header>
@@ -291,10 +296,22 @@ function WorkspaceSidebarLoading() {
   );
 }
 
-function LibraryLoading() {
+/**
+ * The Library overview and Wiki have no sidebar; an open meeting keeps it.
+ * The overview mirrors its page so the content lands where its shapes were.
+ */
+function LibraryLoading({ pathname }: { pathname: string }) {
+  const section = workspaceSection(pathname);
+  if (section === "overview") {
+    return (
+      <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
+        <LibraryOverviewSkeleton />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden" aria-hidden="true">
-      <WorkspaceSidebarLoading />
+      {sectionHasSidebar(section) ? <WorkspaceSidebarLoading /> : null}
       <section className="workspace-content-viewport min-w-0 flex-1 px-6 py-7">
         <Skeleton className="h-5 w-32" />
         <div className="mt-5 flex gap-3">
@@ -319,7 +336,7 @@ function DocumentLoading() {
       <main className="workspace-content-viewport flex min-w-0 flex-1 flex-col bg-app-surface">
         <header
           aria-hidden="true"
-          className="flex h-(--app-header-height) shrink-0 items-center gap-2 border-b border-border/60 px-3 sm:px-5"
+          className="flex h-(--app-header-height) shrink-0 items-center gap-2 px-3 sm:px-5"
         >
           <span className="text-sm font-medium text-foreground">
             {t(roomSurfaceMessages.routeDocument)}

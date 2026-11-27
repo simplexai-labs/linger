@@ -79,4 +79,52 @@ describe("node-services role lifecycle", () => {
     await close?.();
     expect(events).toEqual(["memory:stopping", "agent:stop", "memory:stop"]);
   });
+
+  it("logs host.role_started and host.startup_timings with non-negative ms for each selected role", async () => {
+    vi.stubEnv("NODE_SERVICES_ROLES", "memory,agent");
+    vi.stubEnv("NODE_ENV", "test");
+    const lines: string[] = [];
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk) => {
+        lines.push(String(chunk));
+        return true;
+      });
+    try {
+      const { main } = await import("../src/main.js");
+      await main();
+      await close?.();
+    } finally {
+      stderr.mockRestore();
+    }
+    const records = lines
+      .join("")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const roleStarted = records.filter(
+      (record) => record.event === "host.role_started",
+    );
+    expect(roleStarted.map((record) => record.role)).toEqual([
+      "memory",
+      "agent",
+    ]);
+    for (const record of roleStarted) {
+      expect(typeof record.ms).toBe("number");
+      expect(record.ms as number).toBeGreaterThanOrEqual(0);
+    }
+    const startupTimings = records.find(
+      (record) => record.event === "host.startup_timings",
+    );
+    expect(startupTimings).toBeDefined();
+    expect(typeof startupTimings?.total_ms).toBe("number");
+    expect(startupTimings?.total_ms as number).toBeGreaterThanOrEqual(0);
+    const roleMap = startupTimings?.roles as Record<string, unknown>;
+    expect(Object.keys(roleMap)).toEqual(["memory", "agent"]);
+    expect(typeof roleMap.memory).toBe("number");
+    expect(roleMap.memory as number).toBeGreaterThanOrEqual(0);
+    expect(typeof roleMap.agent).toBe("number");
+    expect(roleMap.agent as number).toBeGreaterThanOrEqual(0);
+  });
 });

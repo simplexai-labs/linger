@@ -66,7 +66,7 @@
     },
     "platform": {
       "owner": "out-of-env",
-      "description": "Variables injected by the runtime environment: image build info, the teamhub-cli runtime, Computer on user machines, deployment platforms, and the Room Document E2E harness. On Linux the Computer reads the desktop session's DISPLAY and WAYLAND_DISPLAY before it opens a browser window. The Desktop WSL launcher passes WSL_DISTRO_NAME to the Windows TeamHub CLI so it can resolve local attachment paths. Not part of .env.",
+      "description": "Variables injected by the runtime environment: image build info, the teamhub-cli runtime, Computer on user machines, deployment platforms, and the Room Document E2E harness. On Linux the Computer reads the desktop session's DISPLAY and WAYLAND_DISPLAY before it opens a browser window. The Desktop WSL launcher and Windows Local Computer Daemon use WSLENV and WSL_DISTRO_NAME to forward TeamHub CLI configuration and resolve local attachment paths across the Windows/WSL boundary. Not part of .env.",
       "names": [
         "APP_VERSION",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
@@ -103,12 +103,13 @@
         "TEAMHUB_TOKEN_FILE",
         "TEAMHUB_URL",
         "WAYLAND_DISPLAY",
-        "WSL_DISTRO_NAME"
+        "WSL_DISTRO_NAME",
+        "WSLENV"
       ]
     },
     "desktop": {
       "owner": "out-of-env",
-      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and V2 incremental bundle update overrides, the source checkout for \"Run on This Computer\", and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
+      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and V2 incremental bundle update overrides, the source checkout for \"Run on This Computer\", the TeamHub CLI launcher Node override, and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
       "names": [
         "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
         "LINGER_ALLOW_LOOPBACK_TEST_FEED",
@@ -123,6 +124,7 @@
         "LINGER_HEALTH_GATE_INTERVAL_MS",
         "LINGER_HEALTH_GATE_TIMEOUT_MS",
         "LINGER_NO_FOCUS",
+        "LINGER_NODE",
         "LINGER_PG_DUMP_BIN",
         "LINGER_PG_RESTORE_BIN",
         "LINGER_SEED_DIR",
@@ -138,7 +140,7 @@
     },
     "installer": {
       "owner": "out-of-env",
-      "description": "Read by the local installer and @linger/local-installation on user machines: the installer home, the local models tool, the app model gateway passed to natively started services, a package registry and Go module proxy the person configured for native source, the download region (SIMPLEX_REGION: cn, global or auto; the installer passes the resolved one to node-services and localmodels, see scripts/installs/README.md), the system proxy the desktop resolved (LINGER_SYSTEM_HTTPS_PROXY), V2 decoupled bundle runtime directories, and Python variables cleared before running it. Not part of .env.",
+      "description": "Read by the local installer and @linger/local-installation on user machines: the installer home, the local models tool, the app model gateway passed to natively started services, a package registry and Go module proxy the person configured for native source, the download region (SIMPLEX_REGION: cn, global or auto; the installer passes the resolved one to node-services and localmodels, see scripts/installs/README.md), the system proxy the desktop resolved (LINGER_SYSTEM_HTTPS_PROXY), which the installer passes as HTTPS_PROXY to TeamHub and node-services only, the pre-reserved voice tools bin directory (TEAMHUB_VOICE_TOOLS_BIN) passed to TeamHub while voice tools extract asynchronously, V2 decoupled bundle runtime directories, and Python variables cleared before running it. Not part of .env.",
       "names": [
         "GOPROXY",
         "LOCAL_ENV_FILE",
@@ -158,7 +160,8 @@
         "LINGER_PROMPTS_DIR",
         "LINGER_SYSTEM_HTTPS_PROXY",
         "LINGER_VOICE_RUNTIME_DIR",
-        "SIMPLEX_REGION"
+        "SIMPLEX_REGION",
+        "TEAMHUB_VOICE_TOOLS_BIN"
       ]
     },
     "voice-workers": {

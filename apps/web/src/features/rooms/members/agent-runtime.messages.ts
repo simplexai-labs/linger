@@ -8,14 +8,13 @@ export const agentRuntimeMessages = defineMessages("agentRuntime", {
   computer: "Computer",
   computerLabel: "Agent computer",
   chooseComputer: "Choose a computer",
-  computerOnline: "{name} · Online",
-  computerOffline: "{name} · Offline",
-  computerOnlineUpgrade: "{name} · Online · Upgrade required",
-  computerOfflineUpgrade: "{name} · Offline · Upgrade required",
+  online: "Online",
+  offline: "Offline",
+  onlineUpgrade: "Online · Upgrade required",
+  offlineUpgrade: "Offline · Upgrade required",
   runtime: "Runtime",
   runtimeLabel: "Agent runtime",
   chooseRuntime: "Choose a runtime",
-  runtimeNotReady: "{runtime} · {status}",
   model: "Model",
   modelLabel: "Agent model",
   noModels: "No models available",
@@ -23,15 +22,13 @@ export const agentRuntimeMessages = defineMessages("agentRuntime", {
   reasoning: "Reasoning",
   reasoningLabel: "Agent reasoning effort",
   waitForAgent: "Wait for this Agent to finish before saving changes.",
-  moveHint:
-    "Moving starts a new native Runtime session on the new computer. Local files stay on the old computer.",
+  moveHint: "Local files stay on the old computer.",
   noWritableWorkspace:
     "This computer has no writable workspace. Choose another computer.",
   currentModelUnavailable:
     "The current model is unavailable. Choose another model.",
   noRuntimeModels: "No models are available for this runtime.",
   optionsUnavailable: "Runtime options are unavailable.",
-  readyAfterSignIn: "It turns ready here on its own shortly after you sign in.",
   installAndSignIn:
     "Install and sign in to this runtime on the computer, then wait for it to become ready.",
   missingDefault:

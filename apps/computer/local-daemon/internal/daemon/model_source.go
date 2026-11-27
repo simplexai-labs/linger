@@ -10,6 +10,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/localmodels"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
@@ -183,9 +184,14 @@ func (d *Daemon) handleModelSourceCommand(ctx context.Context, stream transport.
 		return sendFailed(localmodels.CodeToolFailed, "Could not complete the model source action on this Computer.", true)
 	}
 
-	if status != nil && !d.byokEndpoint.Load() {
-		// An Agent Service that predates BYOK paths rejects the unknown keys.
-		status.Byok.Path, status.Byok.Endpoint = "", ""
+	if status != nil {
+		if !d.byokEndpoint.Load() {
+			// An Agent Service that predates BYOK paths rejects the unknown keys.
+			status.Byok.Path, status.Byok.Endpoint = "", ""
+		}
+		if !d.dynamicReasoningEfforts.Load() && status.ReasoningEffort != "" && !provider.LegacyRuntimeReasoningEffort(status.ReasoningEffort) {
+			status.ReasoningEffort = ""
+		}
 	}
 	frame := wire.CapabilityModelSourceSucceeded{
 		ProtocolVersion: request.ProtocolVersion,

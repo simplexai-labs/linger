@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { translate } from "@/i18n/language";
 
-import { runtimeFailureMessage } from "./runtime-failure-message";
+import {
+  runtimeFailureDiagnostic,
+  runtimeFailureMessage,
+} from "./runtime-failure-message";
+import { runtimeStatusMessages as m } from "./runtime-status.messages";
 
 describe("Runtime failure messages", () => {
   it.each(["claude", "codex"] as const)(
@@ -12,123 +16,66 @@ describe("Runtime failure messages", () => {
         code: "execution_outcome_unknown",
         runtime_type,
       });
-      expect(message).toContain("A command was dispatched");
-      expect(message).toContain("not automatically replayed");
-      expect(message).toContain("Check its effects before retrying");
+      expect(message).toBe(translate(m.failureExecutionOutcomeUnknown));
       expect(message).not.toMatch(
         /Pod|container|Kubernetes|token|network error/i,
       );
     },
   );
 
-  it("tells people to choose another model when the account cannot use it", () => {
+  it.each([
+    ["model_unavailable", m.failureModelUnavailable],
+    ["model_not_offered", m.failureModelNotOffered],
+    ["local_model_unavailable", m.failureLocalModelUnavailable],
+    ["model_gateway_unavailable", m.failureModelGatewayUnavailable],
+    ["reply_undelivered", m.failureReplyUndelivered],
+    ["reply_not_sent", m.failureReplyNotSent],
+    ["context_too_long", m.failureContextTooLong],
+    ["model_service_error", m.failureModelServiceError],
+    ["timeout", m.failureTimeout],
+    ["response_too_large", m.failureResponseTooLarge],
+    ["cleanup_unconfirmed", m.failureCleanupUnconfirmed],
+    ["unclassified", m.failureUnclassified],
+  ] as const)("gives %s its own cause", (code, message) => {
+    expect(
+      runtimeFailureMessage(translate, { code, runtime_type: "codex" }),
+    ).toBe(translate(message));
+  });
+
+  it("leaves the Runtime and its version out of the cause", () => {
     const message = runtimeFailureMessage(translate, {
       code: "model_unavailable",
       runtime_type: "codex",
       runtime_version: "0.153.4",
     });
-    expect(message).toContain("Codex 0.153.4");
-    expect(message).toContain("Choose another model");
-    expect(message).not.toMatch(/Check the Agent's computer/);
+    expect(message).not.toContain("Codex");
+    expect(message).not.toContain("0.153.4");
   });
 
-  it("points to the Agent's settings when its Computer does not offer the model", () => {
-    const message = runtimeFailureMessage(translate, {
-      code: "model_not_offered",
-      runtime_type: "codex",
-    });
-    expect(message).toContain("Codex:");
-    expect(message).toContain("does not offer its selected model");
-    expect(message).toContain("Open the Agent's settings");
-  });
-
-  it("points to the Computer's Models page when the local model could not load", () => {
-    const message = runtimeFailureMessage(translate, {
-      code: "local_model_unavailable",
-      runtime_type: "pi",
-    });
-    expect(message).toContain("Pi:");
-    expect(message).toContain("could not load its local model");
-    expect(message).toContain("Open the Models page");
-    expect(message).not.toMatch(/sign the Runtime in/);
-  });
-
-  it("points to Settings > Models and Local Computer diagnostics when the model gateway could not start", () => {
-    const message = runtimeFailureMessage(translate, {
-      code: "model_gateway_unavailable",
-      runtime_type: "codex",
-    });
-    expect(message).toContain("Codex:");
-    expect(message).toContain("could not start its local model gateway");
-    expect(message).toContain("Open Settings > Models");
-    expect(message).toContain("Local Computer diagnostics");
-  });
-
-  it("says the Agent finished but its reply did not reach the Room", () => {
-    const message = runtimeFailureMessage(translate, {
-      code: "reply_undelivered",
-      runtime_type: "pi",
-    });
-    expect(message).toContain("Pi:");
-    expect(message).toContain("reply did not reach the Room");
-    expect(message).toContain("TeamHub");
-  });
-
-  it("says the Agent finished without sending its reply", () => {
-    const message = runtimeFailureMessage(translate, {
-      code: "reply_not_sent",
-      runtime_type: "pi",
-    });
-    expect(message).toContain("Pi:");
-    expect(message).toContain("finished without sending its reply");
-    expect(message).toContain("choose a stronger model");
-  });
-
-  it("names a failure the Agent Service observed without a Runtime prefix", () => {
-    expect(runtimeFailureMessage(translate, { code: "interrupted" })).toMatch(
-      /^The Run stopped before it finished because its Computer restarted/,
+  it("names a failure the Agent Service observed without a Runtime", () => {
+    expect(runtimeFailureMessage(translate, { code: "interrupted" })).toBe(
+      translate(m.failureInterrupted),
     );
     expect(
       runtimeFailureMessage(translate, { code: "computer_unavailable" }),
-    ).toContain("Make sure the Computer is online");
+    ).toBe(translate(m.failureComputerUnavailable));
   });
 
-  it.each([
-    ["context_too_long", "context window"],
-    ["model_service_error", "model service reported an internal error"],
-    ["timeout", "time limit"],
-    ["response_too_large", "larger than a Room message"],
-    ["cleanup_unconfirmed", "could not be confirmed stopped"],
-    ["unclassified", "could not identify"],
-  ] as const)("gives %s its own cause", (code, cause) => {
-    const message = runtimeFailureMessage(translate, {
-      code,
-      runtime_type: "claude",
-    });
-    expect(message).toMatch(/^Claude: /);
-    expect(message).toContain(cause);
-  });
-
-  it("only describes protocol errors as incompatible", () => {
-    expect(
-      runtimeFailureMessage(translate, {
-        code: "protocol_incompatible",
-        runtime_type: "codex",
-        runtime_version: "0.153.4",
-      }),
-    ).toContain("protocol is incompatible");
-    for (const code of [
+  it("gives every classified code a distinct cause", () => {
+    const codes = [
+      "protocol_incompatible",
       "authentication_required",
       "network_error",
       "rate_limited",
       "execution_failed",
-    ] as const) {
-      expect(
-        runtimeFailureMessage(translate, { code, runtime_type: "codex" }),
-      ).not.toContain("incompatible");
-    }
+    ] as const;
+    const texts = codes.map((code) =>
+      runtimeFailureMessage(translate, { code, runtime_type: "codex" }),
+    );
+    expect(new Set(texts).size).toBe(codes.length);
   });
-  it("does not render raw version data or invent a version for legacy failures", () => {
+
+  it("does not render raw version data and falls back for unknown causes", () => {
     expect(
       runtimeFailureMessage(translate, {
         code: "execution_failed",
@@ -136,6 +83,27 @@ describe("Runtime failure messages", () => {
         runtime_version: "/private/token",
       }),
     ).not.toContain("private");
-    expect(runtimeFailureMessage(translate)).toBe("Run failed");
+    expect(runtimeFailureMessage(translate)).toBe(translate(m.runFailed));
+  });
+});
+
+describe("runtimeFailureDiagnostic", () => {
+  it.each([
+    [
+      {
+        code: "execution_failed",
+        runtime_type: "codex",
+        runtime_version: "0.170.0",
+      },
+      "codex 0.170.0 \u00b7 execution_failed",
+    ],
+    [{ code: "timeout", runtime_type: "claude" }, "claude \u00b7 timeout"],
+    [{ code: "reply_not_sent" }, "reply_not_sent"],
+  ] as const)("names %j as %s", (failure, expected) => {
+    expect(runtimeFailureDiagnostic(failure)).toBe(expected);
+  });
+
+  it("names nothing without a failure", () => {
+    expect(runtimeFailureDiagnostic()).toBeUndefined();
   });
 });

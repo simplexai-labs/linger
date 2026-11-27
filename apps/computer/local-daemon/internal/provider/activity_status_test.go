@@ -64,11 +64,63 @@ func TestShellScriptsAreNamedByTheirSteps(t *testing.T) {
 		{"python3 compare_fares.py\nrm out.txt", "file_change", []string{"Running a script", "Organizing files"}},
 		{"cat a.md; rg x; curl https://c.com; python3 s.py; git status", "command", []string{"Fetching c.com", "Running a script", "Checking changes"}},
 		{"some-unknown-tool --flag", "command", nil},
+		{"@'\nDon't split; a | b\n'@ | teamhub message send --file -", "message", nil},
+		{"@'\r\nDon't split; a | b\r\n'@ | teamhub.cmd message send --file -", "message", nil},
+		{"@\"\r\nDouble quoted body; a | b\r\n\"@ | TEAMHUB.EXE docs create --title 'Plan' --file -", "file_change", []string{"Creating a document"}},
+		{"teamhub.cmd message read --json", "message_read", []string{"Reading messages"}},
+		{"teamhub.exe docs get doc_123 --json", "read", []string{"Reading a document"}},
+		{`C:\Users\alice\AppData\Local\Linger\cli\teamhub.cmd message read --json`, "message_read", []string{"Reading messages"}},
+		{`& 'C:\Users\alice\AppData\Local\Linger\cli\teamhub.cmd' docs get doc_123`, "read", []string{"Reading a document"}},
+		{`& "C:\Users\alice\AppData\Local\Linger\cli\teamhub.exe" task create --name 'Check'`, "delegation", []string{"Assigning a task"}},
 	} {
 		kind, _, status := activityPresentation(native.Event{Kind: native.EventToolCall, ToolName: "exec_command", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": test.command}})
 		if kind != test.kind || !slices.Equal(status.steps, test.steps) || status.title != "" {
 			t.Errorf("%q: got %q %q, want %q %q", test.command, kind, status.steps, test.kind, test.steps)
 		}
+	}
+}
+
+func TestPowerShellToolActivityAndTaskCreation(t *testing.T) {
+	for _, command := range []string{
+		"@'\r\nCan't wait; check a | b\r\n'@ | teamhub.cmd message send --file -",
+		"@'\nHello\n'@ | `\nteamhub message send --file -",
+		"@'\r\nHello\r\n'@ | `\r\nteamhub.cmd message send --file -",
+		"teamhub `\n message send --content \"Done\"",
+		"cd .\\my` folder; teamhub message send --content \"Done\"",
+		"Write-Output \"He said `\"hi`\"\" | teamhub message send --file -",
+		`cd "C:\work\" ; teamhub message send --content "hi"`,
+		"$msg=@'\nDon't split\n'@\n$msg | teamhub message send --file -",
+		"teamhub message send --content 'It''s fine'",
+	} {
+		kind, _, status := activityPresentation(native.Event{
+			Kind:         native.EventToolCall,
+			ToolName:     "powershell",
+			ActivityKind: native.ActivityCommand,
+			Input:        map[string]any{"command": command},
+		})
+		if kind != native.ActivityMessage || status.steps != nil {
+			t.Errorf("powershell %q = %q %q, want %q nil", command, kind, status.steps, native.ActivityMessage)
+		}
+	}
+
+	taskCmd := "@'\r\nInvestigate it's failing; check logs | tail\r\n'@ | teamhub.cmd task create --name 'Debug' --requirement-file -"
+	kind, _, status := activityPresentation(native.Event{
+		Kind:         native.EventToolCall,
+		ToolName:     "powershell",
+		ActivityKind: native.ActivityCommand,
+		Input:        map[string]any{"command": taskCmd},
+	})
+	if kind != native.ActivityDelegation || !slices.Equal(status.steps, []string{"Assigning a task"}) {
+		t.Fatalf("powershell task create = %q %q", kind, status.steps)
+	}
+	if !createsTaskFor(taskCmd, true) {
+		t.Fatalf("createsTaskFor(%q, true) = false, want true", taskCmd)
+	}
+	if !createsTaskFor("teamhub.cmd `\r\n task create --name 'It''s ready'", true) {
+		t.Fatal("createsTaskFor failed for PowerShell line continuation and doubled quotes")
+	}
+	if !createsTaskFor(`C:\Users\alice\cli\teamhub.exe task create --name 'Debug'`, false) {
+		t.Fatal("createsTaskFor failed for full Windows path")
 	}
 }
 
@@ -187,5 +239,119 @@ func TestThinkingWithoutTitlesIsTitledFromItsText(t *testing.T) {
 		if titled < 0 || events[titled].(map[string]any)["title"] != "Use Bearer [REDACTED] here" {
 			t.Fatalf("the title was not redacted: %v", events)
 		}
+	}
+}
+
+func TestThinkingCompletionAndToolCallStart(t *testing.T) {
+	// Complete: true flushes a single line with no newline.
+	projection := eventProjection{operationID: "operation"}
+	first := projection.project(native.Event{Kind: native.EventReasoning, Body: "Check"})
+	if len(first) != 1 || first[0].(map[string]any)["title"] != nil {
+		t.Fatalf("thinking did not start untitled: %v", first)
+	}
+	if mid := projection.project(native.Event{Kind: native.EventReasoning, Body: " the files"}); len(mid) != 0 {
+		t.Fatalf("single-line delta without newline titled early: %v", mid)
+	}
+	completed := projection.project(native.Event{Kind: native.EventReasoning, Complete: true})
+	if len(completed) != 1 || completed[0].(map[string]any)["title"] != "Check the files" {
+		t.Fatalf("complete reasoning did not flush single line: %v", completed)
+	}
+
+	// Already titled via newline does not duplicate on Complete: true, and resets for the next block.
+	projection = eventProjection{operationID: "operation"}
+	if titled := projection.project(native.Event{Kind: native.EventReasoning, Body: "First thought\nmore"}); len(titled) != 1 || titled[0].(map[string]any)["title"] != "First thought" {
+		t.Fatalf("first block did not title on newline: %v", titled)
+	}
+	if ignored := projection.project(native.Event{Kind: native.EventReasoning, Body: "tail"}); len(ignored) != 0 {
+		t.Fatalf("tail delta was published: %v", ignored)
+	}
+	if duplicate := projection.project(native.Event{Kind: native.EventReasoning, Complete: true}); len(duplicate) != 0 {
+		t.Fatalf("complete reasoning duplicated newline title: %v", duplicate)
+	}
+	if pending := projection.project(native.Event{Kind: native.EventReasoning, Body: "Second thought"}); len(pending) != 0 {
+		t.Fatalf("second block delta published before delimiter: %v", pending)
+	}
+	if second := projection.project(native.Event{Kind: native.EventReasoning, Complete: true}); len(second) != 1 || second[0].(map[string]any)["title"] != "Second thought" {
+		t.Fatalf("second block did not title after Complete reset: %v", second)
+	}
+
+	// Empty or whitespace-only completion produces nothing and does not lock out later thinking.
+	projection = eventProjection{operationID: "operation"}
+	projection.project(native.Event{Kind: native.EventReasoning, Body: "   \t "})
+	if blank := projection.project(native.Event{Kind: native.EventReasoning, Complete: true}); len(blank) != 0 {
+		t.Fatalf("whitespace-only reasoning published a title: %v", blank)
+	}
+	if next := projection.project(native.Event{Kind: native.EventReasoning, Body: "Real thought\n"}); len(next) != 1 || next[0].(map[string]any)["title"] != "Real thought" {
+		t.Fatalf("blank block locked out later thinking: %v", next)
+	}
+
+	// EventToolCallStart flushes pending single-line thinking and transitions to working.
+	projection = eventProjection{operationID: "operation"}
+	projection.project(native.Event{Kind: native.EventReasoning, Body: "Building SVG"})
+	started := projection.project(native.Event{Kind: native.EventToolCallStart, InvocationID: "call-1", ToolName: "bash", ActivityKind: native.ActivityCommand})
+	if len(started) != 2 || started[0].(map[string]any)["title"] != "Building SVG" || started[1].(map[string]any)["status"] != "working" {
+		t.Fatalf("tool call start did not flush thinking and switch to working: %v", started)
+	}
+	called := projection.project(native.Event{Kind: native.EventToolCall, InvocationID: "call-1", ToolName: "bash", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": "ls"}})
+	if len(called) != 2 || called[0].(map[string]any)["type"] != "tool.called" || called[1].(map[string]any)["type"] != "activity.started" {
+		t.Fatalf("subsequent tool call re-emitted thinking/working: %v", called)
+	}
+
+	// EventToolCallStart transitions already-titled thinking to working without duplicating title.
+	projection = eventProjection{operationID: "operation"}
+	projection.project(native.Event{Kind: native.EventReasoning, Body: "Planning\nstep"})
+	transitioned := projection.project(native.Event{Kind: native.EventToolCallStart, InvocationID: "call-2", ToolName: "bash"})
+	if len(transitioned) != 1 || transitioned[0].(map[string]any)["status"] != "working" {
+		t.Fatalf("tool call start did not transition titled thinking to working: %v", transitioned)
+	}
+
+	// EventToolCallStart emits nothing when not thinking.
+	projection = eventProjection{operationID: "operation"}
+	if idle := projection.project(native.Event{Kind: native.EventToolCallStart, InvocationID: "call-3", ToolName: "bash"}); len(idle) != 0 {
+		t.Fatalf("tool call start emitted events while idle: %v", idle)
+	}
+}
+
+func TestThinkingIdleFlush(t *testing.T) {
+	// Pending single-line thinking flushes once with redaction and does not repeat on EventToolCall.
+	projection := eventProjection{operationID: "operation"}
+	projection.project(native.Event{Kind: native.EventReasoning, Body: "Use Bearer fixture-token here"})
+	if !projection.hasPendingReasoning() {
+		t.Fatal("expected pending reasoning before flush")
+	}
+	flushed := projection.flushReasoning()
+	if len(flushed) != 1 || flushed[0].(map[string]any)["title"] != "Use Bearer [REDACTED] here" {
+		t.Fatalf("idle flush did not publish redacted title: %v", flushed)
+	}
+	if projection.hasPendingReasoning() {
+		t.Fatal("pending reasoning remained after flush")
+	}
+	if again := projection.flushReasoning(); len(again) != 0 {
+		t.Fatalf("idle flush repeated title: %v", again)
+	}
+	called := projection.project(native.Event{Kind: native.EventToolCall, InvocationID: "call-1", ToolName: "bash", ActivityKind: native.ActivityCommand})
+	if len(called) != 3 || called[0].(map[string]any)["status"] != "working" || called[1].(map[string]any)["type"] != "tool.called" {
+		t.Fatalf("tool call after idle flush re-emitted thinking title: %v", called)
+	}
+
+	// EventToolCallStart after idle flush also avoids duplicating thinking title.
+	projection = eventProjection{operationID: "operation"}
+	projection.project(native.Event{Kind: native.EventReasoning, Body: "Drafting reply"})
+	if got := projection.flushReasoning(); len(got) != 1 || got[0].(map[string]any)["title"] != "Drafting reply" {
+		t.Fatalf("flush = %v", got)
+	}
+	started := projection.project(native.Event{Kind: native.EventToolCallStart, InvocationID: "call-2", ToolName: "bash"})
+	if len(started) != 1 || started[0].(map[string]any)["status"] != "working" {
+		t.Fatalf("tool call start after idle flush = %v", started)
+	}
+
+	// Whitespace-only flush does not lock out subsequent thinking text.
+	projection = eventProjection{operationID: "operation"}
+	projection.project(native.Event{Kind: native.EventReasoning, Body: "   "})
+	if blank := projection.flushReasoning(); len(blank) != 0 {
+		t.Fatalf("whitespace flush emitted %v", blank)
+	}
+	if next := projection.project(native.Event{Kind: native.EventReasoning, Body: "Actual plan\n"}); len(next) != 1 || next[0].(map[string]any)["title"] != "Actual plan" {
+		t.Fatalf("whitespace flush locked out subsequent thinking: %v", next)
 	}
 }

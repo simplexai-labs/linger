@@ -1,9 +1,17 @@
 # Local Computer Daemon
 
 This Go module is the resident Local Computer Daemon.
+
 It carries the frozen Linger execution implementation needed for local process,
 provider, workspace, and daemon lifecycle behavior while adapting all product
 control through Linger's Runner Gateway.
+
+Each execution Context can run one Operation at a time. Different Contexts on
+the same Computer can run concurrently, subject to their model endpoint's
+queue. On upgrade, the Daemon removes the retired `max_concurrent_operations`
+setting from existing Computer configuration on first load. Existing
+`linger-computer login` scripts can still pass `--max-concurrent-runs` or
+`--no-max-concurrent-runs`. The CLI prints a warning and ignores both options.
 
 ## Ownership
 
@@ -110,10 +118,13 @@ authentication probe for Desktop setup and the local installer. It shares
 via `computerconfig.RuntimeEnvironment`) and `provider.Discover` (with
 `SkipModelCatalog: true`) with `linger-computer` and the resident Daemon.
 It accepts repeatable `--runtime <codex|claude|pi|antigravity>` (defaulting to
-`codex`, `claude`, and `pi`) and optional `--timeout-ms`, and emits a single
-`linger.daemon.runtime-probe/v1` JSON object on stdout carrying per-runtime
-`type`, `status`, `installed`, `authenticated`, redacted `version`,
-`required_version`, `executable`, and optional `error`.
+`codex`, `claude`, and `pi`), optional `--include-bundled` (off by default so
+setup inspection reports only host-installed runtimes; enabled for runtime
+reconciliation so bundled Pi is discovered when absent from `PATH`), and
+optional `--timeout-ms`, and emits a single `linger.daemon.runtime-probe/v1`
+JSON object on stdout carrying per-runtime `type`, `status`, `installed`,
+`authenticated`, redacted `version`, `required_version`, `executable`, and
+optional `error`.
 
 ## One-shot model calls
 
@@ -411,8 +422,10 @@ the `byok_endpoint` service feature. `localmodels` writes
 non-harness paths from before the rewrite alongside any `runtime_paths` that
 `apply` reported, without pinning paths inside `<home>/runtime/harness`. The
 Daemon re-reads the file on every discovery tick to overlay the Runtimes'
-environment (`OverlayEnvironment`) and executable paths (`OverlayRuntimePaths`),
-scanning `<home>/runtime/harness/bin/<runtime>` and the highest-version
+environment (`OverlayEnvironment`) and executable paths
+(`ResolveRuntimePathsWithBundled`, which keeps harness-managed Pi in
+`ManagedPaths` after user `PATH` and before bundled Pi), scanning
+`<home>/runtime/harness/bin/<runtime>` and the highest-version
 `<home>/runtime/harness/tools/<runtime>/<version>/<runtime>` on each read so
 managed Runtime updates take effect without rewriting `model-source.json`. It
 also drops any stale `byok-home` entry in `local` mode in favor of the managed
@@ -514,9 +527,18 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
 - Codex runs `linger-computer-daemon shell-text-hook` as a
   PreToolUse hook for every shell command. Codex on Windows runs PowerShell,
   so it gets no hook.
-- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run. It
-  runs the same hook before a `bash` call that names `teamhub` and holds `$` or
-  a backquote.
+- Pi loads the managed extension (`extensions/pi-mcp.mjs`) for every Run. On
+  POSIX, before a `bash` call runs, it runs the shell text check (for calls
+  naming `teamhub` with `$` or a backquote) and permission review on the
+  original command, then prepends `pipefail` for bash and zsh (skipping
+  unsupported POSIX `sh` fallbacks) only after the call is allowed. Under
+  `pipefail`, a producer killed by `SIGPIPE` when a downstream reader closes
+  early (such as `| head`, exit `141`) or a non-zero upstream stage (such as
+  `grep` with no matches piped to `wc -l`) fails the pipeline; a command that
+  wants to ignore upstream failures can run `set +o pipefail`. On Windows, Pi
+  uses the built-in `powershell` tool instead of `bash`, so it skips the POSIX
+  `shell-text-hook` and `pipefail`, and the managed extension overrides
+  `powershell` to set UTF-8 `$OutputEncoding` and console encodings.
 - Antigravity is not checked: its permission request can only allow or reject
   a call, with no reason the Agent would read.
 
@@ -575,6 +597,20 @@ for a browser sign-in when signed out.
   changes, logout or re-login diagnostics transitions, Agent stop or removal,
   and Daemon shutdown. Cancelled, timed-out, failed, or background-continuation
   turns never park and confirm process-tree exit.
+- Idle session compaction (`session_compact`, Computer 0.66.0 or later) takes a
+  parked Antigravity process (never an unadopted pre-start), rejects every
+  `session/request_permission` during the compaction turn, submits
+  `/compact <instructions>` over ACP while its `mcpFront` stays unbound, and
+  verifies compaction deterministically from `CHECKPOINT` entries appended to
+  the session's JSONL transcript (never from model prose). It records the first
+  positive `usage_update` `used` value as `pre_tokens`, parks the process back
+  only when the turn ends cleanly with no open tool calls and a valid release
+  fence, and otherwise retires the process before returning.
+- Managed Antigravity hooks (`--add-dir`) canonicalize their temp directory path
+  via symlink resolution and keep the loopback callback URL unquoted on Windows
+  (wrapping the full command in outer quotes only when the Daemon executable
+  path contains `cmd /c` special characters `&<>()@^|`) so `cmd /c` preserves
+  quotes around the executable path.
 - Legacy `agy` installations that lack `session/list` or `session/resume`
   report `not_eligible` on `provider.prepare` and fall back to a one-shot
   process per Operation using `session/load` (dropping replayed history). An id
@@ -611,9 +647,12 @@ for a browser sign-in when signed out.
   is not zero finishes as failed. Otherwise
   the adapter selects the allow option, as the Runtime runs with the Agent's
   full local authority.
-- Antigravity reports a model error, such as a rejected API key, as reply text
-  and ends the turn with `end_turn`. With no structured signal, such a Run
-  completes and the Room shows the text.
+- Antigravity can report a model or preflight error (such as a rejected API key
+  or unsupported region) as plain text and end the turn with `end_turn` without
+  emitting model usage or any tool, thought, or plan activity. Because a normal
+  model turn reports usage or activity, the adapter fails such a Run, retires
+  the process instead of parking it, and surfaces the trimmed redacted notice in
+  `failure.detail` when the Agent Service announces `runtime_failure_detail`.
 - History reads, Local Skill scans and local models do not support
   Antigravity, so Agent Memory skips Antigravity Agents.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
@@ -696,14 +735,20 @@ its image until `ui_reset`, so a completed action never reports an error.
 
 Use `await ui.page(url)` for a managed browser and `ui.window(pid, window_id)`
 for a macOS window. Use `ui.computer.list_windows({app: appName})` to discover
-a named window and check its title. `await target.observe()` returns the visible
-text and actions. Call `view.click(role, name)` on that observation and use its
+a named window and check its title. `await ui.page(url)` navigates and returns
+the observation itself; `await ui.window(pid, window_id).observe()` and
+`await view.observe()` return the visible text and actions. Call `view.click(role, name)` on that observation and use its
 returned view for the next step. A newer driver call in the same namespace
 expires the previous observation. In a browser, `view.fill(fields)` resolves
 all named fields against one observation before sending the driver call. If an
 action has no browser snapshot, the helper obtains one. Use `ui.help("browser")`
 or `ui.help("computer")` for the underlying methods. `ui.emit(result)` selects
 text or native images for the model; the script receives opaque image handles.
+`console.log` lines join the same output. A script that emits no image and
+returns an observation holding screenshots delivers those screenshots too. A
+result with an image part carries no `structuredContent`, because Codex shows
+the model `structuredContent` in place of `content` and would drop the image;
+its last text part is the same summary.
 
 The public tool allows ten minutes. The default script budget is 165 seconds,
 with up to nine minutes per call. Nested calls reserve time to return their
@@ -893,7 +938,10 @@ every tool description and the model's tool listing would be truncated.
 
 When the default browser is not Chrome, the local browser uses a separate Agent
 profile directory, stored under `computer-tools/browser-profiles/` in the state
-directory. Cua can observe the native Chrome window that Playwright connects to.
+directory. That profile runs in Google Chrome, or on macOS and Windows in
+Microsoft Edge when Chrome is not installed. With neither, a browser call fails
+with `BROWSER_UNAVAILABLE` before anything runs, which Live reports as
+`browser_unavailable`. Cua can observe the native Chrome window that Playwright connects to.
 
 On macOS, `launch_app` with `agent_browser: true` opens the Computer's own
 browser window for a site that watches for automated browsers. The Agent drives
@@ -1035,7 +1083,13 @@ mouse events. Cua's background refusals, which recommend a foreground retry or
 background route instead. Cua 0.35.4 refuses a background scroll in a
 Chromium window, so the Agent reads such a page with a `get_window_state`
 query instead; elsewhere a list or pane scrolls by its own `element_token`
-through UI Automation. Windows Operations get `WindowsToolGuide`.
+through UI Automation. Before a `get_window_state` or an input names a
+minimized window by `window_id`, the Daemon restores that window without
+activating it and orders it right below the window in front, so the user's
+foreground window and keyboard focus stay unchanged and background input then
+reaches it. An input to a window the Daemon just restored is not sent: the
+element positions of the earlier read belonged to the minimized window, so the
+Agent reads the window again first. Windows Operations get `WindowsToolGuide`.
 
 Linux controls the signed-in user's X11 desktop. The driver `local_linux.py` is
 embedded in the Go binary; it reads windows through AT-SPI and sends input with
@@ -1068,6 +1122,27 @@ last observed fails with `WINDOW_CHANGED` when another window, such as one the
 user clicked, became active since. The result shows the active window, and the
 next input to it goes through. `open_application` and `open_url` are not
 checked, because they bring up a window of their own.
+
+When no X11 window is active—or GNOME Shell's `OverviewActive` D-Bus property
+is true, as in the Activities Overview even after a single `Escape` restores
+`_NET_ACTIVE_WINDOW` to a background window—`type_text` and non-exempt
+`press_key` inputs (including `Return` and chords such as `Super+l` or `ctrl+a`)
+fail with `NO_ACTIVE_WINDOW` before any input is sent (`not_dispatched`) for
+single-step calls and before step 1 of `run_actions`, preserving the last
+observed window so returning to it does not trigger `WINDOW_CHANGED`. Mid-batch
+in `run_actions`, after earlier steps have already run, hitting an empty active
+window stops the batch early with `completed_steps`, `total_steps`, a desktop
+screenshot, and a `NO_ACTIVE_WINDOW` `stopped` reason rather than reporting
+`not_dispatched`, while still preserving the last observed window. Bare
+overview-dismiss and toggle keys (`Escape`, `Esc`, `Super`, `Super_L`,
+`Super_R`, `win`, `meta`) remain allowed while no window is active—including
+immediately after observing another window—alongside pointer, observation,
+launch, and semantic element tools. In `run_actions`, bare overview keys wait a
+250 ms settle pause before the inter-step active-window check so GNOME Shell
+finishes toggling Overview before the next step runs; bare `Super`/`Meta`/`Win`
+keys also unconditionally stop the batch before any subsequent keyboard or text
+step so the Agent observes the overview/launcher state regardless of compositor
+latency (while `Escape` inside a still-focused window continues normally).
 
 GTK4 applications report their controls as sensitive rather than enabled, and
 on X11 report every control at the screen origin. The driver counts either
@@ -1156,22 +1231,46 @@ with its dependencies resolves its own jiti first. Node reads `NODE_PATH` at
 startup, so the extension then restores the value Pi inherited, and the
 commands Pi starts never resolve a package from the bundle.
 
-The same extension carries Pi's permission review and dynamic MCP attachment, so
-resident Pi processes and provider pre-starts load it with an empty managed MCP
-config file and `mcp__*` in `--tools`. On Room-presence `provider.prepare`, Pi
-starts with a 40-second timeout, verifies `get_state` and applies any clamped
-thinking level, then parks without submitting a prompt. When a Run adopts a
-parked Pi process whose MCP server set changed, the Daemon writes the new
-front-rewritten `linger-mcp.json`, verifies `get_commands` exposes
-`linger-sync-mcp`, runs `/linger-sync-mcp` and reads the structured verdict from
-its `linger.mcp_sync` RPC dialog before submitting the prompt; an attachment
-failure recycles the process and falls back to a cold spawn. Its `tool_call`
-hook opens an RPC `input` dialog titled `linger.permission_review` for each
-`bash` and `mcp__*` call, with the call as JSON. The Daemon answers it with a
-JSON verdict from the Run's permission review, with `bash` reviewed as a shell
-command. A Run without review gets an allow verdict, because a resident Pi
-process may serve both kinds of Run. A missing or unreadable verdict blocks the
-call. The Daemon cancels any other extension dialog.
+The same extension carries Pi's bash `pipefail` wrapper, permission review,
+dynamic MCP attachment, and the Windows PowerShell UTF-8 override, so every Pi
+Run loads it with `NODE_PATH` pointing at the tools' `node_modules` (and
+`mcp__*` in `--tools` when MCP is wired or syncable; Windows Pi passes
+`powershell` in `--tools` instead of `bash`). On Room-presence
+`provider.prepare`, Pi starts with a 40-second timeout, verifies `get_state`
+and applies any clamped thinking level, then parks without submitting a prompt.
+When a Run adopts a parked Pi process whose MCP server set changed, the Daemon
+writes the new front-rewritten `linger-mcp.json`, verifies `get_commands`
+exposes `linger-sync-mcp`, runs `/linger-sync-mcp` and reads the structured
+verdict from its `linger.mcp_sync` RPC dialog before submitting the prompt; an
+attachment failure recycles the process and falls back to a cold spawn. Its
+`tool_call` hook opens an RPC `input` dialog titled `linger.permission_review`
+for each `bash`, `powershell`, and `mcp__*` call, with the call as JSON. The
+Daemon answers it with a JSON verdict from the Run's permission review: `bash`
+is evaluated by the POSIX shell allowlist (`Shell`), while `powershell` is
+evaluated separately as `PowerShell` by `ShellPowerShell`. A Run without review
+gets an allow verdict, because a resident Pi process may serve both kinds of
+Run. A missing or unreadable verdict blocks the call. The Daemon cancels any
+other extension dialog.
+
+Idle session compaction (`execute` `session_compact`) compacts a parked Pi
+process in place through Pi's native `compact` RPC (forwarding optional
+`customInstructions` and reporting `tokensBefore` as `pre_tokens`). Local
+pre-flight checks run first: the Daemon verifies idle state and transcript
+validity, resolves Pi's effective `compaction.keepRecentTokens` from the
+`<agentDir>/settings.json` and `modelOverrides` snapshotted when the Pi process
+launched (managed Pi starts with `--no-approve`, so Pi ignores project
+`<cwd>/.pi/settings.json`), and structurally evaluates Pi's active branch,
+`context_edit` records, and cut-point rules so empty, post-compaction
+metadata-only, or under-budget sessions return `nothing_to_compact` without
+matching error prose and without triggering gateway or local model loads. Only
+when compaction will proceed does the Daemon check model gateway and local
+model readiness off the admission lock using the active model observed from
+`get_state`. Clean compaction parks the process back for reuse; a clean
+JSON-RPC rejection probes idle state and parks a still-healthy process back
+when its fence still admits it; transport errors, unhealthy probes, and
+cancellation (which sends a bounded `abort` RPC) retire the process before
+returning; and a pre-RPC gateway or local model failure parks the untouched
+process back when its fence still admits it.
 
 The compatibility probe of the pinned Playwright catalog is
 `TestPinnedPlaywrightCatalog`; it needs `LINGER_PLAYWRIGHT_COMPAT_ENTRY` and

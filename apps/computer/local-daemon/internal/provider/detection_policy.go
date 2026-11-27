@@ -10,7 +10,9 @@ import (
 type runtimeDetectionPolicy struct {
 	// authenticationProbe asks the Runtime who is signed in. Nil means this
 	// Runtime has no way to tell us, and readiness rests on protocol alone.
-	authenticationProbe func(context.Context, string, map[string]string, time.Duration) runtimeProbeOutcome
+	// tempBase holds optional private probe directories under the Daemon state
+	// directory; empty falls back to the OS temporary directory.
+	authenticationProbe func(context.Context, string, map[string]string, time.Duration, string) runtimeProbeOutcome
 	// authenticationBeforeProtocol reaches the authentication verdict first and
 	// returns it without a handshake. Claude answers out of band, so a signed-out
 	// CLI is reported as needing a login rather than as an incompatible

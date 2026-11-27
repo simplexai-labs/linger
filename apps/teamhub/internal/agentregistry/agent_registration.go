@@ -194,7 +194,7 @@ func ValidAgentRuntimeConfig(runtime httpapi.AgentRuntimeConfig) bool {
 		!validAgentRuntimePlacement(runtime.Placement) {
 		return false
 	}
-	if runtime.ReasoningEffort != nil && !runtime.ReasoningEffort.Valid() {
+	if runtime.ReasoningEffort != nil && !isValidReasoningEffortToken(*runtime.ReasoningEffort) {
 		return false
 	}
 	return true
@@ -217,7 +217,7 @@ func agentRuntimeConfig(registration store.AgentRegistration) httpapi.AgentRunti
 	}
 	runtime := httpapi.AgentRuntimeConfig{Model: registration.RuntimeModel, Placement: placement}
 	if registration.RuntimeReasoningEffort.Valid {
-		effort := httpapi.AgentReasoningEffort(registration.RuntimeReasoningEffort.String)
+		effort := registration.RuntimeReasoningEffort.String
 		runtime.ReasoningEffort = &effort
 	}
 	return runtime
@@ -453,5 +453,5 @@ func optionalAgentReasoningEffort(value *httpapi.AgentReasoningEffort) pgtype.Te
 	if value == nil {
 		return pgtype.Text{}
 	}
-	return textValue(string(*value))
+	return textValue(*value)
 }

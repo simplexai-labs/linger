@@ -1060,14 +1060,6 @@ components:
           type: boolean
         has_pending_work:
           type: boolean
-        next_run_origins:
-          type: array
-          description: >-
-            Distinct scheduling metadata of the initial inputs of every
-            claimable queued Run. The Run claimed next serves them all, so it
-            waits as the most urgent of them.
-          items:
-            $ref: "#/components/schemas/AgentRunInputOrigin"
         message_steers:
           type: array
           maxItems: 1024
@@ -1078,29 +1070,6 @@ components:
             or a native question's answer assigned to the Run that asked it.
           items:
             $ref: "#/components/schemas/StoredAgentRuntimeInput"
-    AgentRunInputOrigin:
-      type: object
-      additionalProperties: false
-      required:
-        [
-          notification,
-          task_inbox,
-          author_type,
-          message_kind,
-          fired_routine,
-          human_waiting,
-        ]
-      properties:
-        notification: { type: boolean }
-        task_inbox: { type: boolean }
-        author_type: { type: string }
-        message_kind: { type: string }
-        fired_routine: { type: boolean }
-        human_waiting:
-          type: boolean
-          description: >-
-            A Human acted through this hidden Message, by answering a card or
-            asking during a recording, and waits for the Agent's answer.
     AgentRuntimeWaitingContexts:
       type: object
       additionalProperties: false
@@ -1148,21 +1117,23 @@ components:
           const: status.changed
         status:
           type: string
-          enum: [queued, working, thinking]
+          enum: [queued, working, thinking, waiting_background]
         title:
           type: string
           minLength: 1
           maxLength: 50000
           description: >-
-            Optional public queue label for queued, or the full provider-visible reasoning
-            summary title for thinking. Omit for working; raw reasoning is never allowed.
+            Optional public queue label for queued, or the full provider-visible reasoning summary
+            title for thinking. Omit for working and waiting_background; raw reasoning is never
+            allowed.
     AgentRuntimeExecutionFailure:
       type: object
       additionalProperties: false
       required: [code]
       description: >-
-        Public classified failure; contains no native error text, paths, credentials, or task input.
+        Public classified failure; contains no credentials, raw secrets, or task input.
         Each code is set where the failure is observed, from structured signals only.
+        detail is an optional redacted, single-line diagnostic summary for Activity display.
         model_unavailable means the model service refused the selected model for the
         Runtime's account, so the Agent needs another model or another sign-in.
         model_not_offered means the Agent's Computer does not offer the selected model for
@@ -1236,6 +1207,13 @@ components:
           type: string
           maxLength: 80
           pattern: '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$'
+        detail:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: >-
+            Optional redacted, single-line diagnostic detail explaining why the Run failed,
+            for display in the Activity log. Must contain no credentials or control characters.
     AgentRuntimeStoppedStatusChangedEvent:
       type: object
       additionalProperties: false
@@ -1526,9 +1504,6 @@ components:
         last_seen_at:
           type: string
           format: date-time
-        capacity:
-          type: integer
-          minimum: 0
         runtimes:
           type: array
           items:
@@ -1603,6 +1578,8 @@ components:
         capacity:
           type: integer
           minimum: 0
+          deprecated: true
+          description: Accepted from older Agent Services and ignored by TeamHub.
         runtimes:
           type: array
           items:
@@ -1840,7 +1817,18 @@ components:
               type: integer
               minimum: 0
               maximum: 3
-              description: Invalid or timed-out outputs produced for this stage; 3 stops maintenance for this Agent.
+              description: >-
+                Invalid or timed-out outputs produced for this stage; 3 pauses
+                maintenance for this Agent until its execution target or source
+                thread changes.
+            target:
+              type: string
+              minLength: 1
+              maxLength: 512
+              description: >-
+                Execution target (Computer, Runtime, and model) that recorded
+                the current pending attempts; switching to another target resets
+                an exhausted pending stage.
 
     CreateRuntimeHumanInteractionRequest:
       type: object

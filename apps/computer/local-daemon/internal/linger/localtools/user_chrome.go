@@ -45,31 +45,67 @@ func environmentValue(env []string, key string) string {
 // chromeExecutable returns the installed Google Chrome. The Agent profile and
 // the extension connection both use it; neither downloads a browser.
 func chromeExecutable(env []string) string {
-	var candidates []string
-	switch runtime.GOOS {
+	chrome, _ := BrowserCandidates(runtime.GOOS, env)
+	return firstFile(chrome)
+}
+
+// managedBrowserExecutable returns the browser the Agent profile runs in:
+// Google Chrome, or on macOS and Windows Microsoft Edge when Chrome is not
+// installed. Edge is Chromium, so it takes the same flags and CDP.
+func managedBrowserExecutable(env []string) string {
+	if chrome := chromeExecutable(env); chrome != "" {
+		return chrome
+	}
+	return edgeExecutable(env)
+}
+
+// edgeExecutable returns the installed Microsoft Edge on macOS and Windows.
+func edgeExecutable(env []string) string {
+	_, edge := BrowserCandidates(runtime.GOOS, env)
+	return firstFile(edge)
+}
+
+// BrowserCandidates returns, in lookup order, where Google Chrome and
+// Microsoft Edge may be installed on goos. Edge has no Linux candidates
+// because the Agent profile falls back to it only on macOS and Windows.
+// doctor and the browser launch share these lists so they agree on whether
+// a browser is installed.
+func BrowserCandidates(goos string, env []string) (chrome, edge []string) {
+	switch goos {
 	case "linux":
 		// Snap Chromium comes before /usr/bin/chromium-browser, which on Ubuntu
 		// is a script that runs it, so its confined profile folder is chosen.
-		candidates = []string{"/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome", "/snap/bin/chromium", "/usr/bin/chromium", "/usr/bin/chromium-browser"}
+		chrome = []string{"/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome", "/snap/bin/chromium", "/usr/bin/chromium", "/usr/bin/chromium-browser"}
 		for _, folder := range filepath.SplitList(environmentValue(env, "PATH")) {
 			for _, name := range []string{"google-chrome-stable", "google-chrome", "chromium", "chromium-browser"} {
 				if filepath.IsAbs(folder) {
-					candidates = append(candidates, filepath.Join(folder, name))
+					chrome = append(chrome, filepath.Join(folder, name))
 				}
 			}
 		}
 	case "darwin":
-		candidates = []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}
+		chrome = []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}
+		edge = []string{"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"}
 		if home := environmentValue(env, "HOME"); home != "" {
-			candidates = append(candidates, filepath.Join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+			chrome = append(chrome, filepath.Join(home, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+			edge = append(edge, filepath.Join(home, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"))
 		}
 	case "windows":
 		for _, root := range []string{"LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432"} {
 			if base := environmentValue(env, root); base != "" {
-				candidates = append(candidates, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
+				chrome = append(chrome, filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
+			}
+		}
+		for _, root := range []string{"PROGRAMFILES(X86)", "PROGRAMFILES", "PROGRAMW6432", "LOCALAPPDATA"} {
+			if base := environmentValue(env, root); base != "" {
+				edge = append(edge, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
 			}
 		}
 	}
+	return chrome, edge
+}
+
+func firstFile(candidates []string) string {
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
 			return candidate

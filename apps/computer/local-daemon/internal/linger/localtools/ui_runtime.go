@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -48,6 +49,8 @@ type uiExecution struct {
 	sequence  uint64
 	blocked   map[string]bool
 	receipts  []uiDispatchReceipt
+	// driverFailed records that a driver call of this execution failed.
+	driverFailed bool
 	// unknown keeps every unknown-outcome receipt for the Operation; a lost
 	// response or a reset must not hide which action may have applied.
 	unknown     []uiDispatchReceipt
@@ -102,20 +105,21 @@ func unifiedUITools() []tool {
 		{
 			Name: "ui_exec",
 			Description: "Execute one async JavaScript body for the longest sequence you can determine from current UI evidence. Await each action, inspect its result, branch or loop in this same body, then return the verified outcome. " +
-				"Return to the model for ambiguous choices, visual interpretation or missing information. Only state persists across executions; an uncaught script error resets it, so catch expected failures in the script. When the user specifies the next control, resolve it from the fresh observation and act immediately in this script. " +
+				"Return to the model for ambiguous choices, visual interpretation or missing information. Only properties of the global state object persist across ui_exec calls; keep plain data there, such as ids and text (state.pid=w.pid), never a view, which works only in the call that made it. Local variables such as v do not persist, and state itself cannot be reassigned. An uncaught script error resets state, so catch expected failures in the script. When the user specifies the next control, resolve it from the fresh observation and act immediately in this script. " +
 				"For repeated stages, read changing values from each observation in JavaScript and continue in a bounded loop. Never paste a value from the last model turn when the current UI supplies it. On an unrecognized stage return its observation before writing. " +
-				"Browser: const page=await ui.page(url); let v=await page.observe(); on resume omit the URL. Read v.text. Use v=await v.click(role,name), v=await v.type(role,name,text) or v=await v.select(role,name,[value]). " +
+				"Browser: let v=await ui.page(url) opens the page and returns its observation; v=await ui.page() or v=await v.observe() reads the current page again. Read v.text. Use v=await v.click(role,name), v=await v.type(role,name,text) or v=await v.select(role,name,[value]). " +
 				"Fill several named controls from one observation with v=await v.fill([{type,name,value},...]); type is the control role, e.g. textbox or combobox. " +
 				"macOS: when the user names an app and window, discover and read it in one call: const r=await ui.computer.list_windows({app:appName}); const matches=r.structuredContent.windows.filter(w=>w.title===windowTitle); if(matches.length!==1)return r.structuredContent.windows; const w=matches[0]; let v=await ui.window(w.pid,w.window_id).observe(); use v.text for reads. " +
 				"To act, v=await v.click('AXButton',name). Each named action returns the next observation. Use it for the next decision. Observe again for missing or changing state. " +
-				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) for images and ui.help(namespace) for unfamiliar methods. Never replay an unknown write. Each action retains its permission review.",
+				"To see a window, return await ui.computer.get_window_state({pid,window_id,include_screenshot:true}): a returned or emitted screenshot reaches you in this same call. A confirmed click only means the driver sent it, so after a click by coordinates return the next screenshot and check for the change you expected. If nothing changed, read the window again and click from that fresh screenshot before trying another route, and report what the screen shows when the control still does not respond. " +
+				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) to choose which images and text to return, console.log for notes and ui.help(namespace) for unfamiliar methods. Never replay an unknown write. Linger reviews each action before it runs.",
 			InputSchema: schema(map[string]any{
 				"code": map[string]any{"type": "string", "minLength": 1, "maxLength": 65536, "description": "Async JavaScript body. Put repeated decisions in a for loop: inspect v.text, stop on completion or ambiguity, derive values from that view, then assign each awaited action back to v. " +
-					"Return the final observed state. Do not yield between known stages. Single-step tasks need no loop."},
+					"Return what you read, e.g. return v.text. Do not yield between known stages. Single-step tasks need no loop."},
 				"timeout_ms": map[string]any{"type": "integer", "minimum": minUIExecutionBudget.Milliseconds(), "maximum": 540000},
 			}, "code"),
 		},
-		{Name: "ui_reset", Description: "Discard this Operation's persistent JavaScript state and image handles. Does not close user apps, clear unknown action records, or replay actions. Re-read target state after resetting.", InputSchema: schema(map[string]any{})},
+		{Name: "ui_reset", Description: "Discard this Operation's persistent JavaScript state and image handles. Call it only after an image-budget note or when state holds values you no longer trust; it is not a finish step, so when the task is done answer the user without it. Does not close user apps, clear unknown action records, or replay actions. Re-read target state after resetting.", InputSchema: schema(map[string]any{})},
 	}
 }
 
@@ -169,6 +173,7 @@ func (u *uiExecution) call(ctx context.Context, name string, args json.RawMessag
 	scheduling, stop := schedulingContext(ctx)
 	defer stop()
 	u.receipts = nil
+	u.driverFailed = false
 	u.lastResults = map[string]json.RawMessage{}
 	u.syncImageGeneration(u.engine.Generation())
 	result, err := u.engine.Exec(ctx, scheduling, input.Code)
@@ -184,28 +189,60 @@ func (u *uiExecution) call(ctx context.Context, name string, args json.RawMessag
 	if err != nil {
 		summary["error"] = err.Error()
 		summary["last_results"] = u.lastResults
+		// A failed driver call carries its own code, such as a missing
+		// permission; only a failure of the script itself gets this hint.
+		if !u.driverFailed {
+			summary["hint"] = "The script threw, so fix the script: a JavaScript error is neither a macOS permission problem nor a site block. Receipts with status confirmed happened; do not repeat them. last_results holds each namespace's latest driver result, not the cause of the error."
+		}
 	}
 	content := []json.RawMessage{}
 	expandedBytes := 0
-	for _, output := range result.Output {
-		parts, expandErr := u.expandOutput(output)
-		for _, part := range parts {
-			expandedBytes += len(part)
+	hasImage := false
+	expand := func(outputs []json.RawMessage) bool {
+		for _, output := range outputs {
+			var outputHasImage bool
+			parts, expandErr := u.expandContent(output, 0, &outputHasImage)
+			for _, part := range parts {
+				expandedBytes += len(part)
+			}
+			if expandedBytes > maxMCPBytes/2 {
+				expandErr = errors.New("UI expanded output exceeds its byte limit")
+			}
+			if expandErr != nil {
+				err = errors.Join(err, expandErr)
+				summary["error"] = err.Error()
+				return false
+			}
+			content = append(content, parts...)
+			hasImage = hasImage || outputHasImage
 		}
-		if expandedBytes > maxMCPBytes/2 {
-			expandErr = errors.New("UI expanded output exceeds its byte limit")
-		}
-		if expandErr != nil {
-			err = errors.Join(err, expandErr)
-			summary["error"] = err.Error()
-			break
-		}
-		content = append(content, parts...)
+		return true
 	}
-	encoded, _ := json.Marshal(summary)
+	// Notes and emitted text do not stand in for a returned screenshot: when
+	// the script selected no image, the ones in its returned observation go.
+	if expand(result.Output) && !hasImage {
+		expand(u.returnedImages(result.Value))
+	}
+	// A returned string, usually page text, reads poorly once escaped inside
+	// the summary JSON, so the model gets it verbatim and the summary omits it.
+	shown := summary
+	var value string
+	if bytes.HasPrefix(result.Value, []byte(`"`)) && json.Unmarshal(result.Value, &value) == nil {
+		plain, _ := json.Marshal(map[string]string{"type": "text", "text": value})
+		content = append(content, plain)
+		shown = maps.Clone(summary)
+		shown["value"] = "returned text shown above"
+	}
+	encoded, _ := json.Marshal(shown)
 	text, _ := json.Marshal(map[string]string{"type": "text", "text": string(encoded)})
 	content = append(content, text)
-	return json.Marshal(map[string]any{"isError": err != nil, "content": content, "structuredContent": summary})
+	reply := map[string]any{"isError": err != nil, "content": content}
+	// Codex gives the model structuredContent in place of content, which
+	// drops the image parts. The last text part carries the same summary.
+	if !hasImage {
+		reply["structuredContent"] = summary
+	}
+	return json.Marshal(reply)
 }
 
 func decodeUI[T any](data []byte, result *T) error {
@@ -226,7 +263,12 @@ func uiTextResult(value any) json.RawMessage {
 	return result
 }
 
-func (u *uiExecution) dispatch(ctx context.Context, call uiruntime.Call) (json.RawMessage, error) {
+func (u *uiExecution) dispatch(ctx context.Context, call uiruntime.Call) (output json.RawMessage, err error) {
+	defer func() {
+		if err != nil {
+			u.driverFailed = true
+		}
+	}()
 	u.syncImageGeneration(call.Generation)
 	if err := schedulingError(ctx); err != nil {
 		return nil, err
@@ -362,7 +404,7 @@ func (u *uiExecution) help(ctx context.Context, topic string) (json.RawMessage, 
 				namespaces = append(namespaces, name)
 			}
 		}
-		return json.Marshal(map[string]any{"namespaces": namespaces, "state": "Only state persists. Await each method. Use ui.emit(result) for native images and selected output. Read namespace help for unfamiliar methods. Methods return original MCP content and optional structuredContent. Errors throw; unknown effects cannot be retried.", "scope": "This Operation and execution lease only; resets invalidate state and image handles."})
+		return json.Marshal(map[string]any{"namespaces": namespaces, "state": "Only properties of the global state object persist across calls. Await each method. Use ui.emit(result) for native images and selected output. Read namespace help for unfamiliar methods. Methods return original MCP content and optional structuredContent. Errors throw; unknown effects cannot be retried.", "scope": "This Operation and execution lease only; resets invalidate state and image handles."})
 	}
 	endpoint, ok := u.endpoints[topic]
 	if !ok {
@@ -492,11 +534,34 @@ func (u *uiExecution) retainImages(raw json.RawMessage) (json.RawMessage, error)
 	return json.Marshal(result)
 }
 
-func (u *uiExecution) expandOutput(raw json.RawMessage) ([]json.RawMessage, error) {
-	return u.expandContent(raw, 0)
+// returnedImages selects the screenshots of a driver observation the script
+// returned without emitting anything, so returning a view shows it to the
+// model. The observation itself stays in the summary's value.
+func (u *uiExecution) returnedImages(value json.RawMessage) []json.RawMessage {
+	var observation struct {
+		Content []json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(value, &observation) != nil {
+		return nil
+	}
+	parts := observation.Content
+	if parts == nil {
+		parts = []json.RawMessage{value}
+	}
+	var images []json.RawMessage
+	for _, part := range parts {
+		var handle struct {
+			Type    string `json:"type"`
+			ImageID string `json:"image_id"`
+		}
+		if json.Unmarshal(part, &handle) == nil && handle.Type == "image" && u.images[handle.ImageID] != nil {
+			images = append(images, part)
+		}
+	}
+	return images
 }
 
-func (u *uiExecution) expandContent(raw json.RawMessage, depth int) ([]json.RawMessage, error) {
+func (u *uiExecution) expandContent(raw json.RawMessage, depth int, hasImage *bool) ([]json.RawMessage, error) {
 	if depth > 1 {
 		return nil, errors.New("UI content envelopes cannot be nested")
 	}
@@ -519,12 +584,13 @@ func (u *uiExecution) expandContent(raw json.RawMessage, depth int) ([]json.RawM
 		if !ok {
 			return nil, errors.New("UI image handle is stale or unavailable")
 		}
+		*hasImage = true
 		return []json.RawMessage{part}, nil
 	}
 	if object.Content != nil {
 		var out []json.RawMessage
 		for _, c := range object.Content {
-			parts, err := u.expandContent(c, depth+1)
+			parts, err := u.expandContent(c, depth+1, hasImage)
 			if err != nil {
 				return nil, err
 			}

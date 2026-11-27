@@ -78,6 +78,31 @@ it("routes browser installs and environment checks to the native source core", a
   );
   expect((await adapter.config("source")).releaseAvailable).toBe(true);
 });
+it("forwards explicit launchVoiceToolsBackground through coreAdapter to installNativeSource", async () => {
+  const launcher = vi.fn(() => ({ commit: vi.fn(), abort: vi.fn() }));
+  const adapter = coreAdapter("/private-home", "/checkout", true, launcher);
+  const signal = new AbortController().signal;
+  const emit = vi.fn();
+  await adapter.run({ instance: "source", setupChoice: "pi" }, signal, emit);
+  expect(installNativeSource).toHaveBeenCalledWith(
+    expect.objectContaining({
+      repo: "/checkout",
+      name: "source",
+      home: "/private-home",
+      externalComputer: true,
+      launchVoiceToolsBackground: launcher,
+    }),
+  );
+
+  vi.mocked(installNativeSource).mockClear();
+  const disabled = coreAdapter("/private-home", "/checkout", false, false);
+  await disabled.run({ instance: "source", setupChoice: "pi" }, signal, emit);
+  expect(installNativeSource).toHaveBeenCalledWith(
+    expect.objectContaining({
+      launchVoiceToolsBackground: false,
+    }),
+  );
+});
 it("hands the selected install descriptor to the desktop job", async () => {
   const descriptor = {
     runtime: "pi" as const,

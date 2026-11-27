@@ -18,8 +18,11 @@ import (
 //go:embed local_linux.py
 var nativeLinuxProgram string
 
+// linuxHost reports whether this process runs on Linux; a test seam.
+var linuxHost = func() bool { return runtime.GOOS == "linux" }
+
 // localLinux reports the signed-in user's own X11 desktop.
-func (m *Manager) localLinux() bool { return runtime.GOOS == "linux" }
+func (m *Manager) localLinux() bool { return linuxHost() }
 
 func (op *operation) ensureLinux(ctx context.Context) (*mcpClient, error) {
 	op.cuaMu.Lock()

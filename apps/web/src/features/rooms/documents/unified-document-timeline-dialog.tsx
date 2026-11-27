@@ -126,11 +126,11 @@ export function UnifiedDocumentTimelineDialog({
   return (
     <ModalDialog
       ariaLabel={t(m.pageHistory)}
-      className="fixed inset-0 z-50 m-0 max-h-none max-w-none overflow-hidden border-0 bg-popover p-0 shadow-lg backdrop:bg-[var(--app-overlay)] backdrop:backdrop-blur-sm sm:inset-0 sm:m-auto sm:h-[min(640px,82dvh)] sm:w-[calc(100%-2.5rem)] sm:max-w-3xl sm:rounded-lg"
+      className="fixed inset-0 z-50 m-0 max-h-none max-w-none overflow-hidden border-0 bg-popover p-0 shadow-lg backdrop:bg-[var(--app-overlay)] backdrop:backdrop-blur-sm sm:inset-0 sm:m-auto sm:h-[min(640px,82dvh)] sm:w-[calc(100%-2.5rem)] sm:max-w-3xl sm:rounded-[var(--app-modal-radius)]"
       onClose={onClose}
     >
       <div className="flex h-full min-h-0 flex-col">
-        <header className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-app-border px-4">
+        <header className="flex min-h-14 shrink-0 items-center justify-between gap-3 px-4">
           <h2 className="text-sm font-semibold text-app-ink">
             {t(m.pageHistory)}
           </h2>
@@ -148,7 +148,7 @@ export function UnifiedDocumentTimelineDialog({
         </header>
         <div className="min-h-0 flex-1 overflow-hidden">
           <div className="grid h-full min-h-0 sm:grid-cols-[200px_minmax(0,1fr)]">
-            <aside className="workspace-scrollbar min-h-0 overflow-y-auto border-b border-app-border p-3 sm:border-r sm:border-b-0">
+            <aside className="workspace-scrollbar min-h-0 overflow-y-auto border-app-border p-3 sm:border-r">
               <TimelineList
                 empty={t(m.noPageHistory)}
                 error={history.error}
@@ -245,7 +245,7 @@ function HistoryPreview({
       className="flex min-h-0 min-w-0 flex-col"
     >
       {entry ? (
-        <div className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-app-border px-4">
+        <div className="flex min-h-12 shrink-0 items-center justify-between gap-3 px-4">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-app-ink">
               {formatDateTime(
@@ -312,7 +312,7 @@ function HistoryPreview({
         )}
       </div>
       {entry ? (
-        <div className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-app-border px-4 py-2">
+        <div className="flex min-h-14 shrink-0 items-center justify-between gap-3 px-4 py-2">
           <div className="min-w-0">
             {restoreFeedback ? (
               <p className="text-sm text-app-muted" role="status">
@@ -419,7 +419,7 @@ function TimelineList({
     return <p className="py-16 text-center text-sm text-app-muted">{empty}</p>;
   }
   return (
-    <ul className="divide-y divide-app-border/60">
+    <ul>
       {items.map((item) => (
         <li key={item.id}>
           <button

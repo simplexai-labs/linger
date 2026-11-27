@@ -102,7 +102,6 @@ import {
   buildModelGroups,
   downloadStopped,
   formatGigabytes,
-  hasReadyLocalModels,
   hostBlocker,
   joinList,
   loadCheck,
@@ -369,22 +368,24 @@ function MemorySummaryCard({
               used: formatGigabytes(summary.usedBytes, t),
             })}
           </p>
-          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
-            {view.observed_at
-              ? t(m.memoryFreeChecked, {
-                  free: formatGigabytes(summary.freeBytes, t),
-                  time: relativeTime(view.observed_at, translation),
-                })
-              : t(m.memoryFree, {
-                  free: formatGigabytes(summary.freeBytes, t),
-                })}
-          </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {canRecheck ? (
-            <Button loading={rechecking} onClick={onRecheck} size="compact">
+            <Button
+              aria-label={t(m.recheckMemory)}
+              loading={rechecking}
+              onClick={onRecheck}
+              size="compact"
+              title={
+                view.observed_at
+                  ? t(m.memoryFreeChecked, {
+                      free: formatGigabytes(summary.freeBytes, t),
+                      time: relativeTime(view.observed_at, translation),
+                    })
+                  : undefined
+              }
+            >
               {rechecking ? null : <Icon icon={RefreshIcon} size={14} />}
-              {t(m.recheckMemory)}
             </Button>
           ) : null}
           <Button onClick={onDetails} size="compact">
@@ -716,7 +717,8 @@ function ComputerModels({
       <header className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-48 flex-1">
           <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
-          {status ? (
+          {status?.mode === "subscription" ? (
+            // Neither tab carries the in-use dot for a subscription source.
             <p className="mt-1.5 text-sm text-muted-foreground">
               {t(m.agentsUse, {
                 computer: computerName,
@@ -1426,7 +1428,6 @@ function Library({
     entry.model.pi_model !== status.runtime_model &&
     entry.model.id !== status.runtime_model;
 
-  const hasReadyModels = hasReadyLocalModels(entries);
   const desktopDriver = useDesktopDriverUpdate(
     isLocalDesktop && !offline && !readOnly,
   );
@@ -1494,7 +1495,6 @@ function Library({
         disabled={offline || readOnly || switching || busy(modelId)}
         entry={entry}
         expanded={expandedKey === group.key}
-        hasReadyAlternatives={hasReadyModels}
         inSpotlight={inSpotlight}
         key={group.key}
         onAssignAgent={
@@ -1577,7 +1577,9 @@ function Library({
           />
         </Notice>
       ) : null}
-      {readOnly ? <Notice>{t(m.readOnlyNotice, { name })}</Notice> : null}
+      {readOnly && !offline ? (
+        <Notice>{t(m.readOnlyNotice, { name })}</Notice>
+      ) : null}
 
       {unavailable ? (
         <EmptyState

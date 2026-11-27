@@ -48,7 +48,7 @@ func TestCodexCompactionParksTheProcessBack(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	result := takeParkedForTest(t, "codex", "ctx-compact").Compact(ctx, "ignored by Codex")
+	result := takeParkedForTest(t, "codex", "ctx-compact").CompactWithPrepare(ctx, "ignored by Codex", nil)
 	if result.Outcome != "compacted" || result.PreTokens != nil || result.Reason != "" {
 		t.Fatalf("compaction = %+v", result)
 	}
@@ -71,7 +71,7 @@ func TestCodexCompactionCancelInterruptsAndRetires(t *testing.T) {
 	session := takeParkedForTest(t, "codex", "ctx-compact")
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan CompactResult, 1)
-	go func() { done <- session.Compact(ctx, "") }()
+	go func() { done <- session.CompactWithPrepare(ctx, "", nil) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for fake.count("thread/compact/start") == 0 {
 		if time.Now().After(deadline) {
@@ -110,7 +110,7 @@ func TestClaudeCompactionParksTheProcessBack(t *testing.T) {
 	home.turn(t, "one", RunSpec{})
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	result := takeParkedForTest(t, "claude", "ctx-compact").Compact(ctx, "keep the open questions")
+	result := takeParkedForTest(t, "claude", "ctx-compact").CompactWithPrepare(ctx, "keep the open questions", nil)
 	if result.Outcome != "compacted" || result.PreTokens == nil || *result.PreTokens != 44445 || result.Reason != "" {
 		t.Fatalf("compaction = %+v", result)
 	}
@@ -118,7 +118,7 @@ func TestClaudeCompactionParksTheProcessBack(t *testing.T) {
 	if strings.TrimSpace(string(compacts)) != "/compact keep the open questions" {
 		t.Fatalf("compaction input = %q", compacts)
 	}
-	empty := takeParkedForTest(t, "claude", "ctx-compact").Compact(ctx, "empty")
+	empty := takeParkedForTest(t, "claude", "ctx-compact").CompactWithPrepare(ctx, "empty", nil)
 	if empty.Outcome != "nothing_to_compact" || empty.PreTokens != nil {
 		t.Fatalf("short session compaction = %+v", empty)
 	}
@@ -135,7 +135,7 @@ func TestClaudeCompactionCancelRetiresTheProcess(t *testing.T) {
 	session := takeParkedForTest(t, "claude", "ctx-compact")
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan CompactResult, 1)
-	go func() { done <- session.Compact(ctx, "hang") }()
+	go func() { done <- session.CompactWithPrepare(ctx, "hang", nil) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		events, _ := os.ReadFile(filepath.Join(home.dir, "events"))

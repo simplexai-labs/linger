@@ -8,9 +8,23 @@
 // bundles' exact `artifactId`, `sha256`, `inputHash`, `originAppVersion`, and
 // `url`, and is Ed25519-signed with `DESKTOP_UPDATE_KEY_PEM` (verified against
 // `UPDATE_PUBLIC_KEY` in `apps/desktop/src/main/update-manifest.ts`).
-import { createHash, createPublicKey, generateKeyPairSync, verify } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  generateKeyPairSync,
+  verify,
+} from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,28 +67,32 @@ export const STEP_DEFINITIONS = Object.freeze([
   {
     id: "step-00-baseline",
     changedModules: [...BUNDLE_IDS],
-    updateBehavior: "Initial 2+1 V2 Store seed (web + unified backend + node-native-deps)",
+    updateBehavior:
+      "Initial 2+1 V2 Store seed (web + unified backend + node-native-deps)",
     rollbackSafe: true,
     dbSchemaEpoch: 892,
   },
   {
     id: "step-01-web",
     changedModules: ["web"],
-    updateBehavior: "0-downtime Web static-host hot reload + visible V2 badge (backend & node-native-deps 0B skipped)",
+    updateBehavior:
+      "0-downtime Web static-host hot reload + visible V2 badge (backend & node-native-deps 0B skipped)",
     rollbackSafe: true,
     dbSchemaEpoch: 892,
   },
   {
     id: "step-02-backend",
     changedModules: ["backend"],
-    updateBehavior: "Atomic signed backend rolling upgrade (teamhub + daemon + node-services/skills/installer; PG/LiveKit/Electron 0 restart; web & node-native-deps 0B skipped)",
+    updateBehavior:
+      "Atomic signed backend rolling upgrade (teamhub + daemon + node-services/skills/installer; PG/LiveKit/Electron 0 restart; web & node-native-deps 0B skipped)",
     rollbackSafe: true,
     dbSchemaEpoch: 892,
   },
   {
     id: "step-03-rollback-faulty",
     changedModules: ["backend"],
-    updateBehavior: "Faulty signed backend (rollbackSafe:false, exit 42) -> pg_dump/pg_restore + atomic rollback to step-02 + denylist",
+    updateBehavior:
+      "Faulty signed backend (rollbackSafe:false, exit 42) -> pg_dump/pg_restore + atomic rollback to step-02 + denylist",
     rollbackSafe: false,
     dbSchemaEpoch: 893,
   },
@@ -91,8 +109,10 @@ function makeArtifactUrl(baseUrl, bundleId, fileName) {
 }
 
 function signedKindFor(target, { macosSigned, windowsSigned }) {
-  if (target.startsWith("darwin-")) return macosSigned ? "developer-id" : "none";
-  if (target.startsWith("win32-")) return windowsSigned ? "authenticode" : "none";
+  if (target.startsWith("darwin-"))
+    return macosSigned ? "developer-id" : "none";
+  if (target.startsWith("win32-"))
+    return windowsSigned ? "authenticode" : "none";
   return "none";
 }
 
@@ -118,7 +138,10 @@ function injectWebBanner(html, version, stepId) {
   return `${html}${banner}`;
 }
 
-async function stageWebDir(workDir, { webDistDir, version, stepId, injectBanner, staticHostSrc }) {
+async function stageWebDir(
+  workDir,
+  { webDistDir, version, stepId, injectBanner, staticHostSrc },
+) {
   const stage = path.join(workDir, `web-${stepId}`);
   const distDest = path.join(stage, "dist");
   await mkdir(distDest, { recursive: true });
@@ -147,7 +170,10 @@ async function stageWebDir(workDir, { webDistDir, version, stepId, injectBanner,
   return stage;
 }
 
-async function stageNodeNativeDepsDir(workDir, { nodeNativeDepsDir, target, version }) {
+async function stageNodeNativeDepsDir(
+  workDir,
+  { nodeNativeDepsDir, target, version },
+) {
   const stage = path.join(workDir, `node-native-deps-${target}`);
   await mkdir(stage, { recursive: true });
   const src = nodeNativeDepsDir ? path.join(nodeNativeDepsDir, target) : null;
@@ -299,8 +325,19 @@ async function stageUnifiedBackendDir(
     );
     await chmod(file, 0o755);
   }
-  if (teamhubCliDir) {
-    await copyIfExists(teamhubCliDir, path.join(daemonDest, "teamhub-cli"));
+  if (teamhubCliDir && existsSync(teamhubCliDir)) {
+    const cliDest = path.join(daemonDest, "teamhub-cli");
+    const isWindowsTarget = target.startsWith("win32-");
+    await mkdir(cliDest, { recursive: true });
+    await cp(teamhubCliDir, cliDest, {
+      recursive: true,
+      filter: (src) => {
+        const base = path.basename(src);
+        if (base === "teamhub.cmd") return false;
+        if (!isWindowsTarget && base === "teamhub.exe") return false;
+        return true;
+      },
+    });
   }
 
   // 5. installer/
@@ -319,7 +356,13 @@ async function stageUnifiedBackendDir(
       {
         module: "backend",
         layout: "2+1-unified-backend",
-        components: ["teamhub", "node-services", "skills", "computer-daemon", "installer"],
+        components: [
+          "teamhub",
+          "node-services",
+          "skills",
+          "computer-daemon",
+          "installer",
+        ],
         target,
         stepId,
         appVersion: version,
@@ -466,9 +509,17 @@ export async function buildV2TestUpgradePacks({
 
   if (ephemeralTestKey && !signingPrivateKeyPem) {
     const pair = generateKeyPairSync("ed25519");
-    signingPrivateKeyPem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-    verifyPublicKeyPem = pair.publicKey.export({ type: "spki", format: "pem" }).toString();
-    await writeFile(path.join(absOut, "test-public-key.pem"), verifyPublicKeyPem, "utf8");
+    signingPrivateKeyPem = pair.privateKey
+      .export({ type: "pkcs8", format: "pem" })
+      .toString();
+    verifyPublicKeyPem = pair.publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
+    await writeFile(
+      path.join(absOut, "test-public-key.pem"),
+      verifyPublicKeyPem,
+      "utf8",
+    );
     signedWith = "ephemeral-ed25519-test-key";
   } else if (signingPrivateKeyPem) {
     signedWith = "DESKTOP_UPDATE_KEY_PEM";
@@ -481,8 +532,13 @@ export async function buildV2TestUpgradePacks({
 
   const versions = deriveStepVersions(baseVersion);
   const lockfilePath = path.join(repoRoot, "pnpm-lock.yaml");
-  const lockfileText = existsSync(lockfilePath) ? await readFile(lockfilePath, "utf8") : "";
-  const nativeDepsInfo = computeNativeDepsHash(lockfileText, { target: "all", nodeMajor: "26" });
+  const lockfileText = existsSync(lockfilePath)
+    ? await readFile(lockfilePath, "utf8")
+    : "";
+  const nativeDepsInfo = computeNativeDepsHash(lockfileText, {
+    target: "all",
+    nodeMajor: "26",
+  });
   // Keep minShellVersion <= baseVersion (never strip prerelease suffix, since in
   // SemVer 0.1.10-v2test.0 < 0.1.10 which would wrongly trigger shell-upgrade-required).
   const effectiveMinShell = minShellVersion ?? baseVersion;
@@ -496,11 +552,16 @@ export async function buildV2TestUpgradePacks({
     const packNoarch = async (bundleId, stageDir, originAppVersion) => {
       const destDir = path.join(absOut, "bundles", bundleId);
       const packed = await packDeterministicTarZst(stageDir, destDir, bundleId);
-      checksumFiles.push({ rel: `bundles/${bundleId}/${packed.fileName}`, sha256: packed.sha256 });
+      checksumFiles.push({
+        rel: `bundles/${bundleId}/${packed.fileName}`,
+        sha256: packed.sha256,
+      });
       return {
         arch: "noarch",
         originAppVersion,
-        inputHash: sha256String(`${bundleId}:${originAppVersion}:${packed.sha256}`),
+        inputHash: sha256String(
+          `${bundleId}:${originAppVersion}:${packed.sha256}`,
+        ),
         artifact: {
           artifactId: packed.artifactId,
           format: "tar.zst",
@@ -522,7 +583,10 @@ export async function buildV2TestUpgradePacks({
           bundleId,
           target,
         );
-        checksumFiles.push({ rel: `bundles/${bundleId}/${packed.fileName}`, sha256: packed.sha256 });
+        checksumFiles.push({
+          rel: `bundles/${bundleId}/${packed.fileName}`,
+          sha256: packed.sha256,
+        });
         hashParts.push(`${target}:${packed.sha256}`);
         const signed =
           bundleId === "backend"
@@ -540,8 +604,12 @@ export async function buildV2TestUpgradePacks({
       return {
         arch: "per-target",
         originAppVersion,
-        inputHash: sha256String(`${bundleId}:${originAppVersion}:${hashParts.join("|")}`),
-        ...(bundleId === "backend" ? { nativeDepsHash: nativeDepsInfo.hash } : {}),
+        inputHash: sha256String(
+          `${bundleId}:${originAppVersion}:${hashParts.join("|")}`,
+        ),
+        ...(bundleId === "backend"
+          ? { nativeDepsHash: nativeDepsInfo.hash }
+          : {}),
         targets: targetEntries,
       };
     };
@@ -595,7 +663,9 @@ export async function buildV2TestUpgradePacks({
         id: def.id,
         appVersion,
         changedModules: def.changedModules,
-        inheritedModules: BUNDLE_IDS.filter((id) => !def.changedModules.includes(id)),
+        inheritedModules: BUNDLE_IDS.filter(
+          (id) => !def.changedModules.includes(id),
+        ),
         rollbackSafe: def.rollbackSafe,
         dbSchemaEpoch: def.dbSchemaEpoch,
         updateBehavior: def.updateBehavior,
@@ -640,7 +710,8 @@ export async function buildV2TestUpgradePacks({
         teamhubCliDir,
         nodeServicesDir,
         nodeNativeDepsDir,
-        installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
+        installerDistDir:
+          installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
         addUpgradeMarkers: false,
         faulty: false,
       });
@@ -650,7 +721,11 @@ export async function buildV2TestUpgradePacks({
         version: v0,
       });
     }
-    baselineBundles.backend = await packPerTarget("backend", backendV0Stages, v0);
+    baselineBundles.backend = await packPerTarget(
+      "backend",
+      backendV0Stages,
+      v0,
+    );
     baselineBundles["node-native-deps"] = await packPerTarget(
       "node-native-deps",
       nativeDepsStages,
@@ -697,7 +772,9 @@ export async function buildV2TestUpgradePacks({
           teamhubCliDir,
           nodeServicesDir,
           nodeNativeDepsDir,
-          installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
+          installerDistDir:
+            installerDistDir ??
+            path.join(repoRoot, "apps/linger-installer/dist"),
           addUpgradeMarkers: true,
           faulty: false,
         });
@@ -724,7 +801,9 @@ export async function buildV2TestUpgradePacks({
           teamhubCliDir,
           nodeServicesDir,
           nodeNativeDepsDir,
-          installerDistDir: installerDistDir ?? path.join(repoRoot, "apps/linger-installer/dist"),
+          installerDistDir:
+            installerDistDir ??
+            path.join(repoRoot, "apps/linger-installer/dist"),
           addUpgradeMarkers: true,
           faulty: true,
         });
@@ -773,9 +852,9 @@ export async function buildV2TestUpgradePacks({
     );
 
     // Deduplicate & sort SHA256SUMS.txt
-    const uniqueChecksums = [...new Map(checksumFiles.map((c) => [c.rel, c.sha256])).entries()].sort(
-      ([a], [b]) => a.localeCompare(b),
-    );
+    const uniqueChecksums = [
+      ...new Map(checksumFiles.map((c) => [c.rel, c.sha256])).entries(),
+    ].sort(([a], [b]) => a.localeCompare(b));
     await writeFile(
       path.join(absOut, "SHA256SUMS.txt"),
       `${uniqueChecksums.map(([rel, sha]) => `${sha}  ${rel}`).join("\n")}\n`,
@@ -809,15 +888,27 @@ export async function verifyV2TestUpgradeKit(
   kitDir,
   { publicKeyPem = null, requireSignatures = true } = {},
 ) {
-  const index = JSON.parse(await readFile(path.join(kitDir, "manifest-index.json"), "utf8"));
+  const index = JSON.parse(
+    await readFile(path.join(kitDir, "manifest-index.json"), "utf8"),
+  );
   const pubKey = publicKeyPem ? createPublicKey(publicKeyPem) : null;
 
   let prevManifest = null;
   const checkedSteps = [];
 
   for (const step of index.steps) {
-    const manifestPath = path.join(kitDir, "steps", step.id, "app-manifest.json");
-    const sigPath = path.join(kitDir, "steps", step.id, "app-manifest.json.sig");
+    const manifestPath = path.join(
+      kitDir,
+      "steps",
+      step.id,
+      "app-manifest.json",
+    );
+    const sigPath = path.join(
+      kitDir,
+      "steps",
+      step.id,
+      "app-manifest.json.sig",
+    );
     const bytes = await readFile(manifestPath);
 
     if (requireSignatures || existsSync(sigPath)) {
@@ -825,7 +916,9 @@ export async function verifyV2TestUpgradeKit(
         throw new Error(`Missing signature file for ${step.id}`);
       }
       if (!pubKey) {
-        throw new Error(`Signature present for ${step.id} but no publicKeyPem supplied`);
+        throw new Error(
+          `Signature present for ${step.id} but no publicKeyPem supplied`,
+        );
       }
       const sigB64 = (await readFile(sigPath, "utf8")).trim();
       const valid = verify(null, bytes, pubKey, Buffer.from(sigB64, "base64"));
@@ -843,7 +936,9 @@ export async function verifyV2TestUpgradeKit(
       const entry = manifest.bundles[bundleId];
       if (!entry) throw new Error(`${step.id}: missing bundle ${bundleId}`);
       const refs =
-        entry.arch === "noarch" ? [entry.artifact] : Object.values(entry.targets);
+        entry.arch === "noarch"
+          ? [entry.artifact]
+          : Object.values(entry.targets);
       for (const ref of refs) {
         const relPath = ref.url.startsWith("bundles/")
           ? ref.url
@@ -891,7 +986,10 @@ export async function verifyV2TestUpgradeKit(
   return { ok: true, stepCount: checkedSteps.length, steps: checkedSteps };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const args = process.argv.slice(2);
   const flag = (name) => {
     const idx = args.indexOf(name);
@@ -899,7 +997,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   };
   const repoRoot = path.resolve(flag("--repo") ?? defaultRepoRoot);
   const outDir = path.resolve(
-    flag("--out") ?? path.join(repoRoot, ".linger-runtime/v2-test-service-upgrade-packs"),
+    flag("--out") ??
+      path.join(repoRoot, ".linger-runtime/v2-test-service-upgrade-packs"),
   );
   const baseVersion = flag("--base-version") ?? "0.1.10-v2test.0";
   const channel = flag("--channel") ?? "stable";
@@ -910,7 +1009,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     .filter(Boolean);
   const signKeyPath = flag("--sign-key");
   const ephemeralTestKey = args.includes("--ephemeral-test-key");
-  const skipPubkeyCheck = args.includes("--skip-pubkey-check") || ephemeralTestKey;
+  const skipPubkeyCheck =
+    args.includes("--skip-pubkey-check") || ephemeralTestKey;
 
   const privateKeyPem = signKeyPath
     ? await readFile(path.resolve(signKeyPath), "utf8")
@@ -918,11 +1018,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   let expectedPublicKeyPem = null;
   if (privateKeyPem && !skipPubkeyCheck) {
-    const src = await readFile(path.join(desktopDir, "src/main/update-manifest.ts"), "utf8");
+    const src = await readFile(
+      path.join(desktopDir, "src/main/update-manifest.ts"),
+      "utf8",
+    );
     expectedPublicKeyPem =
-      /-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/.exec(src)?.[0] ?? null;
+      /-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/.exec(
+        src,
+      )?.[0] ?? null;
     if (!expectedPublicKeyPem) {
-      throw new Error("Could not locate UPDATE_PUBLIC_KEY in apps/desktop/src/main/update-manifest.ts");
+      throw new Error(
+        "Could not locate UPDATE_PUBLIC_KEY in apps/desktop/src/main/update-manifest.ts",
+      );
     }
   }
 
@@ -937,19 +1044,31 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     expectedPublicKeyPem,
     ephemeralTestKey,
     webDistDir: flag("--web-dist") ? path.resolve(flag("--web-dist")) : null,
-    installerDistDir: flag("--installer-dist") ? path.resolve(flag("--installer-dist")) : null,
-    nodeServicesDir: flag("--node-services-dir") ? path.resolve(flag("--node-services-dir")) : null,
+    installerDistDir: flag("--installer-dist")
+      ? path.resolve(flag("--installer-dist"))
+      : null,
+    nodeServicesDir: flag("--node-services-dir")
+      ? path.resolve(flag("--node-services-dir"))
+      : null,
     nodeNativeDepsDir: flag("--node-native-deps-dir")
       ? path.resolve(flag("--node-native-deps-dir"))
       : null,
-    teamhubDir: flag("--teamhub-dir") ? path.resolve(flag("--teamhub-dir")) : null,
-    teamhubV2Dir: flag("--teamhub-v2-dir") ? path.resolve(flag("--teamhub-v2-dir")) : null,
+    teamhubDir: flag("--teamhub-dir")
+      ? path.resolve(flag("--teamhub-dir"))
+      : null,
+    teamhubV2Dir: flag("--teamhub-v2-dir")
+      ? path.resolve(flag("--teamhub-v2-dir"))
+      : null,
     teamhubFaultyDir: flag("--teamhub-faulty-dir")
       ? path.resolve(flag("--teamhub-faulty-dir"))
       : null,
     daemonDir: flag("--daemon-dir") ? path.resolve(flag("--daemon-dir")) : null,
-    daemonV2Dir: flag("--daemon-v2-dir") ? path.resolve(flag("--daemon-v2-dir")) : null,
-    teamhubCliDir: flag("--teamhub-cli-dir") ? path.resolve(flag("--teamhub-cli-dir")) : null,
+    daemonV2Dir: flag("--daemon-v2-dir")
+      ? path.resolve(flag("--daemon-v2-dir"))
+      : null,
+    teamhubCliDir: flag("--teamhub-cli-dir")
+      ? path.resolve(flag("--teamhub-cli-dir"))
+      : null,
     macosSigned: flag("--macos-signed") === "true",
     windowsSigned: flag("--windows-signed") === "true",
     minShellVersion: flag("--min-shell") ?? null,

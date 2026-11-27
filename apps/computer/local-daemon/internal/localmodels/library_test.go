@@ -916,3 +916,98 @@ func TestDownloadPublishesDownloadingBeforeSlowPhaseStatusReturns(t *testing.T) 
 		return got != nil && got.State == "loaded"
 	})
 }
+
+func TestLibrarySetHarnessDirectoryTriggersEnsurePiWhenModelAlreadyLoaded(t *testing.T) {
+	t.Run("triggers_after_loaded_refresh", func(t *testing.T) {
+		fake := newFakeTool(t)
+		fake.write("status.json", status(model(testModel, "loaded")))
+		harnessDir := filepath.Join(filepath.Dir(fake.state), "harness")
+		record := &recorder{}
+		library := New(Options{
+			Tool:             &fake.tool,
+			Environment:      map[string]string{"LOCALMODELS_FAKE_TOOL": "1", "HOME": t.TempDir(), "PATH": os.Getenv("PATH")},
+			JobDirectory:     filepath.Join(t.TempDir(), "jobs"),
+			HarnessDirectory: "",
+			Publish:          record.publish,
+			RuntimeChanged:   record.runtimeChanged,
+		})
+		t.Cleanup(library.Close)
+
+		library.Refresh(t.Context())
+		if library.PiExecutable() != "" {
+			t.Fatalf("empty harness directory unexpectedly provisioned Pi: %q", library.PiExecutable())
+		}
+		if slices.ContainsFunc(fake.calls(), func(c string) bool { return strings.HasPrefix(c, "harness ") }) {
+			t.Fatalf("expected no harness calls before SetHarnessDirectory, got %v", fake.calls())
+		}
+
+		library.SetHarnessDirectory(harnessDir)
+		want := filepath.Join(harnessDir, "tools", "pi", "1.3.0", "pi")
+		waitFor(t, "Pi provisioned after SetHarnessDirectory", func() bool {
+			return library.PiExecutable() == want && record.changes() > 0
+		})
+	})
+
+	t.Run("does_not_trigger_when_cleared_to_empty", func(t *testing.T) {
+		fake := newFakeTool(t)
+		fake.write("status.json", status(model(testModel, "loaded")))
+		harnessDir := filepath.Join(filepath.Dir(fake.state), "harness")
+		record := &recorder{}
+		library := New(Options{
+			Tool:             &fake.tool,
+			Environment:      map[string]string{"LOCALMODELS_FAKE_TOOL": "1", "HOME": t.TempDir(), "PATH": os.Getenv("PATH")},
+			JobDirectory:     filepath.Join(t.TempDir(), "jobs"),
+			HarnessDirectory: harnessDir,
+			Publish:          record.publish,
+			RuntimeChanged:   record.runtimeChanged,
+		})
+		t.Cleanup(library.Close)
+
+		library.SetHarnessDirectory("")
+		library.Refresh(t.Context())
+		if library.PiExecutable() != "" {
+			t.Fatalf("cleared harness directory unexpectedly provisioned Pi: %q", library.PiExecutable())
+		}
+		if slices.ContainsFunc(fake.calls(), func(c string) bool { return strings.HasPrefix(c, "harness ") }) {
+			t.Fatalf("expected no harness calls after clearing harness directory, got %v", fake.calls())
+		}
+	})
+
+	t.Run("concurrent_set_and_refresh_race_free", func(t *testing.T) {
+		fake := newFakeTool(t)
+		fake.write("status.json", status(model(testModel, "loaded")))
+		harnessDir := filepath.Join(filepath.Dir(fake.state), "harness")
+		record := &recorder{}
+		library := New(Options{
+			Tool:             &fake.tool,
+			Environment:      map[string]string{"LOCALMODELS_FAKE_TOOL": "1", "HOME": t.TempDir(), "PATH": os.Getenv("PATH")},
+			JobDirectory:     filepath.Join(t.TempDir(), "jobs"),
+			HarnessDirectory: "",
+			Publish:          record.publish,
+			RuntimeChanged:   record.runtimeChanged,
+		})
+		t.Cleanup(library.Close)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for range 8 {
+				library.SetHarnessDirectory(harnessDir)
+				library.SetHarnessDirectory("")
+			}
+			library.SetHarnessDirectory(harnessDir)
+		}()
+		go func() {
+			defer wg.Done()
+			for range 4 {
+				library.Refresh(t.Context())
+			}
+		}()
+		wg.Wait()
+		want := filepath.Join(harnessDir, "tools", "pi", "1.3.0", "pi")
+		waitFor(t, "Pi provisioned after concurrent updates", func() bool {
+			return library.PiExecutable() == want
+		})
+	})
+}

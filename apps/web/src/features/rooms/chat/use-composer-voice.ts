@@ -133,7 +133,10 @@ export function useComposerVoiceTurn({
       contextMessages: [...selectedContextMessages],
     };
     let snapshot: MessageComposition | undefined;
-    return async (voiceLiveTurn?: TeamHubVoiceLiveTurnMarker) => {
+    return async (
+      voiceLiveTurn?: TeamHubVoiceLiveTurnMarker,
+      onQueued?: () => void,
+    ) => {
       try {
         // Inside the try so a rejected turn releases its claimed materials.
         if (references.pendingAvailability)
@@ -154,7 +157,11 @@ export function useComposerVoiceTurn({
         if (snapshot.body.length > TEAMHUB_MESSAGE_MAX_LENGTH)
           throw new Error(messageLengthError());
         await authorizeVoiceMaterials(materials);
-        await onSend(snapshot);
+        // The outbox shows the turn synchronously; the live words it replaces
+        // leave in that same render instead of after the server's answer.
+        const sending = onSend(snapshot);
+        onQueued?.();
+        await sending;
       } catch (error) {
         for (const material of materials)
           claimedMaterialIds.current.delete(material.id);

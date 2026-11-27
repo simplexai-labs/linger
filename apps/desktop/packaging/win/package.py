@@ -43,6 +43,23 @@ from archive import sha256  # noqa: E402
 import computer_tools  # noqa: E402
 from native_bundle import check_runtime, check_teamhub  # noqa: E402
 DAEMON = os.path.join(DESKTOP, "dist", "computer", "win32-x64", "linger-computer-daemon.exe")
+TEAMHUB_LAUNCHER = os.path.join(DESKTOP, "dist", "teamhub-cli", "teamhub.exe")
+TEAMHUB_ARCHIVE_LAUNCHER = "Linger/resources/app/dist/teamhub-cli/teamhub.exe"
+TEAMHUB_ARCHIVE_LEGACY_CMD = "Linger/resources/app/dist/teamhub-cli/teamhub.cmd"
+
+
+def verify_teamhub_cli_archive(archive):
+    """Exits unless the finished zip holds a non-empty teamhub.exe and no teamhub.cmd."""
+    with zipfile.ZipFile(archive) as source:
+        sizes = {
+            info.filename.replace("\\", "/"): info.file_size
+            for info in source.infolist()
+            if not info.is_dir()
+        }
+    if not sizes.get(TEAMHUB_ARCHIVE_LAUNCHER):
+        sys.exit(f"{os.path.basename(archive)} is missing non-empty {TEAMHUB_ARCHIVE_LAUNCHER}")
+    if TEAMHUB_ARCHIVE_LEGACY_CMD in sizes:
+        sys.exit(f"{os.path.basename(archive)} must not contain {TEAMHUB_ARCHIVE_LEGACY_CMD}")
 
 
 def run(*args, **kwargs):
@@ -158,6 +175,9 @@ def main():
     if not os.path.exists(DAEMON):
         sys.exit("dist/ is missing the daemon for win32-x64; run "
                  "`LINGER_DESKTOP_DAEMON_TARGETS=win32-x64 node build.mjs` first")
+    if not os.path.isfile(TEAMHUB_LAUNCHER) or os.path.getsize(TEAMHUB_LAUNCHER) <= 0:
+        sys.exit("dist/ is missing dist/teamhub-cli/teamhub.exe for win32-x64; run "
+                 "`LINGER_DESKTOP_DAEMON_TARGETS=win32-x64 node build.mjs` first")
     check_teamhub("win32-x64")
     check_runtime("win32-x64")
     os.makedirs(args.out, exist_ok=True)
@@ -174,6 +194,7 @@ def main():
         def make_zip():
             build_zip(stage, archive)
             computer_tools.check_archive(archive, "Linger/resources/", "win32-x64")
+            verify_teamhub_cli_archive(archive)
             report(archive)
 
         # Both read the finalized stage folder and write distinct outputs.

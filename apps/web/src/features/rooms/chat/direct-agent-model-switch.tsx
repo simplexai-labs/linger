@@ -11,10 +11,14 @@ const EditAgentRuntimeDialog = lazy(async () => ({
     .EditAgentRuntimeDialog,
 }));
 import {
-  reasoningEffortMessages,
+  reasoningEffortLabel,
   useResolvedAgentModelLabel,
 } from "../members/use-agent-model-selection";
-import { tenantAgentsQueryKey } from "../room-queries";
+import {
+  anotherMeQueryKey,
+  tenantAgentAvailabilityQueryKey,
+  tenantAgentsQueryKey,
+} from "../room-queries";
 import { composerMessages } from "./composer.messages";
 import "./direct-agent-model-switch.css";
 
@@ -75,6 +79,12 @@ function RuntimeSettingsEntry({ client, registration, tenantId, busy }: Props) {
           queryKey: tenantAgentsQueryKey(tenantId),
         }),
         queryClient.invalidateQueries({
+          queryKey: tenantAgentAvailabilityQueryKey(tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: anotherMeQueryKey(tenantId),
+        }),
+        queryClient.invalidateQueries({
           queryKey: tenantLocalModelsQueryKey(tenantId),
         }),
       ]);
@@ -99,7 +109,7 @@ function RuntimeSettingsEntry({ client, registration, tenantId, busy }: Props) {
           <>
             {" "}
             <span className="agent-model-switch-trigger-effort">
-              {t(reasoningEffortMessages[effort])}
+              {reasoningEffortLabel(effort, t)}
             </span>
           </>
         ) : null}

@@ -24,6 +24,7 @@ import {
   validateByokEndpoint,
 } from "@linger/local-installation/byok-source";
 import { checkRuntimeModel } from "@linger/local-installation/managed-codex";
+import type { SourceInstallOptions } from "@linger/local-installation/source-checkout";
 export interface ServerOptions {
   home: string;
   sourceRepo: string;
@@ -33,6 +34,7 @@ export interface ServerOptions {
   port?: number;
   webDir?: string;
   idleTimeoutMs?: number;
+  launchVoiceToolsBackground?: SourceInstallOptions["launchVoiceToolsBackground"];
   dependencies?: Partial<ReturnType<typeof coreAdapter>> & {
     run?: RunInstallation;
   };
@@ -87,7 +89,12 @@ export async function startInstallerServer(options: ServerOptions) {
   }
   await rm(path.join(stateDir, "launch.html"), { force: true });
   const dependencies = {
-    ...coreAdapter(options.home, options.sourceRepo, options.externalComputer),
+    ...coreAdapter(
+      options.home,
+      options.sourceRepo,
+      options.externalComputer,
+      options.launchVoiceToolsBackground,
+    ),
     ...options.dependencies,
   };
   const jobs = new JobManager(path.join(stateDir, "jobs"), dependencies.run);

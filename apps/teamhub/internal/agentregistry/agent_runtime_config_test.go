@@ -24,7 +24,12 @@ func TestLocalAgentRuntimeSnapshotPreservesReasoningEffort(t *testing.T) {
 	if runtime.ReasoningEffort == nil || *runtime.ReasoningEffort != "medium" {
 		t.Fatalf("Local snapshot lost reasoning effort: %+v", runtime)
 	}
-	registration.RuntimeReasoningEffort = textValue("invalid")
+	registration.RuntimeReasoningEffort = textValue("minimal")
+	snapshot, err = ProjectAgentRuntimeConfigSnapshot(registration)
+	if err != nil || snapshot.Runtime.ReasoningEffort == nil || *snapshot.Runtime.ReasoningEffort != "minimal" {
+		t.Fatalf("dynamic reasoning effort was rejected: snapshot=%+v err=%v", snapshot.Runtime, err)
+	}
+	registration.RuntimeReasoningEffort = textValue("bad effort!")
 	if _, err := ProjectAgentRuntimeConfigSnapshot(registration); err == nil {
 		t.Fatal("invalid reasoning effort was accepted")
 	}
@@ -34,15 +39,19 @@ func TestLocalAgentRuntimeConfigPreservesReasoningEffort(t *testing.T) {
 	computer, grant := "computer-local", "workspace-local"
 	for _, runtimeType := range []httpapi.LocalRuntimeType{httpapi.LocalRuntimeTypeCodex, httpapi.LocalRuntimeTypeClaude, httpapi.LocalRuntimeTypePi} {
 		t.Run(string(runtimeType), func(t *testing.T) {
-			effort := httpapi.AgentReasoningEffort("medium")
-			config := httpapi.AgentRuntimeConfig{Model: "test-model", ReasoningEffort: &effort, Placement: &httpapi.AgentRuntimePlacement{Type: httpapi.Local, ComputerId: &computer, WorkspaceGrantId: &grant, RuntimeType: &runtimeType}}
-			if !ValidAgentRuntimeConfig(config) {
-				t.Fatal("valid Local model reasoning effort was rejected")
+			for _, value := range []string{"medium", "minimal", "custom_2"} {
+				effort := value
+				config := httpapi.AgentRuntimeConfig{Model: "test-model", ReasoningEffort: &effort, Placement: &httpapi.AgentRuntimePlacement{Type: httpapi.Local, ComputerId: &computer, WorkspaceGrantId: &grant, RuntimeType: &runtimeType}}
+				if !ValidAgentRuntimeConfig(config) {
+					t.Fatalf("valid Local model reasoning effort %q was rejected", value)
+				}
 			}
-			invalid := httpapi.AgentReasoningEffort("invalid")
-			config.ReasoningEffort = &invalid
-			if ValidAgentRuntimeConfig(config) {
-				t.Fatal("invalid reasoning effort was accepted")
+			for _, value := range []string{"", "-minimal", "bad effort", "too_long_effort_token"} {
+				invalid := value
+				config := httpapi.AgentRuntimeConfig{Model: "test-model", ReasoningEffort: &invalid, Placement: &httpapi.AgentRuntimePlacement{Type: httpapi.Local, ComputerId: &computer, WorkspaceGrantId: &grant, RuntimeType: &runtimeType}}
+				if ValidAgentRuntimeConfig(config) {
+					t.Fatalf("invalid reasoning effort %q was accepted", value)
+				}
 			}
 		})
 	}

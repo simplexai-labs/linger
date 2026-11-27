@@ -48,16 +48,18 @@ var BrowserTool = Tool{
 // out these steps instead of guessing at the interface.
 const browserConnectionSteps = "Give them the exact steps, not a guess: click their profile picture at the bottom of the left sidebar, choose Settings, open Computers, select this computer, click Connect Chrome, then follow the three steps there (install the Playwright Extension in Chrome, copy the token it shows, paste it and connect). Do not say you cannot see their screen; these steps are the whole answer."
 
-// BrowserConnectionDetail tells the live model what to say when the owner's
-// Chrome is not connected or is busy, so nothing ran: the user connects it
-// once under Settings, Computers, or the work goes to a background task,
-// which can use their Chrome through the desktop.
+// BrowserConnectionDetail tells the live model what to say when a browser
+// call ran nothing: the owner's Chrome is not connected or is busy, which
+// the user fixes once under Settings, Computers, or by handing the work to a
+// background task; or the computer has no browser to drive at all.
 func BrowserConnectionDetail(code string) (string, bool) {
 	switch code {
 	case "browser_connection_required":
 		return "Nothing was done: the user's Chrome is not connected to you yet. Tell them so in one sentence and that they can connect it once in Settings under Computers. " + browserConnectionSteps + " Until then offer to do it as a background task with start_task (surface web). Never call this tool again in this call until they say it is connected, and never blame Chrome, sleep or a frozen window.", true
 	case "browser_connection_invalid":
 		return "Nothing was done: the saved connection to the user's Chrome no longer works. Tell them so in one sentence and that they can reconnect it in Settings under Computers. " + browserConnectionSteps + " Until then offer to do it as a background task with start_task (surface web). Never call this tool again in this call until they say it is reconnected.", true
+	case "browser_unavailable":
+		return "Nothing was done: this computer has no browser you can drive. Tell the user so in one sentence and that installing Google Chrome on it fixes this. A background task uses the same browser, so do not offer start_task for this. Never call this tool again in this call until they say it is installed.", true
 	case "browser_busy":
 		return "Nothing was done: a background task is using the user's Chrome right now. Tell them so in one sentence and offer to try again when that task finishes; do not call this tool again right away.", true
 	}

@@ -255,16 +255,6 @@ export function UpdateDriverDialog({
 
   return (
     <ModalDialog
-      description={
-        model
-          ? t(m.driverDialogDescriptionForModel, {
-              computer: view.computer.display_name,
-              model: model.name,
-            })
-          : t(m.driverDialogDescriptionHost, {
-              computer: view.computer.display_name,
-            })
-      }
       footer={
         <>
           {onRecheck && !offline ? (
@@ -346,7 +336,7 @@ export function UpdateDriverDialog({
               </dd>
             </div>
           </dl>
-          <p className="mt-2.5 border-t border-border/70 pt-2 text-xs text-muted-foreground">
+          <p className="mt-2.5 pt-2 text-xs text-muted-foreground">
             {t(m.driverDialogNoToolkitNote)}
           </p>
         </div>
@@ -571,9 +561,6 @@ export function UpdateDriverDialog({
                 </p>
               </>
             )}
-            <p className="text-xs text-muted-foreground">
-              {t(m.driverDialogWindowsRestartNote)}
-            </p>
           </div>
         )}
 
@@ -591,7 +578,7 @@ export function UpdateDriverDialog({
           </FormFeedback>
         ) : null}
 
-        <div className="flex items-center justify-between border-t border-border/70 pt-2.5 text-xs">
+        <div className="flex items-center justify-between pt-2.5 text-xs">
           {desktopBridge ? (
             <button
               className="inline-flex items-center gap-1 font-medium text-app-link underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

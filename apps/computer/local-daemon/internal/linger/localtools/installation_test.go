@@ -14,7 +14,7 @@ import (
 func TestInstalledToolsRejectCorruptOrRedirectedAssets(t *testing.T) {
 	root := t.TempDir()
 	toolRoot := filepath.Join(root, "cli", "computer-tools")
-	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", "bin/pi"}, quickJSAssets...)
 	assets := []map[string]any{}
 	for _, name := range entries {
 		p := filepath.Join(toolRoot, name)
@@ -31,7 +31,7 @@ func TestInstalledToolsRejectCorruptOrRedirectedAssets(t *testing.T) {
 	node := filepath.Join(root, "runtime", "bin", "node")
 	_ = os.MkdirAll(filepath.Dir(node), 0o700)
 	_ = os.WriteFile(node, []byte("fixture"), 0o700)
-	manifest := map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets}
+	manifest := map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": entries[2], "assets": assets}
 	write := func() {
 		t.Helper()
 		data, _ := json.Marshal(manifest)
@@ -41,9 +41,26 @@ func TestInstalledToolsRejectCorruptOrRedirectedAssets(t *testing.T) {
 	}
 	write()
 	executable := filepath.Join(root, "daemon", "linger-computer-daemon")
-	if result, err := Installed(executable); err != nil || result == nil || result.NodePath != node {
+	resolvedTools, err := filepath.EvalSymlinks(toolRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Installed(executable)
+	if err != nil || result == nil || result.NodePath != node || result.PiEntry != filepath.Join(resolvedTools, "bin", "pi") || result.PiVersion != "1.5.2" {
 		t.Fatalf("valid installation: %+v %v", result, err)
 	}
+	manifest["pi_entry"] = ""
+	write()
+	if _, err := Installed(executable); err == nil {
+		t.Fatal("missing pi_entry accepted")
+	}
+	manifest["pi_entry"] = "bin/pi.exe"
+	write()
+	if _, err := Installed(executable); err == nil {
+		t.Fatal("wrong-target pi_entry accepted")
+	}
+	manifest["pi_entry"] = entries[2]
+	write()
 	asset := filepath.Join(toolRoot, entries[0])
 	_ = os.WriteFile(asset, []byte("truncated or replaced"), 0o600)
 	if _, err := Installed(executable); err == nil {
@@ -75,7 +92,14 @@ func TestInstalledToolsRejectCorruptOrRedirectedAssets(t *testing.T) {
 func TestInstalledToolsIgnoreFileManagerMetadata(t *testing.T) {
 	root := t.TempDir()
 	tools := filepath.Join(root, "cli", "computer-tools")
-	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	executable := filepath.Join(root, "daemon", "linger-computer-daemon")
+	node := filepath.Join(root, "runtime", "bin", "node")
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+		node += ".exe"
+	}
+	piBin := piEntry(executable)
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", piBin}, quickJSAssets...)
 	assets := make([]map[string]any, 0, len(entries))
 	for _, name := range entries {
 		file := filepath.Join(tools, filepath.FromSlash(name))
@@ -87,18 +111,12 @@ func TestInstalledToolsIgnoreFileManagerMetadata(t *testing.T) {
 		}
 		assets = append(assets, map[string]any{"path": name, "size_bytes": 7})
 	}
-	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets})
+	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": piBin, "assets": assets})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(tools, "manifest.json"), manifest, 0o600); err != nil {
 		t.Fatal(err)
-	}
-	executable := filepath.Join(root, "daemon", "linger-computer-daemon")
-	node := filepath.Join(root, "runtime", "bin", "node")
-	if runtime.GOOS == "windows" {
-		executable += ".exe"
-		node += ".exe"
 	}
 	if err := os.MkdirAll(filepath.Dir(node), 0o700); err != nil {
 		t.Fatal(err)
@@ -142,7 +160,7 @@ func TestInstalledToolsFollowTheBundleDepsLinks(t *testing.T) {
 	root := t.TempDir()
 	deps := filepath.Join(root, "deps-0123456789abcdef")
 	bundle := filepath.Join(root, "lib-fedcba9876543210-1")
-	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", "bin/pi"}, quickJSAssets...)
 	assets := []map[string]any{}
 	for _, name := range entries {
 		p := filepath.Join(deps, "computer-tools", name)
@@ -155,7 +173,7 @@ func TestInstalledToolsFollowTheBundleDepsLinks(t *testing.T) {
 		sum := sha256.Sum256([]byte("fixture"))
 		assets = append(assets, map[string]any{"path": name, "size_bytes": 7, "sha256": hex.EncodeToString(sum[:])})
 	}
-	data, _ := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets})
+	data, _ := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": entries[2], "assets": assets})
 	if err := os.WriteFile(filepath.Join(deps, "computer-tools", "manifest.json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +205,7 @@ func TestWindowsInstalledToolsUseExtractedBundle(t *testing.T) {
 	}
 	root := t.TempDir()
 	tools := filepath.Join(root, "cli", "computer-tools")
-	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", "bin/pi.exe"}, quickJSAssets...)
 	assets := make([]map[string]any, 0, len(entries))
 	for _, name := range entries {
 		file := filepath.Join(tools, filepath.FromSlash(name))
@@ -199,7 +217,7 @@ func TestWindowsInstalledToolsUseExtractedBundle(t *testing.T) {
 		}
 		assets = append(assets, map[string]any{"path": name, "size_bytes": 7})
 	}
-	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets})
+	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": entries[2], "assets": assets})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +233,7 @@ func TestWindowsInstalledToolsUseExtractedBundle(t *testing.T) {
 	}
 	executable := filepath.Join(root, "daemon", "linger-computer-daemon.exe")
 	result, err := Installed(executable)
-	if err != nil || result == nil || result.NodePath != node {
+	if err != nil || result == nil || result.NodePath != node || result.PiEntry != filepath.Join(tools, "bin", "pi.exe") || result.PiVersion != "1.5.2" {
 		t.Fatalf("extracted installation: %+v %v", result, err)
 	}
 	if err := os.WriteFile(filepath.Join(tools, "unexpected.js"), []byte("unlisted"), 0o600); err != nil {
@@ -243,7 +261,7 @@ func TestInstalledToolsInTheDesktopLayout(t *testing.T) {
 		t.Fatalf("desktop without tools: %+v %v", result, err)
 	}
 	tools := ToolsDirectory(executable)
-	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", "bin/pi"}, quickJSAssets...)
 	assets := make([]map[string]any, 0, len(entries))
 	for _, name := range entries {
 		file := filepath.Join(tools, filepath.FromSlash(name))
@@ -255,7 +273,7 @@ func TestInstalledToolsInTheDesktopLayout(t *testing.T) {
 		}
 		assets = append(assets, map[string]any{"path": name, "size_bytes": 7})
 	}
-	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets})
+	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": entries[2], "assets": assets})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +288,7 @@ func TestInstalledToolsInTheDesktopLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := Installed(executable)
-	if err != nil || result == nil || result.NodePath != node || result.PlaywrightEntry != filepath.Join(tools, filepath.FromSlash(entries[0])) {
+	if err != nil || result == nil || result.NodePath != node || result.PlaywrightEntry != filepath.Join(tools, filepath.FromSlash(entries[0])) || result.PiEntry != filepath.Join(tools, "bin", "pi") || result.PiVersion != "1.5.2" {
 		t.Fatalf("desktop installation: %+v %v", result, err)
 	}
 }
@@ -283,7 +301,7 @@ func TestInstalledToolsSupportSharedNodeAndExternalToolsEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	externalTools := filepath.Join(root, "store", "computer-tools-abc123")
-	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs"}, quickJSAssets...)
+	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", "bin/pi"}, quickJSAssets...)
 	assets := make([]map[string]any, 0, len(entries))
 	for _, name := range entries {
 		file := filepath.Join(externalTools, filepath.FromSlash(name))
@@ -295,7 +313,7 @@ func TestInstalledToolsSupportSharedNodeAndExternalToolsEnv(t *testing.T) {
 		}
 		assets = append(assets, map[string]any{"path": name, "size_bytes": 7})
 	}
-	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.2.0", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "assets": assets})
+	manifest, err := json.Marshal(map[string]any{"schema_version": 1, "versions": map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"}, "playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": entries[2], "assets": assets})
 	if err != nil {
 		t.Fatal(err)
 	}

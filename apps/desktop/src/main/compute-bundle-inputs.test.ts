@@ -34,7 +34,7 @@ afterEach(async () => {
 
 const SAMPLE_LOCKFILE = `lockfileVersion: '9.0'
 packages:
-  '@livekit/rtc-node@0.13.34':
+  '@livekit/rtc-ffi-bindings@0.13.34':
     resolution: {integrity: sha512-livekitRtcHash==}
   'better-sqlite3@11.0.0':
     resolution: {integrity: sha512-sqliteHash==}
@@ -72,16 +72,22 @@ describe("V2 bundle versioning & inputHash planner", () => {
       target: "darwin-arm64",
       nodeMajor: "26",
     });
-    expect(base.packageCount).toBe(3); // @livekit/rtc-node, better-sqlite3, sharp (not hono)
+    expect(base.packageCount).toBe(3); // @livekit/rtc-ffi-bindings, better-sqlite3, sharp (not hono)
 
-    const pureJsEdited = SAMPLE_LOCKFILE.replace("honoPureJsHash==", "honoPureJsHashV2==");
+    const pureJsEdited = SAMPLE_LOCKFILE.replace(
+      "honoPureJsHash==",
+      "honoPureJsHashV2==",
+    );
     const afterJsEdit = computeNativeDepsHash(pureJsEdited, {
       target: "darwin-arm64",
       nodeMajor: "26",
     });
     expect(afterJsEdit.hash).toBe(base.hash);
 
-    const nativeEdited = SAMPLE_LOCKFILE.replace("sharpHash==", "sharpHashV2==");
+    const nativeEdited = SAMPLE_LOCKFILE.replace(
+      "sharpHash==",
+      "sharpHashV2==",
+    );
     const afterNativeEdit = computeNativeDepsHash(nativeEdited, {
       target: "darwin-arm64",
       nodeMajor: "26",
@@ -137,7 +143,10 @@ describe("V2 bundle versioning & inputHash planner", () => {
       path.join(repo, "apps/teamhub/cmd/teamhub/main.go"),
       "package main\nfunc main() { println(2) }\n",
     );
-    const backendOnlyPlan = planBundleBuilds(repo, { useFs: true, prevManifest });
+    const backendOnlyPlan = planBundleBuilds(repo, {
+      useFs: true,
+      prevManifest,
+    });
     expect(backendOnlyPlan.toBuild).toEqual(["backend"]);
     expect(backendOnlyPlan.reused).toEqual(["web", "node-native-deps"]);
 
@@ -153,7 +162,8 @@ describe("V2 bundle versioning & inputHash planner", () => {
     expect(kitPlan.toBuild).toEqual(["web", "backend"]);
     expect(kitPlan.reused).toEqual(["node-native-deps"]);
     expect(
-      computeBundleInputHash(repo, "node-native-deps", { useFs: true }).inputHash,
+      computeBundleInputHash(repo, "node-native-deps", { useFs: true })
+        .inputHash,
     ).toBe(baselineDepsHash);
   });
 
@@ -173,7 +183,10 @@ describe("V2 bundle versioning & inputHash planner", () => {
     const builtArtifacts: Record<string, unknown> = {};
     for (const id of BUNDLE_IDS) {
       const entry = plan.bundles[id]!;
-      const art = id === "web" ? packed : { ...packed, artifactId: `${id}-${packed.sha256.slice(0, 12)}` };
+      const art =
+        id === "web"
+          ? packed
+          : { ...packed, artifactId: `${id}-${packed.sha256.slice(0, 12)}` };
       builtArtifacts[id] =
         entry.arch === "noarch"
           ? art
@@ -190,9 +203,15 @@ describe("V2 bundle versioning & inputHash planner", () => {
     });
 
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const privPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const privPem = privateKey
+      .export({ type: "pkcs8", format: "pem" })
+      .toString();
     const pubPem = publicKey.export({ type: "spki", format: "pem" }).toString();
-    const { bytes, signatureBase64 } = signManifestV3(manifest, privPem, pubPem);
+    const { bytes, signatureBase64 } = signManifestV3(
+      manifest,
+      privPem,
+      pubPem,
+    );
     const verified = verifyAppManifestV3(bytes, signatureBase64, pubPem);
     expect(verified.appVersion).toBe("0.2.15");
     expect(verified.rollout.percent).toBe(25);
@@ -229,7 +248,7 @@ describe("V2 bundle versioning & inputHash planner", () => {
       manifest.bundles.web.artifact.url,
     );
     expect(nextManifest.bundles.backend.originAppVersion).toBe("0.2.16");
-    expect(nextManifest.bundles.backend.targets["darwin-arm64"].url).toBe(
+    expect(nextManifest.bundles.backend.targets["darwin-arm64"]?.url).toBe(
       "https://cdn-new.example.com/linger/bundles/backend/backend-bbbbbbbbbbbb.tar.zst",
     );
   });

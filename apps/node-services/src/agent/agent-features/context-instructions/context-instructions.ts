@@ -132,7 +132,7 @@ function renderCompactTeamHubCommands(
     { readonly contextKind: "meta" }
   >,
 ): string {
-  const common = `teamhub is a command-line program, not a tool: run it with your shell tool (exec_command, Bash, or bash), passing the whole command line as its cmd or command argument, and never call a tool named teamhub. teamhub <domain> <action> --help explains each command, and TeamHub checks your authority on every call. Use --file - for a body from stdin and --json for structured results. Credentials are installed; never read or print them. With --operation-id, use a unique id per write; after an unknown outcome, rerun the same command with the id the error printed.${input.connectedApps ? COMPACT_CONNECTED_APP_WRITES : ""}`;
+  const common = `teamhub is a command-line program, not a tool: run it with your shell tool (exec_command, Bash, bash, or powershell), passing the whole command line as its cmd or command argument, and never call a tool named teamhub. teamhub <domain> <action> --help explains each command, and TeamHub checks your authority on every call. Use --file - for a body from stdin and --json for structured results. Credentials are installed; never read or print them. With --operation-id, use a unique id per write; after an unknown outcome, rerun the same command with the id the error printed.${input.connectedApps ? COMPACT_CONNECTED_APP_WRITES : ""}`;
   if (input.contextKind === "document")
     return `<teamhub-commands>\n${common}
 Use the thread ID from this input: teamhub docs comment get <thread-id> reads it, teamhub docs comment reply <thread-id> --content "..." replies, and teamhub docs comment replace <thread-id> --content "..." applies an explicitly requested text change. Don't send Room messages.

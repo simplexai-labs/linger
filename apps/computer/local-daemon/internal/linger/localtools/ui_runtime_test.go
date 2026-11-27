@@ -140,8 +140,21 @@ func TestUnifiedUIStateImagesAndPrivateCapabilities(t *testing.T) {
 		t.Fatalf("image/capability result: %s", got)
 	}
 	got = f.execute(t, `state.count++; ui.emit(state.picture); ui.emit([1,2]); ui.emit(3); return state.count;`)
-	if strings.Contains(string(got), `"isError":true`) || !strings.Contains(string(got), `"value":2`) {
+	if strings.Contains(string(got), `"isError":true`) || !strings.Contains(string(got), `\"value\":2`) || strings.Contains(string(got), `"structuredContent"`) {
 		t.Fatalf("state did not persist: %s", got)
+	}
+	got = f.execute(t, `return "line one\nsays \"hi\""`)
+	if !strings.Contains(string(got), `{"text":"line one\nsays \"hi\"","type":"text"}`) || !strings.Contains(string(got), `\"value\":\"returned text shown above\"`) {
+		t.Fatalf("returned text was not shown verbatim: %s", got)
+	}
+	if got = f.execute(t, `return null`); strings.Contains(string(got), `{"text":"","type":"text"}`) {
+		t.Fatalf("a null value added an empty text part: %s", got)
+	}
+	if got = f.execute(t, `null.x`); !strings.Contains(string(got), `"hint"`) {
+		t.Fatalf("a script error has no hint: %s", got)
+	}
+	if got = f.execute(t, `await ui.browser.no_such_method({})`); strings.Contains(string(got), `"hint"`) {
+		t.Fatalf("a driver error got the script hint: %s", got)
 	}
 	reset := f.rpc(t, t.Context(), "tools/call", map[string]any{"name": "ui_reset", "arguments": map[string]any{}})
 	if !strings.Contains(string(reset), `"reset":true`) {
@@ -338,13 +351,41 @@ func TestUnifiedUIImageHandleExpiresAfterScriptFailure(t *testing.T) {
 	}
 	defer clear()
 	first := f.execute(t, `return (await ui.browser.take_screenshot({})).content[0];`)
+	// A returned screenshot is delivered as an image part, so the result has
+	// no structuredContent for Codex to show in place of it; the summary is
+	// the last text part.
+	var envelope struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+			Data string `json:"data"`
+		} `json:"content"`
+		Structured json.RawMessage `json:"structuredContent"`
+	}
+	if json.Unmarshal(first, &envelope) != nil || len(envelope.Content) != 2 || len(envelope.Structured) != 0 ||
+		envelope.Content[0].Type != "image" || envelope.Content[0].Data != "aW1hZ2U=" {
+		t.Fatalf("returned screenshot was not delivered as an image: %s", first)
+	}
 	var reply struct {
 		Structured struct {
 			Value json.RawMessage `json:"value"`
-		} `json:"structuredContent"`
+		}
 	}
-	if json.Unmarshal(first, &reply) != nil || len(reply.Structured.Value) == 0 {
+	if json.Unmarshal([]byte(envelope.Content[1].Text), &reply.Structured) != nil || len(reply.Structured.Value) == 0 {
 		t.Fatal(string(first))
+	}
+	// A whole observation delivers its screenshot, and a note beside it does
+	// not take the screenshot's place.
+	for _, script := range []string{
+		`return await ui.browser.take_screenshot({});`,
+		`console.log('clicked'); return await ui.browser.take_screenshot({});`,
+	} {
+		if got := f.execute(t, script); !strings.Contains(string(got), `"data":"aW1hZ2U="`) || strings.Contains(string(got), `"structuredContent"`) {
+			t.Fatalf("%s did not deliver the returned screenshot: %s", script, got)
+		}
+	}
+	if text := f.execute(t, `return 1`); !strings.Contains(string(text), `"structuredContent":{`) {
+		t.Fatalf("a result without images lost structuredContent: %s", text)
 	}
 	failure := f.execute(t, `throw new Error('discard this state');`)
 	if !strings.Contains(string(failure), `"state_reset":true`) {

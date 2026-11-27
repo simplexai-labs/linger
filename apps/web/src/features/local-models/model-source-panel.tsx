@@ -199,15 +199,6 @@ function TerminateTasksDialog({
   const t = useT();
   return (
     <ModalDialog
-      description={
-        agents.length
-          ? t(m.terminateDescription, {
-              computer: computerName,
-              count: agents.length,
-              names: joinList(agents, t),
-            })
-          : t(m.terminateDescriptionSome, { computer: computerName })
-      }
       footer={
         <>
           <Button onClick={onClose}>{t(commonMessages.cancel)}</Button>
@@ -221,7 +212,13 @@ function TerminateTasksDialog({
       title={t(m.terminateTitle)}
     >
       <p className="px-5 py-4 text-sm text-muted-foreground">
-        {t(m.terminateBody)}
+        {agents.length
+          ? t(m.terminateDescription, {
+              computer: computerName,
+              count: agents.length,
+              names: joinList(agents, t),
+            })
+          : t(m.terminateDescriptionSome, { computer: computerName })}
       </p>
     </ModalDialog>
   );
@@ -259,7 +256,7 @@ export function ModelSourceTabs({
   }
 
   return (
-    <div className="mt-5 border-b border-border">
+    <div className="mt-5">
       <div
         aria-label={t(m.modelSource)}
         className="relative -ml-3 inline-flex max-w-full self-start gap-1"

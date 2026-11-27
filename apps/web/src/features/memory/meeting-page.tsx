@@ -76,7 +76,7 @@ export function MeetingPage() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-app-surface">
-      <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-app-border bg-app-surface px-4 py-3 md:px-6">
+      <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 bg-app-surface px-4 py-3 md:px-6">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <Button
             aria-controls={WORKSPACE_TREE_ID}

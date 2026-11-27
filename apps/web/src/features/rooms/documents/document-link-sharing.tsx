@@ -63,7 +63,7 @@ export function DocumentLinkSharing({
     }
   }
   return (
-    <section className="mt-5 border-t border-app-border pt-4">
+    <section className="mt-5 pt-4">
       <div className="flex flex-wrap items-center gap-3">
         <Icon icon={Link01Icon} className="text-app-muted" />
         <h3 className="mr-auto text-sm font-medium">{t(m.anyoneWithLink)}</h3>

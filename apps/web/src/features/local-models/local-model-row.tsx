@@ -47,7 +47,6 @@ import type {
   LocalModelsView,
 } from "./local-models-queries";
 import {
-  collapsedRowBadges,
   downloadPercent,
   downloadStatusDetail,
   downloadStopped,
@@ -257,16 +256,14 @@ function RowStatusLine({
                   : undefined
           }
         >
-          {t(tag.label)}
+          {status === "available" ? availableSummary : t(tag.label)}
         </span>
         {slower ? (
           <>
             {" · "}
-            {availableSummary}
-            {" · "}
             <span className="text-app-warning">{t(m.runsSlower)}</span>
           </>
-        ) : detail ? (
+        ) : detail && status !== "available" ? (
           ` · ${detail}`
         ) : null}
       </span>
@@ -275,20 +272,7 @@ function RowStatusLine({
 }
 
 function availableDetailCopy(model: LocalModel, t: Translate): string {
-  const download = formatGigabytes(model.download_bytes, t);
-  if (model.memory_bytes <= 0) return download;
-  const memory = formatGigabytes(model.memory_bytes, t);
-  if (model.fit === "gpu") {
-    if (model.host_ram_bytes && model.host_ram_bytes > 0) {
-      return t(m.availableDetailWithVramAndRam, {
-        download,
-        ram: formatGigabytes(model.host_ram_bytes, t),
-        vram: memory,
-      });
-    }
-    return t(m.availableDetailWithVram, { download, vram: memory });
-  }
-  return t(m.availableDetailWithMemory, { download, memory });
+  return formatGigabytes(model.download_bytes, t);
 }
 
 function loadedMemoryCopy(model: LocalModel, t: Translate): string {
@@ -326,22 +310,18 @@ function variantDetailCopy(entry: ModelEntry, t: Translate): string {
 }
 
 function RowMetadataPills({
-  badges,
   engine,
   engineBadge,
   engineTitle,
   featured,
-  overflowTitle,
   status,
   usedBy,
   usedByTitle,
 }: {
-  badges: string[];
   engine?: LocalModel["engine"];
   engineBadge?: string;
   engineTitle?: string;
   featured: boolean;
-  overflowTitle?: string;
   status: ModelStatus;
   usedBy?: string;
   usedByTitle?: string;
@@ -393,15 +373,6 @@ function RowMetadataPills({
           {engineBadge}
         </span>
       ) : null}
-      {badges.map((badge, index) => (
-        <span
-          className="inline-flex h-[22px] items-center rounded-sm bg-muted px-2 text-xs text-muted-foreground"
-          key={badge}
-          title={index === badges.length - 1 ? overflowTitle : undefined}
-        >
-          {badge}
-        </span>
-      ))}
     </div>
   );
 }
@@ -453,7 +424,6 @@ export function ModelRow({
   disabled,
   entry,
   expanded,
-  hasReadyAlternatives = false,
   inSpotlight = false,
   onAssignAgent,
   onRecheck,
@@ -475,7 +445,6 @@ export function ModelRow({
   disabled: boolean;
   entry: ModelEntry;
   expanded: boolean;
-  hasReadyAlternatives?: boolean;
   /** Rendered inside `FeaturedModelSpotlight`, which already carries the partner header. */
   inSpotlight?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
@@ -568,12 +537,7 @@ export function ModelRow({
       ? engineBadgeCopy(model.engine)
       : undefined;
   const engineTitle = model.engine_label ?? engineBadge;
-  const { badges, overflowTitle } = collapsedRowBadges(model, t);
-  const hasMeta =
-    showFeaturedPill ||
-    Boolean(usedBy) ||
-    Boolean(engineBadge) ||
-    badges.length > 0;
+  const hasMeta = showFeaturedPill || Boolean(usedBy) || Boolean(engineBadge);
   const damagedFiles =
     status === "failed" &&
     (model.error?.code === "CHECKSUM_MISMATCH" ||
@@ -708,12 +672,10 @@ export function ModelRow({
         </button>
         {hasMeta ? (
           <RowMetadataPills
-            badges={badges}
             engine={model.engine}
             engineBadge={engineBadge}
             engineTitle={engineTitle}
             featured={showFeaturedPill}
-            overflowTitle={overflowTitle}
             status={status}
             usedBy={usedBy}
             usedByTitle={usedByTitle}
@@ -721,7 +683,7 @@ export function ModelRow({
         ) : null}
         <div
           className={cn(
-            "col-span-2 mt-0.5 flex flex-wrap items-center justify-end gap-1.5 border-t border-border/60 pt-2.5 @md:col-span-1 @md:col-start-2 @md:row-start-1 @md:mt-0 @md:flex-nowrap @md:border-t-0 @md:pt-0",
+            "col-span-2 mt-0.5 flex flex-wrap items-center justify-end gap-1.5 pt-2.5 @md:col-span-1 @md:col-start-2 @md:row-start-1 @md:mt-0 @md:flex-nowrap @md:pt-0",
             hasMeta ? "row-start-3 @2xl:col-start-3" : "row-start-2",
           )}
         >
@@ -762,16 +724,6 @@ export function ModelRow({
                 );
               })}
             </Select>
-          ) : model.quant ? (
-            <span
-              className={cn(
-                "inline-flex h-7 max-w-44 shrink-0 items-center truncate rounded-full border border-border/70 bg-muted/40 px-2.5 text-xs font-medium text-muted-foreground",
-                status === "unavailable" && "opacity-60",
-              )}
-              title={`${t(m.factVersion)}: ${model.quant}`}
-            >
-              {model.quant}
-            </span>
           ) : null}
           {status === "loaded" && handlers.onUseForAgents ? (
             <Button
@@ -885,7 +837,7 @@ export function ModelRow({
         <AutoHeight appear>
           <div
             aria-label={t(m.detailsOf, { name: model.name })}
-            className="border-t border-border bg-app-canvas/60 px-4 pt-3 pb-3.5"
+            className="bg-app-canvas/60 px-4 pt-3 pb-3.5"
             id={panelId}
             role="region"
           >
@@ -901,7 +853,6 @@ export function ModelRow({
               disabled={disabled}
               entry={entry}
               hasPrimaryAssignAction={showsPrimaryAssignButton}
-              hasReadyAlternatives={hasReadyAlternatives}
               onAssignAgent={onAssignAgent}
               onRecheck={onRecheck}
               onUpdateDriver={onUpdateDriver}
@@ -909,7 +860,7 @@ export function ModelRow({
               view={view}
             />
             {removable || stopped ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+              <div className="mt-3 flex flex-wrap items-center gap-2 pt-3">
                 {removable ? (
                   <Button
                     data-voice-risk="never"

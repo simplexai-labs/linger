@@ -221,12 +221,14 @@ func TestClaudeUsageTotals(t *testing.T) {
 func TestClaudeUnsupportedEffortNeverSpawns(t *testing.T) {
 	dir := t.TempDir()
 	backend, _ := Open("claude", claudeFakeProfile(t, "frames", map[string]string{"CLAUDE_FAKE_DIR": dir}))
-	_, err := backend.Start(t.Context(), "hello", claudeSpec(RunSpec{Effort: "ultra"}))
-	if err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "argv")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("the fake was spawned")
+	for _, invalid := range []string{"-low", "bad effort", "too_long_effort_token"} {
+		_, err := backend.Start(t.Context(), "hello", claudeSpec(RunSpec{Effort: invalid}))
+		if err == nil || !strings.Contains(err.Error(), "unsupported") {
+			t.Fatalf("Effort %q err = %v", invalid, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "argv")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the fake was spawned for invalid effort %q", invalid)
+		}
 	}
 	if _, err := backend.Start(t.Context(), "hello", RunSpec{}); err == nil || !strings.Contains(err.Error(), "policy is required") {
 		t.Fatalf("missing policy err = %v", err)
@@ -242,6 +244,26 @@ func TestClaudeUnsupportedEffortNeverSpawns(t *testing.T) {
 	}
 	if _, err := backend.Start(t.Context(), "hello", claudeSpec(RunSpec{AssignSessionID: "not-a-uuid"})); err == nil || !strings.Contains(err.Error(), "not a UUID") {
 		t.Fatalf("identity err = %v", err)
+	}
+}
+
+func TestClaudeDynamicReasoningEffortTokens(t *testing.T) {
+	logger := claudeQuietLogger()
+	for _, effort := range []string{"", "none", "minimal", "ultra", "custom_2"} {
+		if err := claudeCheckEffort(effort); err != nil {
+			t.Fatalf("claudeCheckEffort(%q) = %v, want nil", effort, err)
+		}
+	}
+	for _, invalid := range []string{"-low", "bad effort", "too_long_effort_token", "_leading"} {
+		if err := claudeCheckEffort(invalid); err == nil {
+			t.Fatalf("claudeCheckEffort(%q) = nil, want error", invalid)
+		}
+	}
+	for _, effort := range []string{"minimal", "ultra", "custom_2"} {
+		_, argv := claudeBuildArgv(logger, claudeSpec(RunSpec{Effort: effort}))
+		if v := claudeFlagValue(argv, "--effort"); len(v) != 1 || v[0] != effort || !slices.Contains(claudeFlagValue(argv, "--thinking"), "adaptive") {
+			t.Fatalf("effort %q argv = %v", effort, argv)
+		}
 	}
 }
 
@@ -397,15 +419,41 @@ func TestClaudeRemoveMCPConfigKeepsForeignLayout(t *testing.T) {
 	if _, err := os.Stat(sibling); err != nil {
 		t.Fatal("foreign directory was removed")
 	}
-	path, err := claudeWriteMCPConfig([]byte("{}"))
+	path, cleanup, err := claudeWriteMCPConfig("", []byte("{}"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(path); err != nil || (info.Mode().Perm() != 0o600 && os.PathSeparator == '/') {
 		t.Fatalf("mcp file = %v %v", info, err)
 	}
-	claudeRemoveMCPConfig(path)
+	cleanup()
 	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("MCP directory survived")
+	}
+}
+
+func TestClaudeWriteMCPConfigUsesOperationTempBaseAndCleansUp(t *testing.T) {
+	opTempBase := filepath.Join(t.TempDir(), "daemon-state", "operation-tmp")
+	path, cleanup, err := claudeWriteMCPConfig(opTempBase, []byte(`{"mcpServers":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpDir := filepath.Dir(path)
+	opTempDir := filepath.Dir(mcpDir)
+	if !strings.HasPrefix(opTempDir, opTempBase+string(os.PathSeparator)) {
+		cleanup()
+		t.Fatalf("mcp config path %q is not under operation-tmp base %q", path, opTempBase)
+	}
+	if !strings.HasPrefix(filepath.Base(mcpDir), claudeMCPDirPrefix) {
+		cleanup()
+		t.Fatalf("mcp dir %q missing prefix %q", mcpDir, claudeMCPDirPrefix)
+	}
+	if info, err := os.Stat(path); err != nil || (info.Mode().Perm() != 0o600 && os.PathSeparator == '/') {
+		cleanup()
+		t.Fatalf("mcp file = %v %v", info, err)
+	}
+	cleanup()
+	if _, err := os.Stat(opTempDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("mcp operation temp dir survived cleanup: %v", err)
 	}
 }

@@ -195,11 +195,8 @@ export const cardsMessages = defineMessages("cards", {
 
   // A Composio API key request.
   labelComposioKey: "Composio API key requested",
-  neededToConnect: "Needed to connect {app}",
-  everyAppNeedsIt: "Every connected app needs it",
   composioApiKey: "Composio API key",
   addKey: "Add key",
-  continuesOnceKeySaved: "{agent} continues once the key is saved.",
   addComposioKeyTitle: "Add a Composio API key",
   keyAdded: "Key added",
   noKeyAdded: "No key added",

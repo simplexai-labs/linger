@@ -24,7 +24,6 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { SettingsGroup } from "@/components/ui/settings-group";
 import { Icon } from "@/components/ui/icon";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -40,9 +39,11 @@ import { formatLocale, translate } from "@/i18n/language";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
 import {
+  anotherMeQueryKey,
   teamHubIdentityQueryOptions,
   teamHubQueryRoot,
   tenantActorsQueryKey,
+  tenantAgentAvailabilityQueryKey,
   tenantAgentAvailabilityQueryOptions,
   tenantAgentsQueryKey,
   tenantAgentsQueryOptions,
@@ -65,6 +66,7 @@ import { agentTemplateMessages } from "../agent-templates/agent-templates.messag
 import { roomDialogMessages } from "../room-dialogs.messages";
 import { sidePanelMessages } from "../task-sidebar/side-panel.messages";
 import { agentInfoMessages } from "./agent-info.messages";
+import { PanelFooterAction, PanelFooterActions } from "./panel-footer-actions";
 import { AgentInstructions } from "./agent-instructions";
 import { agentRuntimeMessages } from "./agent-runtime.messages";
 import { EditAgentInstructionsDialog } from "./edit-agent-instructions-dialog";
@@ -106,7 +108,7 @@ export function ActorProfilePanel({
       className="room-profile-panel flex h-full min-h-0 w-[336px] max-w-[min(21rem,calc(100%-min(22.5rem,45%)))] shrink flex-col border-l border-border bg-background max-sm:w-full max-sm:max-w-none max-sm:border-l-0"
     >
       <header className="shrink-0 px-5 pt-5">
-        <div className="flex items-center gap-2.5 border-b border-app-border pb-3.5">
+        <div className="flex items-center gap-2.5 pb-3.5">
           <ActorAvatar
             actorId={actor.id}
             kind={actor.kind}
@@ -302,6 +304,12 @@ export function AgentProfileContent({
         }),
         queryClient.invalidateQueries({
           queryKey: tenantAgentsQueryKey(tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: tenantAgentAvailabilityQueryKey(tenantId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: anotherMeQueryKey(tenantId),
         }),
         queryClient.invalidateQueries({
           queryKey: tenantLocalModelsQueryKey(tenantId),
@@ -861,17 +869,12 @@ function PanelAgentInfoActions({
   const t = useT();
   if (!canDelete) return null;
   return (
-    <SettingsGroup ariaLabel={t(agentInfoMessages.agentActions)}>
-      <button
-        data-voice-risk="never"
-        className="flex min-h-11 w-full items-center justify-center gap-2 px-3.5 text-[14px] font-medium text-destructive transition-colors duration-150 hover:bg-destructive/5 focus-visible:bg-destructive/5 focus-visible:outline-none"
-        onClick={onDelete}
-        type="button"
-      >
-        <Icon icon={Delete02Icon} size={16} />
+    <PanelFooterActions label={t(agentInfoMessages.agentActions)}>
+      <PanelFooterAction danger data-voice-risk="never" onClick={onDelete}>
+        <Icon icon={Delete02Icon} size={14} />
         {t(roomDialogMessages.removeAgent)}
-      </button>
-    </SettingsGroup>
+      </PanelFooterAction>
+    </PanelFooterActions>
   );
 }
 
@@ -913,7 +916,7 @@ function InfoRow({
     </>
   );
   const className =
-    "flex min-h-12 w-full items-center justify-between gap-3 border-b border-app-border px-4 py-3 text-left last:border-b-0";
+    "flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left";
   if (onClick) {
     return (
       <button

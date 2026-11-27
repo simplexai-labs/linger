@@ -31,7 +31,6 @@ export function describePendingMessageFailure(
     case "delivery_interrupted":
       return t(composerMessages.deliveryInterrupted);
     case "delivery_may_have_reached":
-      return t(composerMessages.deliveryMayHaveReached);
     case "delivery_unconfirmed":
       return t(composerMessages.deliveryUnconfirmed);
     case "local_save_failed":

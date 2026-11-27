@@ -125,7 +125,7 @@ func TestClaudeScopedKeychainDeletionFailureDoesNotRecordRecovery(t *testing.T) 
 func TestClaudeProbeReleasesNativeKeychain(t *testing.T) {
 	entries := map[string][]byte{"": []byte(hostClaudeFixture)}
 	stubClaudeKeychainEntries(t, entries)
-	prepared, release, err := ClaudeProbeEnvironment(map[string]string{"HOME": t.TempDir()})
+	prepared, release, err := ClaudeProbeEnvironment(map[string]string{"HOME": t.TempDir()}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

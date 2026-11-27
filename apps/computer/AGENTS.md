@@ -7,8 +7,8 @@
   supervision, and Runtime execution.
 - The Go implementation under `local-daemon/` is the only Local Computer
   Daemon and Runtime execution implementation, and `local-daemon/cmd/linger-computer`
-  is the control CLI the release bundle ships as `cli/linger-computer`. The bundled Node runs only the `teamhub` CLI and the managed
-  Computer tools.
+  is the control CLI the release bundle ships as `cli/linger-computer`. The bundled Node runs only the `teamhub` CLI, the managed
+  Computer tools, and the bundled Pi runtime.
 - The Desktop app (`apps/desktop`) ships the same Daemon and runs it as its
   child. A `desktop` config section selects Desktop mode: no
   self-update, shutdown when stdin closes, status lines on stdout, and the
@@ -50,9 +50,17 @@
 
 - `cmd/linger-computer-launcher` is the stable Windows command: as
   `linger-computer-<environment>.exe` it runs the active bundle's CLI, and as
-  `cli/teamhub.exe` the bundled Node TeamHub CLI. The Daemon's Windows-only
-  `platform` subcommand serves the Windows installer helper (owner-only files,
-  process identity, owned-process cleanup); nothing else calls it.
+  `cli/teamhub.exe` the bundled Node TeamHub CLI. `cmd/linger-pi-launcher` is
+  the minimal Windows native launcher shipped as `cli/computer-tools/bin/pi.exe`
+  that starts the bundled Pi runtime on the sibling bundled Node inside a
+  kill-on-close Job Object. `cmd/linger-teamhub-launcher` is the Windows native
+  launcher Desktop ships as `dist/teamhub-cli/teamhub.exe`; it runs `teamhub.js`
+  on the Desktop bundled Node (or `Linger.exe` with `ELECTRON_RUN_AS_NODE=1`,
+  falling back to `LINGER_NODE` or `node` on `PATH` from source) inside a
+  kill-on-close Job Object without routing arguments through `cmd.exe`. The
+  Daemon's Windows-only `platform` subcommand serves the Windows installer
+  helper (owner-only files, process identity, owned-process cleanup); nothing
+  else calls it.
 - `scripts/` builds the development bundle, and `tests/` holds the Vitest
   checks of the bundle tools and the Runner Gateway wire against the Go
   Daemon. Do not add a second Runtime detector, Runtime executor, Gateway
@@ -84,6 +92,13 @@
   Operation detaches, so a retried stop sees the turn complete. After an
   invalid-request interrupt rejection the Daemon also accepts an idle status on
   the same thread. Terminal cleanup and process exit checks still apply.
+
+- A Pi assistant message with `stopReason: "aborted"` interrupts the turn.
+  A scheduler cancellation resumes the same Run only after the native turn
+  stops for that cancellation and cleanup is confirmed. If Pi reports an abort
+  while the cancellation RPC is pending, the Daemon gives Pi a bounded grace
+  period to report whether the cancellation stopped that turn. An independent Pi
+  abort ends the Run as interrupted, including when a yield arrives late.
 
 - Default tests use deterministic providers and real fixture child processes;
   they never call a live model.
@@ -143,7 +158,7 @@
   do not require the full installer lifecycle gate. CI runs
   `make check-computer-go` (the daemon's Go unit tests) when `local-daemon/`
   changes, and `check (computer-go-windows)` builds every daemon package for
-  Windows and tests only `cmd/linger-computer-launcher`, `internal/computercli`,
+  Windows and tests only `cmd/linger-computer-launcher`, `cmd/linger-pi-launcher`, `cmd/linger-teamhub-launcher`, `internal/computercli`,
   `internal/computerconfig`, `internal/localmodels`, and `internal/process`
   there; other packages (`internal/uiruntime`, `internal/provider/native`, and
   so on) are not tested on Windows in CI. The rest of `check-computer` stays

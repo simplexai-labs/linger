@@ -47,6 +47,52 @@ describe("Composer Document catalog", () => {
     expect(listLibraryDocuments).toHaveBeenCalledTimes(1);
   });
 
+  it("loads the next shareable page when the list reaches its end", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const document = (id: string) => ({
+      capabilities: { manage: true },
+      from: [],
+      id,
+      tenant_id: "tenant",
+      title: id,
+      updated_at: "2026-11-26T00:00:00Z",
+    });
+    runtime.server.on("GET", "/v0/library/documents", ({ query }) =>
+      query.get("cursor") === "next"
+        ? { items: [document("second")], page: { has_more: false } }
+        : {
+            items: [document("first")],
+            page: { has_more: true, next_cursor: "next" },
+          },
+    );
+    const { result } = renderHook(
+      () =>
+        useComposerDocumentOptions({
+          client: runtime.client,
+          draftDocumentIds: [],
+          roomDocuments: [],
+          tenantId: "tenant",
+        }),
+      { wrapper },
+    );
+    act(() => result.current.onDocumentQueryChange(""));
+    await waitFor(() =>
+      expect(result.current.documents.map(({ id }) => id)).toEqual(["first"]),
+    );
+    act(() => result.current.onLoadMoreDocuments());
+    await waitFor(() =>
+      expect(result.current.documents.map(({ id }) => id)).toEqual([
+        "first",
+        "second",
+      ]),
+    );
+    // The last page has nothing after it.
+    act(() => result.current.onLoadMoreDocuments());
+    expect(
+      runtime.server.requestsTo("GET", "/v0/library/documents"),
+    ).toHaveLength(2);
+  });
+
   it("resolves references from a restored draft even before the picker opens", async () => {
     let resolve!: (value: unknown) => void;
     const getDocument = vi.fn(

@@ -27,6 +27,45 @@ export declare function packageBackendBundle(options: {
   installerDir?: string | null;
 }): Promise<PackedTarZst>;
 
+export interface AssembledBundleManifest {
+  readonly schema: 3;
+  readonly channel: "stable" | "beta" | "canary";
+  readonly releaseId: string;
+  readonly appVersion: string;
+  readonly publishedAt: string;
+  readonly rollout: { readonly percent: number; readonly urgent?: boolean };
+  readonly compat: Record<string, unknown>;
+  readonly bundles: {
+    readonly web: {
+      readonly originAppVersion: string;
+      readonly artifact: {
+        readonly artifactId: string;
+        readonly url: string;
+        readonly mirrors?: readonly string[];
+        readonly sha256: string;
+        readonly size: number;
+      };
+      readonly [key: string]: unknown;
+    };
+    readonly backend: {
+      readonly originAppVersion: string;
+      readonly targets: Record<
+        string,
+        {
+          readonly artifactId: string;
+          readonly url: string;
+          readonly mirrors?: readonly string[];
+          readonly sha256: string;
+          readonly size: number;
+        }
+      >;
+      readonly [key: string]: unknown;
+    };
+    readonly [key: string]: unknown;
+  };
+  readonly [key: string]: unknown;
+}
+
 export declare function assembleManifestV3(options: {
   appVersion: string;
   channel?: "stable" | "beta" | "canary";
@@ -45,9 +84,10 @@ export declare function assembleManifestV3(options: {
   shell?: unknown;
   plan: BundleBuildPlan;
   builtArtifacts?: Record<string, unknown>;
+  prevManifest?: unknown;
   baseUrl: string;
   mirrorBaseUrls?: readonly string[];
-}): Record<string, unknown>;
+}): AssembledBundleManifest;
 
 export declare function signManifestV3(
   manifest: unknown,

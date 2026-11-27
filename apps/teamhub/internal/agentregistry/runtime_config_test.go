@@ -10,7 +10,7 @@ import (
 )
 
 func TestRuntimeConfigSnapshotPreservesReasoningEffort(t *testing.T) {
-	for _, effort := range []string{"", "low", "high", "ultra", "invalid"} {
+	for _, effort := range []string{"", "minimal", "low", "high", "ultra", "bad effort"} {
 		t.Run(effort, func(t *testing.T) {
 			registration := store.GetMaterializableAgentRuntimeRegistrationByManagementIDRow{
 				ActorID: "actor_test", TenantID: "tenant_test", AgentManagementID: textValue("agent_test"),
@@ -23,7 +23,7 @@ func TestRuntimeConfigSnapshotPreservesReasoningEffort(t *testing.T) {
 				registration.RuntimeReasoningEffort = textValue(effort)
 			}
 			snapshot, err := ProjectAgentRuntimeConfigSnapshot(registration)
-			if effort == "invalid" {
+			if effort == "bad effort" {
 				if !errors.Is(err, agentruntimestate.ErrConflict) {
 					t.Fatalf("expected invalid reasoning to be rejected, got %v", err)
 				}

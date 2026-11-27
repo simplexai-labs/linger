@@ -5,10 +5,11 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
   symlink,
 } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -21,9 +22,11 @@ import {
   prepareNativeDependencies,
   prepareNativeVoiceTools,
   readPublishedVoiceTools,
+  resolveNativeVoiceToolsPlan,
   validateNativeVoiceTools,
 } from "./native-dependencies.js";
 import * as downloads from "./download.js";
+import * as verifiedStamps from "./verified-stamps.js";
 import { REGION_SCHEMA, regionFile } from "./region.js";
 import type { InstallerEvent } from "./events.js";
 const roots: string[] = [];
@@ -206,6 +209,45 @@ describe("verified extraction", () => {
       ),
     ).rejects.toThrow(/cache/);
   });
+  it("reuses settled stamps once clock ticks settle while still detecting mtime-backdated tampering", async () => {
+    const f = await fixture();
+    const directory = await acquireNativeArtifact(
+      f.home,
+      f.artifact,
+      new AbortController().signal,
+      undefined,
+      f.fetcher,
+    );
+    const stampFile = `${directory}.verified.json`;
+    expect(existsSync(stampFile)).toBe(true);
+    const before = await readFile(stampFile, "utf8");
+    const baseNow = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(baseNow + 10_000);
+    await expect(
+      acquireNativeArtifact(
+        f.home,
+        f.artifact,
+        new AbortController().signal,
+        undefined,
+        f.fetcher,
+      ),
+    ).resolves.toBe(directory);
+    expect(await readFile(stampFile, "utf8")).toBe(before);
+
+    // Tamper with identical byte count and restore an older mtime; ctime still triggers re-hash.
+    const past = new Date(baseNow - 10_000);
+    await writeFile(path.join(directory, "bin/tool"), "changed");
+    await utimes(path.join(directory, "bin/tool"), past, past);
+    await expect(
+      acquireNativeArtifact(
+        f.home,
+        f.artifact,
+        new AbortController().signal,
+        undefined,
+        f.fetcher,
+      ),
+    ).rejects.toThrow(/cache/);
+  });
   it("publishes verified Windows PostgreSQL manifests separately from the original cache", async () => {
     const { home, artifact, fetcher } = await fixture();
     const signal = new AbortController().signal;
@@ -245,6 +287,71 @@ describe("verified extraction", () => {
     expect(await load(true)).toBe(prepared);
     expect(await readdir(path.join(original, "bin"))).toEqual(["tool"]);
     expect(await load(false)).toBe(original);
+  });
+  it("preserves readdir traversal key order in .simplex-files.json when entries finish hashing out of order", async () => {
+    const root = await temp(),
+      input = path.join(root, "input"),
+      home = path.join(root, "home");
+    await mkdir(path.join(input, "bin"), { recursive: true });
+    await writeFile(path.join(input, "bin/alpha"), "a", { mode: 0o755 });
+    await writeFile(path.join(input, "bin/beta"), "b", { mode: 0o755 });
+    await writeFile(path.join(input, "bin/gamma"), "g", { mode: 0o755 });
+    const archive = path.join(root, "payload.tgz");
+    await pack({ cwd: input, file: archive, gzip: true }, ["bin"]);
+    const bytes = await readFile(archive);
+    const artifact = {
+      url: "https://releases.example/tool.tgz",
+      algorithm: "sha256" as const,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      maxBytes: bytes.length,
+    };
+    const fetcher = (async () =>
+      new Response(bytes, {
+        headers: { "content-length": String(bytes.length) },
+      })) as typeof fetch;
+
+    const realSha256File = verifiedStamps.sha256File;
+    let firstByReaddir: string | undefined;
+    let releaseFirst!: () => void;
+    const waitOthers = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const completionOrder: string[] = [];
+    let settledOthers = 0;
+    vi.spyOn(verifiedStamps, "sha256File").mockImplementation(async (file) => {
+      firstByReaddir ??= readdirSync(path.dirname(file))[0]!;
+      const digest = await realSha256File(file);
+      if (path.basename(file) === firstByReaddir) {
+        await waitOthers;
+        completionOrder.push(path.basename(file));
+      } else {
+        completionOrder.push(path.basename(file));
+        settledOthers += 1;
+        if (settledOthers === 2) releaseFirst();
+      }
+      return digest;
+    });
+
+    const directory = await acquireNativeArtifact(
+      home,
+      artifact,
+      new AbortController().signal,
+      undefined,
+      fetcher,
+    );
+    const expectedOrder = (await readdir(path.join(directory, "bin"))).map(
+      (name) => `bin/${name}`,
+    );
+    expect(completionOrder[0]).not.toBe(path.basename(expectedOrder[0]!));
+    expect(completionOrder.at(-1)).toBe(path.basename(expectedOrder[0]!));
+    const manifest = JSON.parse(
+      await readFile(path.join(directory, ".simplex-files.json"), "utf8"),
+    ) as Record<string, string>;
+    expect(Object.keys(manifest)).toEqual(expectedOrder);
+    const stamps = JSON.parse(
+      await readFile(`${directory}.verified.json`, "utf8"),
+    ) as { stamps: Record<string, unknown> };
+    expect(Object.keys(stamps.stamps)).toEqual(expectedOrder);
   });
   it("checksum failure leaves no promoted component and permits clean retry", async () => {
     const f = await fixture();
@@ -336,6 +443,107 @@ describe("verified extraction", () => {
         f.fetcher,
       ),
     ).rejects.toThrow(/archive/);
+  });
+  it("locks per artifact without blocking distinct artifacts and waits on INSTANCE_BUSY for the same artifact", async () => {
+    const base = path.join(await temp(), "components");
+    async function makeArchive(name: string, payload: string) {
+      const root = await temp();
+      const input = path.join(root, "input");
+      await mkdir(path.join(input, "bin"), { recursive: true });
+      await writeFile(path.join(input, "bin", name), payload, { mode: 0o755 });
+      const archive = path.join(root, `${name}.tgz`);
+      await pack({ cwd: input, file: archive, gzip: true }, ["bin"]);
+      const bytes = await readFile(archive);
+      return {
+        bytes,
+        artifact: {
+          url: `https://releases.example/${name}.tgz`,
+          algorithm: "sha256" as const,
+          digest: createHash("sha256").update(bytes).digest("hex"),
+          maxBytes: bytes.length,
+        },
+      };
+    }
+    const first = await makeArchive("tool-a", "payload-a");
+    const second = await makeArchive("tool-b", "payload-b");
+
+    let firstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const started = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const blockingFetcher = (async () => {
+      firstStarted();
+      await gate;
+      return new Response(first.bytes, {
+        headers: { "content-length": String(first.bytes.length) },
+      });
+    }) as typeof fetch;
+
+    const firstPromise = acquireNativeArtifact(
+      base,
+      first.artifact,
+      new AbortController().signal,
+      undefined,
+      blockingFetcher,
+    );
+    await started;
+
+    // A distinct artifact acquires its own lock and finishes while the first holds its lock.
+    const secondDir = await acquireNativeArtifact(
+      base,
+      second.artifact,
+      new AbortController().signal,
+      undefined,
+      async () =>
+        new Response(second.bytes, {
+          headers: { "content-length": String(second.bytes.length) },
+        }),
+    );
+    expect(await readFile(path.join(secondDir, "bin/tool-b"), "utf8")).toBe(
+      "payload-b",
+    );
+
+    // A waiting caller on the same artifact respects signal abort cleanly.
+    const abortWaiter = new AbortController();
+    const abortedWait = acquireNativeArtifact(
+      base,
+      first.artifact,
+      abortWaiter.signal,
+      undefined,
+      vi.fn<typeof fetch>(),
+      undefined,
+      { lockWaitMs: 10_000, lockPollMs: 25 },
+    );
+    setTimeout(() => abortWaiter.abort(), 60);
+    await expect(abortedWait).rejects.toThrow();
+
+    // A second caller on the same artifact waits on INSTANCE_BUSY and reuses the published cache.
+    const waiterFetcher = vi.fn<typeof fetch>();
+    const waiterPromise = acquireNativeArtifact(
+      base,
+      first.artifact,
+      new AbortController().signal,
+      undefined,
+      waiterFetcher,
+      undefined,
+      { lockWaitMs: 10_000, lockPollMs: 25 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    releaseFirst();
+
+    const [firstDir, waiterDir] = await Promise.all([
+      firstPromise,
+      waiterPromise,
+    ]);
+    expect(waiterDir).toBe(firstDir);
+    expect(waiterFetcher).not.toHaveBeenCalled();
+    expect(await readFile(path.join(waiterDir, "bin/tool-a"), "utf8")).toBe(
+      "payload-a",
+    );
   });
 });
 
@@ -866,4 +1074,76 @@ describe("native voice tools", () => {
       );
     },
   );
+  it("resolves deterministic voice tools plan paths and prepared state without extracting", async () => {
+    const home = await temp();
+    const target = `${process.platform}-${process.arch}`;
+    const exe = process.platform === "win32" ? ".exe" : "";
+    const entry = {
+      ...voice,
+      target,
+      file: path.join(home, "voice-tools.tar.gz"),
+      sha256: "c".repeat(64),
+    };
+
+    vi.stubEnv("LINGER_NATIVE_VOICE_TOOLS_JSON", "");
+    expect(await resolveNativeVoiceToolsPlan(home)).toBeUndefined();
+
+    vi.stubEnv(
+      "LINGER_NATIVE_VOICE_TOOLS_JSON",
+      JSON.stringify([
+        {
+          ...entry,
+          target: target === "win32-x64" ? "linux-x64" : "win32-x64",
+        },
+      ]),
+    );
+    expect(await resolveNativeVoiceToolsPlan(home)).toBeUndefined();
+
+    vi.stubEnv("LINGER_NATIVE_VOICE_TOOLS_JSON", "{invalid");
+    await expect(resolveNativeVoiceToolsPlan(home)).rejects.toThrow(/invalid/i);
+
+    vi.stubEnv("LINGER_NATIVE_VOICE_TOOLS_JSON", JSON.stringify([entry]));
+    // Missing bundled archive file is rejected up front instead of deferring.
+    await expect(resolveNativeVoiceToolsPlan(home)).rejects.toThrow(
+      /Bundled native voice tools archive is missing/,
+    );
+
+    await writeFile(entry.file, "archive-bytes");
+    const directory = path.join(
+      path.resolve(home),
+      "tools",
+      "native",
+      "components",
+      entry.sha256,
+    );
+    const bin = path.join(directory, "bin");
+    const livekit = path.join(bin, `livekit-server${exe}`);
+
+    expect(await resolveNativeVoiceToolsPlan(home)).toEqual({
+      bin,
+      livekit,
+      prepared: false,
+      damaged: false,
+    });
+
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(directory, ".simplex-files.json"), "{}");
+    await writeFile(livekit, "livekit");
+    await writeFile(path.join(bin, `ffmpeg${exe}`), "ffmpeg");
+    // Component directory exists without all required files -> damaged.
+    expect(await resolveNativeVoiceToolsPlan(home)).toEqual({
+      bin,
+      livekit,
+      prepared: false,
+      damaged: true,
+    });
+
+    await writeFile(path.join(bin, `ffprobe${exe}`), "ffprobe");
+    expect(await resolveNativeVoiceToolsPlan(home)).toEqual({
+      bin,
+      livekit,
+      prepared: true,
+      damaged: false,
+    });
+  });
 });

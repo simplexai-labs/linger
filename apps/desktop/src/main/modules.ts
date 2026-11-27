@@ -119,7 +119,7 @@ export const startLayers = (
 export class ModuleHost {
   readonly #layers: readonly (readonly Module[])[];
   readonly #byName: Map<string, Module>;
-  readonly #started: Module[] = [];
+  readonly #started = new Set<Module>();
   readonly #log: Logger;
   readonly ctx: ModuleContext;
 
@@ -142,34 +142,41 @@ export class ModuleHost {
       await Promise.all(
         layer.map(async (m) => {
           await m.start(this.ctx);
-          this.#started.push(m);
+          this.#started.add(m);
           this.#log.info("module.started", { module: m.name });
         }),
       );
     }
   }
 
-  // Reverse start order. A module that does not stop in time is abandoned so
-  // quit and update are never blocked by one stuck module.
+  // Reverse dependency layers: peers in a layer stop concurrently, and a
+  // module that does not stop in time is abandoned so quit and update are never
+  // blocked by one stuck module.
   async stop(reason: StopReason): Promise<void> {
-    while (this.#started.length > 0) {
-      const m = this.#started.pop()!;
-      let timer: NodeJS.Timeout | undefined;
-      const timeout = new Promise<"timeout">((resolve) => {
-        timer = setTimeout(() => resolve("timeout"), STOP_TIMEOUT_MS);
-      });
-      try {
-        const outcome = await Promise.race([m.stop(reason), timeout]);
-        if (outcome === "timeout")
-          this.#log.warn("module.stop_timeout", { module: m.name });
-      } catch (error) {
-        this.#log.warn("module.stop_failed", {
-          module: m.name,
-          error: String(error),
-        });
-      } finally {
-        clearTimeout(timer);
-      }
+    for (const layer of [...this.#layers].reverse()) {
+      const active = layer.filter((m) => this.#started.has(m));
+      if (active.length === 0) continue;
+      await Promise.all(
+        active.map(async (m) => {
+          let timer: NodeJS.Timeout | undefined;
+          const timeout = new Promise<"timeout">((resolve) => {
+            timer = setTimeout(() => resolve("timeout"), STOP_TIMEOUT_MS);
+          });
+          try {
+            const outcome = await Promise.race([m.stop(reason), timeout]);
+            if (outcome === "timeout")
+              this.#log.warn("module.stop_timeout", { module: m.name });
+          } catch (error) {
+            this.#log.warn("module.stop_failed", {
+              module: m.name,
+              error: String(error),
+            });
+          } finally {
+            clearTimeout(timer);
+            this.#started.delete(m);
+          }
+        }),
+      );
     }
   }
 }

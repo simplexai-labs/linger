@@ -14,6 +14,7 @@ from archive import sha256
 
 DESKTOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NATIVE = os.path.join(DESKTOP, "dist", "installer", "native")
+COMPUTER_TOOLS = os.path.join(DESKTOP, "dist", "computer-tools")
 SOURCE = os.path.join(DESKTOP, "dist", "installer", "source")
 SEED = os.path.join(DESKTOP, "dist", "seed")
 TEAMHUB_COMMANDS = ("teamhub", "migrate", "account")
@@ -92,7 +93,21 @@ def check_teamhub(target, native=NATIVE):
             sys.exit(f"{directory}/{binary['file']} does not match its manifest")
 
 
-def check_runtime(target, native=NATIVE):
+def _shared_node_parts(node, manifest_path):
+    binary = node.get("binary")
+    parts = binary.split("/") if isinstance(binary, str) else []
+    if (
+        not isinstance(binary, str)
+        or not binary
+        or "\\" in binary
+        or os.path.isabs(binary)
+        or any(part in ("", ".", "..") for part in parts)
+    ):
+        sys.exit(f"{manifest_path} has an invalid shared node binary path")
+    return parts
+
+
+def check_runtime(target, native=NATIVE, computer_tools_dir=None):
     """Exits unless the bundled services and Node.js match their manifest and
     the bundled source; in the folder layout, every file of the services too."""
     directory = os.path.join(native, f"runtime-{target}")
@@ -100,7 +115,20 @@ def check_runtime(target, native=NATIVE):
     if manifest is None:
         return
     folder = manifest.get("layout") == "directory"
-    items = [manifest["directory" if folder else "archive"], manifest["node"]]
+    items = [manifest["directory" if folder else "archive"]]
+    node = manifest["node"]
+    if node.get("shared"):
+        parts = _shared_node_parts(node, os.path.join(directory, "manifest.json"))
+        tools_root = (
+            computer_tools_dir
+            if computer_tools_dir is not None
+            else os.path.join(COMPUTER_TOOLS, target)
+        )
+        node_file = os.path.join(tools_root, *parts)
+        if not matches(node_file, node):
+            sys.exit(f"{node_file} does not match {directory}/manifest.json")
+    else:
+        items.append(node)
     if folder:
         runtime = os.path.dirname(manifest["directory"]["file"])
         with open(os.path.join(directory, manifest["directory"]["file"])) as file:
@@ -117,7 +145,7 @@ def _write_json(path, value, indent):
     os.replace(path + ".tmp", path)
 
 
-def refresh(native, target):
+def refresh(native, target, shared_node=None):
     """Records the bytes signing changed (macOS) in the manifests of the copy
     in native/, so the desktop's checks of the copies it installs pass."""
     teamhub = os.path.join(native, f"teamhub-{target}")
@@ -149,8 +177,17 @@ def refresh(native, target):
             item["sha256"] = sha256(full)
             item["bytes"] = size
     _write_json(files_path, files, 1)
-    for key in ("directory", "node"):
-        item = manifest[key]
-        item["sha256"] = sha256(os.path.join(runtime, item["file"]))
-        item["bytes"] = os.path.getsize(os.path.join(runtime, item["file"]))
+    directory_item = manifest["directory"]
+    directory_item["sha256"] = sha256(os.path.join(runtime, directory_item["file"]))
+    directory_item["bytes"] = os.path.getsize(os.path.join(runtime, directory_item["file"]))
+    node_item = manifest["node"]
+    if node_item.get("shared"):
+        parts = _shared_node_parts(node_item, path)
+        node_path = shared_node or os.path.normpath(
+            os.path.join(native, "..", "..", "..", "..", *parts)
+        )
+    else:
+        node_path = os.path.join(runtime, node_item["file"])
+    node_item["sha256"] = sha256(node_path)
+    node_item["bytes"] = os.path.getsize(node_path)
     _write_json(path, manifest, 2)

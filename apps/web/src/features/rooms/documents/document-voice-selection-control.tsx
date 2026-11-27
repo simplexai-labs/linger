@@ -118,7 +118,7 @@ export function DocumentVoiceSelectionControl({
 
   return (
     <div
-      className="shrink-0 border-t border-app-border bg-app-surface px-3 py-2"
+      className="shrink-0 bg-app-surface px-3 py-2"
       data-document-voice-selection-control
       role="group"
       aria-label={t(m.documentSelection)}

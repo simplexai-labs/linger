@@ -344,6 +344,7 @@ func (s *Service) settleConnectionAuthorization(ctx context.Context, id string) 
 		return err
 	}
 	next := ""
+	reboundConnectionID := ""
 	switch {
 	case due:
 		next = "expired"
@@ -356,17 +357,39 @@ func (s *Service) settleConnectionAuthorization(ctx context.Context, id string) 
 			next = "failed"
 			break
 		}
-		var current string
-		var reauthorizing bool
-		err = tx.QueryRow(ctx, `SELECT status,reauthorization_upstream_id IS NOT NULL FROM external_connections
- WHERE id=$1 AND account_id=$2 AND provider=$3 FOR SHARE`, connectionID, accountID, view.AppKey).Scan(&current, &reauthorizing)
+		queries := store.New(tx)
+		effectiveConnectionID := connectionID
+		row, err := queries.LockExternalConnectionForAuthorizationSettlement(ctx, store.LockExternalConnectionForAuthorizationSettlementParams{
+			ID:        connectionID,
+			AccountID: accountID,
+			Provider:  view.AppKey,
+		})
+		current := row.Status
+		reauthorizing := row.Reauthorizing
+		if err == nil && current == "revoked" && row.StatusErrorCode == "duplicate_remote_principal" && row.RemotePrincipalKey != "" {
+			// The candidate was already committed as revoked during recovery, so taking
+			// FOR SHARE on the canonical non-revoked connection preserves lock order.
+			canonical, canonicalErr := queries.LockCanonicalExternalConnectionForPrincipal(ctx, store.LockCanonicalExternalConnectionForPrincipalParams{
+				AccountID:          accountID,
+				Provider:           view.AppKey,
+				RemotePrincipalKey: row.RemotePrincipalKey,
+			})
+			if canonicalErr == nil {
+				effectiveConnectionID = canonical.ID
+				reboundConnectionID = canonical.ID
+				current = canonical.Status
+				reauthorizing = canonical.Reauthorizing
+			} else if !errors.Is(canonicalErr, pgx.ErrNoRows) {
+				return canonicalErr
+			}
+		}
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			next = "failed"
 		case err != nil:
 			return err
 		case current == "active":
-			if err := s.connections.GrantAgentConnectionInTx(ctx, tx, accountID, connectionID, agentID); err != nil {
+			if err := s.connections.GrantAgentConnectionInTx(ctx, tx, accountID, effectiveConnectionID, agentID); err != nil {
 				return err
 			}
 			next = "succeeded"
@@ -377,7 +400,15 @@ func (s *Service) settleConnectionAuthorization(ctx context.Context, id string) 
 	if next == "" {
 		return tx.Commit(ctx)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE decisions SET status=$2, finished_at=clock_timestamp() WHERE id=$1`, id, next); err != nil {
+	rebound := ""
+	if next == "succeeded" {
+		rebound = reboundConnectionID
+	}
+	if err := store.New(tx).FinishSettledConnectionAuthDecision(ctx, store.FinishSettledConnectionAuthDecisionParams{
+		ID:                  id,
+		Status:              next,
+		ReboundConnectionID: rebound,
+	}); err != nil {
 		return err
 	}
 	if err := endSettledDecision(ctx, tx, id, alterEgo); err != nil {

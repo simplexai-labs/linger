@@ -1,6 +1,7 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import {
   type ReactNode,
+  type Ref,
   useEffect,
   useEffectEvent,
   useId,
@@ -12,6 +13,27 @@ import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
 export type DialogSize = "sm" | "md" | "lg" | "xl";
+
+interface DialogCloseButtonProps {
+  onClick: () => void;
+  ref?: Ref<HTMLButtonElement>;
+}
+
+export function DialogCloseButton({ onClick, ref }: DialogCloseButtonProps) {
+  const t = useT();
+  return (
+    <button
+      aria-label={t(commonMessages.close)}
+      className="app-dialog-close"
+      data-voice-close
+      onClick={onClick}
+      ref={ref}
+      type="button"
+    >
+      <Icon icon={Cancel01Icon} size={16} />
+    </button>
+  );
+}
 
 const focusableSelector = [
   "button:not([disabled])",
@@ -62,7 +84,6 @@ export function ModalDialog({
   /** Rendering a title opts the dialog into the shared header/body/footer chrome. */
   title?: ReactNode;
 }) {
-  const t = useT();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeFromBackdrop = useEffectEvent(() => onClose());
   const headingId = useId();
@@ -79,12 +100,20 @@ export function ModalDialog({
     if (typeof dialog.showModal === "function") {
       if (!dialog.open) {
         dialog.showModal();
-        // showModal focuses the header close button first; keep initial focus on the content.
-        if (document.activeElement === closeButtonRef.current) {
-          (
+        // showModal focuses the header close button first; keep initial focus
+        // on the content. Moving focus on from a focused control would mark it
+        // keyboard focus, so the first row or field lit up on every open; it
+        // shows only once the person uses the keyboard.
+        const close = closeButtonRef.current;
+        if (close && document.activeElement === close) {
+          const target =
             firstFocusable(dialog.querySelector(".app-dialog-body")) ??
-            firstFocusable(dialog.querySelector(".app-dialog-footer"))
-          )?.focus();
+            firstFocusable(dialog.querySelector(".app-dialog-footer")) ??
+            close;
+          // Refocusing the close button itself would keep its ring, so it
+          // lets go first.
+          close.blur();
+          target.focus({ focusVisible: false });
         }
       }
     } else {
@@ -137,16 +166,7 @@ export function ModalDialog({
                 <p className="app-dialog-description">{description}</p>
               ) : null}
             </div>
-            <button
-              data-voice-close
-              aria-label={t(commonMessages.close)}
-              className="app-dialog-close"
-              ref={closeButtonRef}
-              onClick={onClose}
-              type="button"
-            >
-              <Icon icon={Cancel01Icon} size={16} />
-            </button>
+            <DialogCloseButton onClick={onClose} ref={closeButtonRef} />
           </header>
           <div className="app-dialog-body">{children}</div>
           {footer !== undefined ? (

@@ -283,8 +283,13 @@ export async function inspectSetup(
         signal: options.signal,
         ...(options.env ? { env: options.env } : {}),
         timeoutMs: 120000,
+        // Keep bundled Pi off setup inspect's PATH so legacy localmodels
+        // fallback does not treat bundled Pi as a user-installed runtime.
+        bundledPi: null,
         ...(options.onEvent ? { onEvent: options.onEvent } : {}),
       }),
+      // Omit includeBundled during setup inspection so non-local machines
+      // without Claude or Codex do not recommend bundled Pi.
       probeRuntimes({
         runtimes: ["codex", "claude", "pi"],
         env: probeEnv,

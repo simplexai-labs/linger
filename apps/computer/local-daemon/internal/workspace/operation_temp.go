@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 type OperationTemp struct {
@@ -29,17 +31,14 @@ func PrepareOperationTemp(base string) (*OperationTemp, error) {
 	if !filepath.IsAbs(base) {
 		return nil, fmt.Errorf("Operation temp base must be absolute")
 	}
-	if err := os.MkdirAll(base, 0o700); err != nil {
-		return nil, fmt.Errorf("create Operation temp base: %w", err)
-	}
-	if err := os.Chmod(base, 0o700); err != nil { //nolint:gosec // owner-only directory mode; gosec expects a file mode for Chmod
-		return nil, fmt.Errorf("protect Operation temp base: %w", err)
+	if err := privatefs.EnsureDir(base); err != nil {
+		return nil, fmt.Errorf("prepare Operation temp base: %w", err)
 	}
 	dir, err := os.MkdirTemp(base, TaskTempDirPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("create Operation temp directory: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // owner-only directory mode; gosec expects a file mode for Chmod
+	if err := privatefs.EnsureDir(dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("protect Operation temp directory: %w", err)
 	}
@@ -88,4 +87,37 @@ func (t *OperationTemp) release() error {
 		t.err = RemoveTaskTempDir(t.Path)
 	}
 	return t.err
+}
+
+// PrivateTempRoot allocates a private temporary directory. When baseDir is
+// non-empty, it uses PrepareOperationTemp so the directory stays inside the
+// Daemon's private state directory and abandoned directories are swept on
+// restart. When empty, it falls back to the OS temp directory and hardens the
+// created directory with privatefs. The returned cleanup function is idempotent
+// and removes sealed read-only subtrees cleanly.
+func PrivateTempRoot(baseDir, prefix string) (string, func() error, error) {
+	if baseDir != "" {
+		opTemp, err := PrepareOperationTemp(baseDir)
+		if err != nil {
+			return "", nil, err
+		}
+		return opTemp.Path, opTemp.Close, nil
+	}
+	root, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		return "", nil, err
+	}
+	var (
+		once      sync.Once
+		removeErr error
+	)
+	remove := func() error {
+		once.Do(func() { removeErr = RemoveTaskTempDir(root) })
+		return removeErr
+	}
+	if err := privatefs.EnsureDir(root); err != nil {
+		_ = remove()
+		return "", nil, err
+	}
+	return root, remove, nil
 }

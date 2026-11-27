@@ -1582,15 +1582,7 @@ export interface components {
      * @enum {string}
      */
     ModelSourceRuntime: "claude" | "codex" | "pi";
-    /** @enum {string} */
-    AgentReasoningEffort:
-      | "none"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | "max"
-      | "ultra";
+    AgentReasoningEffort: string;
     /**
      * @description Wire format of a BYOK upstream endpoint. The owner's client derives it from the end of the request address, else from the Runtime's own format; the Computer does not probe for it.
      * @enum {string}

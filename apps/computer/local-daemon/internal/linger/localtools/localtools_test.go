@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -49,6 +50,67 @@ func TestLocalToolOperationPropagatesChildCleanupFailure(t *testing.T) {
 	}
 }
 
+func TestMCPClientCloseAcceptsIntentionalNonZeroExit(t *testing.T) {
+	client := fixtureClient(t, "exit-on-eof", "")
+	// Close stdin first so the child exits with status 1 before close() cancels
+	// processCtx, exercising a real bare *exec.ExitError from cmd.Wait.
+	if err := client.stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+	select {
+	case <-client.exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fixture did not exit after stdin EOF")
+	}
+	client.mu.Lock()
+	exitErr := client.err
+	client.mu.Unlock()
+	if _, ok := exitErr.(*exec.ExitError); !ok { //nolint:errorlint // Verify runOwned returned a bare exit error.
+		t.Fatalf("fixture exit err = %T (%v), want bare *exec.ExitError", exitErr, exitErr)
+	}
+	if err := client.close(); err != nil {
+		t.Fatalf("close after confirmed non-zero exit failed: %v", err)
+	}
+}
+
+func TestMCPClientCloseAcceptsBareExitError(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	exited := make(chan struct{})
+	close(exited)
+	client := &mcpClient{stdin: writer, stop: func() {}, exited: exited, err: &exec.ExitError{}}
+	if err := client.close(); err != nil {
+		t.Fatalf("bare exit error after confirmed process-group exit should succeed: %v", err)
+	}
+}
+
+func TestMCPClientCloseRejectsJoinedCleanupFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "joined-canceled",
+			err:  errors.Join(context.Canceled, errors.New("owned command cleanup could not be confirmed")),
+		},
+		{
+			name: "joined-exit-error",
+			err:  errors.Join(&exec.ExitError{}, errors.New("owned command cleanup could not be confirmed")),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			exited := make(chan struct{})
+			close(exited)
+			client := &mcpClient{stdin: writer, stop: func() {}, exited: exited, err: tc.err}
+			if err := client.close(); !errors.Is(err, mcpproxy.ErrCleanupUnconfirmed) {
+				t.Fatalf("close err = %v, want ErrCleanupUnconfirmed", err)
+			}
+		})
+	}
+}
+
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("LINGER_LOCAL_TOOL_FIXTURE"); mode != "" {
 		if mode == "catalog" {
@@ -64,6 +126,9 @@ func TestMain(m *testing.M) {
 			}
 		}
 		runToolFixture(mode)
+		if mode == "exit-on-eof" {
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 	os.Exit(m.Run())

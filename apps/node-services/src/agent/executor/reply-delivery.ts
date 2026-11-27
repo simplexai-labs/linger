@@ -67,6 +67,11 @@ export class ReplyDelivery {
     );
   }
 
+  /** A Human who mentioned the Agent is waiting for its reply. */
+  get awaitingHuman(): boolean {
+    return this.#awaitingHuman;
+  }
+
   get hasFailures(): boolean {
     return this.#failedWrites > 0 || this.#failedReads > 0;
   }

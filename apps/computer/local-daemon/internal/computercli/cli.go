@@ -461,6 +461,9 @@ func (c *cli) executeDoctorPrune(ctx context.Context, parsed command) (int, erro
 }
 
 func (c *cli) executeLogin(ctx context.Context, parsed command) (int, error) {
+	if parsed.deprecatedConcurrencyFlag {
+		c.write(c.deps.stderr, "Warning: --max-concurrent-runs and --no-max-concurrent-runs are deprecated and ignored. Model endpoints now control concurrency.\n")
+	}
 	var requested map[string]string
 	if len(parsed.runtimePaths) > 0 {
 		requested = parsed.runtimePaths
@@ -489,7 +492,6 @@ func (c *cli) executeLogin(ctx context.Context, parsed command) (int, error) {
 	result, err := c.deps.setup(ctx, setupOptions{
 		configPath: parsed.configPath, stateDirectory: filepath.Join(filepath.Dir(parsed.configPath), "state"),
 		webURL: parsed.webURL, displayName: parsed.displayName,
-		maxRunsSet: parsed.maxRunsSet, maxRuns: parsed.maxRuns,
 		runtimePaths: runtimePaths, enabledRuntimes: parsed.enabledRuntimes,
 		codexAuthFile: parsed.codexAuthFile, gatewayURL: parsed.gatewayURL, serverToken: token,
 		localModels: parsed.localModels,

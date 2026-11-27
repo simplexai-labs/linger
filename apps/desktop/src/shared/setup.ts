@@ -57,6 +57,9 @@ export interface SetupLocalServer {
     readonly path: string;
     readonly custom: boolean;
     readonly error?: string;
+    readonly rejectedPath?: string;
+    readonly freeBytes?: number;
+    readonly minFreeBytes?: number;
   };
   // Which provider keys are saved there; the page never sees them.
   readonly keys: {

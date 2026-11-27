@@ -322,9 +322,10 @@ func (op *operation) releaseChromeProfile() {
 
 var errUserChromeRejected = errors.New("BROWSER_CONNECTION_INVALID: the saved connection to the user's Chrome no longer works. Run `teamhub browser connect` to ask them to reconnect through a chat card, then end your turn. Do not use another browser or tool instead, and never ask for the token in a message")
 
-// BrowserCallNotRun names a browser call that never reached the owner's
-// Chrome because it is not connected, its saved connection no longer works,
-// or another task or call holds it; "" for any other failure.
+// BrowserCallNotRun names a browser call that never ran because the owner's
+// Chrome is not connected, its saved connection no longer works, another
+// task or call holds it, or the Computer has no browser for the Agent
+// profile; "" for any other failure.
 func BrowserCallNotRun(err error) string {
 	switch {
 	case errors.Is(err, errBrowserBusy):
@@ -333,6 +334,8 @@ func BrowserCallNotRun(err error) string {
 		return "browser_connection_required"
 	case errors.Is(err, errUserChromeRejected):
 		return "browser_connection_invalid"
+	case errors.Is(err, errNoManagedBrowser):
+		return "browser_unavailable"
 	}
 	return ""
 }

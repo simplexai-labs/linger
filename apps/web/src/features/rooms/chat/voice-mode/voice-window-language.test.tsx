@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -104,21 +111,28 @@ function renderWindow() {
   );
 }
 
-/** A stand-in for the browser's picture-in-picture window. */
+/** A stand-in for the desktop app's floating window, where Voice Mode floats. */
 function installFakeVoicePip() {
   const frame = window.document.createElement("iframe");
   window.document.body.append(frame);
   const document = frame.contentDocument!;
   const pipWindow = {
     addEventListener: () => undefined,
+    removeEventListener: () => undefined,
     close: vi.fn(),
     document,
   };
-  Object.defineProperty(window, "documentPictureInPicture", {
-    configurable: true,
-    value: { requestWindow: vi.fn(async () => pipWindow as unknown as Window) },
-  });
-  return { document };
+  const originalOpen = window.open;
+  window.open = vi.fn(() => pipWindow as unknown as Window);
+  const desktop = window as { lingerDesktop?: unknown };
+  desktop.lingerDesktop = {
+    voiceWindow: { showMainWindow: vi.fn(async () => {}) },
+  };
+  const remove = () => {
+    window.open = originalOpen;
+    delete desktop.lingerDesktop;
+  };
+  return { document, remove };
 }
 
 describe("Voice Mode window in the language on screen", () => {
@@ -141,16 +155,18 @@ describe("Voice Mode window in the language on screen", () => {
     // Voice Mode keeps away from its own controls by this marker.
     expect(frame).toHaveAttribute("data-voice-window");
     expect(frame.matches(voiceWindowSelector)).toBe(true);
-    expect(within(frame).getAllByText(zh.title).length).toBeGreaterThan(0);
     expect(within(frame).getByTitle(zh.openConversation)).toHaveTextContent(
-      zh.title,
+      zh.statusListening,
     );
     expect(
       within(frame).getByText(zhCN.voiceMode.statusListening),
     ).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: zh.mute })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: zh.expand })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: zh.showConversation }));
+    expect(
+      screen.getByRole("button", { name: zh.hideConversation }),
+    ).toBeInTheDocument();
     // Ending Voice Mode from its window is never confirmed, as in English.
     const end = screen.getByRole("button", { name: zh.end });
     expect(end).not.toHaveAttribute("data-voice-risk");
@@ -166,7 +182,7 @@ describe("Voice Mode window in the language on screen", () => {
     ).toBeInTheDocument();
   });
 
-  it("names the floating window and its way back in Chinese", async () => {
+  it("names the floating window in Chinese", async () => {
     await setLanguage("zh-CN");
     const fake = installFakeVoicePip();
     renderWindow();
@@ -174,9 +190,7 @@ describe("Voice Mode window in the language on screen", () => {
     expect(fake.document.title).toBe(zh.title);
     const floating = within(fake.document.body);
     await floating.findByRole("region", { name: zh.window });
-    expect(
-      floating.getByRole("button", { name: zh.returnToLinger }),
-    ).toHaveAttribute("title", zh.returnHint);
+    fake.remove();
   });
 
   it("words voice selections in Chinese and marks removing one", async () => {

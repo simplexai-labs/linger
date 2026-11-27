@@ -55,6 +55,7 @@ import {
 } from "./route-loading-surface";
 import { TeamHubEventSync } from "./event-sync";
 import { useAnotherMeNotifications } from "./another-me-notifications";
+import { clearDismissedBackgroundFailure } from "./chat/another-me-background-failure-dismissal";
 import { requireRoomRouteParam } from "./room-route-params";
 import { useScrollPaneActivity } from "./use-scroll-pane-activity";
 import {
@@ -69,8 +70,8 @@ const VoiceModeMiniWindow = lazy(
   () => import("./chat/voice-mode/voice-mode-mini-window"),
 );
 const RecordingWindow = lazy(() => import("./voice-control/recording-window"));
-const RoomCreateDialog = lazy(async () => ({
-  default: (await import("./room-create-dialog")).RoomCreateDialog,
+const RoomCreator = lazy(async () => ({
+  default: (await import("./room-creator")).RoomCreator,
 }));
 const GlobalSearchDialog = lazy(async () => ({
   default: (await import("@/features/search/global-search-dialog"))
@@ -121,6 +122,14 @@ function RoomShellReady({
   const navigate = useNavigate();
   const wasGated = useRef(false);
   const anotherMeRoomId = anotherMe?.room_id;
+  const hasBackgroundFailure = Boolean(anotherMe?.background_failure);
+  // Clear a session dismissal as soon as TeamHub drops the failure streak,
+  // even while the Human is viewing another Room and the banner is unmounted.
+  useEffect(() => {
+    if (anotherMeRoomId && !hasBackgroundFailure) {
+      clearDismissedBackgroundFailure(tenantId, anotherMeRoomId);
+    }
+  }, [anotherMeRoomId, hasBackgroundFailure, tenantId]);
   // The gate lands the Human in the Another Me Chat it waited for, once they
   // are back from Settings.
   useEffect(() => {
@@ -378,7 +387,7 @@ function RoomShellContent({
             {/* A Room puts this menu button in its own header, so narrow
               screens keep one top bar there. */}
             {roomOpen ? null : (
-              <div className="flex h-(--app-header-height) shrink-0 items-center gap-3 border-b border-border/60 bg-app-sidebar px-3 md:hidden">
+              <div className="flex h-(--app-header-height) shrink-0 items-center gap-3 bg-app-sidebar px-3 md:hidden">
                 <MobileNavigationButton />
                 <span className="truncate text-sm font-medium">
                   {t(navigationMessages.space, {
@@ -389,7 +398,7 @@ function RoomShellContent({
             )}
             {logout.error ? (
               <div
-                className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3 text-sm text-app-danger"
+                className="flex shrink-0 items-center gap-3 px-4 py-3 text-sm text-app-danger"
                 role="alert"
               >
                 <span>{t(authMessages.logoutUnconfirmed)}</span>
@@ -454,7 +463,7 @@ function RoomShellContent({
           ) : null}
           {createRoomOpen ? (
             <Suspense fallback={null}>
-              <RoomCreateDialog
+              <RoomCreator
                 onClose={() => setCreateRoomOpen(false)}
                 tenantId={tenantId}
               />

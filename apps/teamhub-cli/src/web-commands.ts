@@ -247,7 +247,8 @@ const webSearch: CommandDefinition = {
   },
   render: (result) => {
     const results = result.results as Json[];
-    if (!results.length) return "No results.";
+    if (!results.length)
+      return "No results. Try a shorter query, drop --recency or --site, or another ready backend from teamhub web list.";
     return results
       .map((item, index) =>
         [
@@ -284,6 +285,7 @@ const webOpen: CommandDefinition = {
   },
   notes: [
     "The Markdown is cut at 20,000 characters; truncated says when it was.",
+    "To search, run teamhub web search; never open a search engine's results page.",
   ],
   examples: [
     "teamhub web open https://www.postgresql.org/about/news/",

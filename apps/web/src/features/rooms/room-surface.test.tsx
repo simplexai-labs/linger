@@ -173,17 +173,12 @@ describe("RoomSurface command availability", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: /settings from avatar$/ }),
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Edit Room details" }),
-    );
-    // Save stays disabled until something actually changes, so an editable
-    // field that enables it is what proves the panel is still usable.
-    const save = await screen.findByRole("button", { name: "Save changes" });
-    expect(save).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Room name"), {
-      target: { value: "Reconnected Room" },
-    });
-    expect(save).toBeEnabled();
+    // Renaming in place is what proves the panel is still usable.
+    fireEvent.click(await screen.findByRole("button", { name: /^Rename / }));
+    const name = screen.getByRole("textbox", { name: "Name" });
+    expect(name).toBeEnabled();
+    fireEvent.change(name, { target: { value: "Reconnected Room" } });
+    expect(name).toHaveValue("Reconnected Room");
   });
 
   it("keeps transient Room connection state inside the header layout", async () => {

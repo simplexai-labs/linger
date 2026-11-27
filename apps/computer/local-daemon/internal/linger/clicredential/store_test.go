@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 const testToken = "th_agent_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG"
@@ -70,10 +72,20 @@ func TestPrivateModesAndDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
+	agentDirectory := filepath.Dir(installation.CredentialPath)
+	for _, directory := range []string{root, agentDirectory} {
+		if err := privatefs.CheckPath(directory, "directory", true); err != nil {
+			t.Fatalf("CheckPath %s: %v", directory, err)
+		}
+	}
+	for _, file := range []string{installation.CredentialPath, filepath.Join(agentDirectory, "state.json"), filepath.Join(agentDirectory, "profile.json")} {
+		if err := privatefs.CheckPath(file, "file", true); err != nil {
+			t.Fatalf("CheckPath %s: %v", file, err)
+		}
+	}
 	if runtimeSkipsPOSIXModes() {
 		return
 	}
-	agentDirectory := filepath.Dir(installation.CredentialPath)
 	for _, directory := range []string{root, agentDirectory} {
 		info, err := os.Stat(directory)
 		if err != nil {
@@ -355,4 +367,164 @@ func TestRetryableSeparatesTransientStorageErrors(t *testing.T) {
 
 func runtimeSkipsPOSIXModes() bool {
 	return runtime.GOOS == "windows"
+}
+
+func TestLookupCurrentAndPutRepairLegacyLoosePermissions(t *testing.T) {
+	if runtimeSkipsPOSIXModes() {
+		t.Skip("POSIX mode bits test; Windows ACL coverage is in store_windows_test.go")
+	}
+	profile := testProfile("tenant-one", "agent-one")
+	for _, op := range []struct {
+		name string
+		run  func(t *testing.T, store *Store)
+	}{
+		{
+			name: "Lookup",
+			run: func(t *testing.T, store *Store) {
+				t.Helper()
+				installation, err := store.Lookup("tenant-one", "agent-one")
+				if err != nil || installation.Profile != profile {
+					t.Fatalf("Lookup = %+v, %v", installation, err)
+				}
+			},
+		},
+		{
+			name: "Current",
+			run: func(t *testing.T, store *Store) {
+				t.Helper()
+				stored, ok, err := store.Current("tenant-one", "agent-one")
+				if err != nil || !ok || stored.Profile != profile || stored.AssignmentRevision != 1 {
+					t.Fatalf("Current = %+v, ok %v, err %v", stored, ok, err)
+				}
+			},
+		},
+		{
+			name: "Put with unchanged profile",
+			run: func(t *testing.T, store *Store) {
+				t.Helper()
+				if _, err := store.Put("tenant-one", "agent-one", profile, rotatedToken, 2); err != nil {
+					t.Fatalf("Put: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(op.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "agent-cli-credentials")
+			store := mustOpen(t, root)
+			if _, err := store.Put("tenant-one", "agent-one", profile, testToken, 1); err != nil {
+				t.Fatalf("initial Put: %v", err)
+			}
+			agentDirectory := store.agentDirectory("tenant-one", "agent-one")
+			files := []string{
+				filepath.Join(agentDirectory, credentialFile),
+				filepath.Join(agentDirectory, stateFile),
+				filepath.Join(agentDirectory, profileFile),
+			}
+			if err := os.Chmod(agentDirectory, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range files {
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := privatefs.CheckPath(path, "file", true); err == nil {
+					t.Fatalf("expected loose %s to fail CheckPath before repair", path)
+				}
+			}
+
+			op.run(t, store)
+
+			if err := privatefs.CheckPath(agentDirectory, "directory", true); err != nil {
+				t.Fatalf("agentDirectory not repaired: %v", err)
+			}
+			if info, err := os.Stat(agentDirectory); err != nil || info.Mode().Perm() != 0o700 {
+				t.Fatalf("agentDirectory mode = %v, %v", info, err)
+			}
+			for _, path := range files {
+				if err := privatefs.CheckPath(path, "file", true); err != nil {
+					t.Fatalf("%s not repaired: %v", path, err)
+				}
+				if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+					t.Fatalf("%s mode = %v, %v", path, info, err)
+				}
+			}
+		})
+	}
+}
+
+func TestLookupCurrentAndPutRefuseLinkedFiles(t *testing.T) {
+	profile := testProfile("tenant-one", "agent-one")
+	for _, targetName := range []string{credentialFile, stateFile, profileFile} {
+		t.Run("hardlink/"+targetName, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "agent-cli-credentials")
+			store := mustOpen(t, root)
+			if _, err := store.Put("tenant-one", "agent-one", profile, testToken, 1); err != nil {
+				t.Fatal(err)
+			}
+			agentDirectory := store.agentDirectory("tenant-one", "agent-one")
+			target := filepath.Join(agentDirectory, targetName)
+			alias := filepath.Join(agentDirectory, targetName+".alias")
+			if err := os.Link(target, alias); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := store.Lookup("tenant-one", "agent-one"); err == nil || Retryable(err) {
+				t.Fatalf("Lookup accepted hard-linked %s or marked retryable: %v", targetName, err)
+			}
+			if _, _, err := store.Current("tenant-one", "agent-one"); err == nil || Retryable(err) {
+				t.Fatalf("Current accepted hard-linked %s or marked retryable: %v", targetName, err)
+			}
+			if _, err := store.Put("tenant-one", "agent-one", profile, rotatedToken, 2); err == nil || Retryable(err) {
+				t.Fatalf("Put accepted hard-linked %s or marked retryable: %v", targetName, err)
+			}
+		})
+
+		if runtimeSkipsPOSIXModes() {
+			continue
+		}
+		t.Run("symlink/"+targetName, func(t *testing.T) {
+			base := t.TempDir()
+			root := filepath.Join(base, "agent-cli-credentials")
+			store := mustOpen(t, root)
+			if _, err := store.Put("tenant-one", "agent-one", profile, testToken, 1); err != nil {
+				t.Fatal(err)
+			}
+			agentDirectory := store.agentDirectory("tenant-one", "agent-one")
+			target := filepath.Join(agentDirectory, targetName)
+			outside := filepath.Join(base, "outside-"+targetName)
+			original, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(outside, original, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(outside, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(target); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, target); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := store.Lookup("tenant-one", "agent-one"); err == nil || Retryable(err) {
+				t.Fatalf("Lookup accepted symlinked %s or marked retryable: %v", targetName, err)
+			}
+			if _, _, err := store.Current("tenant-one", "agent-one"); err == nil || Retryable(err) {
+				t.Fatalf("Current accepted symlinked %s or marked retryable: %v", targetName, err)
+			}
+			if _, err := store.Put("tenant-one", "agent-one", profile, rotatedToken, 2); err == nil || Retryable(err) {
+				t.Fatalf("Put accepted symlinked %s or marked retryable: %v", targetName, err)
+			}
+			// Verify the symlink target's content and permissions were not modified.
+			if got, err := os.ReadFile(outside); err != nil || string(got) != string(original) {
+				t.Fatalf("symlink target content changed: %q, %v", got, err)
+			}
+			if info, err := os.Stat(outside); err != nil || info.Mode().Perm() != 0o644 {
+				t.Fatalf("symlink target mode changed: %v, %v", info, err)
+			}
+		})
+	}
 }

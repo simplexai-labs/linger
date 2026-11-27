@@ -3,14 +3,8 @@ package integration_test
 import (
 	"net/http"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentcreationapproval"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 )
 
 // A pending creation approval keeps its decision owner and the requesting
@@ -18,24 +12,14 @@ import (
 // who does not own the decision may not take it. A denial tells the Room why.
 func TestRoomMemberRemovalWaitsForPendingCreationApproval(t *testing.T) {
 	allowParallelIntegrationTest(t)
-	env, alice, issued, roomID := newAgentCLIIdentity(t)
+	env, alice, _, roomID := newAgentCLIIdentity(t)
 	bob := seedPeerHuman(t, env)
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
 	if _, err := env.pool.Exec(t.Context(), `UPDATE agent_registrations SET agent_type='anotherme',receives_all_messages=true,represented_human_actor_id='actor_acme_alice',visibility_scope='sponsor' WHERE actor_id='actor_acme_official'`); err != nil {
 		t.Fatal(err)
 	}
-	segments := []messagecreation.Segment{{Type: "text", Content: "Plan the launch"}}
-	members := []string{"actor_acme_alice", "actor_acme_official"}
-	approval, err := agentcreationapproval.New(env.pool, agentauth.New(env.pool), typedcard.New(env.pool)).Submit(
-		agentauth.WithTarget(t.Context(), "room", roomID), issued.AccessToken,
-		agentcreationapproval.Input{
-			RequestKind: "room_creation", InvocationID: "agent-invocation-sha256:" + strings.Repeat("e", 64),
-			RoomCaller:    &agentcreationapproval.RoomCallerInput{Name: "Launch room " + suffix, MemberIDs: members, InitialMessageSegments: segments},
-			RoomEffective: &agentcreationapproval.RoomEffectivePayload{Name: "Launch room " + suffix, MemberIDs: members, InitialMessageSegments: segments},
-		})
-	if err != nil || approval.CreationApprovalRequestID == "" {
-		t.Fatalf("Room approval result=%+v err=%v", approval, err)
-	}
+	card := pendingRoomCreationCard(t, env, roomID, "member-removal-"+suffix)
+	approval := struct{ CreationApprovalRequestID, MessageID string }{card.DecisionID, card.MessageID}
 	decide := func(client *http.Client, decision map[string]any, key string) (int, []byte) {
 		status, _, body := env.request(client, http.MethodPost,
 			"/v0/decisions/"+approval.CreationApprovalRequestID, decision, key)

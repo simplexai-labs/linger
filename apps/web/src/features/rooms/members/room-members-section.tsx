@@ -6,6 +6,10 @@ import {
 } from "@tanstack/react-query";
 import { Delete02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
+import {
+  SettingsGroup,
+  SettingsGroupAction,
+} from "@/components/ui/settings-group";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -140,8 +144,23 @@ export function RoomMembersSection({
   });
 
   return (
-    <section aria-label={t(m.roomMembers)} className="px-5 py-3">
-      <div className="space-y-1">
+    <>
+      <SettingsGroup
+        action={
+          <SettingsGroupAction
+            onClick={() => {
+              putMember.reset();
+              setAddOpen(true);
+            }}
+          >
+            <Icon icon={PlusSignIcon} size={14} />
+            {t(m.addMember)}
+          </SettingsGroupAction>
+        }
+        ariaLabel={t(m.roomMembers)}
+        label={t(m.members)}
+        meta={members.items.length}
+      >
         {members.items.map((member) => {
           const agent = agentDirectory.data?.items.find(
             (candidate) => candidate.actor.id === member.actor.id,
@@ -149,14 +168,14 @@ export function RoomMembersSection({
           const role = ROLE_LABELS[member.role];
           return (
             <div
-              className="group flex min-h-13 w-full items-center rounded-lg transition-colors duration-300 hover:bg-muted/70"
+              className="group flex w-full items-center transition-colors duration-150 hover:bg-accent/60"
               key={member.actor.id}
             >
               <button
                 aria-label={t(agentInfoMessages.openProfile, {
                   name: member.actor.display_name,
                 })}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-left focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus"
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-3.5 pr-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-app-focus"
                 onClick={() => onOpenProfile?.(member.actor.id)}
                 type="button"
               >
@@ -166,38 +185,38 @@ export function RoomMembersSection({
                   name={member.actor.display_name}
                   size="sm"
                 />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium">
-                      {member.actor.display_name}
+                {/* One line per member: the name and its tags, then an
+                    Agent's status at the end; only a non-member role is named. */}
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="truncate text-[14px] font-medium leading-[18px]">
+                    {member.actor.display_name}
+                  </span>
+                  {member.role !== "member" ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                      {role ? t(role) : member.role}
                     </span>
-                    {member.actor.kind === "agent" ? (
-                      <span className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
-                        {t(agentInfoMessages.agent)}
-                      </span>
-                    ) : null}
-                    {sponsoredAgentIds.has(member.actor.id) ? (
-                      <span className="rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
-                        {t(m.yours)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                    <span>{role ? t(role) : member.role}</span>
-                    {member.actor.kind === "agent" &&
-                    agent &&
-                    availabilityByActorId.has(member.actor.id) ? (
-                      <>
-                        <span aria-hidden>·</span>
-                        <AgentStatus
-                          availability={
-                            availabilityByActorId.get(member.actor.id)!
-                          }
-                          showDetails
-                        />
-                      </>
-                    ) : null}
-                  </span>
+                  ) : null}
+                  {member.actor.kind === "agent" ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
+                      {t(agentInfoMessages.agent)}
+                    </span>
+                  ) : null}
+                  {sponsoredAgentIds.has(member.actor.id) ? (
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
+                      {t(m.yours)}
+                    </span>
+                  ) : null}
+                  {member.actor.kind === "agent" &&
+                  agent &&
+                  availabilityByActorId.has(member.actor.id) ? (
+                    <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
+                      <AgentStatus
+                        availability={
+                          availabilityByActorId.get(member.actor.id)!
+                        }
+                      />
+                    </span>
+                  ) : null}
                 </span>
               </button>
               {isOwner && member.actor.id !== currentActorId ? (
@@ -223,23 +242,13 @@ export function RoomMembersSection({
             </div>
           );
         })}
-      </div>
+      </SettingsGroup>
 
       {!addOpen && putMember.error ? (
-        <p className="mt-3 text-sm text-app-danger" role="alert">
+        <p className="px-3 text-sm text-app-danger" role="alert">
           {putMember.error.message}
         </p>
       ) : null}
-      <Button
-        className="mt-3 w-full"
-        onClick={() => {
-          putMember.reset();
-          setAddOpen(true);
-        }}
-      >
-        <Icon className="text-muted-foreground" icon={PlusSignIcon} size={16} />
-        {t(m.addMember)}
-      </Button>
 
       {addOpen ? (
         <AddMemberDialog
@@ -272,7 +281,7 @@ export function RoomMembersSection({
           onRemove={() => removeMember.mutate(removeTarget.id)}
         />
       ) : null}
-    </section>
+    </>
   );
 }
 

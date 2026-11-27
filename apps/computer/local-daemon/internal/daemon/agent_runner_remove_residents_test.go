@@ -66,7 +66,7 @@ while IFS= read -r line; do
     session/new|session/resume) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"agy-daemon"}}\n' "$id" ;;
     session/prompt)
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-daemon","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1}}}\n' "$id" ;;
     *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
   esac
 done

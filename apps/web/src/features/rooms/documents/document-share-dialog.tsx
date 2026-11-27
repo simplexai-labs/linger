@@ -214,7 +214,7 @@ export function DocumentShareDialog({
       size="lg"
     >
       <div className="flex min-h-0 flex-1 flex-col">
-        <header className="flex min-h-14 items-center justify-between gap-3 border-b border-app-border px-4 sm:px-5">
+        <header className="flex min-h-14 items-center justify-between gap-3 px-4 sm:px-5">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               {view === "manage" ? (
@@ -505,7 +505,7 @@ function ManageCollaborators({
           {t(m.agentsWithDirectAccess)}
         </h3>
         {direct.length ? (
-          <div className="mt-2 divide-y divide-app-border">
+          <div className="mt-2">
             {direct.map((item) => {
               const target = item.source.target;
               if (target?.kind !== "agent") {
@@ -620,17 +620,14 @@ function RoomBindingSection({
     TeamHubDocumentShareViewV2["sources"][number] | null
   >(null);
   return (
-    <section
-      aria-labelledby="shared-rooms-heading"
-      className="border-t border-app-border pt-5"
-    >
+    <section aria-labelledby="shared-rooms-heading" className="pt-5">
       <h3
         className="text-sm font-semibold text-app-ink"
         id="shared-rooms-heading"
       >
         {t(m.sharedWithRooms)}
       </h3>
-      <div className="mt-2 divide-y divide-app-border">
+      <div className="mt-2">
         {rooms.map((room) => (
           <div
             className="flex min-h-11 items-center justify-between gap-3"
@@ -695,7 +692,7 @@ function RoomBindingSection({
 function CopyLinkSection({ onCopyLink }: { onCopyLink: () => void }) {
   const t = useT();
   return (
-    <section className="border-t border-app-border pt-5">
+    <section className="pt-5">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-app-ink">
@@ -815,7 +812,7 @@ function InviteCollaboratorsField({
               })}
             </div>
           )}
-          <div className="flex items-center justify-between gap-2 border-t border-app-border px-3 py-2">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
             <Select
               aria-label={t(m.inviteRole)}
               className="h-8 w-auto"

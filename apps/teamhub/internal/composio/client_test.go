@@ -328,11 +328,11 @@ func TestConnectionStatusMapping(t *testing.T) {
 		"EXPIRED": ConnectionExpired, "FAILED": ConnectionFailed, "REVOKED": ConnectionFailed,
 	}
 	for input, want := range tests {
-		if got := mapConnectionStatus(input, false); got != want {
+		if got := classifyConnectionStatus(input, false).Status; got != want {
 			t.Fatalf("status %q=%q want=%q", input, got, want)
 		}
 	}
-	if got := mapConnectionStatus("ACTIVE", true); got != ConnectionFailed {
+	if got := classifyConnectionStatus("ACTIVE", true).Status; got != ConnectionFailed {
 		t.Fatalf("disabled active=%q", got)
 	}
 }
@@ -501,5 +501,420 @@ func TestClientExecuteToolSendsAnObjectForMissingArguments(t *testing.T) {
 	}
 	if len(bodies) != 2 || string(bodies[0]["arguments"]) != `{}` || string(bodies[1]["arguments"]) != `{"guild_id":"g1"}` {
 		t.Fatalf("arguments=%s, %s", bodies[0]["arguments"], bodies[1]["arguments"])
+	}
+}
+
+func TestErrorSourceAndUnauthorizedAttribution(t *testing.T) {
+	t.Run("constructors and helpers", func(t *testing.T) {
+		composio403 := &remoteError{operation: "get connection status", status: http.StatusForbidden, source: ErrorSourceComposio}
+		composio401 := &remoteError{operation: "get connection status", status: http.StatusUnauthorized, source: ErrorSourceComposio}
+		provider403 := &remoteError{operation: "identify Gmail account", status: http.StatusForbidden, source: ErrorSourceProvider}
+		provider401 := &remoteError{operation: "identify Gmail account", status: http.StatusUnauthorized, source: ErrorSourceProvider}
+		legacy403 := RemoteStatusError("legacy op", http.StatusForbidden)
+		legacy401 := RemoteStatusError("legacy op", http.StatusUnauthorized)
+		genericErr := errors.New("network blip")
+
+		if src, ok := ErrorSourceOf(composio403); !ok || src != ErrorSourceComposio {
+			t.Fatalf("composio403 source=(%q,%t) want (%q,true)", src, ok, ErrorSourceComposio)
+		}
+		if src, ok := ErrorSourceOf(provider403); !ok || src != ErrorSourceProvider {
+			t.Fatalf("provider403 source=(%q,%t) want (%q,true)", src, ok, ErrorSourceProvider)
+		}
+		if src, ok := ErrorSourceOf(legacy403); ok || src != "" {
+			t.Fatalf("legacy403 source=(%q,%t) want (\"\",false)", src, ok)
+		}
+		if src, ok := ErrorSourceOf(genericErr); ok || src != "" {
+			t.Fatalf("genericErr source=(%q,%t) want (\"\",false)", src, ok)
+		}
+		if !IsUnauthorized(composio403) || !IsUnauthorized(composio401) {
+			t.Fatal("Composio 401/403 must be IsUnauthorized")
+		}
+		if !IsUnauthorized(legacy403) || !IsUnauthorized(legacy401) {
+			t.Fatal("legacy RemoteStatusError 401/403 must remain IsUnauthorized")
+		}
+		if IsUnauthorized(provider403) || IsUnauthorized(provider401) {
+			t.Fatal("proxied provider 401/403 must not be IsUnauthorized")
+		}
+		for _, err := range []error{composio401, composio403, provider401, provider403, legacy401, legacy403} {
+			if !IsAuthFailure(err) {
+				t.Fatalf("expected IsAuthFailure(%v) == true", err)
+			}
+		}
+	})
+
+	t.Run("direct Composio HTTP errors tag composio source", func(t *testing.T) {
+		for _, status := range []int{http.StatusForbidden, http.StatusInternalServerError, http.StatusTooManyRequests} {
+			t.Run(fmt.Sprintf("requestJSON_%d", status), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Retry-After", "1")
+					w.WriteHeader(status)
+				}))
+				defer server.Close()
+				client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, _ := WithProviderAttemptBudget(context.Background(), 1)
+				_, err = client.GetConnectionStatus(ctx, "ca_1")
+				if src, ok := ErrorSourceOf(err); !ok || src != ErrorSourceComposio {
+					t.Fatalf("status=%d err=%v source=(%q,%t) want composio", status, err, src, ok)
+				}
+				if status == http.StatusForbidden && !IsUnauthorized(err) {
+					t.Fatalf("direct Composio 403 must be IsUnauthorized: %v", err)
+				}
+			})
+			t.Run(fmt.Sprintf("requestJSONOnce_%d", status), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Retry-After", "1")
+					w.WriteHeader(status)
+				}))
+				defer server.Close()
+				client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = client.CreateConnectionLink(context.Background(), "ac_1", "account_1")
+				if src, ok := ErrorSourceOf(err); !ok || src != ErrorSourceComposio {
+					t.Fatalf("status=%d err=%v source=(%q,%t) want composio", status, err, src, ok)
+				}
+			})
+		}
+	})
+
+	t.Run("proxied provider HTTP errors tag provider source", func(t *testing.T) {
+		for _, status := range []int{http.StatusForbidden, http.StatusInternalServerError, http.StatusTooManyRequests} {
+			t.Run(fmt.Sprintf("proxy_%d", status), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_ = json.NewEncoder(w).Encode(proxyResponse{
+						Status:  status,
+						Headers: map[string]string{"retry-after": "1"},
+						Data:    json.RawMessage(`{"error":"upstream"}`),
+					})
+				}))
+				defer server.Close()
+				client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, _ := WithProviderAttemptBudget(context.Background(), 1)
+				_, err = client.IdentifyGmail(ctx, "ca_1")
+				if src, ok := ErrorSourceOf(err); !ok || src != ErrorSourceProvider {
+					t.Fatalf("status=%d err=%v source=(%q,%t) want provider", status, err, src, ok)
+				}
+				if status == http.StatusForbidden {
+					if IsUnauthorized(err) {
+						t.Fatalf("proxied provider 403 must not be IsUnauthorized: %v", err)
+					}
+					if !IsAuthFailure(err) {
+						t.Fatalf("proxied provider 403 must be IsAuthFailure: %v", err)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("dedicated proxy and tool paths tag provider source", func(t *testing.T) {
+		assertProviderError := func(t *testing.T, err error, expectAuth bool) {
+			t.Helper()
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if src, ok := ErrorSourceOf(err); !ok || src != ErrorSourceProvider {
+				t.Fatalf("err=%v source=(%q,%t) want (%q,true)", err, src, ok, ErrorSourceProvider)
+			}
+			if expectAuth {
+				if IsUnauthorized(err) {
+					t.Fatalf("provider auth error must not be IsUnauthorized: %v", err)
+				}
+				if !IsAuthFailure(err) {
+					t.Fatalf("provider auth error must be IsAuthFailure: %v", err)
+				}
+			}
+		}
+
+		t.Run("IdentifySlack HTTP 403, HTTP 429, and ok=false ratelimited", func(t *testing.T) {
+			for _, tc := range []struct {
+				name       string
+				payload    proxyResponse
+				expectAuth bool
+			}{
+				{
+					name:       "http 403",
+					payload:    proxyResponse{Status: http.StatusForbidden, Data: json.RawMessage(`{"ok":false}`)},
+					expectAuth: true,
+				},
+				{
+					name:       "http 429",
+					payload:    proxyResponse{Status: http.StatusTooManyRequests, Headers: map[string]string{"retry-after": "5"}, Data: json.RawMessage(`{}`)},
+					expectAuth: false,
+				},
+				{
+					name:       "slack ratelimited body",
+					payload:    proxyResponse{Status: http.StatusOK, Headers: map[string]string{"retry-after": "5"}, Data: json.RawMessage(`{"ok":false,"error":"ratelimited"}`)},
+					expectAuth: false,
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						_ = json.NewEncoder(w).Encode(tc.payload)
+					}))
+					defer server.Close()
+					client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = client.IdentifySlack(context.Background(), "ca_slack")
+					assertProviderError(t, err, tc.expectAuth)
+				})
+			}
+		})
+
+		t.Run("IdentifyDiscord tool failure 403 and 429", func(t *testing.T) {
+			for _, tc := range []struct {
+				name       string
+				statusCode int
+				expectAuth bool
+			}{
+				{name: "status 403", statusCode: http.StatusForbidden, expectAuth: true},
+				{name: "status 429", statusCode: http.StatusTooManyRequests, expectAuth: false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						_, _ = fmt.Fprintf(w, `{"successful":false,"data":{"status_code":%d}}`, tc.statusCode)
+					}))
+					defer server.Close()
+					client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = client.IdentifyDiscord(context.Background(), "ca_discord")
+					assertProviderError(t, err, tc.expectAuth)
+				})
+			}
+		})
+
+		t.Run("outlookDraftRequest provider 401 and 403", func(t *testing.T) {
+			for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+				t.Run(fmt.Sprintf("status_%d", status), func(t *testing.T) {
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						_ = json.NewEncoder(w).Encode(proxyResponse{Status: status, Data: json.RawMessage(`{"error":"denied"}`)})
+					}))
+					defer server.Close()
+					client, err := New(Config{BaseURL: server.URL, APIKey: "key", EnvironmentKey: "test", HTTPClient: server.Client(), RetryLimit: 0})
+					if err != nil {
+						t.Fatal(err)
+					}
+					client.SetConnectionAuthority(func(context.Context, string) (ConnectionBinding, error) {
+						return ConnectionBinding{UserID: "user_1", ToolkitSlug: "outlook", AuthConfigID: "ac_outlook"}, nil
+					})
+					_, err = client.outlookDraftRequest(context.Background(), "ca_outlook", "/v1.0/me/messages", http.MethodPost, map[string]any{"subject": "hi"})
+					assertProviderError(t, err, true)
+				})
+			}
+		})
+
+		t.Run("uploadGmailDraft start, chunk, and finish provider auth errors", func(t *testing.T) {
+			smallMIME := base64.RawURLEncoding.EncodeToString([]byte("Subject: hi\r\n\r\nhello"))
+			largeMIME := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("a", gmailDraftChunkBytes+128)))
+			location := "https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts?upload_id=session_1"
+
+			t.Run("start 403", func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_ = json.NewEncoder(w).Encode(proxyResponse{Status: http.StatusForbidden})
+				}))
+				defer server.Close()
+				client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = client.uploadGmailDraft(context.Background(), "ca_gmail", "/gmail/v1/users/me/drafts", http.MethodPost, smallMIME)
+				assertProviderError(t, err, true)
+			})
+
+			t.Run("finish 401", func(t *testing.T) {
+				var calls atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					if calls.Add(1) == 1 {
+						_ = json.NewEncoder(w).Encode(proxyResponse{Status: http.StatusOK, Headers: map[string]string{"location": location}})
+						return
+					}
+					_ = json.NewEncoder(w).Encode(proxyResponse{Status: http.StatusUnauthorized})
+				}))
+				defer server.Close()
+				client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = client.uploadGmailDraft(context.Background(), "ca_gmail", "/gmail/v1/users/me/drafts", http.MethodPost, smallMIME)
+				assertProviderError(t, err, true)
+			})
+
+			t.Run("chunk 403", func(t *testing.T) {
+				var calls atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					if calls.Add(1) == 1 {
+						_ = json.NewEncoder(w).Encode(proxyResponse{Status: http.StatusOK, Headers: map[string]string{"location": location}})
+						return
+					}
+					_ = json.NewEncoder(w).Encode(proxyResponse{Status: http.StatusForbidden})
+				}))
+				defer server.Close()
+				client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client(), RetryLimit: 0})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = client.uploadGmailDraft(context.Background(), "ca_gmail", "/gmail/v1/users/me/drafts", http.MethodPost, largeMIME)
+				assertProviderError(t, err, true)
+			})
+		})
+	})
+}
+
+func TestInspectConnectionStatusForToolkit(t *testing.T) {
+	statusCases := []struct {
+		name        string
+		toolkitSlug string
+		body        string
+		want        ConnectionStatusReport
+	}{
+		{
+			name:        "active",
+			toolkitSlug: "gmail",
+			body:        `{"status":"ACTIVE","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionActive, Reason: ConnectionStatusReasonActive},
+		},
+		{
+			name:        "pending",
+			toolkitSlug: "gmail",
+			body:        `{"status":"PENDING","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionPending, Reason: ConnectionStatusReasonPending},
+		},
+		{
+			name:        "initializing",
+			toolkitSlug: "gmail",
+			body:        `{"status":"INITIALIZING","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionPending, Reason: ConnectionStatusReasonPending},
+		},
+		{
+			name:        "initiated",
+			toolkitSlug: "gmail",
+			body:        `{"status":"INITIATED","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionPending, Reason: ConnectionStatusReasonPending},
+		},
+		{
+			name:        "expired",
+			toolkitSlug: "gmail",
+			body:        `{"status":"EXPIRED","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionExpired, Reason: ConnectionStatusReasonExpired},
+		},
+		{
+			name:        "failed",
+			toolkitSlug: "gmail",
+			body:        `{"status":"FAILED","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonFailed},
+		},
+		{
+			name:        "revoked",
+			toolkitSlug: "gmail",
+			body:        `{"status":"REVOKED","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonRevoked},
+		},
+		{
+			name:        "inactive",
+			toolkitSlug: "gmail",
+			body:        `{"status":"INACTIVE","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonInactive},
+		},
+		{
+			name:        "unknown status",
+			toolkitSlug: "gmail",
+			body:        `{"status":"CUSTOM_STATE","is_disabled":false,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonUnknown},
+		},
+		{
+			name:        "disabled overrides active",
+			toolkitSlug: "gmail",
+			body:        `{"status":"ACTIVE","is_disabled":true,"toolkit":{"slug":"gmail"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonDisabled},
+		},
+		{
+			name:        "toolkit mismatch",
+			toolkitSlug: "gmail",
+			body:        `{"status":"ACTIVE","is_disabled":false,"toolkit":{"slug":"slack"}}`,
+			want:        ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonToolkitMismatch},
+		},
+	}
+	for _, tc := range statusCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := newTestClient(Config{BaseURL: server.URL, APIKey: "key", HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := client.InspectConnectionStatusForToolkit(context.Background(), "ca_1", tc.toolkitSlug)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("report=%+v want %+v", got, tc.want)
+			}
+		})
+	}
+
+	scopeCases := []struct {
+		name      string
+		body      string
+		wantField string
+		secret    string
+	}{
+		{
+			name:      "user_id mismatch",
+			body:      `{"status":"ACTIVE","user_id":"secret-other-user","toolkit":{"slug":"gmail"},"auth_config":{"id":"ac_expected"}}`,
+			wantField: "user_id",
+			secret:    "secret-other-user",
+		},
+		{
+			name:      "toolkit_slug mismatch",
+			body:      `{"status":"ACTIVE","user_id":"expected-user","toolkit":{"slug":"secret-other-toolkit"},"auth_config":{"id":"ac_expected"}}`,
+			wantField: "toolkit_slug",
+			secret:    "secret-other-toolkit",
+		},
+		{
+			name:      "auth_config_id mismatch",
+			body:      `{"status":"ACTIVE","user_id":"expected-user","toolkit":{"slug":"gmail"},"auth_config":{"id":"secret-other-config"}}`,
+			wantField: "auth_config_id",
+			secret:    "secret-other-config",
+		},
+	}
+	for _, tc := range scopeCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := New(Config{BaseURL: server.URL, APIKey: "key", EnvironmentKey: "ci", HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			client.SetConnectionAuthority(func(context.Context, string) (ConnectionBinding, error) {
+				return ConnectionBinding{UserID: "expected-user", ToolkitSlug: "gmail", AuthConfigID: "ac_expected"}, nil
+			})
+			_, err = client.InspectConnectionStatusForToolkit(context.Background(), "ca_1", "gmail")
+			if !errors.Is(err, ErrConnectionScope) {
+				t.Fatalf("err=%v want ErrConnectionScope", err)
+			}
+			if gotField := ConnectionScopeMismatchField(err); gotField != tc.wantField {
+				t.Fatalf("field=%q want %q", gotField, tc.wantField)
+			}
+			if strings.Contains(err.Error(), tc.secret) {
+				t.Fatalf("error leaked raw value %q: %v", tc.secret, err)
+			}
+		})
+	}
+	if field := ConnectionScopeMismatchField(ErrConnectionScope); field != "" {
+		t.Fatalf("plain ErrConnectionScope field=%q want empty", field)
 	}
 }

@@ -11,11 +11,17 @@ import {
 } from "./native-process.js";
 
 // The LiveKit server Native voice runs, as docker-compose.yml runs it for
-// Docker: the voice workers and the browser meet there. It listens on
-// loopback only: signalling over HTTP/WebSocket on `httpPort` and media over
-// UDP on `rtcPort`. LiveKit's ICE/TCP fallback always listens on every
-// interface, so Native turns it off; on one computer UDP over loopback
-// always works.
+// Docker: the voice workers and the browser meet there. Signalling listens on
+// loopback only over HTTP/WebSocket (`httpPort`) and media uses UDP on
+// `rtcPort` with ICE/TCP disabled so no wildcard TCP listener opens. On macOS
+// and Linux, media UDP also binds loopback only; on Windows, libwebrtc clients
+// and @livekit/rtc-node workers bind non-loopback interface sockets whenever
+// one exists and Windows blocks cross-scope UDP between non-loopback sockets
+// and 127.0.0.1, so LiveKit binds and advertises local interfaces alongside
+// loopback with `use_ice_lite: true` (which skips LiveKit's auto-injected
+// public STUN servers when `node_ip` is unset). Single-port UDPMux snapshots
+// local interfaces at startup, so network changes on Windows require a LiveKit
+// restart.
 export interface LiveKitSettings {
   httpPort: number;
   rtcPort: number;
@@ -65,13 +71,18 @@ export async function prepareLiveKitSettings(
   root: string,
   reserved: Set<number>,
   onMoved?: (message: string) => void,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<LiveKitSettings> {
   const existing = await readLiveKitSettings(root);
+  const rtcAllInterfaces = platform === "win32";
   let settings: LiveKitSettings;
   if (!existing)
     settings = {
       httpPort: await freePort(reserved),
-      rtcPort: await freePort(reserved, { protocol: "udp" }),
+      rtcPort: await freePort(reserved, {
+        protocol: "udp",
+        allInterfaces: rtcAllInterfaces,
+      }),
       // LiveKit signs access tokens with the secret; it needs 32+ characters.
       apiKey: `API${randomBytes(6).toString("hex")}`,
       apiSecret: randomBytes(32).toString("hex"),
@@ -80,12 +91,12 @@ export async function prepareLiveKitSettings(
     return existing;
   else {
     settings = { ...existing };
-    for (const [name, protocol] of [
-      ["httpPort", "tcp"],
-      ["rtcPort", "udp"],
+    for (const [name, protocol, allInterfaces] of [
+      ["httpPort", "tcp", false],
+      ["rtcPort", "udp", rtcAllInterfaces],
     ] as const) {
-      if (await portFree(existing[name], protocol)) continue;
-      settings[name] = await freePort(reserved, { protocol });
+      if (await portFree(existing[name], protocol, { allInterfaces })) continue;
+      settings[name] = await freePort(reserved, { protocol, allInterfaces });
       onMoved?.(
         `Port ${existing[name]} is in use by another program; Linger's livekit uses port ${settings[name]} instead.\n`,
       );
@@ -122,7 +133,11 @@ export function liveKitEnvironment(settings: LiveKitSettings) {
  * change restarts LiveKit. No webhook, as in Docker; keys come from the
  * environment.
  */
-export function liveKitConfig(settings: LiveKitSettings): string {
+export function liveKitConfig(
+  settings: LiveKitSettings,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const loopbackOnlyRtc = platform !== "win32";
   return JSON.stringify({
     port: settings.httpPort,
     bind_addresses: ["127.0.0.1"],
@@ -130,9 +145,10 @@ export function liveKitConfig(settings: LiveKitSettings): string {
       tcp_port: 0,
       udp_port: settings.rtcPort,
       use_external_ip: false,
-      node_ip: "127.0.0.1",
       enable_loopback_candidate: true,
-      ips: { includes: ["127.0.0.1/32"] },
+      ...(loopbackOnlyRtc
+        ? { node_ip: "127.0.0.1", ips: { includes: ["127.0.0.1/32"] } }
+        : { use_ice_lite: true }),
     },
     logging: { level: "info" },
   });

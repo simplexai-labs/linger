@@ -29,8 +29,6 @@ type LocalComputer = TeamHubLocalComputerPage["items"][number];
 
 const newMac: LocalComputer = {
   active_operations: 0,
-  available_capacity: 2,
-  capacity: 2,
   computer_id: "computer-new-mac",
   display_name: "New Mac",
   runtimes: [
@@ -312,9 +310,7 @@ describe("Local Computer gate", () => {
     expect(
       within(gate).getByText("npm install -g @earendil-works/pi-coding-agent"),
     ).toBeVisible();
-    expect(
-      within(gate).getAllByText("The npm commands need Node.js."),
-    ).toHaveLength(1);
+    expect(within(gate).getAllByText("Needs Node.js.")).toHaveLength(1);
   });
 });
 

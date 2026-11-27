@@ -158,9 +158,14 @@ export const messageSearchInputSchema = object(
   },
   ["query"],
 );
-export const messageDirectInputSchema = object({
-  messages: { type: "array", minItems: 1, maxItems: 100, items: text },
-});
+export const messageDirectInputSchema = object(
+  {
+    messages: { type: "array", minItems: 1, maxItems: 100, items: text },
+    handoff_id: { type: "string", minLength: 1, maxLength: 64 },
+    handoff_state: { enum: ["working", "waiting_for_user", "completed"] },
+  },
+  ["messages"],
+);
 export const messageSequenceInputSchema = object(
   {
     inbox_id: {
@@ -251,6 +256,12 @@ export const historyMessageSchema = object({
     type: "array",
     items: object({ document_id: identity }),
   },
+});
+(historyMessageSchema.properties as Schema).room_handoff = object({
+  handoff_id: identity,
+  room_id: identity,
+  room_name: { type: "string" },
+  state: { enum: ["working", "waiting_for_user", "completed"] },
 });
 export const readMessageSchema = {
   ...historyMessageSchema,

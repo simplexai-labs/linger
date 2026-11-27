@@ -1,7 +1,7 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ConfigStore } from "./config.js";
 import { EventBus, ModuleHost } from "./modules.js";
@@ -99,6 +99,45 @@ describe("WorkspaceGrantsModule", () => {
 
     expect(grants.list()).toHaveLength(1);
     expect(grants.list()[0]?.path).toBe(realpathSync(directory));
+    await host.stop("quit");
+  });
+
+  it("logs and records default workspace grant failure without throwing, then clears once a folder is added", async () => {
+    const blockedPath = path.join(tempDirectory(), "Linger");
+    // A regular file at the default folder path prevents mkdir from creating a directory.
+    writeFileSync(blockedPath, "not a directory");
+    const grants = new WorkspaceGrantsModule({
+      pickDirectory: pickNothing,
+      defaultDirectory: blockedPath,
+    });
+    const errorLog = vi.fn();
+    const host = new ModuleHost([stubModule("Config"), grants], {
+      config: new ConfigStore(path.join(tempDirectory(), "config.json"), {
+        computerId: "computer_1",
+      }),
+      log: { ...silentLog, error: errorLog },
+      bus: new EventBus(),
+    });
+
+    await host.start();
+
+    expect(grants.list()).toEqual([]);
+    expect(grants.defaultFailure()).toMatchObject({
+      directory: blockedPath,
+    });
+    expect(grants.defaultFailure()?.error).toBeTruthy();
+    expect(errorLog).toHaveBeenCalledWith(
+      "workspace_grant.default_failed",
+      expect.objectContaining({
+        directory: blockedPath,
+        error: expect.any(String),
+      }),
+    );
+
+    // Adding a valid folder clears the recorded failure.
+    const fallbackDir = tempDirectory();
+    await grants.add(fallbackDir);
+    expect(grants.defaultFailure()).toBeUndefined();
     await host.stop("quit");
   });
 });

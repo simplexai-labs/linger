@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -238,6 +239,20 @@ func TestVoiceMediaOnWithoutKeysRegistersTheVoicePlane(t *testing.T) {
 	}
 	if got := retentionTables(a.retentionRules()); !slices.Equal(got, slices.Concat(retentionTables(retention.Core), voiceRetentionTables)) {
 		t.Fatalf("retention rules = %v", got)
+	}
+}
+
+func TestVoiceMediaWithReservedToolsBinEnablesVoiceBeforeToolsExist(t *testing.T) {
+	t.Setenv("PATH", "")
+	cfg := voiceOnConfig()
+	cfg.Voice.MediaToolsBin = filepath.Join(t.TempDir(), "voice", "bin")
+	a := &App{cfg: cfg, logger: slog.Default()}
+	if err := a.registerVoice(cfg, Deps{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if a.voiceMedia == nil || a.voiceRecordings == nil || !a.voiceKeys.Enabled() {
+		t.Fatalf("reserved MediaToolsBin did not enable voice plane: media=%v recordings=%v enabled=%v",
+			a.voiceMedia != nil, a.voiceRecordings != nil, a.voiceKeys.Enabled())
 	}
 }
 

@@ -81,6 +81,10 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		d.activeMu.Unlock()
 		d.admissionMu.Unlock()
 	}
+	// Pi reports "cancelled" for our abort RPC and "aborted" for its own interruption.
+	if spec.Provider == "pi" && result.Status == "aborted" && result.CleanupConfirmed && (reason == "" || yieldRequested) {
+		reason = "runtime_aborted"
+	}
 	terminalType := protocol.EventOperationCompleted
 	if reason != "" && !result.CleanupUnconfirmed {
 		terminalType = protocol.EventOperationCancelled
@@ -91,9 +95,11 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		}
 	}
 	slog.Info("runner.operation.finished", "operation_id", command.OperationID, "kind", spec.OperationKind,
-		"provider", spec.Provider, "status", terminalType, "failure_code", result.FailureCode,
+		"provider", spec.Provider, "status", terminalType, "provider_status", result.Status,
+		"scheduler_yield_requested", yieldRequested, "failure_code", result.FailureCode,
 		"error", receiptReason(redact.Text(result.Error)))
-	payload := terminalPayload(spec, result)
+	includeDetail := d.runtimeFailureDetail.Load()
+	payload := terminalPayloadFor(spec, result, includeDetail)
 	if terminalType == protocol.EventOperationCancelled {
 		payload = terminalWithUsage(map[string]any{"reason": reason}, spec, result)
 	}
@@ -108,7 +114,7 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 	}
 	terminal, err := d.ledger.Complete(context.WithoutCancel(ctx), operationIdentity(command), terminal)
 	if errors.Is(err, ErrLedgerCapacity) {
-		terminal = withOperationIdentity(protocol.Event{Type: protocol.EventOperationFailed, SentAt: time.Now().UTC(), Payload: terminalPayload(spec, provider.Result{Status: "failed", Error: "Operation terminal result exceeds its reserved capacity"})}, command)
+		terminal = withOperationIdentity(protocol.Event{Type: protocol.EventOperationFailed, SentAt: time.Now().UTC(), Payload: terminalPayloadFor(spec, provider.Result{Status: "failed", Error: "Operation terminal result exceeds its reserved capacity"}, includeDetail)}, command)
 		terminal, err = d.ledger.Complete(context.WithoutCancel(ctx), operationIdentity(command), terminal)
 	}
 	if err != nil {
@@ -287,12 +293,15 @@ func operationIdentity(command protocol.Command) OperationIdentity {
 	return identity
 }
 
-func terminalPayload(spec provider.OperationSpec, result provider.Result) json.RawMessage {
+func terminalPayloadFor(spec provider.OperationSpec, result provider.Result, includeDetail bool) json.RawMessage {
 	if result.CleanupUnconfirmed {
 		return terminalWithUsage(map[string]any{"code": cleanupUnconfirmedCode, "message": cleanupUnconfirmedMessage, "retryable": false}, spec, result)
 	}
 	if result.Status != "completed" {
 		failure := provider.ClassifyExecutionFailure(spec.Provider, spec.CodexVersion, result.Status, result.FailureCode, result.Diagnostics)
+		if includeDetail {
+			failure.Detail = provider.FormatFailureDetail(result.PublicDetail, result.Diagnostics)
+		}
 		payload := map[string]any{"code": "RUNTIME_EXECUTION_FAILED", "message": "Runtime execution failed", "retryable": false, "failure": failure}
 		if diagnostics := result.Diagnostics.Sanitized(); diagnostics != nil {
 			payload["diagnostics"] = diagnostics

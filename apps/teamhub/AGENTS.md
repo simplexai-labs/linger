@@ -105,11 +105,12 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 
 - `another_me_background_failures` counts an Another Me's background model
   calls that failed in a row, as the Agent Service reports them; a completed
-  call deletes the row. `GET /v0/tenants/{tenantId}/another-me` carries
-  `background_failure` from the third failure on. The `another-me` hint goes
-  out when it appears, when its reason changes and when it clears; a higher
-  count alone shows on the next fetch. Reason codes TeamHub does not know are
-  stored as `unknown`.
+  call, a change to the Another Me's Computer, workspace grant, Runtime, model,
+  or reasoning effort, or a model-source reapply on its Computer deletes the
+  row. `GET /v0/tenants/{tenantId}/another-me` carries `background_failure`
+  from the third failure on. The `another-me` hint goes out when it appears,
+  when its reason changes and when it clears; a higher count alone shows on the
+  next fetch. Reason codes TeamHub does not know are stored as `unknown`.
 - The Human's default Another Me Agent is named `Linger`. Changing the Human's
   name updates the delegate description, never the Agent's display name.
   A forward migration renames generated names; custom Agent names stay.
@@ -169,7 +170,13 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   whether earlier runs changed. Gmail canvases keep their separate header,
   body and attachment rules; an inline image still blocks a body rewrite.
 - Live voice write tools that finish a send return a `next` asking the model
-  to say it was sent; a result without one can leave the voice silent.
+  to say it was sent; a result without one can leave the voice silent. Creating
+  a Room or an Agent and adding members return `voicelive.DoneNext`, and an
+  accepted Room handoff says it is under way, not done; each asks for one warm
+  first-person line that does not repeat the acknowledgement spoken before the
+  call. `needs_confirmation` asks the model to put the question in its own
+  words, never reading the summary out, and asks for no progress line of its
+  own when the yes comes: Voice Runtime's acknowledgement rule covers it.
 - The live voice's persona is warm and lightly playful and says what it does
   in the first person; Voice Runtime's tone rules have each reply open with a
   brief reaction and keep it to two or three short sentences. Humor softens
@@ -178,10 +185,12 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   persona here and the tone rules in Voice Runtime together.
 - Live voice writes need the user's yes from a turn after the question
   (`voiceLiveConfirmed`), except `voicelive.DirectYesTools`: sending a Gmail
-  canvas, which is open beside the chat, runs when the user's own turn told
-  the model to send it and that turn neither asked about it nor wrote,
-  changed or attached to a canvas; otherwise the details are read back and
-  the yes comes in the user's next turn.
+  canvas, which is open beside the chat, and handing a request off to a Room
+  run when the user's own turn told the model to do it and that turn neither
+  asked about it nor wrote, changed or attached to a canvas; otherwise the
+  details are read back and the yes comes in the user's next turn. A handoff
+  preview shows the Room and the first 120 characters of the instruction,
+  while its confirmation binds the whole instruction.
 
 - A Room permits 100 Routines: recurring ones count while they exist, and
   one-shot ones count until they fire. There is no separate one-shot limit.
@@ -214,7 +223,24 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   because they often carry outside content. A refusal names its reason in an
   error issue, which the CLI shows the Agent. The handoff body is hidden from the Web timeline but other
   Agents in that Room can read it. Results come back through
-  `send_direct_message`.
+  `send_direct_message`. Live in the AnotherMe private chat uses the same
+  handoff transaction once the user told it to or said yes, with its active session's
+  identity and lease instead of a direct-chat Meta Run. Live-created Rooms
+  include the call's Agent through ordinary member admission. Existing groups
+  require both members before handoff; a missing Agent is invited explicitly.
+  `room_handoffs` binds each request to its Human, AnotherMe, origin and target;
+  `handoff_id` continues that request. Agent message history exposes the
+  report's `room_handoff` routing metadata to its owning AnotherMe, so text
+  follow-ups preserve the same target. Target-room `send_direct_message` reports
+  carry `handoff_id` and `handoff_state` (`working`, `waiting_for_user`, or
+  `completed`), remain visible in private chat after the call, and wake the
+  existing Live task-update stream. Live reads only reports created during
+  its private call, scoped to both identities and current target membership.
+  `ack_room_reports` records completed speech for restart deduplication;
+  interrupted or unspoken updates stay unacknowledged. The private Message is
+  the durable fallback, not an audio-heard receipt. Task delegation still
+  creates AlterEgo Tasks; it does not perform Room coordination. No additional
+  network round trip or file walk is added before `provider_ready`.
 
 - Go generates only types for the contracts TeamHub serves. Mount each
   operation in the caller's route table in `internal/app/routes_*.go`;
@@ -354,7 +380,11 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 - Voice: `TEAMHUB_VOICE_MEDIA` (`on` by default) builds the voice media plane
   over LiveKit; `off`, a missing `LINGER_SECRET_SEED`, or missing ffmpeg keep
   voice off (the last two log `voice.media_unavailable`) without stopping
-  TeamHub.
+  TeamHub. When `TEAMHUB_VOICE_TOOLS_BIN` names a pre-reserved absolute tools
+  directory, `NewHLSMaterializerWithToolsBin` enables voice media before
+  extraction completes and resolves `ffmpeg`/`ffprobe` lazily, preferring
+  `TEAMHUB_VOICE_TOOLS_BIN` over system `PATH` (falling back to `PATH` without
+  caching until the bundled binaries appear).
   `internal/voicekey` resolves the Soniox and xAI keys at each use, the
   environment key over one saved in the product (`voice_provider_keys`, sealed
   with `TEAMHUB_SECRET_ENCRYPTION_KEY`), so a save applies without a restart

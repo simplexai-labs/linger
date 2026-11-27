@@ -32,7 +32,7 @@ func (c *Client) uploadGmailDraft(ctx context.Context, accountID, endpoint, meth
 		return nil, err
 	}
 	if response.Status != http.StatusOK {
-		return nil, &remoteError{operation: "start Gmail draft upload", status: response.Status}
+		return nil, &remoteError{operation: "start Gmail draft upload", status: response.Status, source: ErrorSourceProvider}
 	}
 	session := headerValue(response.Headers, "location")
 	parsed, err := url.Parse(session)
@@ -52,12 +52,12 @@ func (c *Client) uploadGmailDraft(ctx context.Context, accountID, endpoint, meth
 		}
 		if end == len(message) {
 			if response.Status != http.StatusOK && response.Status != http.StatusCreated {
-				return nil, &remoteError{operation: "finish Gmail draft upload", status: response.Status}
+				return nil, &remoteError{operation: "finish Gmail draft upload", status: response.Status, source: ErrorSourceProvider}
 			}
 			return response.Data, nil
 		}
 		if response.Status != http.StatusPermanentRedirect {
-			return nil, &remoteError{operation: "upload Gmail draft chunk", status: response.Status}
+			return nil, &remoteError{operation: "upload Gmail draft chunk", status: response.Status, source: ErrorSourceProvider}
 		}
 		if headerValue(response.Headers, "range") != fmt.Sprintf("bytes=0-%d", end-1) {
 			return nil, errors.New("Gmail did not acknowledge the complete draft chunk")

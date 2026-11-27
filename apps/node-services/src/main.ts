@@ -155,6 +155,7 @@ export async function main(
 ): Promise<void> {
   const logger = createJsonLogger({ service: "node-services" });
   await runServiceProcess(async (control) => {
+    const startupStartedAt = performance.now();
     const selected = selectRoles(process.env.NODE_SERVICES_ROLES);
     const http = selected.some((name) => HTTP_ROLES.has(name))
       ? await startHttpHost(readHttpAddress(process.env))
@@ -170,6 +171,7 @@ export async function main(
     );
     const seams: RoleHost["seams"] = {};
     const running: { name: RoleName; role: RunningRole }[] = [];
+    const roleTimingsMs: Partial<Record<RoleName, number>> = {};
     const stopRoles = async (): Promise<void> => {
       const failures: unknown[] = [];
       const stopping = running.splice(0).reverse();
@@ -205,6 +207,7 @@ export async function main(
     try {
       for (const name of selected) {
         control.signal.throwIfAborted();
+        const roleStartedAt = performance.now();
         const role = await roles[name]({
           ...control,
           http,
@@ -213,11 +216,18 @@ export async function main(
           seams,
           ...overrides,
         });
+        const ms = Math.max(0, Math.round(performance.now() - roleStartedAt));
+        roleTimingsMs[name] = ms;
+        logger.log("info", "host.role_started", { role: name, ms });
         running.push({ name, role });
       }
       for (const { role } of running) role.started?.();
       http?.finishStartup();
       if (http) logger.log("info", "host.listening", { url: http.url });
+      logger.log("info", "host.startup_timings", {
+        total_ms: Math.max(0, Math.round(performance.now() - startupStartedAt)),
+        roles: roleTimingsMs,
+      });
     } catch (error) {
       await stopRoles().catch((stopError: unknown) => {
         logger.log("error", "host.start_cleanup_failed", { error: stopError });

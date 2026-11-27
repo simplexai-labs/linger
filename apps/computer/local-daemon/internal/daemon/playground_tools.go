@@ -14,6 +14,8 @@ import (
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
 	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // maxCardFiles is how many files one card carries.
@@ -188,34 +190,56 @@ func (d *Daemon) placePlaygroundImage(ctx context.Context, tenantID, agentID str
 // agentCLIUnknown is told when a CLI run may have changed something.
 const agentCLIUnknown = "It may have been done; check before trying again."
 
-// runAgentCLI runs the bundled CLI as the Agent with a profile of its own
-// that targets roomID, and returns what it printed. The credential stays in
-// its file; the CLI reads it.
-func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string, stdin string) ([]byte, error) {
-	program, prefix, environment, ok := cardCLIProgram(d.teamhubCLIBin, runtime.GOOS)
-	if !ok {
-		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
+func (d *Daemon) operationTempBase() string {
+	if d.stateDirectory == "" {
+		return ""
 	}
-	home, err := os.MkdirTemp("", "linger-live-card-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(home)
+	return filepath.Join(d.stateDirectory, "operation-tmp")
+}
+
+// prepareAgentCLIConfig creates a private temporary directory containing a
+// TeamHub CLI config.json scoped to roomID. When baseDir is non-empty, it
+// allocates a lock-tracked directory inside baseDir via PrepareOperationTemp
+// so the path stays inside the Daemon's private state directory rather than
+// system TEMP.
+func prepareAgentCLIConfig(baseDir string, installation clicredential.Installation, roomID string) (home, configPath string, cleanup func(), err error) {
 	config, err := json.Marshal(map[string]any{"version": 1, "default_profile": "live", "profiles": map[string]any{"live": map[string]any{
 		"url": installation.Profile.URL, "token_file": installation.CredentialPath,
 		"tenant_id": installation.Profile.TenantID, "agent_id": installation.Profile.AgentID,
 		"scope": map[string]string{"kind": "room", "id": roomID},
 	}}})
 	if err != nil {
+		return "", "", nil, err
+	}
+	home, removeRoot, err := localworkspace.PrivateTempRoot(baseDir, "linger-live-card-")
+	if err != nil {
+		return "", "", nil, err
+	}
+	cleanup = func() { _ = removeRoot() }
+	configPath = filepath.Join(home, "config.json")
+	if err := privatefs.WriteFile(configPath, config, true); err != nil {
+		cleanup()
+		return "", "", nil, err
+	}
+	return home, configPath, cleanup, nil
+}
+
+// runAgentCLI runs the bundled CLI as the Agent with a profile of its own
+// that targets roomID, and returns what it printed. The credential stays in
+// its file; the CLI reads it.
+func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Installation, roomID string, arguments []string, stdin string) ([]byte, error) {
+	program, ok := cardCLIProgram(d.teamhubCLIBin, runtime.GOOS)
+	if !ok {
+		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
+	}
+	home, configPath, cleanup, err := prepareAgentCLIConfig(d.operationTempBase(), installation, roomID)
+	if err != nil {
 		return nil, err
 	}
-	configPath := filepath.Join(home, "config.json")
-	if err := os.WriteFile(configPath, config, 0o600); err != nil {
-		return nil, err
-	}
-	command := exec.CommandContext(ctx, program, append(prefix, arguments...)...)
+	defer cleanup()
+	command := exec.CommandContext(ctx, program, arguments...)
 	command.Dir = home
-	command.Env = append(append(cardCLIEnvironment(os.Environ()), environment...), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
+	command.Env = append(cardCLIEnvironment(os.Environ()), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")
 	command.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
@@ -234,36 +258,19 @@ func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Ins
 	return stdout.Bytes(), nil
 }
 
-// cardCLIProgram is how to start the bundled CLI in directory. The Computer
-// bundle has a teamhub program on every platform. Desktop has only scripts on
-// Windows; its teamhub.cmd is not run, since cmd.exe would parse the card's
-// text, so the app it names runs teamhub.js as Node instead.
-func cardCLIProgram(directory, goos string) (program string, prefix, environment []string, ok bool) {
+// cardCLIProgram is how to start the bundled CLI in directory. Both the
+// Computer bundle and Desktop ship a native teamhub.exe on Windows and a
+// teamhub command on other platforms.
+func cardCLIProgram(directory, goos string) (string, bool) {
 	if directory == "" {
-		return "", nil, nil, false
+		return "", false
 	}
-	if goos != "windows" {
-		program = filepath.Join(directory, "teamhub")
-		return program, nil, nil, regularFile(program)
+	name := "teamhub"
+	if goos == "windows" {
+		name = "teamhub.exe"
 	}
-	if program = filepath.Join(directory, "teamhub.exe"); regularFile(program) {
-		return program, nil, nil, true
-	}
-	script := filepath.Join(directory, "teamhub.js")
-	if !regularFile(script) {
-		return "", nil, nil, false
-	}
-	// Prefer LINGER_CLI_NODE_PATH when the CLI is served from an externalized
-	// V2 store directory (outside the Electron app bundle); fall back to the
-	// relative app path beside teamhub.cmd written by apps/desktop/build.mjs.
-	app := strings.TrimSpace(os.Getenv("LINGER_CLI_NODE_PATH"))
-	if app == "" || !regularFile(app) {
-		app = filepath.Join(directory, "..", "..", "..", "..", "Linger.exe")
-	}
-	if !regularFile(app) {
-		return "", nil, nil, false
-	}
-	return filepath.Clean(app), []string{"--use-env-proxy", script}, []string{"ELECTRON_RUN_AS_NODE=1"}, true
+	program := filepath.Join(directory, name)
+	return program, regularFile(program)
 }
 
 func regularFile(name string) bool {

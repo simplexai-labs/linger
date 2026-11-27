@@ -7,7 +7,6 @@ import {
   isModelOnComputer,
   modelStatus,
 } from "@/features/local-models/local-models-rules";
-import { agentRuntimeMessages } from "@/features/rooms/members/agent-runtime.messages";
 import type { Message } from "@/i18n/messages";
 import { RichMessage, useT } from "@/i18n/use-translation";
 
@@ -150,22 +149,23 @@ export function PiRuntimeSetupGuidance({
           {t(m.piDownloadingTitle)}
         </p>
         <p className="mt-1 text-muted-foreground">
-          {state.percent !== undefined
-            ? t(m.piDownloadingBodyWithPercent, {
+          {state.percent !== undefined ? (
+            <RichMessage
+              message={m.piDownloadingBodyWithPercent}
+              tags={{ link: modelsLink }}
+              values={{
                 computer: computerName,
                 model: state.modelName,
                 percent: state.percent,
-              })
-            : t(m.piDownloadingBody, {
-                computer: computerName,
-                model: state.modelName,
-              })}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          <RichMessage
-            message={m.piDownloadingAction}
-            tags={{ link: modelsLink }}
-          />
+              }}
+            />
+          ) : (
+            <RichMessage
+              message={m.piDownloadingBody}
+              tags={{ link: modelsLink }}
+              values={{ computer: computerName, model: state.modelName }}
+            />
+          )}
         </p>
       </div>
     );
@@ -182,15 +182,10 @@ export function PiRuntimeSetupGuidance({
           {t(m.piLoadingTitle)}
         </p>
         <p className="mt-1 text-muted-foreground">
-          {t(m.piLoadingBody, {
-            computer: computerName,
-            model: state.modelName,
-          })}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
           <RichMessage
-            message={m.piLoadingAction}
+            message={m.piLoadingBody}
             tags={{ link: modelsLink }}
+            values={{ computer: computerName, model: state.modelName }}
           />
         </p>
       </div>
@@ -239,17 +234,15 @@ export function PiRuntimeSetupGuidance({
               {t(m.piNeedsModelTitle)}
             </p>
             <p className="mt-1 text-muted-foreground">
-              {t(m.piNeedsModelBody, { computer: computerName })}
-            </p>
-            <p className="mt-1.5 text-muted-foreground">
               <RichMessage
-                message={m.piNeedsModelAction}
+                message={m.piNeedsModelBody}
                 tags={{ link: modelsLink }}
+                values={{ computer: computerName }}
               />
             </p>
           </>
         )}
-        <details className="mt-2.5 border-t border-[var(--app-status-warning-border)]/70 pt-2 text-xs text-muted-foreground">
+        <details className="mt-2.5 pt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none font-medium text-foreground/80 hover:text-foreground">
             {t(m.piStandaloneCliToggle)}
           </summary>
@@ -259,9 +252,6 @@ export function PiRuntimeSetupGuidance({
               computerName={computerName}
               runtimeType="pi"
             />
-            <p className="mt-1 text-muted-foreground">
-              {t(agentRuntimeMessages.readyAfterSignIn)}
-            </p>
           </div>
         </details>
       </div>
@@ -278,9 +268,6 @@ export function PiRuntimeSetupGuidance({
         computerName={computerName}
         runtimeType="pi"
       />
-      <p className="mt-1 text-muted-foreground">
-        {t(agentRuntimeMessages.readyAfterSignIn)}
-      </p>
     </div>
   );
 }

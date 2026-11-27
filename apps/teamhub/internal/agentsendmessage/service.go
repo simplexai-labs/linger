@@ -247,6 +247,7 @@ func (s *Service) Send(
 		AttachmentRule: messagecreation.PreparedAttachments,
 		CardTitle:      input.CardTitle,
 		CardKind:       input.CardKind,
+		Continues:      input.Continues,
 	})
 	if err != nil {
 		if errors.Is(err, messagecreation.ErrInvalid) ||

@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // fakeCardCLI installs a teamhub program that records how it was run and
@@ -119,8 +121,8 @@ func TestPlaygroundCardRefusesAnInvalidCardOrMissingCredential(t *testing.T) {
 	}
 }
 
-// Desktop ships only scripts beside its CLI on Windows; the card runs the app
-// as Node rather than through cmd.exe.
+// Both the Computer bundle and Desktop ship teamhub.exe on Windows and teamhub
+// on other platforms; cmd.exe batch wrappers are never invoked.
 func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
 	touch := func(name string) {
 		t.Helper()
@@ -131,40 +133,32 @@ func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bundle := t.TempDir()
-	touch(filepath.Join(bundle, "teamhub.exe"))
-	if program, prefix, _, ok := cardCLIProgram(bundle, "windows"); !ok || program != filepath.Join(bundle, "teamhub.exe") || prefix != nil {
-		t.Fatalf("Computer bundle: %s %v %v", program, prefix, ok)
+	windowsDir := t.TempDir()
+	touch(filepath.Join(windowsDir, "teamhub.exe"))
+	if program, ok := cardCLIProgram(windowsDir, "windows"); !ok || program != filepath.Join(windowsDir, "teamhub.exe") {
+		t.Fatalf("Windows CLI: %s %v", program, ok)
 	}
-	app := t.TempDir()
-	desktop := filepath.Join(app, "resources", "app", "dist", "teamhub-cli")
-	touch(filepath.Join(desktop, "teamhub.cmd"))
-	touch(filepath.Join(desktop, "teamhub.js"))
-	if _, _, _, ok := cardCLIProgram(desktop, "windows"); ok {
-		t.Fatal("ran teamhub.cmd without the app beside it")
+	cmdOnly := t.TempDir()
+	touch(filepath.Join(cmdOnly, "teamhub.cmd"))
+	touch(filepath.Join(cmdOnly, "teamhub.js"))
+	if _, ok := cardCLIProgram(cmdOnly, "windows"); ok {
+		t.Fatal("accepted teamhub.cmd without teamhub.exe")
 	}
-	touch(filepath.Join(app, "Linger.exe"))
-	program, prefix, environment, ok := cardCLIProgram(desktop, "windows")
-	if !ok || program != filepath.Join(app, "Linger.exe") || len(prefix) != 2 || prefix[1] != filepath.Join(desktop, "teamhub.js") || environment[0] != "ELECTRON_RUN_AS_NODE=1" {
-		t.Fatalf("Desktop: %s %v %v %v", program, prefix, environment, ok)
+	posixDir := t.TempDir()
+	touch(filepath.Join(posixDir, "teamhub"))
+	if program, ok := cardCLIProgram(posixDir, "darwin"); !ok || program != filepath.Join(posixDir, "teamhub") {
+		t.Fatalf("POSIX CLI: %s %v", program, ok)
 	}
-	if _, _, _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
+	if _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
 		t.Fatal("found a CLI in an empty directory")
 	}
-	// Externalized V2 store directory without Linger.exe 4 levels up succeeds
-	// when LINGER_CLI_NODE_PATH points at the shell/node binary.
+	// Externalized V2 store directory with native teamhub.exe resolves cleanly
+	// without needing a cmd.exe wrapper or a relative Linger.exe layout.
 	externalCLI := filepath.Join(t.TempDir(), "store", "backend", "backend-abc", "computer-daemon", "teamhub-cli")
-	touch(filepath.Join(externalCLI, "teamhub.cmd"))
+	touch(filepath.Join(externalCLI, "teamhub.exe"))
 	touch(filepath.Join(externalCLI, "teamhub.js"))
-	if _, _, _, ok := cardCLIProgram(externalCLI, "windows"); ok {
-		t.Fatal("externalized CLI succeeded without LINGER_CLI_NODE_PATH or Linger.exe")
-	}
-	shellExe := filepath.Join(t.TempDir(), "Linger.exe")
-	touch(shellExe)
-	t.Setenv("LINGER_CLI_NODE_PATH", shellExe)
-	extProgram, extPrefix, extEnv, extOk := cardCLIProgram(externalCLI, "windows")
-	if !extOk || extProgram != shellExe || len(extPrefix) != 2 || extPrefix[1] != filepath.Join(externalCLI, "teamhub.js") || extEnv[0] != "ELECTRON_RUN_AS_NODE=1" {
-		t.Fatalf("externalized Desktop CLI: %s %v %v %v", extProgram, extPrefix, extEnv, extOk)
+	if extProgram, extOk := cardCLIProgram(externalCLI, "windows"); !extOk || extProgram != filepath.Join(externalCLI, "teamhub.exe") {
+		t.Fatalf("externalized Desktop CLI: %s %v", extProgram, extOk)
 	}
 }
 
@@ -180,5 +174,61 @@ func TestPlaygroundImageRefusesAnIncompletePlacement(t *testing.T) {
 		if _, err := daemon.placePlaygroundImage(t.Context(), "tenant-1", "agent-1", image); !errors.As(err, &failure) || failure.code != "invalid_image" {
 			t.Fatalf("image %+v = %v", image, err)
 		}
+	}
+}
+
+func TestPlaygroundAgentCLIConfigUsesDaemonOperationTempBase(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "daemon-state")
+	opTempBase := filepath.Join(stateDir, "operation-tmp")
+	home, configPath, cleanup, err := prepareAgentCLIConfig(opTempBase, cardInstallation, "room-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(home, opTempBase+string(os.PathSeparator)) {
+		cleanup()
+		t.Fatalf("CLI config home %q is not under operation-tmp %q", home, opTempBase)
+	}
+	if err := privatefs.CheckPath(home, "directory", true); err != nil {
+		cleanup()
+		t.Fatalf("CLI config home not private: %v", err)
+	}
+	if err := privatefs.CheckPath(configPath, "file", true); err != nil {
+		cleanup()
+		t.Fatalf("CLI config.json not private: %v", err)
+	}
+	if removed, _, err := localworkspace.PruneOperationTemps(opTempBase, nil); err != nil || removed != 0 {
+		cleanup()
+		t.Fatalf("prune removed active CLI temp dir: removed=%d err=%v", removed, err)
+	}
+	cleanup()
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("CLI temp dir survived cleanup: %v", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	// Verify runAgentCLI places TEAMHUB_CONFIG inside stateDirectory/operation-tmp
+	// and cleans it up when the CLI finishes.
+	cliDir := t.TempDir()
+	configPathRecord := filepath.Join(t.TempDir(), "config-path")
+	script := "#!/bin/sh\nprintf '%s' \"$TEAMHUB_CONFIG\" > '" + configPathRecord + "'\nprintf '%s' '{\"accepted\":true,\"message_id\":\"m1\"}'\n"
+	if err := os.WriteFile(filepath.Join(cliDir, "teamhub"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{stateDirectory: stateDir, teamhubCLIBin: cliDir}
+	if _, err := d.runAgentCLI(t.Context(), cardInstallation, "room-1", []string{"message", "card"}, "body"); err != nil {
+		t.Fatalf("runAgentCLI: %v", err)
+	}
+	recorded, err := os.ReadFile(configPathRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usedConfig := string(recorded)
+	if !strings.HasPrefix(usedConfig, opTempBase+string(os.PathSeparator)) {
+		t.Fatalf("runAgentCLI wrote TEAMHUB_CONFIG at %q, want under %q", usedConfig, opTempBase)
+	}
+	if _, err := os.Stat(filepath.Dir(usedConfig)); !os.IsNotExist(err) {
+		t.Fatalf("runAgentCLI temp dir %q survived return: %v", filepath.Dir(usedConfig), err)
 	}
 }

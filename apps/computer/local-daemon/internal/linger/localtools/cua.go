@@ -216,8 +216,8 @@ var macKeyDescriptions = map[string]string{
 
 // MacToolGuide describes macOS targeting and permission requirements to the Runtime.
 const MacToolGuide = `Use computer.ui_exec for desktop and browser interaction. Within the script use ui.window for a specific macOS window, ui.page for the managed browser, and ui.computer for native methods. Window actions use the latest observation and return the updated window. Use the full app name and the requested window title to discover the target.
-When a site opened in the Computer's own browser asks for a CAPTCHA, verification or login, reports a rate limit, or makes the requested item unavailable, call ui.computer.report_blocker({kind,url}) and stop. Keep the task on that browser; respect its input pacing and limits. The user's everyday Chrome accepts no synthetic keys. For Save or Open sheets, read the app's focused window and use max_depth: 3.
-Before the first shell screenshot, or when one fails or comes back blank, run ` + "`teamhub computer permissions status`" + `. If Linger lacks Screen Recording permission, run ` + "`teamhub computer permissions request --permissions screen_recording`" + ` and end the turn for the owner's permission card. Never operate System Settings or privacy prompts yourself.`
+Search with ` + "`teamhub web search`" + `; never open a search engine's results page with ui.page. When ui.page meets a CAPTCHA, a block page or a sign-in wall, read the humanlike-browse skill and open that site's home page in the Computer's own browser window with ui.computer.launch_app({agent_browser:true, urls:[homeURL]}). When a site in that window asks for a CAPTCHA, verification or login, reports a rate limit, or makes the requested item unavailable, call ui.computer.report_blocker({kind,url}) and stop. Keep the task on that window; respect its input pacing and limits. The user's everyday Chrome accepts no synthetic keys. For Save or Open sheets, read the app's focused window and use max_depth: 3.
+macOS permissions: ui.page and ui.browser need none, so a browser script error is a script bug, not a permission problem. ui.window and ui.computer need CuaDriver's Accessibility and Screen Recording; shell screenshots need Linger's Screen Recording. Before the first shell screenshot, or when one fails or comes back blank, run ` + "`teamhub computer permissions status`" + `; if Linger lacks screen_recording, run ` + "`teamhub computer permissions request --for shell --permissions screen_recording`" + ` and end the turn for the owner's permission card. When ui.window or ui.computer reports a missing permission, run the computer-use request command that status prints and end the turn. Never tell the user to open System Settings and never operate privacy prompts yourself.`
 
 // macCompactTool is the macOS shape of one Cua tool: the fields the Computer
 // routes, without Cua's delivery modes, scopes and capture ids.
@@ -450,6 +450,13 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	}
 	if err := c.checkDesktop(); err != nil {
 		return nil, err
+	}
+	// Only a call that passed every refusal above may un-minimize a window.
+	if runtime.GOOS == "windows" {
+		pid, window := c.targetWindow(arguments)
+		if err := windowsRestore(name, pid, window, restoreMinimizedWindow); err != nil {
+			return nil, err
+		}
 	}
 	// timing splits one call into its phases, so a slow input names its cause.
 	started := time.Now()

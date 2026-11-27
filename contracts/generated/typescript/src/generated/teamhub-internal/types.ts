@@ -1557,8 +1557,23 @@ export interface components {
       /** @description The event as outside data, never instructions. */
       text: string;
     };
+    VoiceLiveRoomReport: {
+      message_id: components["schemas"]["VoiceId"];
+      handoff_id: components["schemas"]["VoiceId"];
+      room_id: components["schemas"]["VoiceId"];
+      room_name: string;
+      /**
+       * @description Current state of the Room collaboration, including any later Human follow-up.
+       * @enum {string}
+       */
+      state: "working" | "waiting_for_user" | "completed";
+      /** @description A group collaboration report as reference data, never an instruction from the Human. */
+      text: string;
+    };
     VoiceLiveTaskList: {
       tasks: components["schemas"]["VoiceLiveTask"][];
+      /** @description New group collaboration questions and results for the private call, also persisted in the direct chat. */
+      room_reports?: components["schemas"]["VoiceLiveRoomReport"][];
       /** @description Events from the user's connected apps that proactive reminders judged worth telling now and that wait for this call to end; the live voice tells them during the call. */
       alerts?: components["schemas"]["VoiceLiveAlert"][];
     };
@@ -1836,20 +1851,14 @@ export interface components {
         source_key?: string;
         thread_id?: string;
         through?: number;
-        /** @description Invalid or timed-out outputs produced for this stage; 3 stops maintenance for this Agent. */
+        /** @description Invalid or timed-out outputs produced for this stage; 3 pauses maintenance for this Agent until its execution target or source thread changes. */
         attempt?: number;
+        /** @description Execution target (Computer, Runtime, and model) that recorded the current pending attempts; switching to another target resets an exhausted pending stage. */
+        target?: string;
       };
     };
     AgentRuntimePositiveInt64: string;
-    /** @enum {string} */
-    AgentReasoningEffort:
-      | "none"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | "max"
-      | "ultra";
+    AgentReasoningEffort: string;
     /** @enum {string} */
     LocalRuntimeType: "codex" | "claude" | "pi" | "antigravity";
     AgentRuntimeSettingsSnapshot: {
@@ -2181,7 +2190,7 @@ export interface components {
     AgentRuntimeSuccessResult: {
       success: boolean;
     };
-    /** @description Public classified failure; contains no native error text, paths, credentials, or task input. Each code is set where the failure is observed, from structured signals only. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. local_model_unavailable means the Agent's Computer could not load the Agent's local model (not enough free memory, not fully downloaded, or loading took too long), so the Runtime did not start; the person can manage it on the Computer's Models page or choose another model. model_gateway_unavailable means the Agent's Computer could not start or reach its local model gateway (such as Bifrost for BYOK), so the Runtime did not start; the person can check the Computer's Models page or Local Computer diagnostics before retrying. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished while a Human who mentioned the Agent waited for its reply, every message write the Agent tried to post failed, and no reply reached the Room. reply_not_sent means a Room Run finished while a Human who mentioned the Agent waited for its reply and no reply reached the Room without any failed message write attempt (for instance, the Runtime ended the turn in text nobody sees, which is not posted for it). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
+    /** @description Public classified failure; contains no credentials, raw secrets, or task input. Each code is set where the failure is observed, from structured signals only. detail is an optional redacted, single-line diagnostic summary for Activity display. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. local_model_unavailable means the Agent's Computer could not load the Agent's local model (not enough free memory, not fully downloaded, or loading took too long), so the Runtime did not start; the person can manage it on the Computer's Models page or choose another model. model_gateway_unavailable means the Agent's Computer could not start or reach its local model gateway (such as Bifrost for BYOK), so the Runtime did not start; the person can check the Computer's Models page or Local Computer diagnostics before retrying. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished while a Human who mentioned the Agent waited for its reply, every message write the Agent tried to post failed, and no reply reached the Room. reply_not_sent means a Room Run finished while a Human who mentioned the Agent waited for its reply and no reply reached the Room without any failed message write attempt (for instance, the Runtime ended the turn in text nobody sees, which is not posted for it). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
     AgentRuntimeExecutionFailure: {
       /** @enum {string} */
       code:
@@ -2208,6 +2217,8 @@ export interface components {
         | "unclassified";
       runtime_type?: components["schemas"]["LocalRuntimeType"];
       runtime_version?: string;
+      /** @description Optional redacted, single-line diagnostic detail explaining why the Run failed, for display in the Activity log. Must contain no credentials or control characters. */
+      detail?: string;
     };
     AgentRuntimeSessionCheckpoint: {
       expected_revision: components["schemas"]["AgentRuntimeInt64"];
@@ -2325,20 +2336,9 @@ export interface components {
     ClearAgentRuntimeSessionResult: {
       cleared: boolean;
     };
-    AgentRunInputOrigin: {
-      notification: boolean;
-      task_inbox: boolean;
-      author_type: string;
-      message_kind: string;
-      fired_routine: boolean;
-      /** @description A Human acted through this hidden Message, by answering a card or asking during a recording, and waits for the Agent's answer. */
-      human_waiting: boolean;
-    };
     AgentRuntimeWorkState: {
       has_queued_runs: boolean;
       has_pending_work: boolean;
-      /** @description Distinct scheduling metadata of the initial inputs of every claimable queued Run. The Run claimed next serves them all, so it waits as the most urgent of them. */
-      next_run_origins?: components["schemas"]["AgentRunInputOrigin"][];
       /** @description Present on the work-state read. Steers a Message transaction queued for this Context that the Agent Service has not settled, in input order: a targeted Message for the running Run that reads its Inbox, or a native question's answer assigned to the Run that asked it. */
       message_steers?: components["schemas"]["StoredAgentRuntimeInput"][];
     };
@@ -2362,8 +2362,8 @@ export interface components {
        */
       type: "status.changed";
       /** @enum {string} */
-      status: "queued" | "working" | "thinking";
-      /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working; raw reasoning is never allowed. */
+      status: "queued" | "working" | "thinking" | "waiting_background";
+      /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working and waiting_background; raw reasoning is never allowed. */
       title?: string;
     };
     AgentRuntimePlanStep: {
@@ -2482,7 +2482,6 @@ export interface components {
       credential_generation: components["schemas"]["AgentRuntimeInt64"];
       /** Format: date-time */
       last_seen_at?: string;
-      capacity?: number;
       runtimes: ("codex" | "claude" | "pi" | "antigravity")[];
       runtime_diagnostics: {
         [key: string]: unknown;
@@ -2513,6 +2512,10 @@ export interface components {
       display_name: string;
       /** @enum {string} */
       platform?: "darwin" | "linux" | "win32";
+      /**
+       * @deprecated
+       * @description Accepted from older Agent Services and ignored by TeamHub.
+       */
       capacity?: number;
       runtimes: ("codex" | "claude" | "pi" | "antigravity")[];
       runtime_diagnostics: {

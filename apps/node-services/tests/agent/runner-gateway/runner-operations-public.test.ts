@@ -11,6 +11,8 @@ import {
   type RunnerGateway,
   type RunnerGatewayConnection,
 } from "../../../src/agent/runner-gateway/runner-gateway.js";
+import { INTERACTIVE_STALL_MS } from "../../../src/agent/runner-gateway/model-queue.js";
+import { setAgentLogOptions } from "../../../src/agent/observability/agent-log.js";
 import { OPERATION_OUTCOME_UNKNOWN } from "../../../src/agent/runner-gateway/runner-operation.js";
 import { createTestRunnerGateway } from "../test-support/runner-gateway.js";
 import { readyContextScope } from "../test-support/ready-context-view.js";
@@ -97,20 +99,16 @@ describe("RunnerGateway", () => {
     await expect(operation.result).resolves.toMatchObject({ type: "run" });
   });
 
-  it.each([
-    ["task", 1],
-    ["task", null],
-    ["routine", 1],
-  ] as const)(
-    "waits for confirmed %s cleanup before starting chat (Computer capacity %s)",
-    async (runKind, capacity) => {
+  it.each(["task", "routine"] as const)(
+    "waits for confirmed %s cleanup before starting chat",
+    async (runKind) => {
       const gateway = createTestRunnerGateway({
         createId: sequenceIds(),
         operationCancelTimeoutMs: 10,
       });
       const peer = new RecordingPeer();
       const connection = await acceptReadyConnection(gateway, peer, {
-        ...hello([], capacity),
+        ...hello(),
         runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
       });
       try {
@@ -204,170 +202,161 @@ describe("RunnerGateway", () => {
     },
   );
 
-  it.each([1, null])(
-    "swaps out a running Task for any Meta Run waiting behind it (Computer capacity %s)",
-    async (capacity) => {
-      const gateway = createTestRunnerGateway({ createId: sequenceIds() });
-      const peer = new RecordingPeer();
-      const connection = await acceptReadyConnection(gateway, peer, {
-        ...hello([], capacity),
-        runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+  it("swaps out a running Task for a waiting Meta Run", async () => {
+    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello(),
+      runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+    });
+    try {
+      const task = await gateway.startOperation({
+        ...runTarget(),
+        runKind: "task",
       });
-      try {
-        const task = await gateway.startOperation({
-          ...runTarget(),
-          runKind: "task",
-        });
-        const start = peer.sent.find(
-          (command) => command.type === "operation.start",
-        )!;
-        await connection.receive(
-          event(start, 1, {
-            type: "operation.accepted",
-            command_id: start.command_id,
-            runner_pid: 100,
-          }),
-        );
-        await connection.receive(
-          event(start, 2, {
-            type: "operation.event",
-            event: {
-              type: "run.started",
-              turn_id: "turn-task",
-              session: { threadId: "task-session", canYield: true },
-            },
-          }),
-        );
-        await connection.receive(
-          event(start, 3, {
-            type: "operation.event",
-            event: {
-              type: "tool.called",
-              call_id: "read",
-              tool_name: "read",
-              input: {},
-            },
-          }),
-        );
-        // A progress follow-up the Meta was claimed for while the Task ran.
-        const followUp = gateway.startOperation({
-          ...runTarget(),
-          ...readyContextScope("meta"),
-          runKind: "follow_up",
-        });
-        await vi.waitFor(() =>
-          expect(
-            peer.sent.find((command) => command.type === "cancel"),
-          ).toMatchObject({
-            operation_id: start.operation_id,
-            reason: "scheduler_yield",
-          }),
-        );
-        const yielded = expect(task.result).rejects.toMatchObject({
-          session: { threadId: "task-session" },
-        });
-        await connection.receive(
-          event(start, 4, {
-            type: "operation.cancelled",
-            reason: "scheduler_yield",
-          }),
-        );
-        await yielded;
-        const meta = await followUp;
-        expect(meta.operationId).not.toBe(start.operation_id);
-        void meta.result.catch(() => undefined);
-      } finally {
-        connection.disconnect();
-      }
-    },
-  );
+      const start = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(start, 1, {
+          type: "operation.accepted",
+          command_id: start.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start, 2, {
+          type: "operation.event",
+          event: {
+            type: "run.started",
+            turn_id: "turn-task",
+            session: { threadId: "task-session", canYield: true },
+          },
+        }),
+      );
+      await connection.receive(
+        event(start, 3, {
+          type: "operation.event",
+          event: {
+            type: "tool.called",
+            call_id: "read",
+            tool_name: "read",
+            input: {},
+          },
+        }),
+      );
+      // A progress follow-up the Meta was claimed for while the Task ran.
+      const followUp = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("meta"),
+        runKind: "follow_up",
+      });
+      await vi.waitFor(() =>
+        expect(
+          peer.sent.find((command) => command.type === "cancel"),
+        ).toMatchObject({
+          operation_id: start.operation_id,
+          reason: "scheduler_yield",
+        }),
+      );
+      const yielded = expect(task.result).rejects.toMatchObject({
+        session: { threadId: "task-session" },
+      });
+      await connection.receive(
+        event(start, 4, {
+          type: "operation.cancelled",
+          reason: "scheduler_yield",
+        }),
+      );
+      await yielded;
+      const meta = await followUp;
+      expect(meta.operationId).not.toBe(start.operation_id);
+      void meta.result.catch(() => undefined);
+    } finally {
+      connection.disconnect();
+    }
+  });
 
-  it.each([
-    ["the Computer", 1, "subscription"],
-    ["the model endpoint", null, "api"],
-  ] as const)(
-    "swaps out a Meta Run for one raised to chat while it waits for %s",
-    async (_, capacity, link) => {
-      const gateway = createTestRunnerGateway({ createId: sequenceIds() });
-      const peer = new RecordingPeer();
-      const connection = await acceptReadyConnection(gateway, peer, {
-        ...hello([], capacity),
-        runtime_diagnostics: runtimeDiagnostics({ link }),
+  it("swaps out a Meta Run for one raised to chat while waiting on the endpoint", async () => {
+    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello(),
+      runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+    });
+    try {
+      const routine = await gateway.startOperation({
+        ...runTarget(),
+        runKind: "routine",
       });
-      try {
-        const routine = await gateway.startOperation({
-          ...runTarget(),
-          runKind: "routine",
-        });
-        const start = peer.sent.find(
-          (command) => command.type === "operation.start",
-        )!;
-        await connection.receive(
-          event(start, 1, {
-            type: "operation.accepted",
-            command_id: start.command_id,
-            runner_pid: 100,
-          }),
-        );
-        await connection.receive(
-          event(start, 2, {
-            type: "operation.event",
-            event: {
-              type: "run.started",
-              turn_id: "turn-routine",
-              session: { threadId: "routine-session", canYield: true },
-            },
-          }),
-        );
-        await connection.receive(
-          event(start, 3, {
-            type: "operation.event",
-            event: {
-              type: "tool.called",
-              call_id: "read",
-              tool_name: "read",
-              input: {},
-            },
-          }),
-        );
-        const priority = new RunPriority(runPriorities.follow_up);
-        const followUp = gateway.startOperation({
-          ...runTarget(),
-          ...readyContextScope("other"),
-          runKind: "follow_up",
-          priority,
-        });
-        expect(await settlesWithin(followUp, 25)).toBe(false);
-        expect(peer.sent.some((command) => command.type === "cancel")).toBe(
-          false,
-        );
-        // A Human's chat queued behind the waiting Run.
-        priority.raise(runPriorities.chat);
-        await vi.waitFor(() =>
-          expect(
-            peer.sent.find((command) => command.type === "cancel"),
-          ).toMatchObject({
-            operation_id: start.operation_id,
-            reason: "scheduler_yield",
-          }),
-        );
-        const yielded = expect(routine.result).rejects.toMatchObject({
-          session: { threadId: "routine-session" },
-        });
-        await connection.receive(
-          event(start, 4, {
-            type: "operation.cancelled",
-            reason: "scheduler_yield",
-          }),
-        );
-        await yielded;
-        const meta = await followUp;
-        void meta.result.catch(() => undefined);
-      } finally {
-        connection.disconnect();
-      }
-    },
-  );
+      const start = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(start, 1, {
+          type: "operation.accepted",
+          command_id: start.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start, 2, {
+          type: "operation.event",
+          event: {
+            type: "run.started",
+            turn_id: "turn-routine",
+            session: { threadId: "routine-session", canYield: true },
+          },
+        }),
+      );
+      await connection.receive(
+        event(start, 3, {
+          type: "operation.event",
+          event: {
+            type: "tool.called",
+            call_id: "read",
+            tool_name: "read",
+            input: {},
+          },
+        }),
+      );
+      const priority = new RunPriority(runPriorities.follow_up);
+      const followUp = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("other"),
+        runKind: "follow_up",
+        priority,
+      });
+      expect(await settlesWithin(followUp, 25)).toBe(false);
+      expect(peer.sent.some((command) => command.type === "cancel")).toBe(
+        false,
+      );
+      // A Human's chat queued behind the waiting Run.
+      priority.raise(runPriorities.chat);
+      await vi.waitFor(() =>
+        expect(
+          peer.sent.find((command) => command.type === "cancel"),
+        ).toMatchObject({
+          operation_id: start.operation_id,
+          reason: "scheduler_yield",
+        }),
+      );
+      const yielded = expect(routine.result).rejects.toMatchObject({
+        session: { threadId: "routine-session" },
+      });
+      await connection.receive(
+        event(start, 4, {
+          type: "operation.cancelled",
+          reason: "scheduler_yield",
+        }),
+      );
+      await yielded;
+      const meta = await followUp;
+      void meta.result.catch(() => undefined);
+    } finally {
+      connection.disconnect();
+    }
+  });
 
   it.each([
     ["thinking", { type: "status.changed", status: "thinking" }],
@@ -836,8 +825,16 @@ describe("RunnerGateway", () => {
       );
       return start;
     };
+    const held = await Promise.all(
+      Array.from({ length: 7 }, (_, index) =>
+        gateway.acquireModelCall(
+          { computerId: "runner-local", runtimeType: "codex" },
+          { priority: 0, kind: "approval", key: String(index) },
+          new AbortController().signal,
+        ),
+      ),
+    );
     try {
-      // Two Tasks fill the ordinary places and a routine the last one.
       const first = await startTask("task-a", 1);
       const second = await startTask("task-b", 1);
       const routine = await gateway.startOperation({
@@ -881,6 +878,7 @@ describe("RunnerGateway", () => {
       await expect(chat).resolves.toBeDefined();
       expect(yields()).toHaveLength(2);
     } finally {
+      for (const lease of held) lease.release({ outcome: "completed" });
       connection.disconnect();
     }
   });
@@ -1053,10 +1051,7 @@ describe("RunnerGateway", () => {
       new AbortController().signal,
     );
     const waiting = new AbortController();
-    const second = gateway.acquireOperationCapacity(
-      { ...target, executionContextKey: "context-b" },
-      waiting.signal,
-    );
+    const second = gateway.acquireOperationCapacity(target, waiting.signal);
     const rejected = expect(second).rejects.toThrow();
     waiting.abort(new Error("cancel waiting Run"));
     await rejected;
@@ -1066,98 +1061,6 @@ describe("RunnerGateway", () => {
       new AbortController().signal,
     );
     next.release();
-  });
-
-  it.each([1, 2])(
-    "prioritizes chat with a Computer capacity of %i",
-    async (hard) => {
-      const gateway = createTestRunnerGateway({ createId: sequenceIds() });
-      const connection = await gateway.acceptConnection(
-        authenticatedPrincipal(),
-        hello([], hard),
-        new RecordingPeer(),
-      );
-      const signal = new AbortController().signal;
-      const acquire = (
-        executionContextKey: string,
-        priority: () => Promise<number>,
-      ) =>
-        gateway.acquireOperationCapacity(
-          {
-            ...runTarget(),
-            executionContextKey,
-            priority: { queuedAt: performance.now(), resolve: priority },
-          },
-          signal,
-        );
-      try {
-        const classify = vi.fn(async () => runPriorities.routine);
-        const first = await acquire("routine", classify);
-        expect(classify).not.toHaveBeenCalled();
-        const order: string[] = [];
-        const doc = acquire(
-          "document",
-          async () => runPriorities.document,
-        ).then((p) => {
-          order.push("document");
-          return p;
-        });
-        const chat = acquire(
-          "interactive",
-          async () => runPriorities.chat,
-        ).then((p) => {
-          order.push("chat");
-          return p;
-        });
-        if (hard === 1) {
-          expect(await settlesWithin(chat, 15)).toBe(false);
-          first.release();
-        }
-        const interactive = await chat;
-        expect(order).toEqual(["chat"]);
-        interactive.release();
-        first.release();
-        (await doc).release();
-        expect(order).toEqual(["chat", "document"]);
-      } finally {
-        connection.disconnect();
-      }
-    },
-  );
-
-  it("keeps the FIFO position of a waiting Run when its priority is refreshed", async () => {
-    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
-    const connection = await gateway.acceptConnection(
-      authenticatedPrincipal(),
-      hello([], 1),
-      new RecordingPeer(),
-    );
-    const stop = new AbortController();
-    const refreshed = new AbortController();
-    const acquire = (key: string, queuedAt: number, signal: AbortSignal) =>
-      gateway.acquireOperationCapacity(
-        {
-          ...runTarget(),
-          executionContextKey: key,
-          priority: { queuedAt, resolve: async () => runPriorities.routine },
-        },
-        signal,
-      );
-    try {
-      const active = await acquire("active", 0, stop.signal);
-      const old = acquire("first", 1, refreshed.signal);
-      const second = acquire("second", 2, stop.signal);
-      const canceled = expect(old).rejects.toThrow();
-      refreshed.abort();
-      await canceled;
-      const first = acquire("first", 1, stop.signal);
-      active.release();
-      (await first).release();
-      (await second).release();
-    } finally {
-      stop.abort();
-      connection.disconnect();
-    }
   });
 
   it("aborts a waiting startOperation on preemptSignal without sending operation.start, and ignores it once sent", async () => {
@@ -1258,47 +1161,6 @@ describe("RunnerGateway", () => {
     ).rejects.toBeInstanceOf(LocalComputerOfflineError);
   });
 
-  it("allows separate Context reservations on upgraded Computers and waits for global capacity", async () => {
-    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
-    const greeting = hello([], 2);
-    await gateway.acceptConnection(
-      authenticatedPrincipal(),
-      {
-        ...greeting,
-      },
-      new RecordingPeer(),
-    );
-    const target = {
-      runnerId: "runner-local",
-      tenantId: "tenant-acme",
-      agentId: "agent-a",
-      executionContextKey: "context-a",
-    };
-    const first = await gateway.acquireOperationCapacity(
-      target,
-      new AbortController().signal,
-    );
-    const second = await gateway.acquireOperationCapacity(
-      { ...target, executionContextKey: "context-b" },
-      new AbortController().signal,
-    );
-    let acquired = false;
-    const third = gateway
-      .acquireOperationCapacity(
-        { ...target, executionContextKey: "context-c" },
-        new AbortController().signal,
-      )
-      .then((permit) => {
-        acquired = true;
-        return permit;
-      });
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(acquired).toBe(false);
-    first.release();
-    (await third).release();
-    second.release();
-  });
-
   it("does not count bound Agent Runners against active Operation capacity", async () => {
     const gateway = createTestRunnerGateway();
     for (const agentId of ["agent-reviewer", "agent-second", "agent-third"])
@@ -1336,7 +1198,7 @@ describe("RunnerGateway", () => {
     connection.disconnect();
   });
 
-  it("admits more than two active Operations when the Computer has no global limit", async () => {
+  it("admits more than two active Operations across distinct Contexts", async () => {
     const agentIds = ["agent-a", "agent-b", "agent-c"];
     const gateway = createTestRunnerGateway({
       createId: sequenceIds(),
@@ -1379,7 +1241,7 @@ describe("RunnerGateway", () => {
     ).resolves.toHaveLength(3);
   });
 
-  it("starts a late chat when ordinary work has filled both soft limits", async () => {
+  it("starts a late chat when ordinary work has filled the model endpoint soft limit", async () => {
     const gateway = createTestRunnerGateway({ createId: sequenceIds() });
     const peer = new RecordingPeer();
     const connection = await acceptReadyConnection(gateway, peer, {
@@ -3259,4 +3121,272 @@ describe("an input still in flight at the terminal", () => {
       connection.disconnect();
     },
   );
+
+  it("suspends and resumes the ModelQueue lease on run.background_waiting and run.background_resumed", async () => {
+    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello([], null),
+      runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+    });
+    try {
+      const run1 = await gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("first"),
+      });
+      const start1 = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(start1, 1, {
+          type: "operation.accepted",
+          command_id: start1.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start1, 2, {
+          type: "operation.event",
+          event: {
+            type: "run.started",
+            turn_id: "turn-1",
+            session: { threadId: "thread-1" },
+          },
+        }),
+      );
+
+      const run2Promise = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("second"),
+      });
+      expect(await settlesWithin(run2Promise, 10)).toBe(false);
+
+      // Entering background wait frees the API endpoint slot so run2 starts immediately.
+      await connection.receive(
+        event(start1, 3, {
+          type: "operation.event",
+          event: {
+            type: "run.background_waiting",
+            observed_at_unix_ms: 1000,
+            tools: [
+              {
+                call_id: "call-1",
+                tool_name: "schedule",
+                started_at_unix_ms: 1000,
+              },
+            ],
+          },
+        }),
+      );
+      const run2 = await run2Promise;
+      const startsAfterRun2 = peer.sent.filter(
+        (command): command is OperationStart =>
+          command.type === "operation.start",
+      );
+      expect(startsAfterRun2).toHaveLength(2);
+      const start2 = startsAfterRun2[1]!;
+      await connection.receive(
+        event(start2, 1, {
+          type: "operation.accepted",
+          command_id: start2.command_id,
+          runner_pid: 101,
+        }),
+      );
+
+      const run3Promise = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("third"),
+      });
+      expect(await settlesWithin(run3Promise, 10)).toBe(false);
+
+      // Resuming run1 restores its active slot, so completing run2 alone still blocks run3.
+      await connection.receive(
+        event(start1, 4, {
+          type: "operation.event",
+          event: {
+            type: "run.background_resumed",
+            observed_at_unix_ms: 1100,
+            trigger: "user_input",
+          },
+        }),
+      );
+      await connection.receive(
+        event(start2, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-2",
+            session: { thread_id: "thread-2" },
+          },
+        }),
+      );
+      await expect(run2.result).resolves.toMatchObject({ type: "run" });
+      expect(await settlesWithin(run3Promise, 10)).toBe(false);
+
+      await connection.receive(
+        event(start1, 5, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-1",
+            session: { thread_id: "thread-1" },
+          },
+        }),
+      );
+      await expect(run1.result).resolves.toMatchObject({ type: "run" });
+      const run3 = await run3Promise;
+      const start3 = peer.sent
+        .filter(
+          (command): command is OperationStart =>
+            command.type === "operation.start",
+        )
+        .at(-1)!;
+      await connection.receive(
+        event(start3, 1, {
+          type: "operation.accepted",
+          command_id: start3.command_id,
+          runner_pid: 102,
+        }),
+      );
+      await connection.receive(
+        event(start3, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-3",
+            session: { thread_id: "thread-3" },
+          },
+        }),
+      );
+      await expect(run3.result).resolves.toMatchObject({ type: "run" });
+    } finally {
+      connection.disconnect();
+    }
+  });
+
+  it("includes phase waiting_background and background_tools in stalled holder diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AGENT_LOG_LEVEL", "info");
+    setAgentLogOptions({ format: "json" });
+    const output = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const gateway = createTestRunnerGateway({
+      heartbeatIntervalMs: 120_000,
+      createId: sequenceIds(),
+    });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello([], 1),
+      runtime_diagnostics: runtimeDiagnostics({ link: "api" }),
+    });
+    try {
+      const run1 = await gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("first"),
+        runKind: "chat",
+      });
+      const start1 = peer.sent.find(
+        (command) => command.type === "operation.start",
+      )!;
+      await connection.receive(
+        event(start1, 1, {
+          type: "operation.accepted",
+          command_id: start1.command_id,
+          runner_pid: 100,
+        }),
+      );
+      await connection.receive(
+        event(start1, 2, {
+          type: "operation.event",
+          event: {
+            type: "run.background_waiting",
+            observed_at_unix_ms: 1000,
+            tools: [
+              {
+                call_id: "call-bg-1",
+                tool_name: "schedule",
+                started_at_unix_ms: 1000,
+              },
+            ],
+          },
+        }),
+      );
+
+      const modelLease = await gateway.acquireModelCall(
+        { computerId: "runner-local", runtimeType: "codex" },
+        { kind: "approval", priority: 0, key: "review" },
+        new AbortController().signal,
+      );
+      const run2Promise = gateway.startOperation({
+        ...runTarget(),
+        ...readyContextScope("second"),
+        runKind: "chat",
+      });
+      void run2Promise.catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(INTERACTIVE_STALL_MS + 1);
+
+      const stalls = output.mock.calls
+        .map(([line]) => JSON.parse(String(line)))
+        .filter((entry) => entry.event === "model_queue.interactive_waiting");
+      expect(stalls).toHaveLength(1);
+      expect(stalls[0]).toMatchObject({
+        holders: [
+          expect.objectContaining({
+            operation_id: start1.operation_id,
+            phase: "waiting_background",
+            background_tools: [
+              {
+                call_id: "call-bg-1",
+                tool_name: "schedule",
+                started_at_unix_ms: 1000,
+              },
+            ],
+          }),
+        ],
+      });
+
+      await connection.receive(
+        event(start1, 3, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-1",
+            session: { thread_id: "thread-1" },
+          },
+        }),
+      );
+      await expect(run1.result).resolves.toMatchObject({ type: "run" });
+      modelLease.release({ outcome: "completed" });
+      const run2 = await run2Promise;
+      const start2 = peer.sent
+        .filter(
+          (command): command is OperationStart =>
+            command.type === "operation.start",
+        )
+        .at(-1)!;
+      await connection.receive(
+        event(start2, 1, {
+          type: "operation.accepted",
+          command_id: start2.command_id,
+          runner_pid: 101,
+        }),
+      );
+      await connection.receive(
+        event(start2, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "done-2",
+            session: { thread_id: "thread-2" },
+          },
+        }),
+      );
+      await expect(run2.result).resolves.toMatchObject({ type: "run" });
+    } finally {
+      setAgentLogOptions();
+      vi.unstubAllEnvs();
+      output.mockRestore();
+      vi.useRealTimers();
+      connection.disconnect();
+    }
+  });
 });

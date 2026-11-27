@@ -18,7 +18,6 @@ export interface TestRecordedLocalComputer {
   readonly owner: LocalComputerOwner;
   status: "online" | "offline" | "upgrade_required";
   platform?: string;
-  capacity?: number;
   runtimes: readonly LocalRuntimeType[];
   runtimeDiagnostics: RuntimeDiagnostics | [];
   workspaceGrants: readonly object[];
@@ -115,7 +114,6 @@ export function createTestLocalComputerRegistry(
         owner,
         status,
         platform: hello.platform,
-        ...(hello.capacity === undefined ? {} : { capacity: hello.capacity }),
         runtimes: [...hello.runtimes],
         runtimeDiagnostics: structuredClone(hello.runtime_diagnostics),
         workspaceGrants: structuredClone(hello.workspace_grants),

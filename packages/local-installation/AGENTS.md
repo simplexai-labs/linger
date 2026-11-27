@@ -72,7 +72,21 @@ voice tools for this computer, Native prepares them and runs LiveKit with
 the key pair and ports in the instance's `livekit.env`, with or without a
 voice key; without them, or when they fail to prepare or LiveKit cannot
 reserve a local port, TeamHub gets `TEAMHUB_VOICE_MEDIA=off` and the install
-continues. The services' `voice`
+continues. On cold first installs (no provisioned account, no `SONIOX_API_KEY`
+or `XAI_API_KEY`, and an unextracted, undamaged voice-tools archive) when an
+explicit `launchVoiceToolsBackground` callback is supplied (such as
+`createVoiceToolsBackgroundLauncher(installerScript)` from
+`apps/linger-installer`), Native reserves LiveKit's loopback HTTP port before
+launching the parallel `runtime` branch (reclaiming orphans once on `EADDRINUSE`
+and disabling voice if still occupied), passes `TEAMHUB_VOICE_TOOLS_BIN` to
+TeamHub only, spawns a detached `--prepare-voice-tools` worker strictly after
+`reclaimEarlierProcesses`, and releases the reservation and commits `"go\n"`
+only right before returning a kept-running outcome (aborting the worker on
+cancellation or rollback); upgrades, existing accounts, configured voice keys,
+and damaged caches keep voice preparation and LiveKit startup synchronous. `acquireNativeArtifact`
+locks per artifact under `tools/native/components/.locks/<key>` with bounded
+`INSTANCE_BUSY` retries so concurrent component preparations do not contend.
+The services' `voice`
 setting tracks only the tools, so a key change never restarts them through
 it. A native process restarts when its generated environment changes.
 The desktop passes the system proxy it resolved for Soniox as
@@ -101,7 +115,14 @@ Every port the installer chooses (`ports.ts`) must be free on both
 127.0.0.1 and ::1 with nothing answering there: `localhost` resolves to ::1
 first on macOS, and a program on ::1 alone would answer for a service that
 bound 127.0.0.1 without an error. UDP allocation holds the bound IPv4 socket
-while checking ::1 instead of closing and rebinding 127.0.0.1, and falls back
+while checking ::1 (and non-loopback local interfaces when `allInterfaces` is
+set, as LiveKit's RTC UDP port requires on Windows where LiveKit binds and
+advertises local interfaces alongside loopback with `use_ice_lite: true`
+because Windows blocks cross-scope UDP between WebRTC's non-loopback sockets
+and `127.0.0.1`, while ICE-Lite keeps LiveKit from auto-injecting public STUN
+servers when `node_ip` is unset; single-port UDPMux snapshots local interfaces
+at startup) instead
+of closing and rebinding 127.0.0.1, and falls back
 to unprivileged non-ephemeral ports when OS ephemeral UDP ports fail or
 collide. The web static host listens on both.
 Creating an instance also reserves other instances' saved LiveKit HTTP and RTC
@@ -199,10 +220,20 @@ Both copies use the same instance data directory and the same executable path
 in the supervisor's configuration hash. A matching live server keeps its
 connections during the upgrade. Its next start uses the UTF-8 copy.
 
-The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) count as current
-only when their files still match the manifest's sizes and hashes. A missing
-or damaged installed file is copied again from the bundle, so Native can use
-the verified binaries without downloading Go and compiling from source.
+The desktop's bundled TeamHub binaries (`teamhub-binaries.ts`) and native
+dependency caches (`native-dependencies.ts`) record `[size, mtimeMs, ctimeMs]`
+stamps keyed by the manifest SHA-256 digest (`STAMP_SETTLE_MS = 2_000`) via
+`verified-stamps.ts` in `<dir>.verified.json` (`prebuilt.verified.json` beside
+`prebuilt`, and `<component>.verified.json` beside extracted component trees).
+Warm restarts and resumes reuse the verified manifest without re-hashing every
+file once every recorded stamp is at least 2 seconds past coarse filesystem
+clock resolution and matches `[size, mtimeMs, ctimeMs]`; any missing stamp,
+unsettled timestamp (`< 2s`), or size/`mtimeMs`/`ctimeMs` mismatch triggers full
+SHA-256 verification against the manifest (and missing or damaged TeamHub
+binaries are copied again from the bundle before falling back to Go
+compilation). Native dependency `.simplex-files.json` manifests also preserve
+`readdir` traversal key order so older installers comparing serialized manifests
+directly still match.
 
 Every Linger release creates TeamHub's schema from the 852 baseline
 migration, which refuses a database that already holds one. A database from
@@ -252,11 +283,14 @@ plan as changed, and the upgraded app could not start.
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.
-The local source is set only by a start whose request chose local models
-(`setupChoice` or a plan approval); a restart or version upgrade from the saved
-choice keeps a source the person switched to on the Models page (leaving the
+The model source is applied only on an explicit setup choice (`setupChoice`,
+`byok`, or a plan approval), which also clears any stale post-stop resume list
+(`<home>/runtime/localmodels/resume-models.json`); a restart or version upgrade
+from the saved choice keeps the saved source (`local`, `subscription`, or
+`byok`) without re-running `source apply --mode subscription` (which would
+unload active local library models during updates) and leaves the Quick Install
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+`subscription` (omitting `--main-plan` from `prepareFoundationServices`, and
 keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
@@ -272,25 +306,30 @@ when `stack up` fails or the binding still needs repair (such as
 `localmodels.stack-up/v1` failures are translated to
 redacted human-readable messages with their `causeCode` in `details.causeCode`,
 and an unreviewable saved plan returns `LOCAL_MODELS_RECOVERY_REQUIRED` with
-`STACK_PLAN_INVALID`. `restoreLocalModels` (`local-models.ts`) brings back a
-local model source's stack and unloaded library model while its services keep
-running (and on cold resume when `model-source.json` says `local`), such as
-after the desktop's quit stopped them, whenever the active model source is
-`local` (or not saved yet on a `local-models` setup): when a saved
-`runtime_model` is recorded, a ready binding checks `library status` so a
-quit-time `library unload` or a `failed` server (`HEALTH_CHECK_FAILED` or other
-non-stopped-download failure, reset with `library unload` first) reloads that
-saved model and re-applies the local source under the same lock (never guessing
-an arbitrary idle model when no `runtime_model` is saved; stopped downloads
-return a degraded outcome without loading), while a stopped plan gets the same
-restore (`stack up`, falling back to `stack apply`), verifies whether a saved
-local model (`localmodels/` or `localmodels-library/`) is loaded, and sets the
-local source again. Quit-time `stopLocalmodels` (`localmodels-tool.ts`) unloads
-both `loaded` models and non-stopped-download `failed` models so a dead server
-resets to `idle` before `stack down`. Library-model reload failures return a
-failure outcome that warm
-and cold resume surface in `details.localModelsDegraded` so startup stays usable
-and the person can still reach the Models page. The first start after an app
+`STACK_PLAN_INVALID`. Quit-time and upgrade `stopLocalmodels`
+(`localmodels-tool.ts`) records all active library models (`loaded`, `loading`,
+and non-stopped-download `failed`) into private `<home>/runtime/localmodels/resume-models.json`
+(`linger.localmodels-resume/v1`) before cancelling loads and unloading models
+into `idle`, merging with any remaining pending list from an interrupted
+restore, preserving a pending non-empty list across chained stops (such as
+Windows setup `--stop` after quit), and recording an empty list when downloaded
+models are all intentionally idle. `restoreLocalModels` (`local-models.ts`)
+brings back previously loaded library models on warm resume, cold resume, and
+app updates across every model source mode (`local`, `subscription`, `byok`, or
+unset) from `resume-models.json` and any on-disk `state: "loaded"` library
+records under `<state>/library/models/*.json` (for crash/reboot recovery),
+without switching a `subscription` or `byok` `model-source.json` back to
+`local`, while respecting an explicit empty `resume-models.json` and falling
+back to a saved local `runtime_model` (`localmodels/` or `localmodels-library/`)
+only when no post-stop record exists (such as upgrading from an earlier release)
+without guessing an arbitrary idle model. Each model settles independently
+under the per-home lock (preserving remaining pending models on abort and
+continuing past partial failures), resets non-stopped-download `failed` records
+via `library unload` before loading, reports restored models through
+`onRestored` (surfaced as `details.localModelsRestored` and
+`details.restoredLocalModels`), and returns any failure outcome for resume
+callers to surface in `details.localModelsDegraded` so startup stays usable and
+the person can still reach the Models page. The first start after an app
 update onto a new checkout passes `degradeLocalModels` without `resume` (it
 installs newer runtimes in full) and degrades the same way, so a stack an
 earlier release left stopped, which the new kit cannot bring back as saved,
@@ -303,9 +342,13 @@ Deployments, that check and the quit-time stop share one lock per home
 `LOCAL_MODELS_BUSY` when restoring a library model without a stack plan).
 `restoreByokSource` (`local-models.ts`) brings back a saved BYOK source's
 Bifrost gateway on every resume (warm, or a restart from the saved choice,
-which then prepares the saved runtime and no other source). Under the same
-lock, waiting as the restore check does, it skips a loopback gateway whose
-`/health` answers, otherwise runs `source apply` from the kit's saved
+which then prepares the saved runtime and no other source) BEFORE restoring
+local library models, because `source apply --mode byok` unloads local models
+before mounting BYOK on Bifrost. Under the same
+lock, waiting as the restore check does, it first snapshots any on-disk
+`state: "loaded"` library records into `resume-models.json` (so crash/reboot
+recovery survives BYOK unloading them to `idle`), then skips a loopback gateway
+whose `/health` answers, otherwise runs `source apply` from the kit's saved
 configuration, so the key never passes through Node. Each re-mount sends
 the kit's one small probe request to the person's endpoint and adds a few
 seconds to a launch after a quit. A failure (`LOCAL_MODELS_BUSY` when the
@@ -403,9 +446,19 @@ Every download offered by both a global host and a mainland-China mirror
 goes through `downloadInRegion` (`region.ts`), which tries the home's
 download region first and never drops a source; the region is
 `SIMPLEX_REGION`, else `<home>/runtime/region.json` (24 hours), else a
-best-of-three npm registry probe (up to 1 MiB per round, fastest wins). When
+best-of-three npm registry probe (up to 1 MiB per round, fastest wins; a
+full-window first round short-circuits only on a 4x margin, when the other
+registry delivered nothing, or on a 2x margin at >= 160 KiB/s, so slow
+cold-start handshakes still run confirmation rounds). When
 the preferred region fails or transfers slowly while a mirror in the other
-region proves faster, the transfer resumes there and rewrites the file. The
+region proves faster, the transfer resumes there and rewrites the file;
+`downloadVerified` keeps `minRemainingMs` while another mirror remains so a
+faster alternate mirror finishing soon completes instead of aborting, and
+keeps slow-mirror comparison enabled until a round measures host throughput.
+`resolveRegion` tracks per-home resolution metadata (`method`, duration `ms`,
+and probe rates) via optional `onResolved`, and `downloadInRegion` /
+`downloadVerified` emit hostname-only diagnostic events (`region_resolved`,
+`slow_switch`, `host_switch`, `region_fallback`) for caller logs. The
 probe is shared per home, but cancellation belongs to each caller: one setup
 leaving does not cancel another, and the last waiter leaving aborts the probe
 so a later caller can retry. Even a cached region respects caller cancellation.
@@ -445,26 +498,40 @@ without adding contract fields. Each wall-clock second counts toward exactly one
 stage on the critical path, so stage durations sum to the total job duration:
 `runtime` runs alongside `release`, `images`, and (on overlapped installs)
 `migrate`, `services`, and `account`, and counts only the wait beyond that
-parallel work, appearing only when the runtime finishes last. LiveKit binds its
-saved port before `prepareFoundationServices` on both paths (before the fork
-when overlapped), because the model controller asks the OS for a free port. On
-fresh installs (`!switchingCheckout`, no
-provisioned account unless a legacy backup was set aside, and no running
-services) and cold resumes (`resume: true`, `!switchingCheckout`, and no running
-services), `migrate`, `services`, and `account` run concurrently with `runtime`,
+parallel work, appearing only when the runtime or local-stack branch finishes
+last. LiveKit binds its saved port before `prepareFoundationServices` (before
+the fork on both paths), because the model controller asks the OS for a free
+port. On fresh installs (`!switchingCheckout`, no provisioned account unless a
+legacy backup was set aside, and no running services) and cold resumes
+(`resume: true`, `!switchingCheckout`, and no running services), `migrate`,
+`services`, and `account` run concurrently with `runtime`,
 `prepareFoundationServices`, and `prepareModelGateway`, holding
 `services`/`account` `succeeded` events and `saveSourceBinding` until both
-branches succeed and aborting and draining both before rollback on failure;
-upgrades and live re-runs keep `migrate` sequential after `runtime`. When
+branches succeed and aborting and draining both before rollback on failure; on
+upgrades and live re-runs (`!overlapWithRuntime`), `runtime`, `migrate`, and
+`bindLiveKit` still run sequentially first, after which
+`prepareFoundationServices` and `prepareModelGateway` run concurrently with
+`startAndAwaitServices` and `provisionAccount` under the same
+`Promise.allSettled`, abort, and deferred `saveSourceBinding` barrier. When
 `resume: true`, `prepareRuntime` inspects the selected runtime (or a saved BYOK
 source's runtime) once and skips
 `harness plan` and `harness apply` when it is already installed (falling back to
 a full install if missing or unreadable), and passes the inspected descriptor
-through `onRuntimeDescriptors` so callers avoid a second status probe. Within
-`release`, binary and native-runtime bundle checks run in parallel, while
-dependency and voice tool preparations stay sequential on the shared
-native-tools lock; collaboration services start concurrently when `node-services`
-is not pre-stopped for a TeamHub config restart. `runLocalmodels`
+through `onRuntimeDescriptors` so callers avoid a second status probe. For BYOK
+with `pi`, `prepareByokNativeRuntime` enables `skipHarnessWhenBundledPiMatches`
+so `installNativeRuntime` binds the verified bundled Pi directly via its stable
+symlink (`ensureStableBundledPi` + `--version` check) whenever
+`findHigherPrecedencePi` finds no higher-precedence `pi` (`SIMPLEX_PI_PATH`,
+non-bundled `LINGER_PI_PATH`, user `PATH`/`~/.local/bin`/`%APPDATA%\npm`, or a
+strictly newer harness copy), falling back to `harness plan` and `apply`
+otherwise. Within `release`, binary and native-runtime bundle checks run in
+parallel, and per-artifact locks under `tools/native/components/.locks/<key>`
+allow independent native tools to prepare without blocking each other;
+collaboration services (`teamhub`, `node-services`, and `web`) always start
+concurrently via `Promise.allSettled`, even after `node-services` is
+pre-stopped for a TeamHub configuration restart (keeping pre-stopped
+`node-services` and pre-existing `web` and `teamhub` untracked by `started` so
+rollback does not stop previously running services). `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per
@@ -477,7 +544,16 @@ endpoint probe of up to about 35 s followed by Bifrost's health wait of up to
 180 s) stops it only after that long with no output. The resume mount
 keeps its 90 s wall clock. `prepareByokRuntime` logs elapsed time every 10 s while mounting
 the BYOK gateway (a log line, since the job appends and persists every stage
-event).
+event) and logs separate `runtime` and `gateway` elapsed seconds when done.
+`prepareLocalmodelsTool` waits for and reuses an in-progress cross-process kit
+download when the publication lock reports `INSTANCE_BUSY` (bounded by
+`lockWaitMs` and cancellable via `signal`), logs region/mirror events and kit
+preparation timings (`download`, `unpack`, `verify`); `runLocalmodels` logs sub-phase
+breakdowns (`download`, retries/switches, `extract`, `verify`, `install`,
+`post-download`) alongside its `tool checked in / ran in` line; `waitHealthy`
+logs per-service readiness times and a summary across `web`, `teamhub`,
+`node-services`, and `document-runtime`; `stopNativeSource` and
+`stopLocalmodels` log per-step stop durations and `Native stop timings (s)`.
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

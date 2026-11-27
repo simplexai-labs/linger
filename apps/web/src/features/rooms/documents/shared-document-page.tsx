@@ -66,7 +66,7 @@ function SharedDocumentSurface({
   });
   return (
     <main className="min-h-dvh bg-app-surface text-app-body">
-      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-app-border px-5 py-3">
+      <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <Icon
             icon={File01Icon}

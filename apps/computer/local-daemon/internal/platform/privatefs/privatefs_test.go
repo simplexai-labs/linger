@@ -53,3 +53,61 @@ func TestPrivateFileRejectsHardLinks(t *testing.T) {
 		t.Fatalf("original changed: %q %v", data, err)
 	}
 }
+
+func TestProtectFileTightensPermissionsAndRejectsUnsafeTargets(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(root, "missing")
+	if err := ProtectFile(missing); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing ProtectFile = %v, want ErrNotExist", err)
+	}
+	if err := ProtectFile(root); err == nil {
+		t.Fatal("directory was accepted by ProtectFile")
+	}
+
+	path := filepath.Join(root, "legacy.json")
+	if err := os.WriteFile(path, []byte("token"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProtectFile(path); err != nil {
+		t.Fatalf("ProtectFile: %v", err)
+	}
+	if err := CheckPath(path, "file", true); err != nil {
+		t.Fatalf("CheckPath after ProtectFile: %v", err)
+	}
+	if data, err := ReadFile(path, 0); err != nil || string(data) != "token" {
+		t.Fatalf("content after ProtectFile = %q, %v", data, err)
+	}
+	// Idempotent on an already private file.
+	if err := ProtectFile(path); err != nil {
+		t.Fatalf("second ProtectFile: %v", err)
+	}
+
+	// Hard-linked files must be refused.
+	hardlink := filepath.Join(root, "hardlink.json")
+	if err := os.Link(path, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProtectFile(hardlink); err == nil {
+		t.Fatal("hardlink accepted by ProtectFile")
+	}
+	_ = os.Remove(hardlink)
+
+	// Symlinks must be refused without changing the target.
+	target := filepath.Join(root, "target.json")
+	if err := os.WriteFile(target, []byte("target"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chmod(target, 0o644)
+	symlink := filepath.Join(root, "link.json")
+	if err := os.Symlink(target, symlink); err == nil {
+		if err := ProtectFile(symlink); err == nil {
+			t.Fatal("symlink accepted by ProtectFile")
+		}
+	}
+}

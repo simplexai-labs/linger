@@ -75,7 +75,8 @@ func (d *Daemon) handleComputerTool(ctx context.Context, stream transport.Stream
 			}
 		}
 		if failure := localtools.BrowserCallNotRun(err); failure != "" {
-			// Nothing ran: the owner's Chrome is not connected or is busy.
+			// Nothing ran: the owner's Chrome is not connected or is busy,
+			// or the Computer has no browser for the Agent profile.
 			result = map[string]any{"status": failure}
 		} else if err != nil {
 			result = map[string]any{"status": "outcome_unknown", "detail": "Local tool did not confirm its result; inspect the current state before retrying."}

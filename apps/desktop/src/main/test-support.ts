@@ -1,6 +1,9 @@
 import { copyFileSync, linkSync, mkdtempSync, symlinkSync } from "node:fs";
+import { chmod, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+import { afterEach, vi } from "vitest";
 
 import { ConfigStore, type DesktopConfig } from "./config.js";
 import type { Logger } from "./log.js";
@@ -12,8 +15,49 @@ export const silentLog: Logger = {
   error: () => {},
 };
 
-export const tempDirectory = (): string =>
-  mkdtempSync(path.join(os.tmpdir(), "desktop-test-"));
+const tempDirectories: string[] = [];
+
+async function reopenForRemoval(directory: string): Promise<void> {
+  await chmod(directory, 0o700).catch(() => undefined);
+  const entries = await readdir(directory, { withFileTypes: true }).catch(
+    () => [],
+  );
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (entry.isSymbolicLink()) return;
+      const child = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await reopenForRemoval(child);
+      } else if (process.platform === "win32") {
+        await chmod(child, 0o600).catch(() => undefined);
+      }
+    }),
+  );
+}
+
+afterEach(async () => {
+  // Windows caps hard links per file. Do not let repeated test runs exhaust
+  // the executable's links and fall back to copying it for every fixture.
+  await Promise.all(
+    tempDirectories.splice(0).map(async (directory) => {
+      try {
+        await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EACCES" && code !== "EPERM") throw error;
+        // Verified localmodels kits are sealed read-only; reopen before cleanup.
+        await reopenForRemoval(directory);
+        await rm(directory, { recursive: true, force: true, maxRetries: 5 });
+      }
+    }),
+  );
+});
+
+export function tempDirectory(): string {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "desktop-test-"));
+  tempDirectories.push(directory);
+  return directory;
+}
 
 /**
  * Places the running Node.js at a simulated runtime's binary path. The runtime
@@ -34,6 +78,16 @@ export function fixtureNode(binary: string): void {
   };
   put(binary);
   if (path.extname(binary) !== ".exe") put(binary + ".exe");
+}
+
+/**
+ * Waits for state the installer stub's real subprocess reports. Subprocesses
+ * can take longer under load, especially on Windows.
+ */
+export function waitForInstaller<T>(check: () => T): Promise<T> {
+  return vi.waitFor(check, {
+    timeout: process.platform === "win32" ? 10_000 : 5_000,
+  });
 }
 
 export const testHost = (

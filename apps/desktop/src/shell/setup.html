@@ -65,6 +65,10 @@
         height: 190px;
         background: #f4f4f0 url("/welcome-scene.png") center / cover no-repeat;
         -webkit-app-region: drag;
+        transition: height 360ms var(--ease);
+      }
+      body[data-customizing="true"] .scene {
+        height: 76px;
       }
       .topbar {
         position: absolute;
@@ -99,6 +103,10 @@
         margin: 0 auto;
         padding: 20px 24px 16px;
         text-align: center;
+      }
+      body[data-customizing="true"] main {
+        padding-top: 14px;
+        padding-bottom: 12px;
       }
       section {
         display: none;
@@ -501,8 +509,15 @@
         margin-bottom: 0;
       }
       /* Customizing makes room for the options. */
-      section[data-customizing="true"] {
+      section[data-step="welcome"][data-customizing="true"] {
+        justify-content: safe center;
+        overflow: hidden;
         padding-bottom: 0;
+      }
+      section[data-step="welcome"][data-customizing="true"] > h1,
+      section[data-step="welcome"][data-customizing="true"] > .lead,
+      section[data-step="welcome"][data-customizing="true"] > .error {
+        flex: none;
       }
       section[data-customizing="true"] h1 {
         margin-bottom: 2px;
@@ -519,8 +534,25 @@
       section[data-customizing="true"] .spotlight-card {
         display: none;
       }
+      .welcome-scroll {
+        flex: none;
+        overflow: visible;
+        padding: 0;
+      }
+      section[data-customizing="true"] .welcome-scroll {
+        flex: 0 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 6px 0 12px;
+      }
       section[data-customizing="true"] .start {
+        flex: none;
         padding-top: 10px;
+        border-top: 1px solid transparent;
+        transition: border-color 160ms ease;
+      }
+      section[data-customizing="true"] .start[data-scrollable="true"] {
+        border-top-color: var(--line);
       }
       section[data-customizing="true"] .primary.large {
         min-height: 40px;
@@ -638,13 +670,17 @@
         background: #d9822b;
       }
       .spotlight-card {
-        width: min(100%, 468px);
+        width: min(100%, 440px);
+        order: 1;
         margin: 12px auto 0;
         padding: 8px 12px;
         border: 1px solid #e8e5dc;
         border-radius: 12px;
         background: linear-gradient(180deg, #fcfcfa 0%, #f7f5ef 100%);
         text-align: left;
+      }
+      #welcome-start:has(.install-location[data-warn="true"]) .spotlight-card {
+        margin-top: 8px;
       }
       .spotlight-card[data-recommended="true"] {
         border-color: #e6d2b5;
@@ -720,6 +756,118 @@
         gap: 6px;
         margin-top: 8px;
       }
+      /* Flat 440px install-location bar aligned with .choices and .spotlight-card;
+         jumps above the spotlight as a warm-red alert on disk-space or path warnings. */
+      .install-location {
+        width: min(100%, 440px);
+        order: 2;
+        margin: 10px auto 0;
+        padding: 5px 10px 5px 11px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fafaf8;
+        text-align: left;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease;
+      }
+      #featured-spotlight:not([hidden]) + .install-location[data-warn="false"] {
+        margin-top: 8px;
+      }
+      section[data-customizing="true"] .install-location {
+        margin-top: 8px;
+      }
+      .install-location .loc-row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 6px;
+        min-width: 0;
+        font-size: 11.5px;
+        line-height: 1.4;
+        color: var(--muted);
+      }
+      .install-location .loc-icon {
+        width: 13px;
+        height: 13px;
+        flex: none;
+        color: var(--faint);
+      }
+      .install-location .loc-label {
+        flex: none;
+        color: var(--muted);
+      }
+      .install-location .loc-path {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #52524b;
+      }
+      .install-location .loc-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: none;
+      }
+      .install-location .loc-btn {
+        height: 22px;
+        padding: 0 8px;
+        border: 1px solid #e4e4de;
+        border-radius: 6px;
+        background: #fff;
+        color: #52524b;
+        font-size: 11.5px;
+        font-weight: 500;
+        text-decoration: none;
+        white-space: nowrap;
+        transition:
+          color 140ms ease,
+          border-color 140ms ease,
+          background-color 140ms ease;
+      }
+      .install-location .loc-btn:hover:not(:disabled) {
+        border-color: #c4c4bc;
+        background: #fafaf8;
+        color: var(--ink);
+      }
+      .install-location[data-warn="true"] {
+        order: 0;
+        margin-top: 10px;
+        padding: 8px 12px;
+        border-color: #f3dfd6;
+        background: #fdf6f3;
+      }
+      .install-location[data-warn="true"] .loc-icon {
+        color: var(--error);
+      }
+      .install-location[data-warn="true"] .loc-label {
+        color: var(--ink);
+        font-weight: 550;
+      }
+      .install-location[data-warn="true"] .loc-btn {
+        height: 24px;
+        padding: 0 9px;
+        border-color: #e6d1c8;
+        color: var(--ink);
+      }
+      .install-location[data-warn="true"] .loc-btn:hover:not(:disabled) {
+        border-color: #d4b6a9;
+        background: #fffaf8;
+      }
+      .install-location .loc-warn {
+        margin: 5px 0 0;
+        color: var(--error);
+        font-size: 11.5px;
+        line-height: 1.45;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        user-select: text;
+        -webkit-user-select: text;
+      }
       /* What downloads now, or what a long step waits on, under the
          installing bar. */
       .transfer {
@@ -792,9 +940,14 @@
       .byok-tip-btn {
         position: relative;
       }
+      .seg button.byok-tip-btn:hover,
+      .seg button.byok-tip-btn:focus-visible {
+        z-index: 30;
+      }
       .byok-tooltip {
         position: absolute;
-        bottom: calc(100% + 8px);
+        top: calc(100% + 8px);
+        bottom: auto;
         right: 0;
         z-index: 30;
         width: 248px;
@@ -810,7 +963,7 @@
         box-shadow: 0 10px 24px -8px rgba(20, 20, 16, 0.45);
         opacity: 0;
         pointer-events: none;
-        transform: translateY(3px);
+        transform: translateY(-3px);
         transition:
           opacity 150ms ease,
           transform 150ms ease;
@@ -1096,6 +1249,16 @@
         border-radius: 2px;
         background: inherit;
         transform: rotate(45deg);
+      }
+      .byok-toast[data-above="true"]::before {
+        top: auto;
+        bottom: -4px;
+      }
+      #welcome-scroll .cb-menu,
+      #welcome-scroll .byok-toast,
+      #welcome-scroll .byok-tooltip {
+        position: fixed;
+        z-index: 40;
       }
       .byok-toast[data-leaving="true"] {
         animation: toast-out 200ms ease forwards;
@@ -2022,186 +2185,176 @@
         ></span>
         <h1 id="welcome-title" data-t="welcomeTitle"></h1>
         <p class="lead tight" id="welcome-lead"></p>
-        <div class="fold" id="local-options" data-open="false">
-          <div>
-            <div class="choices">
-              <div class="choice">
-                <div class="text">
-                  <strong data-t="modelSource"></strong
-                  ><span
-                    class="sub"
-                    id="source-sub"
-                    data-t="modelSourceHint"
-                  ></span>
-                </div>
-                <div
-                  class="seg"
-                  role="radiogroup"
-                  data-t-aria-label="modelSource"
-                  data-plan="source"
-                >
-                  <span class="knob"></span>
-                  <button
-                    type="button"
-                    role="radio"
-                    data-value="local"
-                    data-t="localModel"
-                  ></button>
-                  <button
-                    type="button"
-                    role="radio"
-                    data-value="subscription"
-                    data-t="subscription"
-                  ></button>
-                  <button
-                    type="button"
-                    role="radio"
-                    data-value="byok"
-                    class="byok-tip-btn"
-                    aria-describedby="byok-tip-text"
-                  >
-                    BYOK
-                    <span
-                      class="byok-tooltip"
-                      id="byok-tip-text"
-                      role="tooltip"
-                      data-t="byokTooltip"
-                    ></span>
-                  </button>
-                </div>
-              </div>
-              <div class="choice local" id="local-row" hidden>
-                <div class="text">
-                  <strong data-t="localModel"></strong
-                  ><span class="sub" id="local-sub"></span>
-                </div>
-                <button
-                  type="button"
-                  class="pick"
-                  id="local-model"
-                  role="checkbox"
-                  data-t-aria-label="localModelToggle"
-                  hidden
-                >
-                  <span class="pick-head"
-                    ><span class="pick-name" id="local-model-name"></span
+        <div class="welcome-scroll" id="welcome-scroll">
+          <div class="fold" id="local-options" data-open="false">
+            <div>
+              <div class="choices">
+                <div class="choice">
+                  <div class="text">
+                    <strong data-t="modelSource"></strong
                     ><span
-                      class="featured-pill"
-                      id="local-model-featured"
-                      hidden
-                      data-t="featuredPartnerBadge"
-                    ></span></span
-                  ><small id="local-model-needs"></small>
-                </button>
-                <div class="local-spotlight" id="local-spotlight">
-                  <span id="local-spotlight-text"></span>
-                  <button
-                    type="button"
-                    class="spotlight-link"
-                    id="local-spotlight-link"
-                    data-t-title="openAnnouncement"
-                  ></button>
-                </div>
-              </div>
-              <div class="choice" id="subscription-row" hidden>
-                <div class="text">
-                  <strong data-t="aiRuntime"></strong
-                  ><span
-                    class="sub"
-                    id="runtime-sub"
-                    data-t="runtimeHint"
-                  ></span>
-                </div>
-                <div
-                  class="seg"
-                  role="radiogroup"
-                  data-t-aria-label="aiRuntime"
-                  data-plan="runtime"
-                >
-                  <span class="knob"></span>
-                  <button
-                    type="button"
-                    role="radio"
-                    data-value="recommended"
-                    data-t="auto"
-                  ></button>
-                  <button type="button" role="radio" data-value="codex">
-                    Codex
-                  </button>
-                  <button type="button" role="radio" data-value="claude">
-                    Claude Code
-                  </button>
-                </div>
-              </div>
-              <div class="choice byok-box" id="byok-row" hidden>
-                <div class="byok-row">
-                  <label id="byok-runtime-label" data-t="aiRuntime"></label>
+                      class="sub"
+                      id="source-sub"
+                      data-t="modelSourceHint"
+                    ></span>
+                  </div>
                   <div
                     class="seg"
                     role="radiogroup"
-                    aria-labelledby="byok-runtime-label"
-                    data-byok="runtime"
+                    data-t-aria-label="modelSource"
+                    data-plan="source"
                   >
                     <span class="knob"></span>
-                    <button type="button" role="radio" data-value="claude">
-                      Claude Code
-                    </button>
-                    <button type="button" role="radio" data-value="codex">
-                      Codex
-                    </button>
-                    <button type="button" role="radio" data-value="pi">
-                      Pi
+                    <button
+                      type="button"
+                      role="radio"
+                      data-value="local"
+                      data-t="localModel"
+                    ></button>
+                    <button
+                      type="button"
+                      role="radio"
+                      data-value="subscription"
+                      data-t="subscription"
+                    ></button>
+                    <button
+                      type="button"
+                      role="radio"
+                      data-value="byok"
+                      class="byok-tip-btn"
+                      aria-describedby="byok-tip-text"
+                    >
+                      BYOK
+                      <span
+                        class="byok-tooltip"
+                        id="byok-tip-text"
+                        role="tooltip"
+                        data-t="byokTooltip"
+                      ></span>
                     </button>
                   </div>
                 </div>
-                <div class="byok-fields" id="byok-fields"></div>
-              </div>
-              <details class="choice optional-keys" id="optional-keys">
-                <summary data-t="appIntegrations"></summary>
-                <div class="text">
-                  <span class="sub" data-t="appIntegrationsHint"></span>
-                </div>
-                <div class="keys">
-                  <label for="key-composio">Composio</label>
-                  <input
-                    id="key-composio"
-                    type="password"
-                    data-key="composio"
-                    autocomplete="off"
-                    spellcheck="false"
-                    data-t-aria-label="composioKey"
-                  />
+                <div class="choice local" id="local-row" hidden>
+                  <div class="text">
+                    <strong data-t="localModel"></strong
+                    ><span class="sub" id="local-sub"></span>
+                  </div>
                   <button
                     type="button"
-                    class="change"
-                    data-reveal="composio"
-                    data-t="show"
-                  ></button>
-                  <button
-                    type="button"
-                    class="change"
-                    data-remove="composio"
-                    data-t="remove"
-                  ></button>
+                    class="pick"
+                    id="local-model"
+                    role="checkbox"
+                    data-t-aria-label="localModelToggle"
+                    hidden
+                  >
+                    <span class="pick-head"
+                      ><span class="pick-name" id="local-model-name"></span
+                      ><span
+                        class="featured-pill"
+                        id="local-model-featured"
+                        hidden
+                        data-t="featuredPartnerBadge"
+                      ></span></span
+                    ><small id="local-model-needs"></small>
+                  </button>
+                  <div class="local-spotlight" id="local-spotlight">
+                    <span id="local-spotlight-text"></span>
+                    <button
+                      type="button"
+                      class="spotlight-link"
+                      id="local-spotlight-link"
+                      data-t-title="openAnnouncement"
+                    ></button>
+                  </div>
                 </div>
-                <p class="keys-note" id="keys-note"></p>
-              </details>
-              <div class="choice">
-                <div class="text">
-                  <strong data-t="installLocation"></strong
-                  ><span class="sub" id="location-sub"></span>
+                <div class="choice" id="subscription-row" hidden>
+                  <div class="text">
+                    <strong data-t="aiRuntime"></strong
+                    ><span
+                      class="sub"
+                      id="runtime-sub"
+                      data-t="runtimeHint"
+                    ></span>
+                  </div>
+                  <div
+                    class="seg"
+                    role="radiogroup"
+                    data-t-aria-label="aiRuntime"
+                    data-plan="runtime"
+                  >
+                    <span class="knob"></span>
+                    <button
+                      type="button"
+                      role="radio"
+                      data-value="recommended"
+                      data-t="auto"
+                    ></button>
+                    <button type="button" role="radio" data-value="codex">
+                      Codex
+                    </button>
+                    <button type="button" role="radio" data-value="claude">
+                      Claude Code
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  class="change"
-                  id="location-change"
-                  data-t="changeLocation"
-                ></button>
+                <div class="choice byok-box" id="byok-row" hidden>
+                  <div class="byok-row">
+                    <label id="byok-runtime-label" data-t="aiRuntime"></label>
+                    <div
+                      class="seg"
+                      role="radiogroup"
+                      aria-labelledby="byok-runtime-label"
+                      data-byok="runtime"
+                    >
+                      <span class="knob"></span>
+                      <button type="button" role="radio" data-value="claude">
+                        Claude Code
+                      </button>
+                      <button type="button" role="radio" data-value="codex">
+                        Codex
+                      </button>
+                      <button type="button" role="radio" data-value="pi">
+                        Pi
+                      </button>
+                    </div>
+                  </div>
+                  <div class="byok-fields" id="byok-fields"></div>
+                </div>
+                <details class="choice optional-keys" id="optional-keys">
+                  <summary data-t="appIntegrations"></summary>
+                  <div class="text">
+                    <span class="sub" data-t="appIntegrationsHint"></span>
+                  </div>
+                  <div class="keys">
+                    <label for="key-composio">Composio</label>
+                    <input
+                      id="key-composio"
+                      type="password"
+                      data-key="composio"
+                      autocomplete="off"
+                      spellcheck="false"
+                      data-t-aria-label="composioKey"
+                    />
+                    <button
+                      type="button"
+                      class="change"
+                      data-reveal="composio"
+                      data-t="show"
+                    ></button>
+                    <button
+                      type="button"
+                      class="change"
+                      data-remove="composio"
+                      data-t="remove"
+                    ></button>
+                  </div>
+                  <p class="keys-note" id="keys-note"></p>
+                </details>
               </div>
             </div>
           </div>
         </div>
-        <div class="start">
+        <div class="start" id="welcome-start">
           <button class="primary large" id="local-install" type="button">
             <span id="local-install-label" data-t="quickInstall"></span
             ><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
@@ -2262,28 +2415,63 @@
               data-t="checkAgain"
             ></button>
           </div>
-        </div>
-        <aside
-          class="spotlight-card"
-          id="featured-spotlight"
-          data-t-aria-label="featuredModelAriaLabel"
-          hidden
-        >
-          <div class="spotlight-head">
-            <span class="spotlight-title"
-              ><strong data-t="featuredModelName"></strong
-              ><span class="featured-pill" data-t="featuredPartnerBadge"></span
-            ></span>
-            <button
-              type="button"
-              class="spotlight-link"
-              id="featured-spotlight-link"
-              data-t-title="openAnnouncement"
-            ></button>
+          <aside
+            class="spotlight-card"
+            id="featured-spotlight"
+            data-t-aria-label="featuredModelAriaLabel"
+            hidden
+          >
+            <div class="spotlight-head">
+              <span class="spotlight-title"
+                ><strong data-t="featuredModelName"></strong
+                ><span
+                  class="featured-pill"
+                  data-t="featuredPartnerBadge"
+                ></span
+              ></span>
+              <button
+                type="button"
+                class="spotlight-link"
+                id="featured-spotlight-link"
+                data-t-title="openAnnouncement"
+              ></button>
+            </div>
+            <p class="spotlight-specs" data-t="featuredModelSpecs"></p>
+            <p class="spotlight-note" id="featured-spotlight-note"></p>
+          </aside>
+          <div
+            class="install-location"
+            id="install-location"
+            hidden
+            data-warn="false"
+          >
+            <div class="loc-row">
+              <svg class="loc-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+                />
+              </svg>
+              <span class="loc-label" data-t="installLocation"></span>
+              <span class="loc-path" id="location-path"></span>
+              <span class="loc-actions">
+                <button
+                  type="button"
+                  class="loc-btn"
+                  id="location-change"
+                  data-t="changeLocation"
+                ></button>
+                <button
+                  type="button"
+                  class="loc-btn"
+                  id="location-reset"
+                  data-t="resetLocation"
+                  hidden
+                ></button>
+              </span>
+            </div>
+            <p class="loc-warn" id="location-sub" role="alert" hidden></p>
           </div>
-          <p class="spotlight-specs" data-t="featuredModelSpecs"></p>
-          <p class="spotlight-note" id="featured-spotlight-note"></p>
-        </aside>
+        </div>
         <p class="error" id="local-error" role="alert"></p>
         <p class="team" id="team">
           <span data-t="teamServer"></span>
@@ -3638,11 +3826,131 @@
         requestAnimationFrame(frame);
       };
 
+      const syncCustomizingBody = () => {
+        document.body.dataset.customizing = String(
+          step === "welcome" &&
+            customizing &&
+            Boolean(state?.localServer.available),
+        );
+      };
+
+      const syncWelcomeScroll = () => {
+        const scroller = $("welcome-scroll");
+        const footer = $("welcome-start");
+        if (!scroller || !footer) return;
+        const overflowing =
+          step === "welcome" &&
+          customizing &&
+          Boolean(state?.localServer.available) &&
+          scroller.clientHeight > 0 &&
+          scroller.scrollHeight > scroller.clientHeight + 1;
+        footer.dataset.scrollable = String(overflowing);
+      };
+
+      const placeWelcomeTooltip = () => {
+        const tip = $("byok-tip-text");
+        const btn = tip?.closest(".byok-tip-btn");
+        if (!tip || !btn) return;
+        const rect = btn.getBoundingClientRect();
+        if (!rect.width && !rect.height) return;
+        tip.style.left = "auto";
+        tip.style.right =
+          Math.max(12, Math.round(innerWidth - rect.right)) + "px";
+        if (rect.top >= 100) {
+          tip.style.bottom = Math.round(innerHeight - rect.top + 8) + "px";
+          tip.style.top = "auto";
+        } else {
+          tip.style.top = Math.round(rect.bottom + 8) + "px";
+          tip.style.bottom = "auto";
+        }
+      };
+
+      // Floats popups inside #welcome-scroll with viewport-fixed coordinates so
+      // overflow-y: auto never clips them or inflates scrollHeight.
+      const placeWelcomePopups = () => {
+        const scroller = $("welcome-scroll");
+        if (!scroller) return;
+        const scrollerRect = scroller.getBoundingClientRect();
+        const hasScrollerBox =
+          scrollerRect.width > 0 || scrollerRect.height > 0;
+        let closedCombo = false;
+        for (const combo of combos) {
+          if (!combo.open || !scroller.contains(combo.root)) continue;
+          const menu = combo.root.querySelector(".cb-menu");
+          if (!menu || menu.hidden) continue;
+          const rect = combo.root.getBoundingClientRect();
+          if (!rect.width && !rect.height) continue;
+          if (
+            hasScrollerBox &&
+            (rect.bottom < scrollerRect.top || rect.top > scrollerRect.bottom)
+          ) {
+            combo.open = false;
+            closedCombo = true;
+            continue;
+          }
+          const below = innerHeight - rect.bottom - 17;
+          const above = rect.top - 17;
+          const flipUp = below < 140 && above > below;
+          const maxH = Math.max(
+            88,
+            Math.min(252, Math.floor(flipUp ? above : below)),
+          );
+          menu.style.minWidth = rect.width + 2 + "px";
+          menu.style.maxHeight = maxH + "px";
+          if (combo.root.matches(".ep > .cb")) {
+            menu.style.right =
+              Math.max(12, Math.round(innerWidth - rect.right - 1)) + "px";
+            menu.style.left = "auto";
+          } else {
+            menu.style.left = Math.max(12, Math.round(rect.left - 1)) + "px";
+            menu.style.right = "auto";
+          }
+          if (flipUp) {
+            menu.style.bottom = Math.round(innerHeight - rect.top + 5) + "px";
+            menu.style.top = "auto";
+          } else {
+            menu.style.top = Math.round(rect.bottom + 5) + "px";
+            menu.style.bottom = "auto";
+          }
+        }
+        if (closedCombo) {
+          for (const combo of combos) {
+            if (scroller.contains(combo.root)) combo.sync();
+          }
+        }
+        const toast = $("byok-toast");
+        if (toast && !toast.hidden && scroller.contains(toast)) {
+          const row = toast.closest(".model-row");
+          const rect = row?.getBoundingClientRect();
+          if (rect && (rect.width || rect.height)) {
+            toast.style.width = Math.min(330, Math.round(rect.width)) + "px";
+            toast.style.left = "auto";
+            toast.style.right =
+              Math.max(12, Math.round(innerWidth - rect.right)) + "px";
+            const flipUp =
+              rect.bottom + 9 + toast.offsetHeight > innerHeight - 12 &&
+              rect.top > innerHeight - rect.bottom;
+            if (flipUp) {
+              toast.style.bottom =
+                Math.round(innerHeight - rect.top + 9) + "px";
+              toast.style.top = "auto";
+              toast.dataset.above = "true";
+            } else {
+              toast.style.top = Math.round(rect.bottom + 9) + "px";
+              toast.style.bottom = "auto";
+              delete toast.dataset.above;
+            }
+          }
+        }
+        placeWelcomeTooltip();
+      };
+
       const show = (next) => {
         // Leaving the sign-in step stops waiting for it.
         if (pending === "signin.open") pending = null;
         if (next === "ready" && step !== "ready") setTimeout(celebrate, 320);
         step = next;
+        syncCustomizingBody();
         for (const el of document.querySelectorAll("section"))
           el.classList.toggle("active", el.dataset.step === step);
         if (step === "server") {
@@ -4010,7 +4318,10 @@
         plan.localModel = plan.source === "local" && !!model;
         const custom = !isDefaultPlan(local);
         // Quick Install waits for the check, so it installs what it shows.
+        // BYOK uses the user's own endpoint and does not depend on local-model
+        // inspection, so its Install button unblocks once the fields are valid.
         const checking = models.state === "checking";
+        const waitingForCheck = checking && plan.source !== "byok";
         const known =
           recommended.source === "local" ||
           recommended.runtime !== "recommended";
@@ -4040,7 +4351,7 @@
         // run downloads the localmodels tool, then the check runs. The label
         // changes only when it differs, so the spinner keeps turning.
         const fetching = checking ? models.download : undefined;
-        const label = checking
+        const label = waitingForCheck
           ? '<span class="spinner"></span>' +
             esc(t(fetching ? "downloadingTools" : "checkingComputer"))
           : esc(t(custom ? "install" : "quickInstall"));
@@ -4048,12 +4359,37 @@
           $("local-install-label").innerHTML = label;
         document.querySelector('[data-step="welcome"]').dataset.customizing =
           String(customizing && local.available);
+        syncCustomizingBody();
         const byokIncomplete = plan.source === "byok" && !mainByok.complete();
         const localUnavailable = plan.source === "local" && !model;
+        const location = local.location;
+        const GiB = 1024 ** 3;
+        const baseNeededBytes = location.minFreeBytes ?? 0;
+        const modelDiskBytes =
+          plan.source === "local" && model?.diskBytes != null
+            ? model.diskBytes
+            : 0;
+        const neededBytes = baseNeededBytes + modelDiskBytes;
+        const spaceLow =
+          !location.error &&
+          location.freeBytes != null &&
+          neededBytes > 0 &&
+          location.freeBytes < neededBytes;
+        const locationWarning = location.error
+          ? location.error
+          : spaceLow
+            ? t("locationSpaceLow", {
+                needed: String(Math.ceil(neededBytes / GiB)),
+                free: String(Math.floor(location.freeBytes / GiB)),
+              })
+            : "";
         $("local-install").disabled ||=
-          checking || byokIncomplete || localUnavailable;
-        $("local-install").dataset.busy = String(checking);
-        $("local-install").setAttribute("aria-busy", String(checking));
+          waitingForCheck ||
+          byokIncomplete ||
+          localUnavailable ||
+          !!locationWarning;
+        $("local-install").dataset.busy = String(waitingForCheck);
+        $("local-install").setAttribute("aria-busy", String(waitingForCheck));
         $("plan-summary").textContent = checking
           ? t("findingSetup")
           : following && known
@@ -4084,20 +4420,7 @@
                   .filter(Boolean)
                   .join(" · ")
               : held
-                ? cudaDriverHeld(models)
-                  ? t("heldWhyCudaDriver", {
-                      reasons: reasonsText(models, true),
-                      plan: named(plan),
-                    })
-                  : memoryHeld(models)
-                    ? t("heldWhy", {
-                        reasons: reasonsText(models, true),
-                        plan: named(plan),
-                      })
-                    : t("heldWhyGeneric", {
-                        reasons: reasonsText(models, true),
-                        plan: named(plan),
-                      })
+                ? t("heldWhy", { reasons: reasonsText(models, true) })
                 : (models.state === "checked" && !models.eligible) ||
                     models.state === "unavailable"
                   ? unavailableText
@@ -4106,11 +4429,19 @@
           !local.available || customizing || !$("plan-why").textContent;
         $("plan-line").hidden = !local.available;
         $("welcome-eyebrow").hidden = !local.available;
-        const location = local.location;
-        $("location-sub").textContent =
-          location.error || shortPath(location.path);
-        $("location-sub").title = location.error ? "" : location.path;
-        $("location-sub").dataset.warn = String(!!location.error);
+        const shownLocationPath =
+          location.error && location.rejectedPath
+            ? location.rejectedPath
+            : location.path;
+        $("install-location").hidden = !local.available;
+        $("install-location").dataset.warn = String(!!locationWarning);
+        $("location-path").textContent = shortPath(shownLocationPath);
+        $("location-path").title = shownLocationPath;
+        $("location-sub").textContent = locationWarning;
+        $("location-sub").title = locationWarning;
+        $("location-sub").hidden = !locationWarning;
+        $("location-sub").dataset.warn = String(!!locationWarning);
+        $("location-reset").hidden = !location.custom && !location.error;
         for (const input of document.querySelectorAll("[data-key]")) {
           const provider = input.dataset.key;
           const saved = local.keys[provider];
@@ -4136,17 +4467,12 @@
           checking ||
           !following ||
           !inklingRecommended;
-        $("featured-spotlight").hidden = !local.available || customizing;
+        $("featured-spotlight").hidden =
+          !local.available || customizing || !inklingRecommended;
         $("featured-spotlight").dataset.recommended =
           String(inklingRecommended);
-        $("featured-spotlight-note").textContent = t(
-          inklingRecommended
-            ? "featuredModelSelected"
-            : "featuredModelLibraryNote",
-        );
-        $("featured-spotlight-link").textContent = t(
-          inklingRecommended ? "learnMoreLink" : "thinkingMachinesLink",
-        );
+        $("featured-spotlight-note").textContent = t("featuredModelSelected");
+        $("featured-spotlight-link").textContent = t("learnMoreLink");
         $("local-model-featured").hidden = !shownIsInkling;
         $("local-spotlight").dataset.recommended = String(shownIsInkling);
         $("local-spotlight-text").textContent = t(
@@ -4557,6 +4883,12 @@
             return chip;
           }),
         );
+        syncWelcomeScroll();
+        placeWelcomePopups();
+        requestAnimationFrame(() => {
+          syncWelcomeScroll();
+          placeWelcomePopups();
+        });
       };
 
       // Send Diagnostics, while a diagnostics server is set up.
@@ -4866,9 +5198,6 @@
           byokRuntime = "claude";
           mainByok.reset();
           clearKeys();
-          const location = state.localServer.location;
-          if (location.custom || location.error)
-            run({ op: "local.location.reset" });
         }
         render();
       });
@@ -4918,6 +5247,9 @@
         });
       $("location-change").addEventListener("click", () =>
         run({ op: "local.location.pick" }),
+      );
+      $("location-reset").addEventListener("click", () =>
+        run({ op: "local.location.reset" }),
       );
       $("local-recheck").addEventListener("click", () =>
         run({ op: "local.recheck" }, "local-error"),
@@ -5080,7 +5412,38 @@
                 : "welcome",
         );
       });
-      addEventListener("resize", placeKnobs);
+      $("byok-tip-text")
+        ?.closest(".byok-tip-btn")
+        ?.addEventListener("mouseenter", placeWelcomeTooltip);
+      $("byok-tip-text")
+        ?.closest(".byok-tip-btn")
+        ?.addEventListener("focus", placeWelcomeTooltip);
+      $("welcome-scroll").addEventListener("scroll", placeWelcomePopups, {
+        passive: true,
+      });
+      $("optional-keys").addEventListener("toggle", () => {
+        syncWelcomeScroll();
+        placeWelcomePopups();
+        requestAnimationFrame(() => {
+          syncWelcomeScroll();
+          placeWelcomePopups();
+        });
+      });
+      $("local-options").addEventListener("transitionend", () => {
+        syncWelcomeScroll();
+        placeWelcomePopups();
+      });
+      document
+        .querySelector(".scene")
+        ?.addEventListener("transitionend", () => {
+          syncWelcomeScroll();
+          placeWelcomePopups();
+        });
+      addEventListener("resize", () => {
+        placeKnobs();
+        syncWelcomeScroll();
+        placeWelcomePopups();
+      });
     </script>
   </body>
 </html>

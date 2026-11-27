@@ -435,11 +435,13 @@ paths:
       operationId: getAnotherMe
       summary: Read the current Human's Another Me and its Chat.
       description: >-
-        Both fields are absent until the Human's Computer first comes online with a ready Runtime
-        and a writable workspace, which creates the Another Me.
+        Both agent_actor_id and room_id are absent until the Human's Computer first comes online
+        with a ready Runtime and a writable workspace, which creates the Another Me. While absent,
+        placement_blocker reports why TeamHub could not place or create it on the Human's
+        registered Local Computers.
       responses:
         '200':
-          description: The Another Me, or an empty object before it exists.
+          description: The Another Me, or an empty/diagnostic object before it exists.
           content:
             application/json:
               schema:

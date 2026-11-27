@@ -21,7 +21,6 @@ import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubActor,
-  TeamHubAgentReasoningEffort,
   TeamHubAgentTemplate,
 } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
@@ -618,9 +617,7 @@ function TemplateSetup({
                 disabled={!modelSelection.reasoningEffort}
                 onValueChange={(value) => {
                   beginNewCommand();
-                  modelSelection.selectReasoningEffort(
-                    value as TeamHubAgentReasoningEffort,
-                  );
+                  modelSelection.selectReasoningEffort(value);
                 }}
                 value={modelSelection.reasoningEffort ?? ""}
               >
@@ -646,14 +643,14 @@ function TemplateSetup({
           scrolling away under the template contents. */}
       {createAgent.error ? (
         <p
-          className="shrink-0 border-t border-app-border bg-app-surface px-5 pt-3 text-sm leading-5 text-app-danger"
+          className="shrink-0 bg-app-surface px-5 pt-3 text-sm leading-5 text-app-danger"
           role="alert"
         >
           {createAgent.error.message}
         </p>
       ) : null}
 
-      <footer className="flex shrink-0 justify-end gap-2 border-t border-app-border px-5 py-4">
+      <footer className="flex shrink-0 justify-end gap-2 px-5 py-4">
         <Button onClick={onClose} type="button">
           {t(commonMessages.cancel)}
         </Button>

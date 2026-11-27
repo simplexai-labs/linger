@@ -1,6 +1,8 @@
 package agentregistry
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,10 +11,9 @@ import (
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
 
-func storedLocalComputer(status string, lastSeen time.Time) store.LocalComputer {
-	return store.LocalComputer{
+func storedLocalComputer(status string, lastSeen time.Time) store.RuntimeLocalComputer {
+	return store.RuntimeLocalComputer{
 		ComputerID: "computer_1", DisplayName: "Mac", Status: status, ActiveOperations: 1,
-		Capacity:           pgtype.Int4{Int32: 2, Valid: true},
 		LastSeenAt:         pgtype.Timestamptz{Time: lastSeen, Valid: true},
 		DaemonVersion:      pgtype.Text{String: "0.40.0", Valid: true},
 		RecommendedVersion: pgtype.Text{String: "0.41.0", Valid: true},
@@ -35,7 +36,7 @@ func TestProjectStoredLocalComputerReadsTheRecordedInventory(t *testing.T) {
 	if err != nil || !listed {
 		t.Fatalf("listed=%v err=%v", listed, err)
 	}
-	if item.Status != httpapi.LocalComputerStatusOnline || item.ActiveOperations != 1 || *item.AvailableCapacity != 1 ||
+	if item.Status != httpapi.LocalComputerStatusOnline || item.ActiveOperations != 1 ||
 		*item.DaemonVersion != "0.40.0" || *item.RecommendedVersion != "0.41.0" {
 		t.Fatalf("computer=%+v", item)
 	}
@@ -61,7 +62,7 @@ func TestProjectStoredLocalComputerReadsTheRecordedInventory(t *testing.T) {
 
 func TestProjectStoredLocalComputerKeepsRuntimesOfAnOfflineComputer(t *testing.T) {
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	for name, row := range map[string]store.LocalComputer{
+	for name, row := range map[string]store.RuntimeLocalComputer{
 		"disconnected":     storedLocalComputer("offline", now.Add(-time.Hour)),
 		"stale heartbeat":  storedLocalComputer("online", now.Add(-2*time.Minute)),
 		"upgrade required": storedLocalComputer("upgrade_required", now),
@@ -69,7 +70,7 @@ func TestProjectStoredLocalComputerKeepsRuntimesOfAnOfflineComputer(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			item, listed, err := projectStoredLocalComputer(row, "tenant_1", now)
 			if err != nil || !listed || item.Status != httpapi.LocalComputerStatusOffline ||
-				item.ActiveOperations != 0 || *item.AvailableCapacity != 0 {
+				item.ActiveOperations != 0 {
 				t.Fatalf("computer=%+v listed=%v err=%v", item, listed, err)
 			}
 			if item.UpgradeRequired != (row.Status == "upgrade_required") {
@@ -95,7 +96,8 @@ func TestStoredRuntimeModelsResolvesFallbackDefaultReasoningEffort(t *testing.T)
 	row := storedLocalComputer("online", now)
 	row.RuntimeDiagnostics = []byte(`[
 		{"type":"codex","status":"ready","protocol":"app-server","checked_at":"2026-11-19T00:00:00Z","models":[
-			{"id":"gpt-6-astra","label":"GPT-6-Astra","allowed_reasoning_effort":["low","xhigh"]}
+			{"id":"gpt-6-astra","label":"GPT-6-Astra","allowed_reasoning_effort":["low","xhigh"]},
+			{"id":"gpt-5.4-mini","label":"GPT-5.4 Mini","allowed_reasoning_effort":["minimal","low","high","bad effort"],"default_reasoning_effort":"minimal"}
 		]},
 		{"type":"pi","status":"ready","protocol":"rpc","checked_at":"2026-11-19T00:00:00Z","models":[
 			{"id":"spark","label":"Spark-X2.6-4B","allowed_reasoning_effort":["none","low","high"]},
@@ -112,6 +114,11 @@ func TestStoredRuntimeModelsResolvesFallbackDefaultReasoningEffort(t *testing.T)
 	if err != nil || !listed || len(item.Runtimes) != 2 {
 		t.Fatalf("computer=%+v listed=%v err=%v", item, listed, err)
 	}
+	mini := item.Runtimes[0].Models[1]
+	if mini.Id != "gpt-5.4-mini" || mini.AllowedReasoningEffort == nil || len(*mini.AllowedReasoningEffort) != 3 ||
+		(*mini.AllowedReasoningEffort)[0] != "minimal" || mini.DefaultReasoningEffort == nil || *mini.DefaultReasoningEffort != "minimal" {
+		t.Fatalf("gpt-5.4-mini projected = %+v", mini)
+	}
 	want := map[string]string{
 		"spark":           "low",
 		"qwen":            "medium",
@@ -125,41 +132,90 @@ func TestStoredRuntimeModelsResolvesFallbackDefaultReasoningEffort(t *testing.T)
 	for _, model := range item.Runtimes[1].Models {
 		got := ""
 		if model.DefaultReasoningEffort != nil {
-			got = string(*model.DefaultReasoningEffort)
+			got = *model.DefaultReasoningEffort
 		}
 		if got != want[model.Id] {
 			t.Fatalf("%s default_reasoning_effort=%q, want %q", model.Id, got, want[model.Id])
 		}
 	}
 
-	medium := httpapi.AgentReasoningEffortMedium
-	high := httpapi.AgentReasoningEffortHigh
-	ultra := httpapi.AgentReasoningEffortUltra
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", nil); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+	medium := "medium"
+	high := "high"
+	ultra := "ultra"
+	minimal := "minimal"
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", nil); resolved == nil || *resolved != "low" {
 		t.Fatalf("omitted effort on spark=%v, want low", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &medium); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &medium); resolved == nil || *resolved != "low" {
 		t.Fatalf("unsupported medium on spark=%v, want low", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &high); resolved == nil || *resolved != httpapi.AgentReasoningEffortHigh {
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &high); resolved == nil || *resolved != "high" {
 		t.Fatalf("supported high on spark=%v, want high", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &ultra); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "spark", &ultra); resolved == nil || *resolved != "low" {
 		t.Fatalf("unsupported ultra on pi spark=%v, want low", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "qwen", nil); resolved == nil || *resolved != httpapi.AgentReasoningEffortMedium {
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "qwen", nil); resolved == nil || *resolved != "medium" {
 		t.Fatalf("omitted effort on qwen=%v, want medium", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-6-astra", nil); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "no-effort", &high); resolved != nil {
+		t.Fatalf("stale effort on no-effort model=%v, want nil", *resolved)
+	}
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-6-astra", nil); resolved == nil || *resolved != "low" {
 		t.Fatalf("omitted effort on codex=%v, want low", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-6-astra", &medium); resolved == nil || *resolved != httpapi.AgentReasoningEffortLow {
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-6-astra", &medium); resolved == nil || *resolved != "low" {
 		t.Fatalf("unsupported medium on codex=%v, want low", resolved)
 	}
-	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-6-astra", &ultra); resolved == nil || *resolved != httpapi.AgentReasoningEffortUltra {
-		t.Fatalf("explicit unsupported non-default effort on codex=%v, want ultra preserved", resolved)
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-6-astra", &ultra); resolved == nil || *resolved != "low" {
+		t.Fatalf("unsupported ultra on codex=%v, want clamped to low", resolved)
+	}
+	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "codex", "gpt-5.4-mini", &minimal); resolved == nil || *resolved != "minimal" {
+		t.Fatalf("supported minimal on codex=%v, want minimal", resolved)
 	}
 	if resolved := resolveRegistrationReasoningEffort(row.RuntimeDiagnostics, "pi", "unlisted", nil); resolved != nil {
 		t.Fatalf("unlisted model effort=%v, want nil", resolved)
+	}
+}
+
+func TestStoredRuntimeModelsCapsEffortsAndResolvesDefaultAlias(t *testing.T) {
+	efforts := make([]string, 0, 40)
+	for i := range 40 {
+		efforts = append(efforts, fmt.Sprintf(`"tier_%02d"`, i))
+	}
+	raw := []byte(fmt.Sprintf(`[
+		{"type":"codex","status":"ready","protocol":"app-server","checked_at":"2026-11-25T00:00:00Z","models":[
+			{"id":"gpt-first","label":"GPT First","allowed_reasoning_effort":["tier_00","-invalid",%s],"default_reasoning_effort":"tier_35"},
+			{"id":"gpt-default","label":"GPT Default","allowed_reasoning_effort":["minimal","low"],"default_reasoning_effort":"minimal","is_default":true}
+		]},
+		{"type":"claude","status":"ready","protocol":"stream-json","checked_at":"2026-11-25T00:00:00Z","models":[
+			{"id":"claude-first","label":"Claude First","allowed_reasoning_effort":["low","high"]},
+			{"id":"claude-second","label":"Claude Second","allowed_reasoning_effort":["high"]}
+		]}
+	]`, strings.Join(efforts, ",")))
+
+	firstModel, found := storedRuntimeModel(raw, "codex", "gpt-first")
+	if !found || firstModel.AllowedReasoningEffort == nil {
+		t.Fatalf("gpt-first lookup failed: found=%v model=%+v", found, firstModel)
+	}
+	if len(*firstModel.AllowedReasoningEffort) != maxRuntimeModelReasoningEfforts {
+		t.Fatalf("allowed reasoning efforts len = %d, want %d", len(*firstModel.AllowedReasoningEffort), maxRuntimeModelReasoningEfforts)
+	}
+	if firstModel.DefaultReasoningEffort == nil || *firstModel.DefaultReasoningEffort != "tier_00" {
+		t.Fatalf("default reasoning effort = %v, want tier_00 fallback", firstModel.DefaultReasoningEffort)
+	}
+
+	codexDefault, found := storedRuntimeModel(raw, "codex", "codex-default")
+	if !found || codexDefault.Id != "gpt-default" {
+		t.Fatalf("codex-default resolved to found=%v id=%q, want gpt-default", found, codexDefault.Id)
+	}
+	minimal := "minimal"
+	if resolved := resolveRegistrationReasoningEffort(raw, "codex", "codex-default", &minimal); resolved == nil || *resolved != "minimal" {
+		t.Fatalf("codex-default minimal effort = %v, want minimal", resolved)
+	}
+
+	claudeDefault, found := storedRuntimeModel(raw, "claude", "claude-default")
+	if !found || claudeDefault.Id != "claude-first" {
+		t.Fatalf("claude-default without is_default resolved to found=%v id=%q, want claude-first", found, claudeDefault.Id)
 	}
 }

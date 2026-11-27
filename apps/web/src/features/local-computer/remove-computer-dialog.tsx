@@ -176,7 +176,7 @@ export function RemoveComputerDialog({
             <h3 className="text-xs font-medium text-muted-foreground">
               {t(computersMessages.assignedAgentsMoveFirst)}
             </h3>
-            <ul className="mt-1 divide-y divide-border">
+            <ul className="mt-1">
               {plans.map(({ hint, options, row }) => (
                 <RemoveComputerAgentRow
                   agent={row}

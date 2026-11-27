@@ -1,11 +1,77 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { orderByRegion, sourceRegion, type Region } from "@linger/service-kit";
-import { downloadVerified, type DownloadTiming } from "./download.js";
+import {
+  downloadVerified,
+  type DownloadDiagnosticEvent,
+  type DownloadTiming,
+} from "./download.js";
 import { npmMirrorRegistry, probeNpmRegistries } from "./npm-registry.js";
 import { atomicPrivate, privateDirectory } from "./private-files.js";
 
 export type { Region };
+
+export type RegionResolutionMethod =
+  | "env"
+  | "cache"
+  | "probe"
+  | "default"
+  | "fallback";
+
+export interface RegionProbeRate {
+  registry: string;
+  host: string;
+  bytes: number;
+  elapsedMs: number;
+  bytesPerSecond: number;
+}
+
+export interface RegionResolutionInfo {
+  region: Region;
+  method: RegionResolutionMethod;
+  ms: number;
+  probes?: RegionProbeRate[];
+}
+
+export interface RegionResolvedEvent extends RegionResolutionInfo {
+  kind: "region_resolved";
+}
+
+export interface RegionFallbackEvent {
+  kind: "region_fallback";
+  fromRegion: Region;
+  toRegion: Region;
+  host: string;
+}
+
+export type RegionDownloadEvent =
+  | RegionResolvedEvent
+  | DownloadDiagnosticEvent
+  | RegionFallbackEvent;
+
+/** Concise single-line summary of how the download region was chosen. */
+export function formatRegionResolution(info: RegionResolutionInfo): string {
+  const detail = info.probes?.length
+    ? `; ${info.probes
+        .map((probe) =>
+          probe.bytes < 0
+            ? `${probe.host} refused`
+            : `${probe.host} ${Math.round(probe.bytesPerSecond / 1024)} KB/s`,
+        )
+        .join(", ")}`
+    : "";
+  return `Download region: ${info.region} (${info.method}, ${info.ms}ms${detail}).`;
+}
+
+/** Concise hostname-only log line for a region or mirror download event. */
+export function formatRegionDownloadEvent(event: RegionDownloadEvent): string {
+  if (event.kind === "region_resolved") return formatRegionResolution(event);
+  if (event.kind === "slow_switch")
+    return `Download slow on ${event.fromHost} (${Math.round(event.bytesPerSecond / 1024)} KB/s); switching to ${event.toHost}.`;
+  if (event.kind === "host_switch")
+    return `Download failed on ${event.fromHost} (${event.reason}); switching to ${event.toHost}.`;
+  return `Download region fallback: ${event.fromRegion} -> ${event.toRegion} (${event.host}).`;
+}
 
 // The record localmodels shares: see scripts/installs/README.md.
 export const REGION_SCHEMA = "simplex.region/v1";
@@ -88,7 +154,7 @@ async function save(
 
 // One resolution per home and process, so concurrent downloads share a probe.
 interface Resolution {
-  promise: Promise<Region>;
+  promise: Promise<RegionResolutionInfo>;
   controller: AbortController | undefined;
   waiters: number;
 }
@@ -98,7 +164,9 @@ async function resolve(
   file: string,
   signal: AbortSignal,
   fetcher: typeof fetch,
-): Promise<Region> {
+): Promise<RegionResolutionInfo> {
+  const startedAt = performance.now();
+  const elapsed = () => Math.max(0, Math.round(performance.now() - startedAt));
   const forced = forcedRegion();
   const saved = await readRecord(file);
   if (forced) {
@@ -108,15 +176,28 @@ async function resolve(
       !fresh(saved, Date.now())
     )
       await save(file, forced, "env");
-    return forced;
+    return { region: forced, method: "env", ms: elapsed() };
   }
-  if (saved && fresh(saved, Date.now())) return saved.region;
-  const [best] = await probeNpmRegistries(signal, fetcher);
+  if (saved && fresh(saved, Date.now()))
+    return { region: saved.region, method: "cache", ms: elapsed() };
+  const results = await probeNpmRegistries(signal, fetcher);
+  const probes: RegionProbeRate[] = results.map((entry) => ({
+    registry: entry.registry,
+    host: new URL(entry.registry).hostname,
+    bytes: entry.bytes,
+    elapsedMs: Math.max(0, Math.round(entry.elapsedMs)),
+    bytesPerSecond:
+      entry.bytes > 0
+        ? Math.round((entry.bytes * 1000) / Math.max(entry.elapsedMs, 1))
+        : 0,
+  }));
+  const [best] = results;
   // Neither registry answered: global for now, probed again next run.
-  if (!best || best.bytes <= 0) return "global";
+  if (!best || best.bytes <= 0)
+    return { region: "global", method: "default", ms: elapsed(), probes };
   const region = best.registry === npmMirrorRegistry ? "cn" : "global";
   await save(file, region, "probe");
-  return region;
+  return { region, method: "probe", ms: elapsed(), probes };
 }
 
 /**
@@ -126,7 +207,11 @@ async function resolve(
  */
 export async function resolveRegion(
   home: string,
-  options: { signal?: AbortSignal; fetcher?: typeof fetch } = {},
+  options: {
+    signal?: AbortSignal;
+    fetcher?: typeof fetch;
+    onResolved?: (info: RegionResolutionInfo) => void;
+  } = {},
 ): Promise<Region> {
   const signal = options.signal;
   signal?.throwIfAborted();
@@ -154,12 +239,17 @@ export async function resolveRegion(
   pending.waiters++;
   let onAbort: (() => void) | undefined;
   try {
-    if (!signal) return await pending.promise;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(signal.reason);
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-    return await Promise.race([pending.promise, aborted]);
+    const info = signal
+      ? await Promise.race([
+          pending.promise,
+          new Promise<never>((_resolve, reject) => {
+            onAbort = () => reject(signal.reason);
+            signal.addEventListener("abort", onAbort, { once: true });
+          }),
+        ])
+      : await pending.promise;
+    options.onResolved?.(info);
+    return info.region;
   } finally {
     if (signal && onAbort) signal.removeEventListener("abort", onAbort);
     pending.waiters--;
@@ -182,10 +272,11 @@ export async function recordRegionFallback(
 ): Promise<void> {
   if (forcedRegion()) return;
   const file = regionFile(home);
-  const current = await resolutions.get(file)?.promise.catch(() => undefined);
+  const current = (await resolutions.get(file)?.promise.catch(() => undefined))
+    ?.region;
   if (current === region) return;
   resolutions.set(file, {
-    promise: Promise.resolve(region),
+    promise: Promise.resolve({ region, method: "fallback", ms: 0 }),
     controller: undefined,
     waiters: 0,
   });
@@ -200,24 +291,52 @@ export async function recordRegionFallback(
  */
 export async function downloadInRegion(
   home: string,
-  options: Parameters<typeof downloadVerified>[0],
+  options: Parameters<typeof downloadVerified>[0] & {
+    onEvent?: (event: RegionDownloadEvent) => void;
+  },
   fetcher: typeof fetch = fetch,
   timing?: DownloadTiming,
 ): Promise<string> {
   const sources = [options.url, ...(options.mirrors ?? [])];
+  const onDiagnostic =
+    options.onDiagnostic || options.onEvent
+      ? (event: DownloadDiagnosticEvent) => {
+          options.onDiagnostic?.(event);
+          options.onEvent?.(event);
+        }
+      : undefined;
   if (new Set(sources.map(sourceRegion)).size < 2)
-    return downloadVerified(options, fetcher, timing);
+    return downloadVerified(
+      { ...options, ...(onDiagnostic ? { onDiagnostic } : {}) },
+      fetcher,
+      timing,
+    );
   const region = await resolveRegion(home, {
     signal: options.signal,
     fetcher,
+    onResolved: (info) =>
+      options.onEvent?.({ kind: "region_resolved", ...info }),
   });
   const [url, ...mirrors] = orderByRegion(region, sources);
   const served = await downloadVerified(
-    { ...options, url: url!, mirrors },
+    {
+      ...options,
+      url: url!,
+      mirrors,
+      ...(onDiagnostic ? { onDiagnostic } : {}),
+    },
     fetcher,
     timing,
   );
   const servedRegion = sourceRegion(served);
-  if (servedRegion !== region) await recordRegionFallback(home, servedRegion);
+  if (servedRegion !== region) {
+    await recordRegionFallback(home, servedRegion);
+    options.onEvent?.({
+      kind: "region_fallback",
+      fromRegion: region,
+      toRegion: servedRegion,
+      host: new URL(served).hostname,
+    });
+  }
   return served;
 }

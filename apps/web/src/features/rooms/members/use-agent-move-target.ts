@@ -29,9 +29,10 @@ export function useAgentMoveTarget(
     current?.runtime_type ?? "codex",
   );
   const [requestedModel, setModel] = useState(registration.runtime.model);
-  const [requestedReasoningEffort, setRequestedReasoningEffort] = useState<
-    TeamHubAgentReasoningEffort | ""
-  >(registration.runtime.reasoning_effort ?? "");
+  const [requestedReasoningEffort, setRequestedReasoningEffort] =
+    useState<TeamHubAgentReasoningEffort>(
+      registration.runtime.reasoning_effort ?? "",
+    );
 
   const moving = computerId !== currentComputerId;
   const computer = computers?.find((item) => item.computer_id === computerId);
@@ -61,10 +62,8 @@ export function useAgentMoveTarget(
       : undefined;
   const reasoningEffort = (() => {
     const allowed = selectedModel?.allowed_reasoning_effort ?? [];
-    if (
-      allowed.includes(requestedReasoningEffort as TeamHubAgentReasoningEffort)
-    ) {
-      return requestedReasoningEffort as TeamHubAgentReasoningEffort;
+    if (allowed.includes(requestedReasoningEffort)) {
+      return requestedReasoningEffort;
     }
     const saved = registration.runtime.reasoning_effort;
     if (

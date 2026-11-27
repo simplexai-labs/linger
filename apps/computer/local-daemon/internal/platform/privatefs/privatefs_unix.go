@@ -76,6 +76,35 @@ func EnsureDir(path string) error {
 	}
 	return file.Chmod(0o700)
 }
+
+// ProtectFile tightens an existing regular file owned by the current user to
+// owner-only permissions (0o600). Symlinks, directories, hard-linked files,
+// and files owned by another user are refused without modification.
+func ProtectFile(path string) error {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || uint64(stat.Uid) != uint64(os.Getuid()) {
+		return errors.New("path is not owned by the current user")
+	}
+	if !info.Mode().IsRegular() || stat.Nlink != 1 {
+		return errors.New("path is not a single regular file")
+	}
+	if info.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	if err := file.Chmod(0o600); err != nil {
+		return err
+	}
+	return safe(file, "file", true)
+}
 func openWrite(path string, exclusive bool) (*os.File, error) {
 	flags := os.O_WRONLY | os.O_CREATE | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
 	if exclusive {

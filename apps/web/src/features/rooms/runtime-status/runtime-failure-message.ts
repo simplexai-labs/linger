@@ -37,7 +37,7 @@ export function isRunInterruption(failure?: RuntimeExecutionFailure): boolean {
   return failure?.code === "interrupted";
 }
 
-/** Why a Run failed, or "Run failed" alone when its cause is not known. */
+/** Why a Run failed, or "Couldn't finish" alone when its cause is not known. */
 export function runtimeFailureMessage(
   t: Translate,
   failure?: RuntimeExecutionFailure,
@@ -45,28 +45,27 @@ export function runtimeFailureMessage(
   return runtimeFailureReason(t, failure) ?? t(m.runFailed);
 }
 
-/** The cause of a failed Run in words, when the client knows its code. */
+/** The cause of a failed Run in words, when the client knows its code. The
+ * Runtime and its version stay out of it: the reader acts on the cause. */
 export function runtimeFailureReason(
   t: Translate,
   failure?: RuntimeExecutionFailure,
 ): string | undefined {
   if (!failure || !Object.hasOwn(messages, failure.code)) return undefined;
-  const reason = t(messages[failure.code]);
-  // Failures the Agent Service or TeamHub observed name no Runtime.
-  if (!failure.runtime_type) return reason;
-  const runtime = {
-    codex: "Codex",
-    claude: "Claude",
-    pi: "Pi",
-    antigravity: "Antigravity",
-  }[failure.runtime_type];
-  if (!runtime) return undefined;
-  const version =
-    failure.runtime_version &&
-    /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/.test(
-      failure.runtime_version,
-    )
-      ? ` ${failure.runtime_version}`
-      : "";
-  return t(m.labeled, { label: `${runtime}${version}`, value: reason });
+  return t(messages[failure.code]);
+}
+
+/**
+ * The machine identifiers behind a failure, such as
+ * `codex 0.170.0 · execution_failed`, for someone diagnosing it. They are not
+ * translated: support and logs use the same words.
+ */
+export function runtimeFailureDiagnostic(
+  failure?: RuntimeExecutionFailure,
+): string | undefined {
+  if (!failure) return undefined;
+  const runtime = [failure.runtime_type, failure.runtime_version]
+    .filter(Boolean)
+    .join(" ");
+  return [runtime, failure.code].filter(Boolean).join(" \u00b7 ");
 }

@@ -276,7 +276,7 @@ export interface paths {
     };
     /**
      * Read the current Human's Another Me and its Chat.
-     * @description Both fields are absent until the Human's Computer first comes online with a ready Runtime and a writable workspace, which creates the Another Me.
+     * @description Both agent_actor_id and room_id are absent until the Human's Computer first comes online with a ready Runtime and a writable workspace, which creates the Another Me. While absent, placement_blocker reports why TeamHub could not place or create it on the Human's registered Local Computers.
      */
     get: operations["getAnotherMe"];
     put?: never;
@@ -4357,15 +4357,7 @@ export interface components {
      * @enum {string}
      */
     AgentType: "general" | "anotherme";
-    /** @enum {string} */
-    AgentReasoningEffort:
-      | "none"
-      | "low"
-      | "medium"
-      | "high"
-      | "xhigh"
-      | "max"
-      | "ultra";
+    AgentReasoningEffort: string;
     /** @enum {string} */
     LocalRuntimeType: "codex" | "claude" | "pi" | "antigravity";
     /** @description Agents run on one of the Sponsor's Local Computers. Placement requires computer_id, runtime_type, and workspace_grant_id; TeamHub validates that invariant before persistence. */
@@ -4555,11 +4547,35 @@ export interface components {
       consecutive_failures: number;
       reason: components["schemas"]["AnotherMeBackgroundFailureReason"];
     };
-    /** @description The Human's Another Me and its live direct Chat. Empty until the Another Me exists; room_id is also absent while the Chat is being deleted. */
+    /**
+     * @description Why TeamHub skipped or failed creating the Human's Another Me on their Local Computers. Clients treat an unknown value as unknown.
+     * @enum {string}
+     */
+    AnotherMePlacementBlockerReason:
+      | "no_online_computer"
+      | "computer_upgrade_required"
+      | "no_writable_workspace_grant"
+      | "no_ready_runtime_with_models"
+      | "create_failed";
+    AnotherMePlacementRuntimeStatus: {
+      type: components["schemas"]["LocalRuntimeType"];
+      status: components["schemas"]["LocalRuntimeDiagnosticStatus"];
+      model_count: number;
+      message?: string;
+    };
+    /** @description Present while the Human has no Another Me yet and TeamHub has a known reason it cannot place or create one on the Human's Local Computers. Absent once the Another Me exists or before any Local Computer is registered for the Human. */
+    AnotherMePlacementBlocker: {
+      reason: components["schemas"]["AnotherMePlacementBlockerReason"];
+      computer_id?: components["schemas"]["Id"];
+      /** @description Runtime diagnostics last reported by the candidate Computer when placement is blocked because no Runtime is ready with models. */
+      runtimes?: components["schemas"]["AnotherMePlacementRuntimeStatus"][];
+    };
+    /** @description The Human's Another Me and its live direct Chat. Empty until the Another Me exists or a registered Local Computer reports a placement blocker; room_id is also absent while the Chat is being deleted. */
     AnotherMe: {
       agent_actor_id?: components["schemas"]["Id"];
       room_id?: components["schemas"]["Id"];
       background_failure?: components["schemas"]["AnotherMeBackgroundFailure"];
+      placement_blocker?: components["schemas"]["AnotherMePlacementBlocker"];
     };
     TenantAgentAvatarUpdateRequest: {
       avatar_key: string;
@@ -4615,10 +4631,6 @@ export interface components {
       /** @description Recommended Computer release. This is advisory and does not prevent legacy execution. */
       recommended_version?: string;
       last_seen_at?: components["schemas"]["Timestamp"];
-      /** @description Optional maximum simultaneous active Operations on this Computer. Omission means unlimited; it does not limit bound Agents. */
-      capacity?: number;
-      /** @description Currently available active Operation slots. Present only when capacity is configured. */
-      available_capacity?: number;
       /** @description Active Operations the Computer reported at its last heartbeat; 0 while it is offline. */
       active_operations: number;
       /** @description Runtimes and models as the Computer last reported them, kept while it is offline so an Agent can be placed there. */
@@ -6652,11 +6664,11 @@ export interface components {
       /** @constant */
       type: "status.changed";
       /** @enum {string} */
-      status: "queued" | "working" | "thinking";
-      /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working; raw reasoning is never allowed. */
+      status: "queued" | "working" | "thinking" | "waiting_background";
+      /** @description Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working and waiting_background; raw reasoning is never allowed. */
       title?: string;
     };
-    /** @description Public classified failure; contains no native error text, paths, credentials, or task input. Each code is set where the failure is observed, from structured signals only. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. local_model_unavailable means the Agent's Computer could not load the Agent's local model (not enough free memory, not fully downloaded, or loading took too long), so the Runtime did not start; the person can manage it on the Computer's Models page or choose another model. model_gateway_unavailable means the Agent's Computer could not start or reach its local model gateway (such as Bifrost for BYOK), so the Runtime did not start; the person can check the Computer's Models page or Local Computer diagnostics before retrying. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished while a Human who mentioned the Agent waited for its reply, every message write the Agent tried to post failed, and no reply reached the Room. reply_not_sent means a Room Run finished while a Human who mentioned the Agent waited for its reply and no reply reached the Room without any failed message write attempt (for instance, the Runtime ended the turn in text nobody sees, which is not posted for it). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
+    /** @description Public classified failure; contains no credentials, raw secrets, or task input. Each code is set where the failure is observed, from structured signals only. detail is an optional redacted, single-line diagnostic summary for Activity display. model_unavailable means the model service refused the selected model for the Runtime's account, so the Agent needs another model or another sign-in. model_not_offered means the Agent's Computer does not offer the selected model for its Runtime, or the model does not support the selected reasoning effort, so the Runtime could not start; the Agent needs a model and reasoning effort that Computer offers. local_model_unavailable means the Agent's Computer could not load the Agent's local model (not enough free memory, not fully downloaded, or loading took too long), so the Runtime did not start; the person can manage it on the Computer's Models page or choose another model. model_gateway_unavailable means the Agent's Computer could not start or reach its local model gateway (such as Bifrost for BYOK), so the Runtime did not start; the person can check the Computer's Models page or Local Computer diagnostics before retrying. context_too_long means the conversation no longer fits the model's context window. model_service_error means the model service reported a server-side error. timeout means the Runtime hit its local execution deadline. execution_outcome_unknown means a command was dispatched but no validated exit was observed before unexpected transport or Runtime failure. Intentional cancellation, authorization loss or unavailability, and normal retirement do not create this classification. Authorization loss or unavailability includes explicit revocation, authorization checks that fail or time out, and authorization expiry. This code does not currently cover unknown effects caused by control-plane disconnection. It remains a failed Run and must not be automatically replayed; verify its effects before starting another Run. reply_undelivered means a Room Run finished while a Human who mentioned the Agent waited for its reply, every message write the Agent tried to post failed, and no reply reached the Room. reply_not_sent means a Room Run finished while a Human who mentioned the Agent waited for its reply and no reply reached the Room without any failed message write attempt (for instance, the Runtime ended the turn in text nobody sees, which is not posted for it). interrupted means the Run stopped before it finished for a reason other than a user cancellation, such as a restart or a Runner stopped on its Computer; part of its work may have taken effect and it is not replayed. computer_unavailable means the Agent's Computer could not run it: the Computer is unreachable, the Agent's Runner is stopped there, or the Runtime is not enabled. cleanup_unconfirmed means the Runtime process could not be confirmed stopped. response_too_large means the reply exceeded the Room's size limit. unclassified means no structured signal identified the cause. runtime_type is present when the failure belongs to a selected Runtime; it is absent for failures the Agent Service or TeamHub observes without one. */
     AgentRuntimeExecutionFailure: {
       /** @enum {string} */
       code:
@@ -6683,6 +6695,8 @@ export interface components {
         | "unclassified";
       runtime_type?: components["schemas"]["LocalRuntimeType"];
       runtime_version?: string;
+      /** @description Optional redacted, single-line diagnostic detail explaining why the Run failed, for display in the Activity log. Must contain no credentials or control characters. */
+      detail?: string;
     };
     AgentRuntimeStoppedStatusChangedEvent: {
       /** @constant */
@@ -7182,6 +7196,7 @@ export interface components {
         | "connect_link_expired"
         | "identity_mismatch"
         | "duplicate_remote_principal"
+        | "provider_auth_failed"
         | "stale_revision"
         | "internal_error";
       /**
@@ -9230,7 +9245,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The Another Me, or an empty object before it exists. */
+      /** @description The Another Me, or an empty/diagnostic object before it exists. */
       200: {
         headers: {
           [name: string]: unknown;

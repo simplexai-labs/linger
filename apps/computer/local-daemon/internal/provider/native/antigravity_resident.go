@@ -36,6 +36,7 @@ type antigravityShape struct {
 	auth        string
 	skills      string
 	agentID     string
+	hookDir     string
 	mcp         string
 	mcpEligible bool
 }
@@ -94,7 +95,7 @@ func antigravityAuthFingerprint(env map[string]string) string {
 	return hex.EncodeToString(sum.Sum(nil))
 }
 
-func antigravityShapeFor(program string, profile Profile, spec RunSpec, mcpShape string, mcpEligible bool) *antigravityShape {
+func antigravityShapeFor(program string, profile Profile, spec RunSpec, hookDir, mcpShape string, mcpEligible bool) *antigravityShape {
 	return &antigravityShape{
 		execPath:    program,
 		cwd:         spec.Dir,
@@ -102,6 +103,7 @@ func antigravityShapeFor(program string, profile Profile, spec RunSpec, mcpShape
 		auth:        antigravityAuthFingerprint(profile.Env),
 		skills:      profile.ResidentSkillDigest,
 		agentID:     profile.AgentID,
+		hookDir:     hookDir,
 		mcp:         mcpShape,
 		mcpEligible: mcpEligible,
 	}
@@ -122,6 +124,7 @@ func (s *antigravityShape) differsBase(want *antigravityShape) []string {
 	add(s.auth != want.auth, "auth")
 	add(s.skills != want.skills, "skills")
 	add(s.agentID != want.agentID, "agent_id")
+	add(s.hookDir != want.hookDir, "hook_dir")
 	return fields
 }
 

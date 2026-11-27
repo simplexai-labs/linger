@@ -216,26 +216,26 @@ var errFeishuUpstreamGone = errors.New("the Feishu upstream no longer exists")
 // keeps it pending until the owner finishes it on Feishu's page.
 type feishuConnection struct{ service *Service }
 
-func (c feishuConnection) Status(ctx context.Context, upstreamID string) (composio.ConnectionStatus, error) {
+func (c feishuConnection) Status(ctx context.Context, upstreamID string) (composio.ConnectionStatusReport, error) {
 	mailbox, err := c.service.feishuMailbox(ctx, upstreamID)
 	if err != nil {
-		return "", err
+		return composio.ConnectionStatusReport{}, err
 	}
 	state, err := mailbox.WaitLogin(ctx, upstreamID)
 	if err != nil {
-		return "", err
+		return composio.ConnectionStatusReport{}, err
 	}
 	if state == feishu.LoginPending {
-		return composio.ConnectionPending, nil
+		return composio.ConnectionStatusReport{Status: composio.ConnectionPending, Reason: composio.ConnectionStatusReasonPending}, nil
 	}
 	_, err = mailbox.Status(ctx)
 	switch {
 	case err == nil:
-		return composio.ConnectionActive, nil
+		return composio.ConnectionStatusReport{Status: composio.ConnectionActive, Reason: composio.ConnectionStatusReasonActive}, nil
 	case feishu.IsAuthFailure(err):
-		return composio.ConnectionExpired, nil
+		return composio.ConnectionStatusReport{Status: composio.ConnectionExpired, Reason: composio.ConnectionStatusReasonExpired}, nil
 	default:
-		return "", err
+		return composio.ConnectionStatusReport{}, err
 	}
 }
 

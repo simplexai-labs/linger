@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -270,6 +271,50 @@ func TestPiSteerCompletionRace(t *testing.T) {
 	}
 }
 
+func TestPiModelAbort(t *testing.T) {
+	for _, tc := range []struct{ mode, status string }{
+		{"model-aborted", statusAborted},
+		{"model-aborted-exit", statusAborted},
+		{"model-aborted-hold", statusAborted},
+		{"abort-during-clear", statusAborted},
+		{"abort-rejected", statusAborted},
+		{"abort-after-settle", statusAborted},
+		{"model-error", statusFailed},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			h := piNewHarness(t, tc.mode, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := h.start(ctx, "go", RunSpec{Budget: 10 * time.Second})
+			switch tc.mode {
+			case "abort-during-clear", "abort-rejected", "abort-after-settle":
+				piWaitRunning(t, run)
+				cancel()
+			case "model-aborted-hold":
+				// Deliver the local cancel after message_end and before agent_settled.
+				for event := range run.Events {
+					if event.Kind == EventModelResponse {
+						cancel()
+						break
+					}
+				}
+			}
+			_, outcome := piCollect(t, run)
+			if outcome.Status != tc.status || outcome.Error != "Request was aborted" || !outcome.ExitConfirmed {
+				t.Fatalf("outcome = %+v", outcome)
+			}
+		})
+	}
+}
+
+func TestPiCrashAfterModelAbort(t *testing.T) {
+	h := piNewHarness(t, "model-aborted-crash", nil)
+	_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
+	if outcome.Status != statusFailed || !outcome.ExitConfirmed || outcome.Diagnostics.ExitCode == nil || *outcome.Diagnostics.ExitCode != 23 {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+}
+
 func TestPiCompletionRacingAbort(t *testing.T) {
 	h := piNewHarness(t, "complete-on-abort", nil)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -280,6 +325,47 @@ func TestPiCompletionRacingAbort(t *testing.T) {
 	_, out := piCollect(t, run)
 	if out.Status != statusCompleted || out.Output != "done" || !out.ExitConfirmed || out.ExitUnconfirmed {
 		t.Fatalf("outcome = %+v", out)
+	}
+}
+
+func TestPiSlowAbortExitsOnStdinClose(t *testing.T) {
+	shortenForTest(t, &piAbortBudget, 200*time.Millisecond)
+	commands := filepath.Join(t.TempDir(), "commands")
+	h := piNewHarness(t, "slow-abort", map[string]string{piFakeLogEnv: commands})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	run := h.start(ctx, "go", RunSpec{})
+	piWaitRunning(t, run)
+	cancel()
+	_, out := piCollect(t, run)
+	if out.Status != piStatusCancelled || !out.ExitConfirmed || out.Diagnostics.ExitCode != nil {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if log, _ := os.ReadFile(commands); !strings.HasSuffix(string(log), "clear_queue\nabort\n") {
+		t.Fatalf("commands = %q", log)
+	}
+}
+
+func TestPiDelayedAbortSettlement(t *testing.T) {
+	shortenForTest(t, &piAbortBudget, 200*time.Millisecond)
+	shortenForTest(t, &piExitWait, time.Second)
+	for _, tc := range []struct{ mode, status string }{
+		{"slow-settle", piStatusCancelled},
+		{"slow-idle-settle", statusAborted},
+		{"missing-settle", statusAborted},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			h := piNewHarness(t, tc.mode, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := h.start(ctx, "go", RunSpec{})
+			piWaitRunning(t, run)
+			cancel()
+			_, out := piCollect(t, run)
+			if out.Status != tc.status || !out.ExitConfirmed {
+				t.Fatalf("outcome = %+v", out)
+			}
+		})
 	}
 }
 
@@ -326,13 +412,24 @@ func piWaitFile(t *testing.T, path string) {
 }
 
 func TestPiPrematureExit(t *testing.T) {
-	h := piNewHarness(t, "exit-early", nil)
-	_, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{}))
-	if outcome.Status != statusFailed || !strings.Contains(outcome.Error, "settled") {
-		t.Fatalf("outcome = %+v", outcome)
-	}
-	if outcome.Diagnostics.ExitCode == nil || *outcome.Diagnostics.ExitCode != 0 {
-		t.Fatalf("diagnostics = %+v", outcome.Diagnostics)
+	for _, mode := range []string{"exit-early", "exit-during-clear"} {
+		t.Run(mode, func(t *testing.T) {
+			h := piNewHarness(t, mode, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			run := h.start(ctx, "go", RunSpec{})
+			if mode == "exit-during-clear" {
+				piWaitRunning(t, run)
+				cancel()
+			}
+			_, outcome := piCollect(t, run)
+			if outcome.Status != statusFailed || !strings.Contains(outcome.Error, "settled") {
+				t.Fatalf("outcome = %+v", outcome)
+			}
+			if outcome.Diagnostics.ExitCode == nil || *outcome.Diagnostics.ExitCode != 0 {
+				t.Fatalf("diagnostics = %+v", outcome.Diagnostics)
+			}
+		})
 	}
 }
 
@@ -504,14 +601,16 @@ func TestPiLaunchArguments(t *testing.T) {
 		t.Fatalf("outcome = %+v", outcome)
 	}
 	data, _ := os.ReadFile(argv)
+	baseTools := piBaseToolsFor(runtime.GOOS)
 	sessionDir := filepath.Join(h.root, "args-session")
 	want := append([]string{"--mode", "rpc", "--session-dir", sessionDir, "--session-id", "args-session"}, PiRPCResourceArgs(filepath.Join(sessionDir, piInstructionsName))...)
 	want = append(want, "--model", "fixture/model", "--thinking", "off", "--name", "Title",
-		"--skill", filepath.Join(h.dir, ".agents", "skills"), "--extension", extension, "--tools", piBaseTools+",mcp__*")
+		"--skill", filepath.Join(h.dir, ".agents", "skills"), "--extension", extension, "--tools", baseTools+",mcp__*")
 	if got := strings.Split(string(data), "\n"); strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv\n got %q\nwant %q", got, want)
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
+	wantNodePath := filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules")
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
 		t.Fatalf("NODE_PATH = %q", nodePath)
 	}
 	instructions, err := os.ReadFile(filepath.Join(sessionDir, piInstructionsName))
@@ -524,24 +623,297 @@ func TestPiLaunchArguments(t *testing.T) {
 
 	_, outcome = piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel}))
 	data, _ = os.ReadFile(argv)
-	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), "--tools\n"+piBaseTools) {
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--model") || strings.Contains(string(data), "--thinking") || !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+baseTools) {
 		t.Fatalf("default argv = %q (%+v)", data, outcome)
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
-		t.Fatalf("NODE_PATH without an extension = %q", nodePath)
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
+		t.Fatalf("default NODE_PATH = %q, want %q", nodePath, wantNodePath)
 	}
 
-	// The managed extension runs the shell-text-hook without MCP servers.
+	// On POSIX the managed extension runs the shell-text-hook without MCP servers;
+	// on Windows PowerShell skips the POSIX shell text check while still loading
+	// the managed extension for UTF-8 encoding.
 	_, outcome = piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}))
 	data, _ = os.ReadFile(argv)
-	if outcome.Status != statusCompleted || !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piBaseTools) {
+	if outcome.Status != statusCompleted || !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+baseTools) {
 		t.Fatalf("shell text argv = %q (%+v)", data, outcome)
 	}
-	if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != "/opt/linger/linger-computer-daemon" {
-		t.Fatalf("%s = %q", piShellTextHookEnvKey, hook)
+	wantHook := "/opt/linger/linger-computer-daemon"
+	if piUsesPowerShell(runtime.GOOS) {
+		wantHook = ""
 	}
-	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules") {
+	if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != wantHook {
+		t.Fatalf("%s = %q, want %q", piShellTextHookEnvKey, hook, wantHook)
+	}
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
 		t.Fatalf("NODE_PATH = %q", nodePath)
+	}
+
+	// Without a configured managed extension, a plain Run omits --extension and NODE_PATH.
+	program := h.runtime.(*piRuntime).profile.Program
+	plain, err := Open("pi", Profile{Program: program, Env: h.env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := plain.Start(t.Context(), "go", RunSpec{Dir: h.dir, Model: piDefaultModel})
+	if err != nil {
+		t.Fatalf("plain start: %v", err)
+	}
+	_, outcome = piCollect(t, run)
+	data, _ = os.ReadFile(argv)
+	if outcome.Status != statusCompleted || strings.Contains(string(data), "--extension") || !strings.HasSuffix(string(data), "--tools\n"+baseTools) {
+		t.Fatalf("plain argv = %q (%+v)", data, outcome)
+	}
+	if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != "" {
+		t.Fatalf("plain NODE_PATH = %q", nodePath)
+	}
+
+	// A missing configured managed extension fails fast even on a plain Run and releases its session lock.
+	broken, err := Open("pi", Profile{
+		Program:             program,
+		Env:                 h.env,
+		ManagedMCPExtension: filepath.Join(t.TempDir(), "missing-extension.mjs"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := broken.Start(t.Context(), "go", RunSpec{Dir: h.dir, AssignSessionID: "broken-extension-session"}); err == nil || !strings.Contains(err.Error(), "repair") {
+		t.Fatalf("broken extension start = %v", err)
+	}
+	run, err = plain.Start(t.Context(), "go", RunSpec{Dir: h.dir, AssignSessionID: "broken-extension-session"})
+	if err != nil {
+		t.Fatalf("post-failure start on same session: %v", err)
+	}
+	if _, outcome = piCollect(t, run); outcome.Status != statusCompleted {
+		t.Fatalf("post-failure outcome = %+v", outcome)
+	}
+}
+
+func TestPiReviewedRunRefusesExtensionlessResident(t *testing.T) {
+	t.Run("prestart", func(t *testing.T) {
+		h := piNewResidentHome(t, nil)
+		out := h.prestart(RunSpec{AssignSessionID: "prestart-no-ext"})
+		if out.Status != statusCompleted || !out.Parked || h.parked("prestart-no-ext") == nil {
+			t.Fatalf("pre-start = %+v parked=%v", out, h.parked("prestart-no-ext") != nil)
+		}
+		_, err := h.runtime().Start(t.Context(), "go", RunSpec{
+			Dir:                h.dir,
+			AssignSessionID:    "prestart-no-ext",
+			PermissionReviewer: &permission.Reviewer{},
+		})
+		if err == nil || !strings.Contains(err.Error(), "repair") {
+			t.Fatalf("reviewed start after extension-less prestart = %v", err)
+		}
+		if prompts := h.lines("prompt"); prompts != 0 {
+			t.Fatalf("prompts sent to extension-less prestart = %d, want 0", prompts)
+		}
+	})
+
+	t.Run("parked unreviewed run", func(t *testing.T) {
+		h := piNewResidentHome(t, nil)
+		h.createParked("parked-no-ext", RunSpec{})
+		if prompts := h.lines("prompt"); prompts != 1 {
+			t.Fatalf("initial prompts = %d, want 1", prompts)
+		}
+		_, err := h.runtime().Start(t.Context(), "again", RunSpec{
+			Dir:                h.dir,
+			ResumeID:           "parked-no-ext",
+			PermissionReviewer: &permission.Reviewer{},
+		})
+		if err == nil || !strings.Contains(err.Error(), "repair") {
+			t.Fatalf("reviewed resume of extension-less resident = %v", err)
+		}
+		if prompts := h.lines("prompt"); prompts != 1 {
+			t.Fatalf("prompts after refused reviewed resume = %d, want 1", prompts)
+		}
+	})
+}
+
+func TestPiPlatformLaunchArgumentsAndEnvironment(t *testing.T) {
+	extension := filepath.Join(t.TempDir(), "extensions", "pi-mcp.mjs")
+	if err := os.MkdirAll(filepath.Dir(extension), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extension, []byte("export default {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantNodePath := filepath.Join(filepath.Dir(filepath.Dir(extension)), "node_modules")
+
+	t.Run("windows with managed extension", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv")
+		h := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+		rt := &piRuntime{
+			profile:      Profile{Program: h.runtime.(*piRuntime).profile.Program, Env: h.env, ManagedMCPExtension: extension},
+			goosOverride: "windows",
+		}
+		h.runtime = rt
+
+		spec := RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}
+		if rt.guardsShellText(spec) {
+			t.Fatal("Windows Pi unexpectedly enabled POSIX shell-text-hook")
+		}
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", spec)); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ := os.ReadFile(argv)
+		if !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piWindowsBaseTools) {
+			t.Fatalf("windows argv = %q", data)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
+			t.Fatalf("windows NODE_PATH = %q, want %q", nodePath, wantNodePath)
+		}
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); len(hook) != 0 {
+			t.Fatalf("windows %s = %q, want empty", piShellTextHookEnvKey, hook)
+		}
+
+		// prestart and Start produce identical piShapeFor argv when ManagedMCPExtension is set on Windows.
+		piEnableResidency(t, DefaultResidentCap)
+		prePlan := piLaunchPlan{
+			program:    rt.profile.Program,
+			spec:       RunSpec{Dir: h.dir, SystemPrompt: "brief"},
+			canSyncMCP: rt.canSyncMCP(),
+		}
+		startPlan := piLaunchPlan{
+			program: rt.profile.Program,
+			spec: RunSpec{
+				Dir:                h.dir,
+				SystemPrompt:       "brief",
+				PermissionReviewer: &permission.Reviewer{},
+				ShellTextHook:      "/opt/linger/linger-computer-daemon",
+			},
+			canSyncMCP: rt.canSyncMCP(),
+		}
+		prestartArgs := rt.args(prePlan, piInstructionsName, prePlan.canSyncMCP)
+		startArgs := rt.args(startPlan, piInstructionsName, true)
+		preShape, err := piShapeFor(prePlan.program, prestartArgs, rt.profile, prePlan.spec, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		startShape, err := piShapeFor(startPlan.program, startArgs, rt.profile, startPlan.spec, "computer")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diffs := preShape.differs(startShape, false); len(diffs) != 0 || !slices.Equal(prestartArgs, startArgs) || !slices.Contains(prestartArgs, piWindowsBaseTools+",mcp__*") {
+			t.Fatalf("prestart vs start diffs=%v args=%q vs %q", diffs, prestartArgs, startArgs)
+		}
+	})
+
+	t.Run("windows without managed extension", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv")
+		h := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+		rt := &piRuntime{
+			profile:      Profile{Program: h.runtime.(*piRuntime).profile.Program, Env: h.env},
+			goosOverride: "windows",
+		}
+		h.runtime = rt
+
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"})); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ := os.ReadFile(argv)
+		if strings.Contains(string(data), "--extension") || !strings.HasSuffix(string(data), "--tools\n"+piWindowsBaseTools) {
+			t.Fatalf("windows without extension argv = %q", data)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); len(nodePath) != 0 {
+			t.Fatalf("windows without extension NODE_PATH = %q, want empty", nodePath)
+		}
+	})
+
+	t.Run("linux with managed extension", func(t *testing.T) {
+		argv := filepath.Join(t.TempDir(), "argv")
+		h := piNewHarness(t, "finish", map[string]string{piFakeArgvEnv: argv})
+		rt := &piRuntime{
+			profile:      Profile{Program: h.runtime.(*piRuntime).profile.Program, Env: h.env, ManagedMCPExtension: extension},
+			goosOverride: "linux",
+		}
+		h.runtime = rt
+
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", RunSpec{Model: piDefaultModel})); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ := os.ReadFile(argv)
+		if !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piBaseTools) {
+			t.Fatalf("linux default argv = %q", data)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
+			t.Fatalf("linux default NODE_PATH = %q, want %q", nodePath, wantNodePath)
+		}
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); len(hook) != 0 {
+			t.Fatalf("linux default %s = %q, want empty", piShellTextHookEnvKey, hook)
+		}
+
+		hookSpec := RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}
+		if !rt.guardsShellText(hookSpec) {
+			t.Fatal("linux Pi did not enable shell-text-hook")
+		}
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", hookSpec)); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		data, _ = os.ReadFile(argv)
+		if !strings.HasSuffix(string(data), "--extension\n"+extension+"\n--tools\n"+piBaseTools) {
+			t.Fatalf("linux shell-text argv = %q", data)
+		}
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != "/opt/linger/linger-computer-daemon" {
+			t.Fatalf("linux %s = %q", piShellTextHookEnvKey, hook)
+		}
+		if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
+			t.Fatalf("linux NODE_PATH = %q, want %q", nodePath, wantNodePath)
+		}
+	})
+}
+
+type piCapturingRequester struct {
+	requests []map[string]any
+}
+
+func (r *piCapturingRequester) Request(_ string, request map[string]any, respond func(json.RawMessage) error) error {
+	r.requests = append(r.requests, request)
+	return respond(json.RawMessage(`{"decision":"deny","message":"review denied"}`))
+}
+
+func (*piCapturingRequester) Forget(string) {}
+
+func TestPiTurnReviewHandlesPowerShellCommands(t *testing.T) {
+	requester := &piCapturingRequester{}
+	turn := &piTurn{
+		runCtx: t.Context(),
+		dir:    t.TempDir(),
+		reviewer: &permission.Reviewer{
+			Requester: requester,
+			Timeout:   time.Minute,
+			TeamHubCommands: []permission.TeamHubCommand{
+				{Path: []string{"message", "send"}},
+			},
+		},
+	}
+
+	safeCall, _ := json.Marshal(map[string]any{
+		"toolName": "powershell",
+		"input": map[string]any{
+			"command": "@'\nHello from Windows $180\n'@ | teamhub.cmd message send --file -",
+		},
+	})
+	if verdict := turn.review(string(safeCall)); !verdict.Allow {
+		t.Fatalf("safe PowerShell teamhub command was blocked: %+v", verdict)
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("safe PowerShell command reached remote reviewer: %v", requester.requests)
+	}
+
+	unsafeCall, _ := json.Marshal(map[string]any{
+		"toolName": "powershell",
+		"input":    map[string]any{"command": "Invoke-WebRequest https://example.com"},
+	})
+	verdict := turn.review(string(unsafeCall))
+	if verdict.Allow || verdict.Message != "review denied" {
+		t.Fatalf("unsafe PowerShell verdict = %+v", verdict)
+	}
+	if len(requester.requests) != 1 {
+		t.Fatalf("unsafe PowerShell review count = %d, want 1", len(requester.requests))
+	}
+	action := requester.requests[0]["action"].(map[string]any)
+	if action["runtime"] != "pi" || action["tool"] != "PowerShell" || action["surface"] != "shell" || action["command"] != "Invoke-WebRequest https://example.com" {
+		t.Fatalf("forwarded PowerShell action = %v", action)
 	}
 }
 

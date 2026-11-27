@@ -487,6 +487,7 @@ type AgentRuntimeState =
   | "Responding"
   | "Stopped"
   | "Thinking"
+  | "Waiting for background task"
   | "Waiting for your input"
   | "Working";
 
@@ -500,6 +501,7 @@ const stateLabels: Record<AgentRuntimeState, Message<string>> = {
   Responding: m.stateTyping,
   Stopped: m.stateStopped,
   Thinking: m.stateThinking,
+  "Waiting for background task": m.stateWaitingBackground,
   "Waiting for your input": m.stateWaitingForInput,
   Working: m.stateWorking,
 };
@@ -636,7 +638,7 @@ function resolveAgentRuntimeStatusSegment({
   marks?: readonly RuntimeStatusMark[];
   outputs?: readonly RuntimeOutputPresentation[];
   plan?: RuntimePlanPresentation;
-  status: "queued" | "working" | "thinking";
+  status: "queued" | "working" | "thinking" | "waiting_background";
   t: Translate;
   terminalOutcome?: "canceled" | "completed" | "failed";
   failure?: RuntimeExecutionFailure;
@@ -670,9 +672,11 @@ function resolveAgentRuntimeStatusSegment({
                 ? "Waiting for your input"
                 : status === "thinking"
                   ? "Thinking"
-                  : activeActivity?.kind === "response"
-                    ? "Responding"
-                    : "Working";
+                  : status === "waiting_background"
+                    ? "Waiting for background task"
+                    : activeActivity?.kind === "response"
+                      ? "Responding"
+                      : "Working";
   // Like grok-bot's, the status line names what the Agent did last and plays
   // the entries of its current group in order (see statusLineQueue). Dots
   // wait for the Agent's first Activity or thinking, and Working follows a
@@ -716,18 +720,23 @@ function resolveAgentRuntimeStatusSegment({
               }
             : status === "queued"
               ? { tone: "wait" }
-              : outputs.length > 0 && lineRunning.length === 0
-                ? { tone: "live", text: t(m.stateWorking) }
-                : queue.length > 0
-                  ? queue.at(-1)!.content
-                  : status === "thinking"
-                    ? {
-                        tone: "live",
-                        text: title?.trim() || t(m.stateThinking),
-                      }
-                    : first && activities.length === 0
-                      ? { tone: "wait" }
-                      : { tone: "live", text: t(m.stateWorking) };
+              : status === "waiting_background"
+                ? {
+                    tone: "live",
+                    text: t(m.stateWaitingBackground),
+                  }
+                : outputs.length > 0 && lineRunning.length === 0
+                  ? { tone: "live", text: t(m.stateWorking) }
+                  : queue.length > 0
+                    ? queue.at(-1)!.content
+                    : status === "thinking"
+                      ? {
+                          tone: "live",
+                          text: title?.trim() || t(m.stateThinking),
+                        }
+                      : first && activities.length === 0
+                        ? { tone: "wait" }
+                        : { tone: "live", text: t(m.stateWorking) };
   const lineQueue =
     queue.length > 0 && line === queue.at(-1)!.content ? queue : undefined;
   return {
@@ -868,8 +877,10 @@ export interface AgentStreamingTypingAgent {
 }
 
 const EMPTY_SCOPE_KEY: readonly string[] = [];
+const EMPTY_AGENT_RUNTIME_UPDATED_AT: Readonly<Record<string, string>> = {};
 
 export function AgentStreamingStatusDock({
+  agentRuntimeUpdatedAtByActorId = EMPTY_AGENT_RUNTIME_UPDATED_AT,
   cancelRoomRun,
   redeliverRoomRun,
   runStatuses = EMPTY_RUN_STATUSES,
@@ -877,7 +888,10 @@ export function AgentStreamingStatusDock({
   runtimePresentationEventsByRunStatusId = EMPTY_RUNTIME_EVENTS,
   scopeKey = EMPTY_SCOPE_KEY,
   typingAgent,
+  waitingDecisionSince,
 }: {
+  /** Timestamp when each Agent's runtime config changed; stale Failed/Stopped dock entries older than this are omitted. */
+  agentRuntimeUpdatedAtByActorId?: Readonly<Record<string, string>>;
   cancelRoomRun?: (
     runId: string,
     requestId: string,
@@ -901,9 +915,17 @@ export function AgentStreamingStatusDock({
   scopeKey?: readonly string[];
   /** Shown only while that Agent has no Run status; it offers no Stop. */
   typingAgent?: AgentStreamingTypingAgent;
+  /**
+   * For each Agent with a decision card still waiting on the current Human,
+   * when its newest one was posted.
+   */
+  waitingDecisionSince?: ReadonlyMap<string, string>;
 }) {
   const t = useT();
   const runtimeViewCache = useRef<RuntimeTimelineViewCache>(new Map());
+  const [dismissedRunStatusIds, setDismissedRunStatusIds] = useState<
+    readonly string[]
+  >([]);
   const runtimeStatuses = useMemo(
     () =>
       dockRuntimeStatuses(
@@ -911,8 +933,16 @@ export function AgentStreamingStatusDock({
         runtimePresentationEventsByRunStatusId,
         runtimeViewCache.current,
         t,
+        agentRuntimeUpdatedAtByActorId,
+        dismissedRunStatusIds,
       ),
-    [runStatuses, runtimePresentationEventsByRunStatusId, t],
+    [
+      agentRuntimeUpdatedAtByActorId,
+      dismissedRunStatusIds,
+      runStatuses,
+      runtimePresentationEventsByRunStatusId,
+      t,
+    ],
   );
   const entries = useMemo<AgentStreamingDockEntry[]>(() => {
     const next: AgentStreamingDockEntry[] = runtimeStatuses.map(
@@ -935,19 +965,6 @@ export function AgentStreamingStatusDock({
       next[existing] = typing;
     return next;
   }, [runtimeStatuses, typingAgent]);
-  const [hovered, setHovered] = useState(false);
-  const lineTargets = useMemo(
-    () =>
-      entries.map((entry) => ({
-        id: entry.key,
-        content: dockEntryLine(entry),
-        ...(entry.runtimeStatus?.lineQueue
-          ? { queue: entry.runtimeStatus.lineQueue }
-          : {}),
-      })),
-    [entries],
-  );
-  const line = useAgentStatusLine(lineTargets, hovered);
   const workingEntries = entries.filter(
     (entry) =>
       entry.runtimeStatus?.state !== "Failed" &&
@@ -965,6 +982,70 @@ export function AgentStreamingStatusDock({
   });
 
   if (entries.length === 0) return null;
+
+  return (
+    <AgentStreamingStatusDockBody
+      cancelRoomRun={cancelRoomRun}
+      entries={entries}
+      onDismiss={(runStatusId) =>
+        setDismissedRunStatusIds((prev) =>
+          prev.includes(runStatusId) ? prev : [...prev, runStatusId],
+        )
+      }
+      onViewActivity={onViewActivity}
+      redeliverRoomRun={redeliverRoomRun}
+      scopeKey={scopeKey}
+      t={t}
+      waitingDecisionSince={waitingDecisionSince}
+    />
+  );
+}
+
+function AgentStreamingStatusDockBody({
+  cancelRoomRun,
+  entries,
+  onDismiss,
+  onViewActivity,
+  redeliverRoomRun,
+  scopeKey,
+  t,
+  waitingDecisionSince,
+}: {
+  cancelRoomRun?: (
+    runId: string,
+    requestId: string,
+  ) => Promise<TeamHubRoomRunCancelResult>;
+  entries: readonly AgentStreamingDockEntry[];
+  onDismiss: (runStatusId: string) => void;
+  onViewActivity?: (
+    runStatusId: string,
+    agent: {
+      display_name: string;
+      id: string;
+      kind: "agent";
+    },
+    runId?: string,
+  ) => void;
+  redeliverRoomRun?: (runId: string) => Promise<TeamHubRoomRunRedeliverResult>;
+  scopeKey: readonly string[];
+  t: Translate;
+  waitingDecisionSince?: ReadonlyMap<string, string>;
+}) {
+  // Mounted only while entries exist, so dismissing the last entry resets
+  // hover/focus state automatically without leaving rotation paused.
+  const [hovered, setHovered] = useState(false);
+  const lineTargets = useMemo(
+    () =>
+      entries.map((entry) => ({
+        id: entry.key,
+        content: dockEntryLine(entry, waitingDecisionSince, t),
+        ...(entry.runtimeStatus?.lineQueue
+          ? { queue: entry.runtimeStatus.lineQueue }
+          : {}),
+      })),
+    [entries, waitingDecisionSince, t],
+  );
+  const line = useAgentStatusLine(lineTargets, hovered);
 
   const failedCount = entries.filter(
     (entry) =>
@@ -1070,6 +1151,7 @@ export function AgentStreamingStatusDock({
                 redeliverRoomRun={redeliverRoomRun}
                 scopeKey={scopeKey}
               />
+              <DockEntryDismiss entry={shownEntry} onDismiss={onDismiss} />
             </>
           ) : null}
         </div>
@@ -1136,6 +1218,50 @@ function DockEntryResend({
   );
 }
 
+function DockEntryDismiss({
+  entry,
+  onDismiss,
+}: {
+  entry: AgentStreamingDockEntry;
+  onDismiss: (runStatusId: string) => void;
+}) {
+  const t = useT();
+  const { runtimeStatus } = entry;
+  if (!runtimeStatus || !isTerminalDockStatus(runtimeStatus)) return null;
+  const label = t(m.dismissAgentStatus, { name: entry.agent.display_name });
+  return (
+    <Button
+      aria-label={label}
+      className="size-7 shrink-0 text-app-subtle hover:bg-transparent hover:text-app-ink"
+      data-voice-close
+      onClick={() => onDismiss(runtimeStatus.runStatus.id)}
+      size="compactIcon"
+      title={label}
+      tone="ghost"
+      type="button"
+    >
+      <Icon icon={Cancel01Icon} size={14} />
+    </Button>
+  );
+}
+
+function isTerminalDockStatus(row: AgentRunStatusView): boolean {
+  return (
+    row.state === "Failed" ||
+    row.state === "Stopped" ||
+    row.state === "Needs attention"
+  );
+}
+
+function isTimestampAfter(later: string, earlier: string): boolean {
+  const laterMs = Date.parse(later);
+  const earlierMs = Date.parse(earlier);
+  if (!Number.isNaN(laterMs) && !Number.isNaN(earlierMs)) {
+    return laterMs > earlierMs;
+  }
+  return later > earlier;
+}
+
 function dockRuntimeStatuses(
   runStatuses: readonly TeamHubRunStatus[],
   runtimePresentationEventsByRunStatusId: Readonly<
@@ -1143,6 +1269,8 @@ function dockRuntimeStatuses(
   >,
   cache: RuntimeTimelineViewCache,
   t: Translate,
+  agentRuntimeUpdatedAtByActorId: Readonly<Record<string, string>>,
+  dismissedRunStatusIds: readonly string[],
 ) {
   const latestByAgent = new Map<string, TeamHubRunStatus>();
   for (const runStatus of runStatuses) {
@@ -1168,18 +1296,47 @@ function dockRuntimeStatuses(
     runStatuses: [...latestByAgent.values()],
     runtimePresentationEventsByRunStatusId,
     t,
-  }).filter(
-    (row) =>
-      isLiveAgentRunStatus(row) ||
-      row.state === "Failed" ||
-      row.state === "Stopped" ||
-      row.state === "Needs attention",
-  );
+  }).filter((row) => {
+    if (isLiveAgentRunStatus(row)) return true;
+    if (!isTerminalDockStatus(row)) return false;
+    if (dismissedRunStatusIds.includes(row.runStatus.id)) return false;
+    // Never auto-hide Needs attention or runs with unconfirmed follow-ups so
+    // the user's Resend action stays reachable.
+    if (
+      (row.state === "Failed" || row.state === "Stopped") &&
+      !row.unconfirmedFollowUps
+    ) {
+      const agentRuntimeUpdatedAt =
+        agentRuntimeUpdatedAtByActorId[row.runStatus.agent.id];
+      if (
+        agentRuntimeUpdatedAt &&
+        isTimestampAfter(agentRuntimeUpdatedAt, row.runStatus.updated_at)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
-function dockEntryLine(entry: AgentStreamingDockEntry): AgentStatusLineContent {
-  if (entry.runtimeStatus) return entry.runtimeStatus.line;
-  return { tone: "wait" };
+function dockEntryLine(
+  entry: AgentStreamingDockEntry,
+  waitingDecisionSince: ReadonlyMap<string, string> | undefined,
+  t: Translate,
+): AgentStatusLineContent {
+  const status = entry.runtimeStatus;
+  if (!status) return { tone: "wait" };
+  // A Run that ended after its Agent asked this Human for something, such as
+  // a macOS permission, is waiting on them, not broken. A card from before
+  // the Run says nothing about why this Run ended.
+  const cardAt = waitingDecisionSince?.get(entry.key);
+  if (
+    (status.state === "Failed" || status.state === "Stopped") &&
+    cardAt !== undefined &&
+    Date.parse(cardAt) >= Date.parse(status.runStatus.created_at)
+  )
+    return { tone: "waiting", text: t(m.waitingForDecision) };
+  return status.line;
 }
 
 function statusLineText(content: AgentStatusLineContent, t: Translate) {
@@ -1197,19 +1354,43 @@ function StatusLineText({
   const t = useT();
   if (content.tone === "wait")
     return <TypingDots className="text-app-subtle" />;
+  const ended =
+    content.tone === "danger" ||
+    content.tone === "warn" ||
+    content.tone === "waiting";
   const text = (
     <span
       className={cn(
         "block min-w-0 truncate leading-4",
         content.tone === "live" && "town-status-shimmer",
         content.tone === "muted" && "text-app-subtle",
-        content.tone === "danger" && "text-app-danger",
-        content.tone === "warn" && "text-app-warning",
+        ended && "text-app-muted",
       )}
     >
       {content.text}
     </span>
   );
+  // An ended Run reads as a quiet note: an amber dot, never error red, so a
+  // hiccup does not look like a broken product. The line opens the Activity
+  // panel, where the full reason is.
+  if (ended)
+    return (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "size-1.5 shrink-0 rounded-full bg-app-warning",
+            content.tone === "waiting" && "motion-safe:animate-pulse",
+          )}
+        />
+        {text}
+        {content.tone === "danger" ? (
+          <span className="shrink-0 leading-4 text-app-subtle underline decoration-app-border-strong underline-offset-2">
+            {t(m.details)}
+          </span>
+        ) : null}
+      </span>
+    );
   if (!minutes) return text;
   return (
     <span className="flex min-w-0 items-center gap-1">
@@ -1314,7 +1495,7 @@ function LinkedSourceMessagePanel({
   return (
     <section
       aria-label={t(m.linkedSourceMessage)}
-      className="border-b border-app-border bg-app-surface-soft"
+      className="bg-app-surface-soft"
     >
       <div className="room-readable px-4 py-3 md:px-0">
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3">

@@ -1585,8 +1585,6 @@ describe("RunLoop", () => {
     });
     const providerStart = deferred<AgentRun>();
     harness.provider.startGate = providerStart;
-    const queuedMetaKind = vi.fn(async () => "chat" as const);
-    Object.assign(harness.state, { queuedMetaKind });
     enqueue(harness.state, message("task-input", "task:task-1"));
     harness.execution.start();
     await vi.waitFor(() => expect(harness.provider.starts).toHaveLength(1));
@@ -1601,7 +1599,6 @@ describe("RunLoop", () => {
       new AbortController().signal,
     );
     expect(priority.value).toBe(runPriorities.task);
-    expect(queuedMetaKind).not.toHaveBeenCalled();
     const run = new FakeRun();
     providerStart.resolve(run);
     await steering;
@@ -2268,7 +2265,10 @@ describe("RunLoop", () => {
           : {
               type: "failed",
               error: "provider failed",
-              failure: { code: "unclassified", runtime_type: "pi" },
+              failure: {
+                code: "unclassified",
+                runtime_type: "pi",
+              },
             },
         expect.anything(),
         expect.any(AbortSignal),

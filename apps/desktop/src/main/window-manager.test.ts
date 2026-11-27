@@ -756,8 +756,12 @@ describe("WindowManagerModule", () => {
     });
     expect(content.loadURL).toHaveBeenCalledTimes(1);
     expect(content.executeJavaScript).toHaveBeenCalledTimes(3);
-    expect(content.executeJavaScript.mock.calls[1]![0]).toContain('"percent":75');
-    expect(content.executeJavaScript.mock.calls[2]![0]).toContain('"tone":"rollback"');
+    expect(content.executeJavaScript.mock.calls[1]![0]).toContain(
+      '"percent":75',
+    );
+    expect(content.executeJavaScript.mock.calls[2]![0]).toContain(
+      '"tone":"rollback"',
+    );
 
     // Verify the real offline.html ships the minimal centered updating design.
     const realOfflineHtml = readFileSync(
@@ -769,6 +773,25 @@ describe("WindowManagerModule", () => {
     expect(realOfflineHtml).toContain("window.__lingerSetUpdateProgress");
     expect(realOfflineHtml).toContain("#b5320a");
 
+    await host.stop("quit");
+  });
+
+  it("hide() cancels a pending startup reveal so a subsequent offline load stays hidden", async () => {
+    const { manager, host, config } = setup({
+      serverUrl: "http://localhost:3000",
+    });
+    await host.start();
+    const win = state.windows[0]!;
+    const content = contentView().webContents;
+    expect(win.show).not.toHaveBeenCalled();
+
+    config.update({ serverUrl: undefined });
+    manager.hide();
+    manager.loadServer();
+    content.emit("did-finish-load");
+
+    expect(win.hide).toHaveBeenCalledOnce();
+    expect(win.show).not.toHaveBeenCalled();
     await host.stop("quit");
   });
 });

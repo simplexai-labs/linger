@@ -44,6 +44,20 @@ describe("AuthenticatedRouteLoading", () => {
     ).toHaveAttribute("data-loading-route", kind);
   });
 
+  it.each([
+    ["/t/tenant-northstar/library", false],
+    ["/t/tenant-northstar/library/wiki", false],
+    ["/t/tenant-northstar/library/meetings/meeting-1", true],
+    ["/t/library-co/library/meetings/meeting-1", true],
+  ])(
+    "draws the Library sidebar for %s only where the page has one",
+    (pathname, sidebar) => {
+      render(<AuthenticatedRouteLoading pathname={pathname} rooms={[]} />);
+
+      expect(screen.queryByText("Shared with me") !== null).toBe(sidebar);
+    },
+  );
+
   it("keeps Library chrome stable while only the Document body is loading", () => {
     render(
       <AuthenticatedRouteLoading

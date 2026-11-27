@@ -153,9 +153,6 @@ export function ServerConnection({ tenantId }: { tenantId: string }) {
                 selectionTargetRef={commandRef}
               />
             </div>
-            <p className="text-muted-foreground">
-              {t(computerSetupMessages.waitingForServer)}
-            </p>
             <Button onClick={() => setResult(undefined)}>
               {t(computerSetupMessages.generateAnother)}
             </Button>

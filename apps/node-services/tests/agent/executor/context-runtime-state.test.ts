@@ -434,50 +434,6 @@ describe("TeamHub Context Runtime state", () => {
     await state.close();
   });
 
-  it("refreshes the queued Meta priority when a chat merges into a waiting routine", async () => {
-    const routine = {
-      notification: true,
-      task_inbox: false,
-      message_kind: "agent_runtime",
-      author_type: "agent",
-      fired_routine: true,
-      human_waiting: false,
-    };
-    const origins = [routine];
-    const getWorkState = vi.fn(async () => ({
-      has_queued_runs: true,
-      has_pending_work: true,
-      next_run_origins: origins,
-    }));
-    const client = createTeamHubRuntimeStateClientFake({
-      getWorkState,
-      getContext: async () => context("suspended"),
-      getSession: async () => ({ available: false }),
-    });
-    const state = await createTeamHubContextRuntimeState({
-      client,
-      ref: { kind: "meta", agentId: "agent-reviewer", roomId: "room-1" },
-      configurationRevision: "1",
-      providerKind: "codex",
-    });
-    const signal = new AbortController().signal;
-    try {
-      expect(await state.queuedMetaKind!(signal)).toBe("routine");
-      expect(getWorkState).toHaveBeenCalledTimes(1);
-      origins.push({
-        ...routine,
-        author_type: "user",
-        message_kind: "conversation",
-        fired_routine: false,
-      });
-      state.noteQueuedRun!();
-      expect(await state.queuedMetaKind!(signal)).toBe("chat");
-      expect(getWorkState).toHaveBeenCalledTimes(2);
-    } finally {
-      await state.close();
-    }
-  });
-
   it("keeps a hinted queued Run while an older work-state read is in flight", async () => {
     let finishRead!: (value: {
       has_pending_work: boolean;
@@ -1550,6 +1506,61 @@ describe("TeamHub Context Runtime state", () => {
     expect(state.hasQueuedRuns()).toBe(false);
     expect(workStateReads).toBe(1);
     await state.close();
+  });
+
+  it("drops failure.detail and retries once when an older TeamHub rejects it with HTTP 400", async () => {
+    const seenTerminals: unknown[] = [];
+    const finishRun = vi.fn<TeamHubRuntimeStateClient["finishRun"]>(
+      async (body) => {
+        seenTerminals.push(body.terminal);
+        if (seenTerminals.length === 1) {
+          throw new TeamHubRuntimeStateError(
+            400,
+            "unknown field detail",
+            "INVALID_REQUEST",
+          );
+        }
+        return { run: terminalRun("failed") };
+      },
+    );
+    const { state } = await terminalFixture({ finishRun });
+    try {
+      await state.finishLocalRun("run-1", {
+        type: "failed",
+        error: "execution failed",
+        failure: {
+          code: "execution_failed",
+          runtime_type: "antigravity",
+          runtime_version: "1.5.16",
+          detail:
+            "FAILED_PRECONDITION (code 400): User location is not supported for the API use.",
+        },
+      });
+      expect(seenTerminals).toEqual([
+        {
+          type: "failed",
+          error: "execution failed",
+          failure: {
+            code: "execution_failed",
+            runtime_type: "antigravity",
+            runtime_version: "1.5.16",
+            detail:
+              "FAILED_PRECONDITION (code 400): User location is not supported for the API use.",
+          },
+        },
+        {
+          type: "failed",
+          error: "execution failed",
+          failure: {
+            code: "execution_failed",
+            runtime_type: "antigravity",
+            runtime_version: "1.5.16",
+          },
+        },
+      ]);
+    } finally {
+      await state.close();
+    }
   });
 
   it("reads Local Run reply delivery status from TeamHub", async () => {

@@ -75,7 +75,7 @@ func (s *Service) createVoiceLiveAgent(ctx context.Context, session voicelive.Se
 	case err != nil:
 		return "", err
 	}
-	output := map[string]any{"status": "created", "actor_id": actorID, "name": *change.Name, "joined_room": false}
+	output := map[string]any{"status": "created", "actor_id": actorID, "name": *change.Name, "joined_room": false, "next": voicelive.DoneNext}
 	if !direct {
 		_, _, err := s.collaboration.PutRoomMember(ctx, session.AccountID, session.RoomID, actorID, httpapi.Member, collaboration.AddedByAgent{ActorID: session.Agent.ID, Created: true})
 		if err != nil && s.logger != nil {

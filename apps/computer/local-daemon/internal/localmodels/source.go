@@ -308,29 +308,127 @@ func OverlayEnvironment(base map[string]string, stateDir string) map[string]stri
 
 var managedRuntimeNames = []string{"claude", "codex", "pi"}
 
+// RuntimePathLayers separates explicit configured Runtime paths (checked
+// before user PATH) from harness-managed fallback paths (checked after
+// user PATH and before bundled runtimes).
+type RuntimePathLayers struct {
+	Configured map[string]string
+	Managed    map[string]string
+}
+
 // OverlayRuntimePaths supplements configured Runtime executable paths with
 // managed Runtimes recorded in model-source.json, under <home>/runtime/harness/bin,
 // or under <home>/runtime/harness/tools/<runtime>/<version>.
 func OverlayRuntimePaths(configured map[string]string, stateDir string) map[string]string {
-	result := maps.Clone(configured)
-	if result == nil {
-		result = make(map[string]string)
-	}
-	if overlay := ReadOverlay(stateDir); overlay != nil {
-		for rt, exe := range overlay.RuntimePaths {
-			if !isExecutableFile(result[rt]) && isExecutableFile(exe) {
-				result[rt] = exe
-			}
-		}
-	}
-	if harness := HarnessRoot(stateDir); harness != "" {
-		for rt, exe := range discoverHarnessRuntimePaths(harness) {
-			if !isExecutableFile(result[rt]) {
-				result[rt] = exe
-			}
+	layers := ResolveRuntimePathsWithBundled(configured, stateDir, "")
+	result := layers.Configured
+	for rt, exe := range layers.Managed {
+		if !isExecutableFile(result[rt]) {
+			result[rt] = exe
 		}
 	}
 	return result
+}
+
+// ResolveRuntimePathsWithBundled separates explicit configured Runtime paths
+// from harness-managed Pi paths. Harness-managed Pi installs stay in Managed
+// (checked after user PATH and before BundledPaths) and are included only when
+// their version directory is strictly newer than a valid bundledPiVersion.
+func ResolveRuntimePathsWithBundled(configured map[string]string, stateDir, bundledPiVersion string) RuntimePathLayers {
+	configuredOut := maps.Clone(configured)
+	if configuredOut == nil {
+		configuredOut = make(map[string]string)
+	}
+	managedOut := make(map[string]string)
+	harness := HarnessRoot(stateDir)
+	var bundledPiRoot string
+	if stateDir != "" && filepath.IsAbs(stateDir) {
+		bundledPiRoot = filepath.Join(filepath.Dir(filepath.Dir(filepath.Clean(stateDir))), "bundled-pi")
+	}
+	bundledPiValid := bundledPiVersion != "" && parseVersionName(bundledPiVersion).isVersion
+
+	if exe := configuredOut["pi"]; exe != "" {
+		if harness != "" && pathWithin(harness, exe) {
+			delete(configuredOut, "pi")
+			if !isSupersededHarnessPiPath(exe, harness, bundledPiVersion) && isExecutableFile(exe) {
+				managedOut["pi"] = exe
+			}
+		} else if bundledPiRoot != "" && bundledPiValid && pathWithin(bundledPiRoot, exe) {
+			delete(configuredOut, "pi")
+		}
+	}
+
+	if overlay := ReadOverlay(stateDir); overlay != nil {
+		for rt, exe := range overlay.RuntimePaths {
+			if rt == "pi" {
+				if harness != "" && pathWithin(harness, exe) {
+					if !isSupersededHarnessPiPath(exe, harness, bundledPiVersion) && !isExecutableFile(managedOut["pi"]) && isExecutableFile(exe) {
+						managedOut["pi"] = exe
+					}
+					continue
+				}
+				if bundledPiRoot != "" && bundledPiValid && pathWithin(bundledPiRoot, exe) {
+					continue
+				}
+				if !isExecutableFile(configuredOut["pi"]) && isExecutableFile(exe) {
+					configuredOut["pi"] = exe
+				}
+				continue
+			}
+			if !isExecutableFile(configuredOut[rt]) && isExecutableFile(exe) {
+				configuredOut[rt] = exe
+			}
+		}
+	}
+
+	if harness != "" {
+		for rt, exe := range discoverHarnessRuntimePaths(harness, bundledPiVersion) {
+			if rt == "pi" {
+				if !isExecutableFile(managedOut["pi"]) {
+					managedOut["pi"] = exe
+				}
+				continue
+			}
+			if !isExecutableFile(configuredOut[rt]) {
+				configuredOut[rt] = exe
+			}
+		}
+	}
+
+	return RuntimePathLayers{Configured: configuredOut, Managed: managedOut}
+}
+
+// FilterManagedPiPath drops a harness-managed Pi executable when a valid
+// bundledPiVersion is at least as new as that harness version, returning exe
+// unchanged otherwise.
+func FilterManagedPiPath(exe, stateDir, bundledPiVersion string) string {
+	if exe == "" || isSupersededHarnessPiPath(exe, HarnessRoot(stateDir), bundledPiVersion) {
+		return ""
+	}
+	return exe
+}
+
+func isSupersededHarnessPiPath(exe, harness, bundledPiVersion string) bool {
+	if exe == "" || harness == "" || bundledPiVersion == "" || !parseVersionName(bundledPiVersion).isVersion {
+		return false
+	}
+	if !pathWithin(harness, exe) {
+		return false
+	}
+	toolsPiDir := filepath.Join(harness, "tools", "pi")
+	if !pathWithin(toolsPiDir, exe) {
+		return true
+	}
+	rel, err := filepath.Rel(toolsPiDir, filepath.Clean(exe))
+	if err != nil {
+		return true
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) < 2 {
+		return true
+	}
+	version := parts[0]
+	return !parseVersionName(version).isVersion || compareVersionNames(version, bundledPiVersion) <= 0
 }
 
 func executableNames(name string) []string {
@@ -361,11 +459,11 @@ func harnessExecutableInDir(dir, rt string) string {
 	return ""
 }
 
-func harnessToolsExecutable(harness, rt string) string {
+func harnessToolsExecutable(harness, rt string) (string, string) {
 	toolsRTDir := filepath.Join(harness, "tools", rt)
 	entries, err := os.ReadDir(toolsRTDir)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	bestVersion := ""
 	bestExecutable := ""
@@ -388,21 +486,29 @@ func harnessToolsExecutable(harness, rt string) string {
 			bestExecutable = candidate
 		}
 	}
-	return bestExecutable
+	return bestVersion, bestExecutable
 }
 
-func discoverHarnessRuntimePaths(harness string) map[string]string {
+func discoverHarnessRuntimePaths(harness, bundledPiVersion string) map[string]string {
 	paths := make(map[string]string)
 	if harness == "" {
 		return paths
 	}
+	bundledPiValid := bundledPiVersion != "" && parseVersionName(bundledPiVersion).isVersion
 	binDir := filepath.Join(harness, "bin")
 	for _, rt := range managedRuntimeNames {
+		if rt == "pi" && bundledPiValid {
+			if bestVer, exe := harnessToolsExecutable(harness, rt); exe != "" &&
+				parseVersionName(bestVer).isVersion && compareVersionNames(bestVer, bundledPiVersion) > 0 {
+				paths[rt] = exe
+			}
+			continue
+		}
 		if exe := harnessExecutableInDir(binDir, rt); exe != "" {
 			paths[rt] = exe
 			continue
 		}
-		if exe := harnessToolsExecutable(harness, rt); exe != "" {
+		if _, exe := harnessToolsExecutable(harness, rt); exe != "" {
 			paths[rt] = exe
 		}
 	}

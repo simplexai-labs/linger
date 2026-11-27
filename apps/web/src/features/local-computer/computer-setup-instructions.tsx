@@ -38,16 +38,13 @@ export function ComputerSetupInstructions({
       aria-label={t(computerSetupMessages.label)}
       className="overflow-hidden rounded-xl border border-border bg-card"
     >
-      <div className="border-b border-border p-4">
+      <div className="p-4">
         <div className="flex items-center gap-2.5">
           <span className="flex size-8 items-center justify-center rounded-lg bg-card text-foreground shadow-outline">
             <Icon icon={ComputerTerminal01Icon} size={16} />
           </span>
           <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              {t(computerSetupMessages.title)}
-            </h3>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {t(
                 platform === "win32"
                   ? computerSetupMessages.runInPowerShell
@@ -58,7 +55,7 @@ export function ComputerSetupInstructions({
         </div>
         <ComputerPlatformSelector value={platform} onChange={setPlatform} />
       </div>
-      <ol className="divide-y divide-border px-4">
+      <ol className="px-4">
         <SetupStep
           key={platform}
           command={installCommand}

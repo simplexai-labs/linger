@@ -123,10 +123,10 @@ func TestUnifiedUIBrowserLive(t *testing.T) {
 	url, _ := json.Marshal(fixture.URL)
 	check(`const help=await ui.help('browser');
 if(help.methods.some(x=>x.name==='run_code_unsafe')) throw Error('unsafe capability exposed');
-const page=await ui.page(` + string(url) + `), first=await page.observe();
+const first=await ui.page(` + string(url) + `);
 await first.click('link','Next');
 state.note='retained across calls'; return 'second page';`)
-	got := check(`const page=await ui.page(), second=await page.observe();
+	got := check(`const second=await ui.page();
 const filled=await second.type('textbox',"Note: Jo's order",state.note);
 if(!filled.text.includes(state.note)) throw Error('state lost');
 await filled.click('button','Save #42');

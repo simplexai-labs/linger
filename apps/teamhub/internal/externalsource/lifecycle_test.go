@@ -1,11 +1,15 @@
 package externalsource
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +220,138 @@ func TestConnectionCheckResultKeepsWriteError(t *testing.T) {
 	}
 	if got := connectionCheckResult(failure.cause, failure); !errors.Is(got, failure) {
 		t.Fatalf("check failure became %v", got)
+	}
+}
+
+func testComposioStatusError(t *testing.T, source composio.ErrorSource, status int) error {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if source == composio.ErrorSourceProvider {
+			_, _ = fmt.Fprintf(w, `{"status":%d,"data":{"error":"upstream"}}`, status)
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	client, err := composio.New(composio.Config{
+		BaseURL:        server.URL,
+		APIKey:         "key",
+		EnvironmentKey: "test",
+		HTTPClient:     server.Client(),
+		RetryLimit:     0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetConnectionAuthority(func(context.Context, string) (composio.ConnectionBinding, error) {
+		return composio.ConnectionBinding{}, nil
+	})
+	ctx, _ := composio.WithProviderAttemptBudget(context.Background(), 1)
+	if source == composio.ErrorSourceProvider {
+		_, err = client.IdentifyGmail(ctx, "ca_1")
+		return err
+	}
+	_, err = client.GetConnectionStatus(ctx, "ca_1")
+	return err
+}
+
+func TestConnectionCheckErrorSource(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "composio status", err: testComposioStatusError(t, composio.ErrorSourceComposio, http.StatusForbidden), want: "composio"},
+		{name: "composio rate limit", err: &composio.RateLimitError{Operation: "op", Source: composio.ErrorSourceComposio}, want: "composio"},
+		{name: "provider status", err: testComposioStatusError(t, composio.ErrorSourceProvider, http.StatusForbidden), want: "provider"},
+		{name: "provider rate limit", err: &composio.RateLimitError{Operation: "op", Source: composio.ErrorSourceProvider}, want: "provider"},
+		{name: "legacy status", err: composio.RemoteStatusError("op", http.StatusForbidden), want: ""},
+		{name: "generic", err: errors.New("boom"), want: ""},
+		{name: "nil", err: nil, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := connectionCheckErrorSource(tc.err); got != tc.want {
+				t.Fatalf("source=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnectionCheckErrorClassClosedSentinels(t *testing.T) {
+	payload := "secret-provider-payload"
+	scopeMismatchErr := func(body string) error {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		defer server.Close()
+		client, err := composio.New(composio.Config{BaseURL: server.URL, APIKey: "key", EnvironmentKey: "ci", HTTPClient: server.Client()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.SetConnectionAuthority(func(context.Context, string) (composio.ConnectionBinding, error) {
+			return composio.ConnectionBinding{UserID: "expected-user", ToolkitSlug: "gmail", AuthConfigID: "ac_expected"}, nil
+		})
+		_, err = client.InspectConnectionStatusForToolkit(context.Background(), "ca_1", "gmail")
+		return err
+	}
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "connection scope plain", err: composio.ErrConnectionScope, want: "connection_scope"},
+		{name: "connection scope user_id", err: scopeMismatchErr(`{"status":"ACTIVE","user_id":"other","toolkit":{"slug":"gmail"},"auth_config":{"id":"ac_expected"}}`), want: "connection_scope_user_id"},
+		{name: "connection scope toolkit_slug", err: scopeMismatchErr(`{"status":"ACTIVE","user_id":"expected-user","toolkit":{"slug":"slack"},"auth_config":{"id":"ac_expected"}}`), want: "connection_scope_toolkit_slug"},
+		{name: "connection scope auth_config_id", err: scopeMismatchErr(`{"status":"ACTIVE","user_id":"expected-user","toolkit":{"slug":"gmail"},"auth_config":{"id":"ac_other"}}`), want: "connection_scope_auth_config_id"},
+		{name: "not configured", err: composio.ErrNotConfigured, want: "provider_not_configured"},
+		{name: "response too large", err: composio.ErrResponseTooLarge, want: "response_too_large"},
+		{name: "call budget exhausted", err: composio.ErrProviderCallBudgetExhausted, want: "call_budget_exhausted"},
+		{name: "discord guild required", err: composio.ErrDiscordGuildRequired, want: "discord_guild_required"},
+		{name: "discord guild not accessible", err: composio.ErrDiscordGuildNotAccessible, want: "discord_guild_not_accessible"},
+		{name: "discord tool refused", err: composio.ErrDiscordToolRefused, want: "discord_tool_refused"},
+		{name: "slack access", err: &composio.SlackAccessError{Operation: payload}, want: "slack_access"},
+		{name: "invalid identity", err: ErrInvalid, want: "invalid_identity"},
+		{name: "provider unavailable", err: ErrUnavailable, want: "provider_unavailable"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := connectionCheckErrorClass(tc.err)
+			if got != tc.want {
+				t.Fatalf("class=%q want %q", got, tc.want)
+			}
+			if strings.Contains(got, payload) {
+				t.Fatalf("class leaked payload: %q", got)
+			}
+		})
+	}
+}
+
+func TestConnectionCheckLogTerminalFailureKeepsNilResult(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	check := &connectionCheck{
+		service:    &Service{logger: logger},
+		connection: Connection{ID: "conn_1", Provider: "gmail"},
+		attempt:    1,
+	}
+	check.logTerminalFailure("identity_refresh", "provider_auth_failed", testComposioStatusError(t, composio.ErrorSourceProvider, http.StatusForbidden))
+	if check.failure != nil {
+		t.Fatalf("check.failure=%v want nil so finish preserves a nil result", check.failure)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &record); err != nil {
+		t.Fatalf("unmarshal log %q: %v", buf.String(), err)
+	}
+	if record["level"] != "WARN" ||
+		record["msg"] != "external connection check failed" ||
+		record["connection_id"] != "conn_1" ||
+		record["provider"] != "gmail" ||
+		record["phase"] != "identity_refresh" ||
+		record["error_code"] != "provider_auth_failed" ||
+		record["error_class"] != "http_403" ||
+		record["error_source"] != "provider" ||
+		record["terminal"] != true {
+		t.Fatalf("unexpected log record: %#v", record)
 	}
 }

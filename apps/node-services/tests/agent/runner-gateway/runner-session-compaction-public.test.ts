@@ -28,13 +28,14 @@ const target = {
   executionContextKey: "context-1",
 };
 
-const sentCompaction = async (peer: RecordingPeer) => {
-  await vi.waitFor(() =>
+const sentCompaction = async (peer: RecordingPeer, sentBefore = 0) => {
+  await vi.waitFor(() => {
+    expect(peer.sent.length).toBeGreaterThan(sentBefore);
     expect(peer.sent.at(-1)).toMatchObject({
       type: "execute",
       kind: "session_compact",
-    }),
-  );
+    });
+  });
   const command = peer.sent.at(-1);
   if (command?.type !== "execute" || command?.kind !== "session_compact")
     throw new Error("Missing session.compact");
@@ -198,17 +199,191 @@ describe("RunnerGateway session compaction", () => {
     running.release({ outcome: "lost" });
   });
 
-  it("never offers compaction for Pi or a Runtime that is not ready", async () => {
-    const { gateway, connection } = await connect();
+  it("gates Pi compaction to Computer 0.65.0+ and Antigravity compaction to 0.66.0+, rejecting unready Runtimes", async () => {
+    const oldComputer = await connect({
+      ...hello(),
+      daemon_version: "0.64.0",
+      runtimes: ["codex", "claude", "pi", "antigravity"],
+      runtime_diagnostics: runtimeDiagnostics({
+        ready: ["codex", "claude", "pi", "antigravity"],
+        link: "api",
+      }),
+    });
     try {
-      expect(gateway.supportsSessionCompaction("runner-local", "pi")).toBe(
-        false,
-      );
-      expect(gateway.supportsSessionCompaction("runner-local", "claude")).toBe(
-        false,
-      );
+      expect(
+        oldComputer.gateway.supportsSessionCompaction("runner-local", "codex"),
+      ).toBe(true);
+      expect(
+        oldComputer.gateway.supportsSessionCompaction("runner-local", "claude"),
+      ).toBe(true);
+      expect(
+        oldComputer.gateway.supportsSessionCompaction("runner-local", "pi"),
+      ).toBe(false);
+      expect(
+        oldComputer.gateway.supportsSessionCompaction(
+          "runner-local",
+          "antigravity",
+        ),
+      ).toBe(false);
+      await expect(
+        oldComputer.gateway.compactParkedSession(target, {
+          runtimeType: "pi",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ outcome: "no_process" });
+      await expect(
+        oldComputer.gateway.compactParkedSession(target, {
+          runtimeType: "antigravity",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ outcome: "no_process" });
+      expect(
+        oldComputer.peer.sent.some(
+          (frame) =>
+            frame.type === "execute" && frame.kind === "session_compact",
+        ),
+      ).toBe(false);
     } finally {
-      connection.disconnect();
+      oldComputer.connection.disconnect();
+    }
+
+    const piOnlyComputer = await connect({
+      ...hello(),
+      daemon_version: "0.65.0",
+      runtimes: ["codex", "claude", "pi", "antigravity"],
+      runtime_diagnostics: runtimeDiagnostics({
+        ready: ["codex", "claude", "pi", "antigravity"],
+        link: "api",
+      }),
+    });
+    try {
+      expect(
+        piOnlyComputer.gateway.supportsSessionCompaction(
+          "runner-local",
+          "codex",
+        ),
+      ).toBe(true);
+      expect(
+        piOnlyComputer.gateway.supportsSessionCompaction(
+          "runner-local",
+          "claude",
+        ),
+      ).toBe(true);
+      expect(
+        piOnlyComputer.gateway.supportsSessionCompaction("runner-local", "pi"),
+      ).toBe(true);
+      expect(
+        piOnlyComputer.gateway.supportsSessionCompaction(
+          "runner-local",
+          "antigravity",
+        ),
+      ).toBe(false);
+      await expect(
+        piOnlyComputer.gateway.compactParkedSession(target, {
+          runtimeType: "antigravity",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({
+        outcome: "no_process",
+        reason: "computer_unavailable",
+      });
+      expect(
+        piOnlyComputer.peer.sent.some(
+          (frame) =>
+            frame.type === "execute" && frame.kind === "session_compact",
+        ),
+      ).toBe(false);
+      const pendingPi = piOnlyComputer.gateway.compactParkedSession(target, {
+        runtimeType: "pi",
+        instructions: "Keep open questions",
+        signal: new AbortController().signal,
+      });
+      const piCommand = await sentCompaction(piOnlyComputer.peer);
+      expect(piCommand).toMatchObject({
+        type: "execute",
+        kind: "session_compact",
+        runtime_type: "pi",
+        instructions: "Keep open questions",
+      });
+      await compacted(piOnlyComputer.connection, piCommand);
+      await expect(pendingPi).resolves.toMatchObject({
+        outcome: "compacted",
+        pre_tokens: 120_000,
+      });
+    } finally {
+      piOnlyComputer.connection.disconnect();
+    }
+
+    for (const daemonVersion of ["0.66.0", "dev"] as const) {
+      const current = await connect({
+        ...hello(),
+        daemon_version: daemonVersion,
+        runtimes: ["codex", "pi", "antigravity"],
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["codex", "pi", "antigravity"],
+          link: "api",
+        }),
+      });
+      try {
+        expect(
+          current.gateway.supportsSessionCompaction("runner-local", "pi"),
+        ).toBe(true);
+        expect(
+          current.gateway.supportsSessionCompaction(
+            "runner-local",
+            "antigravity",
+          ),
+        ).toBe(true);
+        expect(
+          current.gateway.supportsSessionCompaction("runner-local", "claude"),
+        ).toBe(false);
+        for (const runtimeType of ["pi", "antigravity"] as const) {
+          const sentBefore = current.peer.sent.length;
+          const pending = current.gateway.compactParkedSession(target, {
+            runtimeType,
+            instructions: "Keep open questions",
+            signal: new AbortController().signal,
+          });
+          const command = await sentCompaction(current.peer, sentBefore);
+          expect(command).toMatchObject({
+            type: "execute",
+            kind: "session_compact",
+            runtime_type: runtimeType,
+            execution_context_key: "context-1",
+            instructions: "Keep open questions",
+          });
+          await compacted(current.connection, command);
+          await expect(pending).resolves.toMatchObject({
+            outcome: "compacted",
+            pre_tokens: 120_000,
+          });
+        }
+      } finally {
+        current.connection.disconnect();
+      }
+    }
+
+    const unreadyRuntimes = await connect({
+      ...hello(),
+      daemon_version: "0.66.0",
+      runtimes: ["codex"],
+      runtime_diagnostics: runtimeDiagnostics({
+        ready: ["codex"],
+        link: "api",
+      }),
+    });
+    try {
+      expect(
+        unreadyRuntimes.gateway.supportsSessionCompaction("runner-local", "pi"),
+      ).toBe(false);
+      expect(
+        unreadyRuntimes.gateway.supportsSessionCompaction(
+          "runner-local",
+          "antigravity",
+        ),
+      ).toBe(false);
+    } finally {
+      unreadyRuntimes.connection.disconnect();
     }
   });
 

@@ -1044,7 +1044,8 @@ SELECT item.id AS task_id,item.tenant_id,item.title,item.state AS work_item_stat
        item.task_desired_control,item.task_control_revision,item.task_control_settled_revision,
        item.task_control_outcome,item.task_control_payload,item.task_execution_updated_at,
        generation.result_agent_actor_id,generation.spec,generation.spec_hash,
-       COALESCE(work_room.room_id,origin.room_id)::text AS event_room_id
+       COALESCE(work_room.room_id,origin.room_id)::text AS event_room_id,
+       origin.room_id AS origin_room_id
 FROM work_items item
 JOIN task_execution_generations generation
   ON generation.task_id=item.id AND generation.tenant_id=item.tenant_id
@@ -1080,6 +1081,7 @@ type LockTaskExecutionSnapshotRow struct {
 	Spec                       []byte             `json:"spec"`
 	SpecHash                   []byte             `json:"spec_hash"`
 	EventRoomID                string             `json:"event_room_id"`
+	OriginRoomID               pgtype.Text        `json:"origin_room_id"`
 }
 
 func (q *Queries) LockTaskExecutionSnapshot(ctx context.Context, taskID string) (LockTaskExecutionSnapshotRow, error) {
@@ -1108,6 +1110,7 @@ func (q *Queries) LockTaskExecutionSnapshot(ctx context.Context, taskID string) 
 		&i.Spec,
 		&i.SpecHash,
 		&i.EventRoomID,
+		&i.OriginRoomID,
 	)
 	return i, err
 }

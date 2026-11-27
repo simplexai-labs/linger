@@ -324,7 +324,7 @@ function ArtifactPreviewHeader({
 }) {
   const t = useT();
   return (
-    <header className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-app-border px-3 sm:px-4">
+    <header className="flex h-[58px] shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
       <div className="min-w-0">
         <h2 className="truncate text-sm font-semibold">{displayName}</h2>
         {preview ? (

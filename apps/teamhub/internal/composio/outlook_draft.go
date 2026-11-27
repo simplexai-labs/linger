@@ -145,7 +145,7 @@ func (c *Client) outlookDraftRequest(ctx context.Context, accountID, endpoint, m
 		return response, err
 	}
 	if response.Status < 200 || response.Status >= 300 {
-		return response, &remoteError{operation: "Outlook draft", status: response.Status}
+		return response, &remoteError{operation: "Outlook draft", status: response.Status, source: ErrorSourceProvider}
 	}
 	// Some proxy responses wrap the provider's JSON in a string.
 	var encoded string

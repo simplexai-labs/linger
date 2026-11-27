@@ -23,7 +23,6 @@ import {
   externalConnectionQueryOptions,
   externalConnectionsQueryKey,
 } from "./connected-apps-queries";
-import { appDescription } from "./app-groups";
 import { ConnectAppStatus, useConnectAppFlow } from "./connect-app-flow";
 import {
   establishedExternalConnections,
@@ -83,7 +82,6 @@ export function AppManageDialog({
     <>
       <ModalDialog
         closeOnBackdrop
-        description={appDescription(app, t)}
         onClose={onClose}
         size="md"
         title={app.display_name}
@@ -137,7 +135,7 @@ export function AppManageDialog({
           ) : null}
           <ConnectAppStatus className="mt-3" flow={connectFlow} />
           {rows.length ? (
-            <div className="mt-4 divide-y divide-border border-t border-border">
+            <div className="mt-4">
               {rows.map((connection) => (
                 <ConnectionRow
                   canReconnect={canAuthorize}
@@ -205,6 +203,22 @@ function ConnectionRow({
   const duplicateIdentity =
     connection.status_error_code === "duplicate_remote_principal";
   const unconfirmed = externalConnectionUnconfirmed(connection);
+  const reauthorizationError =
+    !connection.reauthorizing &&
+    connection.reauthorization_error_code &&
+    connection.reauthorization_error_code !== "stale_revision"
+      ? connection.reauthorization_error_code
+      : undefined;
+  const authFailureMessage = !needsReconnecting
+    ? null
+    : connection.status_error_code === "provider_auth_failed" ||
+        reauthorizationError === "provider_auth_failed"
+      ? m.insufficientPermission
+      : reauthorizationError === "duplicate_remote_principal"
+        ? m.accountAlreadyConnected
+        : connection.status === "failed" || Boolean(reauthorizationError)
+          ? m.authorizationFailed
+          : null;
   const account = connection.identity_label ?? connection.provider;
 
   return (
@@ -281,9 +295,9 @@ function ConnectionRow({
           )}
         </p>
       ) : null}
-      {connection.status_error_code === "provider_auth_failed" ? (
+      {authFailureMessage ? (
         <p className="basis-full text-xs text-app-danger" role="alert">
-          {t(m.insufficientPermission)}
+          {t(authFailureMessage)}
         </p>
       ) : null}
       {statusCheck.error ? (
@@ -325,7 +339,7 @@ function AutoReminders({
     : connection.auto_reminders;
 
   return (
-    <div className="basis-full border-t border-border pt-2.5">
+    <div className="basis-full pt-2.5">
       <label className="flex min-h-8 items-center justify-between gap-3">
         <span className="min-w-0">
           <span className="block text-sm font-medium text-foreground">
@@ -430,15 +444,9 @@ export function DisconnectConnectionDialog({
       <div className="px-5 py-4">
         <p className="text-sm text-muted-foreground">{t(m.disconnectBody)}</p>
         {ended ? (
-          <div
-            className="mt-4 space-y-1 border-y border-border py-3 text-sm"
-            role="status"
-          >
-            <p>{t(m.accessStopped)}</p>
-            <p className="text-muted-foreground">
-              {t(providerAuthorization(ended))}
-            </p>
-          </div>
+          <p className="mt-4 py-3 text-sm" role="status">
+            {t(providerAuthorization(ended))}
+          </p>
         ) : null}
         {disconnect.error || current.error ? (
           <p className="mt-3 text-sm text-app-danger" role="alert">

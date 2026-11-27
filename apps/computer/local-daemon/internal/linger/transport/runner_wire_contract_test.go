@@ -401,6 +401,18 @@ func TestGatewaySessionCompactionKeepsIdentityAndRawRequest(t *testing.T) {
 		request.CompactID != "compact-1" || request.Instructions != "Keep open questions." {
 		t.Fatalf("command = %+v request = %+v", command, request)
 	}
+	piCommand, err := decodeGatewayCommand([]byte(strings.Replace(valid, `"runtime_type":"claude"`, `"runtime_type":"pi"`, 1)))
+	if err != nil || piCommand.Type != protocol.CommandSessionCompact || piCommand.RuntimeType != "pi" {
+		t.Fatalf("pi session compact = %+v, err = %v", piCommand, err)
+	}
+	agyFrame := strings.Replace(valid, `"runtime_type":"claude"`, `"runtime_type":"antigravity"`, 1)
+	agyCommand, err := decodeGatewayCommand([]byte(agyFrame))
+	if err != nil {
+		t.Fatalf("decode antigravity session compaction: %v", err)
+	}
+	if agyCommand.RuntimeType != "antigravity" || agyCommand.Type != protocol.CommandSessionCompact {
+		t.Fatalf("antigravity command = %+v", agyCommand)
+	}
 	for _, change := range [][2]string{
 		{`"protocol_version":"2"`, `"protocol_version":"1.2"`},
 		{`"command_id":"command-1",`, ``},

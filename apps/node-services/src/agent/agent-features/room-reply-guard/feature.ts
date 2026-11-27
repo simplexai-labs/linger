@@ -4,6 +4,7 @@ import {
   awaitedReplyInboxIds,
   awaitsReply,
 } from "../../executor/reply-delivery.js";
+import { isTaskCallbackInput } from "../../executor/run-kind.js";
 import type { AgentLogger } from "../../observability/agent-log.js";
 
 export const ROOM_REPLY_GUARD_FEATURE_ID = "room-reply-guard";
@@ -11,7 +12,10 @@ export const ROOM_REPLY_GUARD_FEATURE_ID = "room-reply-guard";
 const DEFAULT_REPLY_CHECK_TIMEOUT_MS = 5_000;
 
 export const ROOM_REPLY_REMINDER =
-  "You have not sent a visible reply to the Room yet for this turn. Room participants cannot see your final assistant text; only messages sent through the `teamhub message` command (such as `teamhub message send`, `teamhub message card`, `teamhub message ask-user`, `teamhub message sequence`, or an emoji reaction) appear in the Room. Send your reply to the Room now, then finish.";
+  "You have not sent a visible reply to the Room yet for this turn. Room participants cannot see your final assistant text; only messages sent through the `teamhub message` command (such as `teamhub message send`, `teamhub message card`, `teamhub message ask-user`, `teamhub message sequence`, or an emoji reaction) appear in the Room. A message sent with --continuing only says you are still working; send the reply itself without it. Send your reply to the Room now, then finish.";
+
+export const TASK_REPORT_REMINDER =
+  "A Task report woke you, and the report is private. People see its result only when you send it with `teamhub message send`. Send the result now unless this wake asks you to stay quiet, then finish.";
 
 /** Where TeamHub found a visible reply from the Run. */
 export interface RunReplyStatus {
@@ -34,7 +38,10 @@ export interface RoomReplyGuardFeatureDeps {
  * Intercepts a Room Run right before the Runtime finishes when a Human
  * mentioned this Agent in an Inbox where TeamHub has no persisted visible
  * reply from the Run. A chat steered in from another Inbox needs its own
- * reply. Blocks at most once per Run so the model can send its replies via
+ * reply. A Run woken by a Task report alone needs some visible message,
+ * because the report is private and small models often answer it in private
+ * text. TeamHub does not count a message sent with --continuing as the reply.
+ * Blocks at most once per Run so the model can send its replies via
  * `teamhub message` in the same turn without risking an infinite loop.
  */
 export function createRoomReplyGuardFeature(
@@ -62,7 +69,10 @@ export function createRoomReplyGuardFeature(
             if (input.stopHookActive || blockedRuns.has(input.runId)) {
               return { action: "allow" };
             }
-            if (!input.inputs.some(awaitsReply)) {
+            // A Human's mention decides the reminder; a Task report alone
+            // only needs some visible result.
+            const mentioned = input.inputs.some(awaitsReply);
+            if (!mentioned && !input.inputs.some(isTaskCallbackInput)) {
               return { action: "allow" };
             }
             const awaited = awaitedReplyInboxIds(input.inputs);
@@ -108,8 +118,9 @@ export function createRoomReplyGuardFeature(
             });
             return {
               action: "block",
-              reason:
-                unanswered && awaited.length > 1
+              reason: !mentioned
+                ? TASK_REPORT_REMINDER
+                : unanswered && awaited.length > 1
                   ? `${ROOM_REPLY_REMINDER} Reply in each Inbox where you were mentioned; these have no reply from you yet: ${unanswered.join(", ")}. For a thread:<id> Inbox, send with --thread <id>.`
                   : ROOM_REPLY_REMINDER,
             };

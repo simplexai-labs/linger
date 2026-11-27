@@ -104,7 +104,7 @@ export const renderAcceptedNotification = (
   );
   // A Task callback names its Task and how to read the callback stream.
   const baseMessage = accepted.inboxId.startsWith("taskmeta:")
-    ? `${notificationMessage}\n\nTask callback\nTask ID: ${accepted.inboxId.slice("taskmeta:".length)}\nRead: teamhub message read --inbox ${accepted.inboxId}`
+    ? `${notificationMessage}\n\nTask callback\nTask ID: ${accepted.inboxId.slice("taskmeta:".length)}\nRead: teamhub message read --inbox ${accepted.inboxId}\nThis report is private; people see the result only when you send it with teamhub message send.`
     : notificationMessage;
   const contributed =
     contributeNotificationContext?.({

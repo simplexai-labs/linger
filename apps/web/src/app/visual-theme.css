@@ -81,6 +81,13 @@
   --app-focus: hsl(var(--town-foreground));
   --app-ring: hsl(var(--town-primary) / 0.4);
   --app-danger: hsl(var(--town-destructive));
+  /* The Voice Mode island: a white call bar with soft round controls. */
+  --app-voice-island: hsl(var(--town-card));
+  --app-voice-island-ink: hsl(var(--town-foreground));
+  --app-voice-island-control: hsl(var(--town-foreground) / 0.06);
+  --app-voice-island-control-hover: hsl(var(--town-foreground) / 0.1);
+  --app-voice-end: #e52e3b;
+  --app-voice-end-hover: #d42734;
   --app-danger-hover: hsl(var(--town-destructive) / 0.08);
   --app-danger-border: hsl(var(--town-destructive) / 0.3);
   --app-danger-border-hover: hsl(var(--town-destructive));

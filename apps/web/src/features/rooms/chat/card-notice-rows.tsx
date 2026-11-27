@@ -10,7 +10,7 @@ import {
 } from "../cards/card-notice";
 
 const pillClass =
-  "inline-block max-w-full rounded-[14px] bg-muted px-3 py-1 text-center text-xs leading-[18px] text-muted-foreground [overflow-wrap:anywhere]";
+  "inline-block max-w-full rounded-xl bg-muted px-3 py-1 text-center text-xs leading-[18px] text-muted-foreground [overflow-wrap:anywhere]";
 
 /**
  * A settled card as one centered system line, like a Room notice. Once

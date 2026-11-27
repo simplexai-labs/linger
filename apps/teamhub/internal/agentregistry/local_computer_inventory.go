@@ -70,7 +70,24 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 	return items, nil
 }
 
-func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
+func projectStoredLocalComputer(row store.RuntimeLocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
+	item, listed, err := projectStoredLocalComputerWithGrants(row, tenantID, now, true)
+	if err != nil || !listed {
+		return httpapi.LocalComputer{}, false, err
+	}
+	return item, true, nil
+}
+
+// projectStoredLocalComputerForPlacement projects a Computer even when it has
+// no owner-scoped workspace grant in tenantID yet, so Another Me placement
+// diagnostics can distinguish a missing writable grant from an offline or
+// unlisted Computer.
+func projectStoredLocalComputerForPlacement(row store.RuntimeLocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, error) {
+	item, _, err := projectStoredLocalComputerWithGrants(row, tenantID, now, false)
+	return item, err
+}
+
+func projectStoredLocalComputerWithGrants(row store.RuntimeLocalComputer, tenantID string, now time.Time, requireGrant bool) (httpapi.LocalComputer, bool, error) {
 	var storedGrants []storedWorkspaceGrant
 	if err := json.Unmarshal(row.WorkspaceGrants, &storedGrants); err != nil {
 		return httpapi.LocalComputer{}, false, err
@@ -87,7 +104,7 @@ func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now ti
 		}
 		grants = append(grants, httpapi.LocalComputerWorkspaceGrant{GrantId: grant.GrantID, Label: label, Mode: mode})
 	}
-	if len(grants) == 0 {
+	if requireGrant && len(grants) == 0 {
 		return httpapi.LocalComputer{}, false, nil
 	}
 	slices.SortFunc(grants, func(left, right httpapi.LocalComputerWorkspaceGrant) int {
@@ -123,15 +140,7 @@ func projectStoredLocalComputer(row store.LocalComputer, tenantID string, now ti
 	if row.LastSeenAt.Valid {
 		item.LastSeenAt = &row.LastSeenAt.Time
 	}
-	if row.Capacity.Valid && row.Capacity.Int32 > 0 {
-		capacity := int(row.Capacity.Int32)
-		available := max(0, capacity-item.ActiveOperations)
-		if !online {
-			available = 0
-		}
-		item.Capacity, item.AvailableCapacity = &capacity, &available
-	}
-	return item, true, nil
+	return item, len(grants) > 0, nil
 }
 
 func projectStoredRuntimes(raw []byte) ([]httpapi.LocalComputerRuntime, error) {
@@ -191,6 +200,28 @@ func storedPreferredRuntime(raw []byte) (string, error) {
 	return "", nil
 }
 
+func isValidReasoningEffortToken(value string) bool {
+	if len(value) == 0 || len(value) > 20 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		isAlphaNum := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+		if i == 0 {
+			if !isAlphaNum {
+				return false
+			}
+			continue
+		}
+		if !isAlphaNum && c != '_' && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+const maxRuntimeModelReasoningEfforts = 32
+
 func storedRuntimeModels(diagnostic storedRuntimeDiagnostic) []httpapi.AgentModel {
 	if len(diagnostic.ModelCatalogError) > 0 && string(diagnostic.ModelCatalogError) != "null" {
 		return []httpapi.AgentModel{}
@@ -201,10 +232,13 @@ func storedRuntimeModels(diagnostic storedRuntimeDiagnostic) []httpapi.AgentMode
 	models := make([]httpapi.AgentModel, 0, len(*diagnostic.Models))
 	for _, stored := range *diagnostic.Models {
 		model := httpapi.AgentModel{Id: stored.ID, Label: stored.Label}
-		allowed := make([]httpapi.AgentReasoningEffort, 0, len(stored.AllowedReasoningEffort))
+		allowed := make([]httpapi.AgentReasoningEffort, 0, min(len(stored.AllowedReasoningEffort), maxRuntimeModelReasoningEfforts))
 		for _, value := range stored.AllowedReasoningEffort {
-			if effort := httpapi.AgentReasoningEffort(value); effort.Valid() {
-				allowed = append(allowed, effort)
+			if len(allowed) >= maxRuntimeModelReasoningEfforts {
+				break
+			}
+			if isValidReasoningEffortToken(value) && !slices.Contains(allowed, value) {
+				allowed = append(allowed, value)
 			}
 		}
 		if len(allowed) > 0 {
@@ -227,20 +261,20 @@ func resolveDefaultReasoningEffort(allowed []httpapi.AgentReasoningEffort, prefe
 	if len(allowed) == 0 {
 		return ""
 	}
-	if effort := httpapi.AgentReasoningEffort(preferred); effort != "" && slices.Contains(allowed, effort) {
-		return effort
+	if preferred != "" && slices.Contains(allowed, preferred) {
+		return preferred
 	}
 	for _, candidate := range []httpapi.AgentReasoningEffort{
-		httpapi.AgentReasoningEffortMedium,
-		httpapi.AgentReasoningEffortLow,
-		httpapi.AgentReasoningEffortHigh,
+		"medium",
+		"low",
+		"high",
 	} {
 		if slices.Contains(allowed, candidate) {
 			return candidate
 		}
 	}
 	for _, effort := range allowed {
-		if effort != httpapi.AgentReasoningEffortNone {
+		if effort != "none" {
 			return effort
 		}
 	}
@@ -248,7 +282,8 @@ func resolveDefaultReasoningEffort(allowed []httpapi.AgentReasoningEffort, prefe
 }
 
 // storedRuntimeModel looks up one advertised model in a Computer's recorded
-// RuntimeDiagnostics for runtimeType.
+// RuntimeDiagnostics for runtimeType, falling back to the default or first
+// advertised model for legacy "<runtime>-default" aliases.
 func storedRuntimeModel(raw []byte, runtimeType, modelID string) (httpapi.AgentModel, bool) {
 	runtimes, err := projectStoredRuntimes(raw)
 	if err != nil {
@@ -263,33 +298,44 @@ func storedRuntimeModel(raw []byte, runtimeType, modelID string) (httpapi.AgentM
 				return model, true
 			}
 		}
+		if modelID == runtimeType+"-default" && len(runtime.Models) > 0 {
+			for _, model := range runtime.Models {
+				if model.IsDefault != nil && *model.IsDefault {
+					return model, true
+				}
+			}
+			return runtime.Models[0], true
+		}
 	}
 	return httpapi.AgentModel{}, false
 }
 
-// resolveRegistrationReasoningEffort fills a missing or unsupported default
-// effort from the target Computer's projected model catalog so newly created
-// or updated Agents do not start with an unavailable effort.
+// resolveRegistrationReasoningEffort aligns a requested effort with the target
+// Computer's projected model catalog: models without effort levels clear it,
+// supported values are preserved, and missing or unsupported values clamp to
+// the model's default effort.
 func resolveRegistrationReasoningEffort(
 	diagnostics []byte,
 	runtimeType, modelID string,
 	requested *httpapi.AgentReasoningEffort,
 ) *httpapi.AgentReasoningEffort {
 	model, found := storedRuntimeModel(diagnostics, runtimeType, modelID)
-	if !found || model.AllowedReasoningEffort == nil || len(*model.AllowedReasoningEffort) == 0 {
+	if !found {
 		return requested
+	}
+	if model.AllowedReasoningEffort == nil || len(*model.AllowedReasoningEffort) == 0 {
+		return nil
 	}
 	allowed := *model.AllowedReasoningEffort
 	if requested != nil && slices.Contains(allowed, *requested) {
 		return requested
 	}
-	if requested == nil || *requested == httpapi.AgentReasoningEffortMedium || runtimeType == string(httpapi.LocalRuntimeTypePi) {
-		if model.DefaultReasoningEffort != nil {
-			resolved := *model.DefaultReasoningEffort
-			return &resolved
-		}
+	if model.DefaultReasoningEffort != nil {
+		resolved := *model.DefaultReasoningEffort
+		return &resolved
 	}
-	return requested
+	resolved := allowed[0]
+	return &resolved
 }
 
 // ListOwnedLocalComputers lists the Human's Computers as the Runner Gateway

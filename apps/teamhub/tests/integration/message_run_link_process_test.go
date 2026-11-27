@@ -226,6 +226,15 @@ func verifyContinuingMessageOutput(t *testing.T, env *testEnv, token, roomID, ru
 	if present, _ := declared(finalID); present {
 		t.Fatal("undeclared output gained a continuation field")
 	}
+	for messageID, want := range map[string]bool{continuingID: true, finalID: false} {
+		var continues bool
+		if err := env.pool.QueryRow(t.Context(), `SELECT continues FROM messages WHERE id=$1`, messageID).Scan(&continues); err != nil {
+			t.Fatal(err)
+		}
+		if continues != want {
+			t.Fatalf("message %s continues=%v, want %v", messageID, continues, want)
+		}
+	}
 	var invocationID string
 	if err := env.pool.QueryRow(t.Context(), `SELECT invocation_id FROM command_replays WHERE resource_id=$1 AND invocation_id IS NOT NULL`, continuingID).Scan(&invocationID); err != nil {
 		t.Fatal(err)

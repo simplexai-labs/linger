@@ -368,6 +368,24 @@ func (e AgentContextMemberKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentCreationApprovalResponseStatus.
+const (
+	Created         AgentCreationApprovalResponseStatus = "created"
+	PendingApproval AgentCreationApprovalResponseStatus = "pending_approval"
+)
+
+// Valid indicates whether the value is a known member of the AgentCreationApprovalResponseStatus enum.
+func (e AgentCreationApprovalResponseStatus) Valid() bool {
+	switch e {
+	case Created:
+		return true
+	case PendingApproval:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentDocumentCommentAuthorKind.
 const (
 	AgentDocumentCommentAuthorKindAgent AgentDocumentCommentAuthorKind = "agent"
@@ -482,6 +500,27 @@ func (e AgentHistoryMessageMessageKind) Valid() bool {
 	case AgentHistoryMessageMessageKindConversation:
 		return true
 	case AgentHistoryMessageMessageKindTaskTerminalNotice:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentHistoryRoomHandoffState.
+const (
+	AgentHistoryRoomHandoffStateCompleted      AgentHistoryRoomHandoffState = "completed"
+	AgentHistoryRoomHandoffStateWaitingForUser AgentHistoryRoomHandoffState = "waiting_for_user"
+	AgentHistoryRoomHandoffStateWorking        AgentHistoryRoomHandoffState = "working"
+)
+
+// Valid indicates whether the value is a known member of the AgentHistoryRoomHandoffState enum.
+func (e AgentHistoryRoomHandoffState) Valid() bool {
+	switch e {
+	case AgentHistoryRoomHandoffStateCompleted:
+		return true
+	case AgentHistoryRoomHandoffStateWaitingForUser:
+		return true
+	case AgentHistoryRoomHandoffStateWorking:
 		return true
 	default:
 		return false
@@ -764,6 +803,27 @@ func (e AgentRoutineWeekday) Valid() bool {
 	case Tuesday:
 		return true
 	case Wednesday:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentSendDirectMessageRequestHandoffState.
+const (
+	AgentSendDirectMessageRequestHandoffStateCompleted      AgentSendDirectMessageRequestHandoffState = "completed"
+	AgentSendDirectMessageRequestHandoffStateWaitingForUser AgentSendDirectMessageRequestHandoffState = "waiting_for_user"
+	AgentSendDirectMessageRequestHandoffStateWorking        AgentSendDirectMessageRequestHandoffState = "working"
+)
+
+// Valid indicates whether the value is a known member of the AgentSendDirectMessageRequestHandoffState enum.
+func (e AgentSendDirectMessageRequestHandoffState) Valid() bool {
+	switch e {
+	case AgentSendDirectMessageRequestHandoffStateCompleted:
+		return true
+	case AgentSendDirectMessageRequestHandoffStateWaitingForUser:
+		return true
+	case AgentSendDirectMessageRequestHandoffStateWorking:
 		return true
 	default:
 		return false
@@ -1985,20 +2045,29 @@ type AgentCreateTeamMdResponse struct {
 // AgentCreationActorIds Duplicate-free TeamHub Actor identifiers in caller-supplied order.
 type AgentCreationActorIds = []Id
 
-// AgentCreationApprovalResponse Durable pending Room creation approval request.
+// AgentCreationApprovalResponse A submitted Room creation. TeamHub creates the Room at once, owned by the Agent's Sponsor; a submission replayed from an earlier pending approval card still reports that card.
 type AgentCreationApprovalResponse struct {
 	// Accepted Whether TeamHub accepted and durably persisted the Creation request.
 	Accepted bool `json:"accepted"`
 
 	// CreationApprovalRequestId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	CreationApprovalRequestId Id `json:"creation_approval_request_id"`
+	CreationApprovalRequestId *Id `json:"creation_approval_request_id,omitempty"`
 
 	// MessageId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	MessageId Id `json:"message_id"`
+	MessageId *Id `json:"message_id,omitempty"`
 
-	// Status Initial lifecycle state while awaiting a Human decision.
-	Status string `json:"status"`
+	// RoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RoomId *Id `json:"room_id,omitempty"`
+
+	// SkippedArtifacts Requested Documents not delivered to the created Room, each with the reason; present when status is created.
+	SkippedArtifacts *[]AgentRoomCreationSkippedArtifact `json:"skipped_artifacts,omitempty"`
+
+	// Status created when the Room exists; pending_approval for a replayed submission whose approval card still awaits a Human decision.
+	Status AgentCreationApprovalResponseStatus `json:"status"`
 }
+
+// AgentCreationApprovalResponseStatus created when the Room exists; pending_approval for a replayed submission whose approval card still awaits a Human decision.
+type AgentCreationApprovalResponseStatus string
 
 // AgentCreationMessageSegment One structured initial message segment accepted by a Creation request. Every segment must include its type discriminator. Document and file segments remain excluded because the destination Room does not exist yet; create_room delivers existing Documents through its separate artifacts field.
 type AgentCreationMessageSegment struct {
@@ -2238,7 +2307,8 @@ type AgentHistoryMessage struct {
 	ResourceReferences []struct {
 		DocumentId string `json:"document_id"`
 	} `json:"resource_references"`
-	Segments []MessageSegment `json:"segments"`
+	RoomHandoff *AgentHistoryRoomHandoff `json:"room_handoff,omitempty"`
+	Segments    []MessageSegment         `json:"segments"`
 }
 
 // AgentHistoryMessageAuthorKind defines model for AgentHistoryMessage.AuthorKind.
@@ -2246,6 +2316,17 @@ type AgentHistoryMessageAuthorKind string
 
 // AgentHistoryMessageMessageKind defines model for AgentHistoryMessage.MessageKind.
 type AgentHistoryMessageMessageKind string
+
+// AgentHistoryRoomHandoff defines model for AgentHistoryRoomHandoff.
+type AgentHistoryRoomHandoff struct {
+	HandoffId string                       `json:"handoff_id"`
+	RoomId    string                       `json:"room_id"`
+	RoomName  string                       `json:"room_name"`
+	State     AgentHistoryRoomHandoffState `json:"state"`
+}
+
+// AgentHistoryRoomHandoffState defines model for AgentHistoryRoomHandoff.State.
+type AgentHistoryRoomHandoffState string
 
 // AgentInsertDocumentBlocksSemanticOperation defines model for AgentInsertDocumentBlocksSemanticOperation.
 type AgentInsertDocumentBlocksSemanticOperation struct {
@@ -2557,8 +2638,9 @@ type AgentReadMessage struct {
 	ResourceReferences []struct {
 		DocumentId string `json:"document_id"`
 	} `json:"resource_references"`
-	Segments []MessageSegment `json:"segments"`
-	ThreadId *string          `json:"thread_id,omitempty"`
+	RoomHandoff *AgentHistoryRoomHandoff `json:"room_handoff,omitempty"`
+	Segments    []MessageSegment         `json:"segments"`
+	ThreadId    *string                  `json:"thread_id,omitempty"`
 }
 
 // AgentReadMessageAuthorKind defines model for AgentReadMessage.AuthorKind.
@@ -2646,8 +2728,20 @@ type AgentRoomCreationEffectivePayload struct {
 	Name string `json:"name"`
 }
 
+// AgentRoomCreationSkippedArtifact A requested Document the created Room did not receive.
+type AgentRoomCreationSkippedArtifact struct {
+	// DocumentId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	DocumentId Id `json:"document_id"`
+
+	// Reason Why the Document was not delivered.
+	Reason string `json:"reason"`
+}
+
 // AgentRoomHandoffRequest The Room to hand the Human's request to and the instruction the AnotherMe's Context there carries out. The caller, its direct chat and its Human are derived by TeamHub, never accepted from the caller.
 type AgentRoomHandoffRequest struct {
+	// HandoffId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	HandoffId *Id `json:"handoff_id,omitempty"`
+
 	// Instruction Self-contained instruction for the AnotherMe in the target Room. Hidden from the Room's timeline; the receiving Context decides what to post there.
 	Instruction string `json:"instruction"`
 
@@ -2782,12 +2876,21 @@ type AgentSearchAppToolsResponse struct {
 
 // AgentSendDirectMessageRequest Infrastructure-owned invocation identity and Runtime Manifest attestation plus the ordered private messages to send to the current Agent's Human sponsor.
 type AgentSendDirectMessageRequest struct {
+	// HandoffId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	HandoffId *Id `json:"handoff_id,omitempty"`
+
+	// HandoffState State of the identified Room handoff after this report; requires handoff_id.
+	HandoffState *AgentSendDirectMessageRequestHandoffState `json:"handoff_state,omitempty"`
+
 	// InvocationId Stable SHA-256 operation identity derived by the CLI from the Agent identity, command, and caller operation ID. Credential rotation and Runtime restarts do not change it.
 	InvocationId AgentInvocationId `json:"invocation_id"`
 
 	// Messages Ordered private messages persisted atomically in the Direct Room.
 	Messages []string `json:"messages"`
 }
+
+// AgentSendDirectMessageRequestHandoffState State of the identified Room handoff after this report; requires handoff_id.
+type AgentSendDirectMessageRequestHandoffState string
 
 // AgentSendDirectMessageResponse Accepted Direct Room messages plus the exact active Manifest attested in the same authorization and persistence transaction.
 type AgentSendDirectMessageResponse struct {
