@@ -1470,31 +1470,6 @@ a[href][aria-disabled="true"],
   }
 }
 
-/* Template cards settle in on open, staggered by their position in the grid so
-   the shelf reads as one list arriving rather than a block appearing. */
-.template-card-enter {
-  animation: template-card-enter 240ms ease both;
-  animation-delay: calc(var(--template-card-index, 0) * 40ms);
-}
-
-@keyframes template-card-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .template-card-enter {
-    animation: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .ui-field-control {
     transition: none;
@@ -4547,9 +4522,10 @@ button.question-choice:focus-visible {
   }
 }
 
-/* A quiet pill for the one secondary action an Agent profile header offers:
-   hairline border and ink text at rest, a soft fill under the pointer. */
-.agent-publish-button {
+/* A quiet pill for the one secondary action a panel header offers, such as
+   sharing a Room: hairline border and ink text at rest, a soft fill under the
+   pointer. */
+.panel-header-action-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4568,12 +4544,12 @@ button.question-choice:focus-visible {
     border-color var(--app-micro-duration) ease;
 }
 
-.agent-publish-button:hover {
+.panel-header-action-button:hover {
   border-color: hsl(var(--town-foreground) / 0.15);
   background: hsl(var(--town-accent));
 }
 
-.agent-publish-button:focus-visible {
+.panel-header-action-button:focus-visible {
   outline: 2px solid var(--app-focus);
   outline-offset: 2px;
 }

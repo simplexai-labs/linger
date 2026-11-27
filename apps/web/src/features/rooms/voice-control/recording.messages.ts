@@ -9,10 +9,6 @@ export const recordingMessages = defineMessages("recording", {
   minimize: "Minimize recording",
   minimizeHint: "Minimize; recording continues",
   open: "Open recording",
-  float: "Float recording window",
-  floatHint: "Float over other tabs and apps",
-  returnToLinger: "Return recording to Linger",
-  returnHint: "Back to Linger; recording continues",
 
   // The row with the live duration and the controls.
   surface: "Hardware voice focus",

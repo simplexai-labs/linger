@@ -451,6 +451,15 @@ func (d *Daemon) ActiveModelInvokeCount() int {
 	return len(d.modelInvokes)
 }
 
+// ContentURL returns the active Agent Service context content URL, or an empty
+// string when the Daemon is not connected.
+func (d *Daemon) ContentURL() string {
+	if current := d.contentURL.Load(); current != nil {
+		return *current
+	}
+	return ""
+}
+
 func (d *Daemon) DrainIfIdle() int {
 	d.admissionMu.Lock()
 	defer d.admissionMu.Unlock()

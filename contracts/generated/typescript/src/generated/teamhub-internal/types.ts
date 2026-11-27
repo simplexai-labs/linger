@@ -2543,6 +2543,10 @@ export interface components {
     ConnectAgentRuntimeLocalComputerResult: {
       computer: components["schemas"]["AgentRuntimeLocalComputer"];
       placements: components["schemas"]["AgentRuntimeRunnerPlacement"][];
+      /** @description Whether TeamHub currently has a connected-app provider configured. */
+      connected_apps?: boolean;
+      /** @description Whether TeamHub currently has a Runtime permission judge enabled. */
+      permission_review?: boolean;
     };
     TouchAgentRuntimeLocalComputerRequest: {
       computer_id: components["schemas"]["Id"];

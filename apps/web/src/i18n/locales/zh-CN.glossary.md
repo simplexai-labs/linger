@@ -72,7 +72,6 @@ elsewhere.
 | Watch (an app)                | 监听                       | A Routine waiting for an app event.               |
 | Follow-up                     | 后续消息                   | A Message sent while the Agent is working.        |
 | Instructions                  | 指令                       | An Agent's instructions.                          |
-| Template                      | 模板                       |                                                   |
 | Permission                    | 权限                       |                                                   |
 | Allow / Deny                  | 允许 / 拒绝                | Answers to a permission request.                  |
 | Approve / Decline             | 批准 / 拒绝                | Answers to an approval.                           |
@@ -147,9 +146,6 @@ elsewhere.
 | Publisher / License           | 发布者 / 许可证            |                                                   |
 | Parameters                    | 参数量                     | Of a model.                                       |
 | Model source                  | 模型来源                   |                                                   |
-| Publish (a template)          | 发布                       |                                                   |
-| Marketplace                   | 模板市场                   | Where published Agent templates are listed.       |
-| Official template             | 官方模板                   |                                                   |
 | Docs                          | 文档                       | The short form of Documents in search.            |
 | Search scope                  | 搜索范围                   | Messages, Members, Docs or Rooms.                 |
 | Folder                        | 文件夹                     |                                                   |

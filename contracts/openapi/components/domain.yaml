@@ -415,9 +415,6 @@ components:
       additionalProperties: false
       required: [name, instructions, runtime]
       properties:
-        template_id:
-          $ref: "./common.yaml#/components/schemas/Id"
-          description: TeamHub freezes this template's Routines when reserving the Agent. Activation creates the Sponsor direct Room and copies all Routines atomically. Registration retries reuse the frozen snapshot even if the template is later removed.
         name:
           type: string
           minLength: 1

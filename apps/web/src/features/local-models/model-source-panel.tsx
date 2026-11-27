@@ -255,7 +255,7 @@ export function ModelSourceTabs({
     <div className="mt-5 flex">
       <div
         aria-label={t(m.modelSource)}
-        className="inline-flex max-w-full self-start items-center gap-0.5 rounded-xl bg-muted/75 p-1 shadow-[inset_0_1px_1px_rgba(0,0,0,0.04)]"
+        className="inline-flex w-fit max-w-full items-center gap-0.5 self-start rounded-lg bg-muted p-0.5"
         role="tablist"
       >
         {modes.map((mode, index) => {
@@ -264,7 +264,7 @@ export function ModelSourceTabs({
             <button
               aria-selected={selected}
               className={cn(
-                "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-[color,background-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
                 selected
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",

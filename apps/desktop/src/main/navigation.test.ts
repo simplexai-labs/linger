@@ -266,6 +266,19 @@ describe("windowLoadDecision", () => {
         { reason: "retry" },
       ),
     ).toEqual({ action: "load", targetUrl: local, reason: "retry" });
+
+    expect(
+      windowLoadDecision(
+        {
+          currentUrl: `${local}/rooms/1`,
+          showingShellPage: "none",
+          loadFailed: false,
+        },
+        local,
+        local,
+        { reason: "resume_revived" },
+      ),
+    ).toEqual({ action: "load", targetUrl: local, reason: "resume_revived" });
   });
 
   it("reloads on port move and keeps a user-selected remote server", () => {
@@ -294,6 +307,19 @@ describe("windowLoadDecision", () => {
         { movedFrom: local, reason: "resume_ready" },
       ),
     ).toEqual({ action: "noop", reason: "resume_ready" });
+
+    expect(
+      windowLoadDecision(
+        {
+          currentUrl: `${server}/`,
+          showingShellPage: "none",
+          loadFailed: false,
+        },
+        server,
+        local,
+        { reason: "resume_revived" },
+      ),
+    ).toEqual({ action: "noop", reason: "resume_revived" });
 
     expect(
       windowLoadDecision(

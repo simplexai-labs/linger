@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/registration"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/protocol"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
@@ -403,14 +404,14 @@ func TestExecutionResolverPlacesStaticGuidesBeforeMarkerAndBaseAfter(t *testing.
 	reqA := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"pi","model":"localmodels/model-a"},
-		"session_options":{"thread_name":"Agent A","base_instructions":"Agent A Prompt","developer_instructions":"StaticCore\n\n` + staticPrefixEndMarker + `\n\nDynamicA\n\n<user-memory version=\"1\">MemA</user-memory>"},
+		"session_options":{"thread_name":"Agent A","base_instructions":"Agent A Prompt","developer_instructions":"StaticCore\n\n` + StaticPrefixEndMarker + `\n\nDynamicA\n\n<user-memory version=\"1\">MemA</user-memory>"},
 		"session":{},
 		"input":{"type":"text","text":"Hi"}
 	}`)
 	reqB := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"pi","model":"localmodels/model-a"},
-		"session_options":{"thread_name":"Agent B","base_instructions":"Agent B Prompt","developer_instructions":"StaticCore\n\n` + staticPrefixEndMarker + `\n\nDynamicB\n\n<user-memory version=\"2\">MemB</user-memory>"},
+		"session_options":{"thread_name":"Agent B","base_instructions":"Agent B Prompt","developer_instructions":"StaticCore\n\n` + StaticPrefixEndMarker + `\n\nDynamicB\n\n<user-memory version=\"2\">MemB</user-memory>"},
 		"session":{},
 		"input":{"type":"text","text":"Hi"}
 	}`)
@@ -423,10 +424,10 @@ func TestExecutionResolverPlacesStaticGuidesBeforeMarkerAndBaseAfter(t *testing.
 		t.Fatal(err)
 	}
 
-	if strings.Contains(specA.SystemPrompt, staticPrefixEndMarker) || strings.Contains(specB.SystemPrompt, staticPrefixEndMarker) {
+	if strings.Contains(specA.SystemPrompt, StaticPrefixEndMarker) || strings.Contains(specB.SystemPrompt, StaticPrefixEndMarker) {
 		t.Fatalf("internal static prefix marker leaked into SystemPrompt: A=%q B=%q", specA.SystemPrompt, specB.SystemPrompt)
 	}
-	if specA.DeveloperInstructions == nil || strings.Contains(*specA.DeveloperInstructions, staticPrefixEndMarker) {
+	if specA.DeveloperInstructions == nil || strings.Contains(*specA.DeveloperInstructions, StaticPrefixEndMarker) {
 		t.Fatalf("internal static prefix marker leaked into DeveloperInstructions: %v", specA.DeveloperInstructions)
 	}
 
@@ -500,14 +501,14 @@ func TestExecutionResolverPlacesStaticGuidesInCodexBaseInstructionsAndStripsMark
 	reqA := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"codex","model":"localmodels/model-a"},
-		"session_options":{"thread_name":"Agent A","base_instructions":"Responsibility\n\nStaticCore\n\n` + staticPrefixEndMarker + `\n\nAgent A Prompt\n\nDynamicA"},
+		"session_options":{"thread_name":"Agent A","base_instructions":"Responsibility\n\nStaticCore\n\n` + StaticPrefixEndMarker + `\n\nAgent A Prompt\n\nDynamicA"},
 		"session":{"threadId":""},
 		"input":{"type":"text","text":"Hi"}
 	}`)
 	reqB := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"codex","model":"localmodels/model-a"},
-		"session_options":{"thread_name":"Agent B","base_instructions":"Responsibility\n\nStaticCore\n\n` + staticPrefixEndMarker + `\n\nAgent B Prompt\n\nDynamicB"},
+		"session_options":{"thread_name":"Agent B","base_instructions":"Responsibility\n\nStaticCore\n\n` + StaticPrefixEndMarker + `\n\nAgent B Prompt\n\nDynamicB"},
 		"session":{"threadId":""},
 		"input":{"type":"text","text":"Hi"}
 	}`)
@@ -529,13 +530,13 @@ func TestExecutionResolverPlacesStaticGuidesInCodexBaseInstructionsAndStripsMark
 		{"A", specA.BaseInstructions, specA.DeveloperInstructions, specA.SystemPrompt},
 		{"B", specB.BaseInstructions, specB.DeveloperInstructions, specB.SystemPrompt},
 	} {
-		if spec.base == nil || strings.Contains(*spec.base, staticPrefixEndMarker) {
+		if spec.base == nil || strings.Contains(*spec.base, StaticPrefixEndMarker) {
 			t.Fatalf("Codex %s BaseInstructions missing or leaked marker: %v", spec.name, spec.base)
 		}
 		if spec.developer != nil {
 			t.Fatalf("Codex %s DeveloperInstructions should remain nil when guides fit into BaseInstructions: %q", spec.name, *spec.developer)
 		}
-		if strings.Contains(spec.system, staticPrefixEndMarker) {
+		if strings.Contains(spec.system, StaticPrefixEndMarker) {
 			t.Fatalf("Codex %s SystemPrompt leaked marker: %q", spec.name, spec.system)
 		}
 	}
@@ -641,7 +642,7 @@ func TestShellToolGuideAndWindowsStaticPrefixPlacement(t *testing.T) {
 	piReq := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"pi","model":"localmodels/model-a"},
-		"session_options":{"thread_name":"Agent A","base_instructions":"Agent A Prompt","developer_instructions":"StaticCore\n\n` + staticPrefixEndMarker + `\n\nDynamicTail"},
+		"session_options":{"thread_name":"Agent A","base_instructions":"Agent A Prompt","developer_instructions":"StaticCore\n\n` + StaticPrefixEndMarker + `\n\nDynamicTail"},
 		"session":{},
 		"input":{"type":"text","text":"Hi"}
 	}`)
@@ -672,7 +673,7 @@ func TestShellToolGuideAndWindowsStaticPrefixPlacement(t *testing.T) {
 	codexReq := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"codex","model":"localmodels/model-a"},
-		"session_options":{"thread_name":"Agent B","base_instructions":"Responsibility\n\nStaticCore\n\n` + staticPrefixEndMarker + `\n\nAgent B Prompt\n\nDynamicTail"},
+		"session_options":{"thread_name":"Agent B","base_instructions":"Responsibility\n\nStaticCore\n\n` + StaticPrefixEndMarker + `\n\nAgent B Prompt\n\nDynamicTail"},
 		"session":{"threadId":""},
 		"input":{"type":"text","text":"Hi"}
 	}`)
@@ -693,7 +694,7 @@ func TestShellToolGuideAndWindowsStaticPrefixPlacement(t *testing.T) {
 	if codexSpec.DeveloperInstructions != nil {
 		t.Fatalf("Codex DeveloperInstructions = %q, want nil", *codexSpec.DeveloperInstructions)
 	}
-	if strings.Contains(codexSpec.SystemPrompt, staticPrefixEndMarker) {
+	if strings.Contains(codexSpec.SystemPrompt, StaticPrefixEndMarker) {
 		t.Fatalf("Codex SystemPrompt leaked static prefix marker: %q", codexSpec.SystemPrompt)
 	}
 }
@@ -755,7 +756,7 @@ func TestExecutionResolverPlacesHostEnvironmentGuideInStaticPrefix(t *testing.T)
 	req := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"codex","model":"gpt-5"},
-		"session_options":{"thread_name":"Agent A","base_instructions":"StaticCore\n\n` + staticPrefixEndMarker + `\n\nDynamicTail"},
+		"session_options":{"thread_name":"Agent A","base_instructions":"StaticCore\n\n` + StaticPrefixEndMarker + `\n\nDynamicTail"},
 		"session":{"threadId":""},
 		"input":{"type":"text","text":"Hi"}
 	}`)
@@ -778,5 +779,77 @@ func TestExecutionResolverPlacesHostEnvironmentGuideInStaticPrefix(t *testing.T)
 	}
 	if strings.Contains(withoutGuide.SystemPrompt, WindowsHostEnvironmentGuide) {
 		t.Fatalf("empty HostEnvironmentGuide still emitted WindowsHostEnvironmentGuide: %q", withoutGuide.SystemPrompt)
+	}
+}
+
+type fakeCLICredentialLookup struct{ installed bool }
+
+func (f fakeCLICredentialLookup) Lookup(string, string) (clicredential.Installation, error) {
+	if !f.installed {
+		return clicredential.Installation{}, clicredential.ErrNotInstalled
+	}
+	return clicredential.Installation{}, nil
+}
+
+func TestAssembleWarmupSystemPromptMatchesExecutionResolverPrefix(t *testing.T) {
+	serviceCommand := []string{"/opt/linger/bin/linger-computer", "--config", "/etc/linger/config.json"}
+	const toolGuide = "StaticToolGuide"
+	const teamHubBin = "/opt/linger/cli"
+	const staticPart = "StaticCore"
+
+	resolver := ExecutionResolver{
+		ServiceCommand:       serviceCommand,
+		TeamHubCLIBin:        teamHubBin,
+		ToolGuide:            toolGuide,
+		HostEnvironmentGuide: WindowsHostEnvironmentGuide,
+		Providers: map[string]ProviderInstallation{
+			"pi": {Type: "pi", ExecutablePath: "/local/bin/pi", ModelGateway: true, APILink: true},
+		},
+		WorkspaceGrants: map[string]WorkspaceGrant{
+			"grant-local": {GrantID: "grant-local", TenantID: "tenant-acme", Path: "/local/workspace"},
+		},
+		Views: testContextViews{root: "/local/workspace"},
+		Registrations: map[string]RegistrationBinding{
+			"registration-pi": {RegistrationID: "registration-pi", TenantID: "tenant-acme", OwnerActorID: "actor-alice", ProviderType: "pi", Status: registration.StatusOnline},
+		},
+		CLICredentials: fakeCLICredentialLookup{installed: true},
+	}
+	cmd := protocol.Command{
+		TenantID: "tenant-acme", AgentID: "agent-1", RegistrationID: "registration-pi", AssignmentRevision: 1,
+		WorkspaceGrantID: "grant-local", RuntimeType: "pi", HostAccess: "trusted",
+		ContextViewRef: json.RawMessage(`{"receipt_ref":"receipt-1"}`),
+	}
+	request := json.RawMessage(`{
+		"kind":"run.start",
+		"runtime":{"type":"pi","model":"localmodels/model-a"},
+		"session_options":{"thread_name":"Agent A","base_instructions":"Agent A Prompt","developer_instructions":"` + staticPart + `\n\n` + StaticPrefixEndMarker + `\n\nDynamicA"},
+		"session":{},
+		"input":{"type":"text","text":"Hi"}
+	}`)
+	spec, err := resolver.Resolve(context.Background(), cmd, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guides := PiDaemonStaticGuides(serviceCommand, toolGuide, WindowsHostEnvironmentGuide, true, true, true)
+	warmup := AssembleWarmupSystemPrompt(staticPart, guides)
+	if !strings.HasSuffix(warmup, "\n\n"+StaticPrefixEndMarker) {
+		t.Fatalf("warmup prompt missing trailing marker: %q", warmup)
+	}
+	warmupBeforeAnchor := strings.TrimSuffix(warmup, StaticPrefixEndMarker)
+	if !strings.HasPrefix(spec.SystemPrompt, warmupBeforeAnchor) {
+		t.Fatalf("warmup prefix is not an exact byte prefix of ExecutionResolver SystemPrompt:\nwarmupBeforeAnchor=%q\nsystemPrompt=%q", warmupBeforeAnchor, spec.SystemPrompt)
+	}
+
+	// Verify Windows host shell guide alignment explicitly across OS boundaries.
+	winGuides := daemonStaticGuidesFor("trusted", "pi", "windows", serviceCommand, toolGuide, WindowsHostEnvironmentGuide, true, true, true)
+	resolver.goos = "windows"
+	winSpec, err := resolver.Resolve(context.Background(), cmd, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	winWarmup := strings.TrimSuffix(AssembleWarmupSystemPrompt(staticPart, winGuides), StaticPrefixEndMarker)
+	if !strings.Contains(winWarmup, piWindowsPowerShellGuide) || !strings.HasPrefix(winSpec.SystemPrompt, winWarmup) {
+		t.Fatalf("windows warmup prefix mismatch:\nwinWarmup=%q\nwinSystem=%q", winWarmup, winSpec.SystemPrompt)
 	}
 }

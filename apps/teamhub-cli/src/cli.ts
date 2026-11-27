@@ -96,6 +96,7 @@ const fileLayers = new Set([
   "TeamHubFileError",
   "ContextRuntimeFileError",
   "ContextSkillFolderPackError",
+  "DocumentImageError",
 ]);
 
 /**

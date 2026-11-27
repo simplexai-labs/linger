@@ -4746,7 +4746,11 @@ export class LocalServerModule implements Module {
           source: path.basename(repo),
           from: currentRecord.version,
         });
-      this.#ready(origin, currentRecord.origin, "resume_ready");
+      this.#ready(
+        origin,
+        currentRecord.origin,
+        serving.revived ? "resume_revived" : "resume_ready",
+      );
       await this.#syncLocalGateway(
         currentRecord.home,
         origin,
@@ -4787,6 +4791,7 @@ export class LocalServerModule implements Module {
       this.#options.fetch ?? fetch,
       config.serverUrl,
       ORPHANED_SERVER_PROBE_MS,
+      { ready: false },
     ));
   }
 
@@ -4902,13 +4907,14 @@ export class LocalServerModule implements Module {
   }
 
   // Resolves with the source folder the installer reports the services
-  // serving from, and the origin they serve at.
+  // serving from, the origin they serve at, and whether resume cold-started
+  // stopped services.
   async #runResume(
     record: LocalRecord,
     repo: string,
     signal: AbortSignal,
     onStage?: (stage: string) => void,
-  ): Promise<{ source?: string; origin?: string }> {
+  ): Promise<{ source?: string; origin?: string; revived: boolean }> {
     await this.#adoptSourceKeys(record.home);
     // Resolved while the Node runtime is checked, so a slow PAC script does
     // not add to the start.
@@ -5110,6 +5116,7 @@ export class LocalServerModule implements Module {
       ...(typeof origin === "string" && parseServerUrl(origin) === origin
         ? { origin }
         : {}),
+      revived: resumeTimings?.path === "cold",
     };
   }
 
@@ -5672,19 +5679,52 @@ const STAGES: Record<string, readonly [LocalServerStep, number, number]> = {
   computer: ["workspace", 1, 1],
 };
 
-// Whether a server answers at an origin at all.
+// Whether a server is ready to serve at an origin. When `ready` is true
+// (default), probes /readyz first so a web host whose TeamHub or database
+// upstream is down is not mistaken for ready, falling back to HEAD / when an
+// older server returns 404. When `ready` is false, checks plain liveness at
+// HEAD / so transient backend blips do not look like a removed installation.
 async function answers(
   fetcher: typeof fetch,
   origin: string,
   timeoutMs = 1_000,
+  options: { ready?: boolean } = {},
 ): Promise<boolean> {
+  if (options.ready === false) {
+    try {
+      const response = await fetcher(origin, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      await response.body?.cancel().catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const startedAt = Date.now();
   try {
-    await fetcher(origin, {
+    const response = await fetcher(new URL("/readyz", origin).toString(), {
       method: "HEAD",
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
     });
-    return true;
+    await response.body?.cancel().catch(() => {});
+    if (response.ok) return true;
+    if (response.status !== 404) return false;
+  } catch {
+    return false;
+  }
+  const remainingMs = Math.max(200, timeoutMs - (Date.now() - startedAt));
+  try {
+    const fallback = await fetcher(origin, {
+      method: "HEAD",
+      redirect: "manual",
+      signal: AbortSignal.timeout(remainingMs),
+    });
+    await fallback.body?.cancel().catch(() => {});
+    return fallback.status < 500;
   } catch {
     return false;
   }

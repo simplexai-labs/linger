@@ -386,78 +386,6 @@ func (e AgentRuntimeWorkingStatusChangedEventStatus) Valid() bool {
 	}
 }
 
-// Defines values for AgentTemplateOrigin.
-const (
-	Builtin   AgentTemplateOrigin = "builtin"
-	Published AgentTemplateOrigin = "published"
-)
-
-// Valid indicates whether the value is a known member of the AgentTemplateOrigin enum.
-func (e AgentTemplateOrigin) Valid() bool {
-	switch e {
-	case Builtin:
-		return true
-	case Published:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentTemplateRoutineCreatedByRole.
-const (
-	AgentTemplateRoutineCreatedByRoleAgent AgentTemplateRoutineCreatedByRole = "agent"
-	AgentTemplateRoutineCreatedByRoleHuman AgentTemplateRoutineCreatedByRole = "human"
-)
-
-// Valid indicates whether the value is a known member of the AgentTemplateRoutineCreatedByRole enum.
-func (e AgentTemplateRoutineCreatedByRole) Valid() bool {
-	switch e {
-	case AgentTemplateRoutineCreatedByRoleAgent:
-		return true
-	case AgentTemplateRoutineCreatedByRoleHuman:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentTemplateRoutineMentionRole.
-const (
-	AgentTemplateRoutineMentionRoleAgent AgentTemplateRoutineMentionRole = "agent"
-)
-
-// Valid indicates whether the value is a known member of the AgentTemplateRoutineMentionRole enum.
-func (e AgentTemplateRoutineMentionRole) Valid() bool {
-	switch e {
-	case AgentTemplateRoutineMentionRoleAgent:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentTemplateSkillImportStatus.
-const (
-	AgentTemplateSkillImportStatusImportable  AgentTemplateSkillImportStatus = "importable"
-	AgentTemplateSkillImportStatusImported    AgentTemplateSkillImportStatus = "imported"
-	AgentTemplateSkillImportStatusUnavailable AgentTemplateSkillImportStatus = "unavailable"
-)
-
-// Valid indicates whether the value is a known member of the AgentTemplateSkillImportStatus enum.
-func (e AgentTemplateSkillImportStatus) Valid() bool {
-	switch e {
-	case AgentTemplateSkillImportStatusImportable:
-		return true
-	case AgentTemplateSkillImportStatusImported:
-		return true
-	case AgentTemplateSkillImportStatusUnavailable:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AgentType.
 const (
 	AgentTypeAnotherme AgentType = "anotherme"
@@ -3625,22 +3553,22 @@ func (e RoutineCadenceKind) Valid() bool {
 
 // Defines values for RoutineChangedPayloadChangeKind.
 const (
-	RoutineChangedPayloadChangeKindCreated RoutineChangedPayloadChangeKind = "created"
-	RoutineChangedPayloadChangeKindDeleted RoutineChangedPayloadChangeKind = "deleted"
-	RoutineChangedPayloadChangeKindFired   RoutineChangedPayloadChangeKind = "fired"
-	RoutineChangedPayloadChangeKindUpdated RoutineChangedPayloadChangeKind = "updated"
+	Created RoutineChangedPayloadChangeKind = "created"
+	Deleted RoutineChangedPayloadChangeKind = "deleted"
+	Fired   RoutineChangedPayloadChangeKind = "fired"
+	Updated RoutineChangedPayloadChangeKind = "updated"
 )
 
 // Valid indicates whether the value is a known member of the RoutineChangedPayloadChangeKind enum.
 func (e RoutineChangedPayloadChangeKind) Valid() bool {
 	switch e {
-	case RoutineChangedPayloadChangeKindCreated:
+	case Created:
 		return true
-	case RoutineChangedPayloadChangeKindDeleted:
+	case Deleted:
 		return true
-	case RoutineChangedPayloadChangeKindFired:
+	case Fired:
 		return true
-	case RoutineChangedPayloadChangeKindUpdated:
+	case Updated:
 		return true
 	default:
 		return false
@@ -5249,99 +5177,6 @@ type AgentSkillRegistration struct {
 	// SkillId Stable, case-sensitive logical Skill identifier.
 	SkillId SkillIdentifier `json:"skill_id"`
 }
-
-// AgentTemplate A reusable Agent definition. It carries identity text, instructions, Routines, and the exact Skill and Connector selections. Runtime provider, model, reasoning effort, and placement are Agent deployment facts and never belong to a template.
-type AgentTemplate struct {
-	// AvatarKey Product avatar selection carried with the template. Clients that do not know the key fall back to their own default.
-	AvatarKey *string `json:"avatar_key,omitempty"`
-
-	// ConnectorBindings Connected App keys this Agent used, carried so a consumer knows what to authorize. A template never carries a connection, account, credential, or token: the consumer grants access from their own connected accounts after the Agent exists.
-	ConnectorBindings []ExternalAppKey `json:"connector_bindings"`
-
-	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
-	CreatedAt    Timestamp `json:"created_at"`
-	Description  string    `json:"description"`
-	Instructions string    `json:"instructions"`
-	Name         string    `json:"name"`
-
-	// Origin builtin templates ship with the deployment and belong to no Tenant. published templates are Human-published and are visible to every Tenant in the deployment.
-	Origin      AgentTemplateOrigin `json:"origin"`
-	PublishedBy *ActorRef           `json:"published_by,omitempty"`
-
-	// Routines Fixed snapshots of all Routines in the publisher's direct Room with the source Agent. Copied automatically into the new Agent's direct Room with its Sponsor.
-	Routines      []AgentTemplateRoutine   `json:"routines"`
-	SkillBindings []AgentSkillRegistration `json:"skill_bindings"`
-
-	// TemplateId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	TemplateId Id `json:"template_id"`
-
-	// UpdatedAt UTC timestamp in RFC 3339 format with an explicit offset.
-	UpdatedAt Timestamp `json:"updated_at"`
-}
-
-// AgentTemplateOrigin builtin templates ship with the deployment and belong to no Tenant. published templates are Human-published and are visible to every Tenant in the deployment.
-type AgentTemplateOrigin string
-
-// AgentTemplatePage defines model for AgentTemplatePage.
-type AgentTemplatePage struct {
-	Items []AgentTemplate `json:"items"`
-}
-
-// AgentTemplatePublishRequest Publishes one reusable definition to the deployment-wide template market. Skill references are stored exactly as given and are resolved against the consuming Tenant catalog when an Agent is created. Publishing shares the referenced Skill versions: a consumer may copy a version private to the publisher into their own Tenant through importAgentTemplateSkills. A reference that can be neither bound nor copied is skipped rather than rejected here. Connector references name Apps only; no connection, credential, or account of the publisher is ever carried.
-type AgentTemplatePublishRequest struct {
-	AvatarKey *string `json:"avatar_key,omitempty"`
-
-	// ConnectorBindings Connected App keys this Agent used, carried so a consumer knows what to authorize. A template never carries a connection, account, credential, or token: the consumer grants access from their own connected accounts after the Agent exists.
-	ConnectorBindings *[]ExternalAppKey         `json:"connector_bindings,omitempty"`
-	Description       *string                   `json:"description,omitempty"`
-	Instructions      string                    `json:"instructions"`
-	Name              string                    `json:"name"`
-	SkillBindings     *[]AgentSkillRegistration `json:"skill_bindings,omitempty"`
-
-	// SourceAgentActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	SourceAgentActorId *Id `json:"source_agent_actor_id,omitempty"`
-}
-
-// AgentTemplateRoutine defines model for AgentTemplateRoutine.
-type AgentTemplateRoutine struct {
-	Cadence       RoutineCadence                    `json:"cadence"`
-	CreatedByRole AgentTemplateRoutineCreatedByRole `json:"created_by_role"`
-	Enabled       bool                              `json:"enabled"`
-	Instruction   string                            `json:"instruction"`
-
-	// Key Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	Key Id `json:"key"`
-
-	// MentionRole Absent when the source Routine has no valid mention of the source Agent. Raw instruction text is never rewritten.
-	MentionRole *AgentTemplateRoutineMentionRole `json:"mention_role,omitempty"`
-	Name        string                           `json:"name"`
-}
-
-// AgentTemplateRoutineCreatedByRole defines model for AgentTemplateRoutine.CreatedByRole.
-type AgentTemplateRoutineCreatedByRole string
-
-// AgentTemplateRoutineMentionRole Absent when the source Routine has no valid mention of the source Agent. Raw instruction text is never rewritten.
-type AgentTemplateRoutineMentionRole string
-
-// AgentTemplateSkillImport defines model for AgentTemplateSkillImport.
-type AgentTemplateSkillImport struct {
-	// Skill Initial enabled Agent binding to one existing sealed Skill Manifest version. Configuration defaults to an empty object. Agent registration does not upload or create a Skill Package.
-	Skill *AgentSkillRegistration `json:"skill,omitempty"`
-
-	// Source Initial enabled Agent binding to one existing sealed Skill Manifest version. Configuration defaults to an empty object. Agent registration does not upload or create a Skill Package.
-	Source AgentSkillRegistration `json:"source"`
-
-	// Status importable means the published template's Skill version can be copied from the publisher's Tenant into this Tenant as a private Skill of the caller. imported means the copy exists (created now or reused from an earlier import with identical content). unavailable means the source version is missing, disabled, deleted, or not owned by the template's publishing Tenant.
-	Status AgentTemplateSkillImportStatus `json:"status"`
-}
-
-// AgentTemplateSkillImportPage Template Skill references the caller cannot bind from this Tenant catalog. References the catalog already resolves, including platform Skills, are not listed.
-type AgentTemplateSkillImportPage struct {
-	Items []AgentTemplateSkillImport `json:"items"`
-}
-
-// AgentTemplateSkillImportStatus importable means the published template's Skill version can be copied from the publisher's Tenant into this Tenant as a private Skill of the caller. imported means the copy exists (created now or reused from an earlier import with identical content). unavailable means the source version is missing, disabled, deleted, or not owned by the template's publishing Tenant.
-type AgentTemplateSkillImportStatus string
 
 // AgentType Persisted Agent runtime type.
 type AgentType string
@@ -9627,9 +9462,6 @@ type TenantAgentCreateRequest struct {
 	// SkillBindings Initial enabled Agent Skill bindings; skill_id values must be unique. Configuration defaults to an empty object and must satisfy each selected Manifest.
 	SkillBindings *[]AgentSkillRegistration `json:"skill_bindings,omitempty"`
 
-	// TemplateId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	TemplateId *Id `json:"template_id,omitempty"`
-
 	// VisibilityScope Tenant directory visibility only. Sponsor visibility does not hide the Agent from members of a Room where the Sponsor explicitly admitted it, and workspace visibility does not grant Agent management or ordinary Room admission rights.
 	VisibilityScope *AgentVisibilityScope `json:"visibility_scope,omitempty"`
 }
@@ -10478,9 +10310,6 @@ type AfterRoomSeq = int64
 // AgentId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 type AgentId = Id
 
-// AgentTemplateId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-type AgentTemplateId = Id
-
 // AttachmentUploadId Service-signed upload credential. It names the uploading Human, the Room, and the stored file, and it expires at the upload's expires_at; clients must not construct or parse it.
 type AttachmentUploadId = AttachmentUploadToken
 
@@ -11178,9 +11007,6 @@ type ReadRoomHistoryShareJSONRequestBody = ReadRoomHistoryShare
 
 // PatchAccountProfileJSONRequestBody defines body for PatchAccountProfile for application/json ContentType.
 type PatchAccountProfileJSONRequestBody = AccountProfileUpdateRequest
-
-// PublishAgentTemplateJSONRequestBody defines body for PublishAgentTemplate for application/json ContentType.
-type PublishAgentTemplateJSONRequestBody = AgentTemplatePublishRequest
 
 // CreateTenantAgentJSONRequestBody defines body for CreateTenantAgent for application/json ContentType.
 type CreateTenantAgentJSONRequestBody = TenantAgentCreateRequest

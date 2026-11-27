@@ -125,7 +125,6 @@ function QuickCreateGeneralAgentFlow({
         agentType: "general",
         instructions: GENERAL_AGENT_INSTRUCTIONS,
         name: GENERAL_AGENT_DEFAULT_NAME,
-        skillBindings: [],
         tenantId,
         visibilityScope: "sponsor",
       });

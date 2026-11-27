@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   acceptVoiceWindow,
   adoptVoiceWindow,
+  voiceWindowLevel,
+  voiceWindowOptions,
   voiceWindowPosition,
 } from "./voice-window.js";
 
@@ -18,9 +20,13 @@ function fakes() {
     setAlwaysOnTop: vi.fn(),
     setVisibleOnAllWorkspaces: vi.fn(),
     setMenuBarVisibility: vi.fn(),
+    setTitle: vi.fn(),
     isDestroyed: vi.fn(() => false),
     close: vi.fn(() => child.emit("closed")),
-    destroy: vi.fn(),
+    destroy: vi.fn(() => {
+      child.isDestroyed.mockReturnValue(true);
+      child.emit("closed");
+    }),
   });
   const mainFrame = {};
   const opener = Object.assign(new EventEmitter(), {
@@ -40,9 +46,68 @@ describe("adoptVoiceWindow", () => {
   it("floats the window over other apps and keeps the page running", () => {
     const f = fakes();
     adopt(f);
-    expect(f.child.setAlwaysOnTop).toHaveBeenCalledWith(true, "floating");
+    expect(f.child.setAlwaysOnTop).toHaveBeenCalledWith(true, "pop-up-menu");
     expect(f.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(false);
     expect(f.child.setVisibleOnAllWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["darwin", "floating"],
+    // Up to "status", Electron puts a Windows window behind the taskbar each
+    // time it is activated.
+    ["win32", "pop-up-menu"],
+    ["linux", "pop-up-menu"],
+  ] as const)(
+    "floats at a level above ordinary windows on %s",
+    (platform, level) => {
+      expect(voiceWindowLevel(platform)).toBe(level);
+      const f = fakes();
+      adopt(f, platform);
+      expect(f.child.setAlwaysOnTop).toHaveBeenCalledWith(true, level);
+    },
+  );
+
+  it("goes back on top when the main window returns or a screen changes, until it closes", () => {
+    const f = fakes();
+    const main = new EventEmitter();
+    const screen = new EventEmitter();
+    adoptVoiceWindow(f.child as never, f.opener as never, "win32", [
+      [main, ["show", "restore", "focus"]],
+      [screen, ["display-removed"]],
+    ]);
+    f.child.setAlwaysOnTop.mockClear();
+    main.emit("focus");
+    main.emit("restore");
+    screen.emit("display-removed");
+    f.child.emit("show");
+    expect(f.child.setAlwaysOnTop).toHaveBeenCalledTimes(4);
+    // Restacking only: never off and on again, which drops other apps'
+    // always-on-top windows on Windows (electron#31536).
+    expect(
+      f.child.setAlwaysOnTop.mock.calls.every(
+        ([flag, level]) => flag === true && level === "pop-up-menu",
+      ),
+    ).toBe(true);
+
+    f.child.emit("closed");
+    f.child.setAlwaysOnTop.mockClear();
+    main.emit("focus");
+    screen.emit("display-removed");
+    expect(f.child.setAlwaysOnTop).not.toHaveBeenCalled();
+    expect(main.listenerCount("focus")).toBe(0);
+    expect(screen.listenerCount("display-removed")).toBe(0);
+  });
+
+  it("is a movable window apart from the main window, in the taskbar only where it must be", () => {
+    for (const platform of ["darwin", "win32", "linux"] as const) {
+      const options = voiceWindowOptions(platform);
+      expect(options).toMatchObject({ movable: true, minimizable: false });
+      // No parent and no modal: it neither minimizes with the main window nor
+      // sits under it.
+      expect(options).not.toHaveProperty("parent");
+      expect(options).not.toHaveProperty("modal");
+      expect(options.skipTaskbar).toBe(platform === "win32");
+    }
   });
 
   it("follows the person across Spaces on macOS", () => {
@@ -76,36 +141,74 @@ describe("adoptVoiceWindow", () => {
     expect(first.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(true);
   });
 
-  it("closes when the page navigates to another document or crashes", () => {
-    const sameDocument = fakes();
-    adopt(sameDocument);
-    sameDocument.opener.emit("did-start-navigation", {
+  it("destroys the window without calling close when the page navigates to another document or crashes", () => {
+    const navigated = fakes();
+    const main = new EventEmitter();
+    const screen = new EventEmitter();
+    adoptVoiceWindow(
+      navigated.child as never,
+      navigated.opener as never,
+      "linux",
+      [
+        [main, ["show", "restore", "focus"]],
+        [screen, ["display-removed"]],
+      ],
+    );
+    navigated.opener.emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: true,
     });
-    sameDocument.opener.emit("did-start-navigation", {
+    navigated.opener.emit("did-start-navigation", {
       isMainFrame: false,
       isSameDocument: false,
     });
-    expect(sameDocument.child.close).not.toHaveBeenCalled();
-    sameDocument.opener.emit("did-start-navigation", {
+    expect(navigated.child.destroy).not.toHaveBeenCalled();
+    expect(navigated.child.close).not.toHaveBeenCalled();
+
+    navigated.opener.emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
     });
-    expect(sameDocument.child.close).toHaveBeenCalledOnce();
+    expect(navigated.child.destroy).toHaveBeenCalledOnce();
+    expect(navigated.child.close).not.toHaveBeenCalled();
+    expect(navigated.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(
+      true,
+    );
+    expect(navigated.opener.listenerCount("did-start-navigation")).toBe(0);
+    expect(navigated.opener.listenerCount("render-process-gone")).toBe(0);
+    expect(main.listenerCount("focus")).toBe(0);
+    expect(screen.listenerCount("display-removed")).toBe(0);
 
     const crashed = fakes();
-    adopt(crashed);
+    const crashedMain = new EventEmitter();
+    adoptVoiceWindow(crashed.child as never, crashed.opener as never, "linux", [
+      [crashedMain, ["focus"]],
+    ]);
     crashed.opener.emit("render-process-gone");
-    expect(crashed.child.close).toHaveBeenCalledOnce();
+    expect(crashed.child.destroy).toHaveBeenCalledOnce();
+    expect(crashed.child.close).not.toHaveBeenCalled();
+    expect(crashed.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(
+      true,
+    );
+    expect(crashed.opener.listenerCount("did-start-navigation")).toBe(0);
+    expect(crashed.opener.listenerCount("render-process-gone")).toBe(0);
+    expect(crashedMain.listenerCount("focus")).toBe(0);
   });
 
-  it("returns a close function that is safe after the window is gone", () => {
-    const f = fakes();
-    const close = adopt(f);
-    f.child.isDestroyed.mockReturnValue(true);
-    close();
-    expect(f.child.close).not.toHaveBeenCalled();
+  it("returns a teardown function that destroys an open window and is safe after it is gone", () => {
+    const open = fakes();
+    const teardown = adopt(open);
+    teardown();
+    expect(open.child.destroy).toHaveBeenCalledOnce();
+    expect(open.child.close).not.toHaveBeenCalled();
+    expect(open.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(true);
+
+    const gone = fakes();
+    const closeGone = adopt(gone);
+    gone.child.isDestroyed.mockReturnValue(true);
+    closeGone();
+    expect(gone.child.destroy).not.toHaveBeenCalled();
+    expect(gone.child.close).not.toHaveBeenCalled();
   });
 
   it("keeps the window on its empty page", () => {
@@ -117,8 +220,20 @@ describe("adoptVoiceWindow", () => {
     expect(handler({})).toEqual({ action: "deny" });
     const event = { preventDefault: vi.fn() };
     f.childContents.emit("will-navigate", event);
-    f.child.emit("page-title-updated", event);
+    f.child.emit("page-title-updated", event, "about:blank");
     expect(event.preventDefault).toHaveBeenCalledTimes(2);
+    expect(f.child.setTitle).not.toHaveBeenCalled();
+  });
+
+  it("takes the title the page gives it in the interface language", () => {
+    const f = fakes();
+    adopt(f);
+    const event = { preventDefault: vi.fn() };
+    // "Meeting" in Chinese.
+    f.child.emit("page-title-updated", event, "\u4f1a\u8bae");
+    expect(f.child.setTitle).toHaveBeenCalledWith("\u4f1a\u8bae");
+    f.child.emit("page-title-updated", event, "  ");
+    expect(f.child.setTitle).toHaveBeenCalledOnce();
   });
 });
 

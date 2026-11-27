@@ -175,10 +175,10 @@ export interface LingerDesktopApi {
   };
   // The page floats its Voice Mode and Recording windows in a window of their
   // own opened with `window.open("")`; present only when this app allows that,
-  // so an older app keeps them in the page.
+  // so an older app keeps them in the page. The window is moved by its title
+  // bar and has no way back into the page or to the main window.
   readonly voiceWindow: {
-    // Brings the main window to the front, from the floating window.
-    showMainWindow(): Promise<void>;
+    readonly floats: true;
   };
   // The page reports the language the person chose in Settings › Language,
   // and again on every change, so the app's menus, tray, notifications and
@@ -249,7 +249,6 @@ export const IPC = {
   previewCommand: "preview.command",
   previewClose: "preview.close",
   previewState: "preview.state",
-  voiceWindowShowMain: "voice-window.show-main",
   languageSet: "language.set",
   diagnosticsSave: "diagnostics.save",
 } as const;

@@ -320,6 +320,11 @@ export interface RetiredOperationPreparation {
   readonly commandId: string;
   readonly identity: ReturnType<typeof operationMCPPrepareIdentity>;
 }
+export interface DeploymentPromptFeatures {
+  connectedApps: boolean;
+  permissionReview: boolean;
+}
+
 export interface RunnerGatewayContext {
   readonly options: RunnerGatewayOptions;
   readonly heartbeatIntervalMs: number;
@@ -335,6 +340,7 @@ export interface RunnerGatewayContext {
   readonly agentCliCredentialIssuer: AgentCliCredentialIssuer | undefined;
   readonly computerRegistry: LocalComputerRegistry | undefined;
   readonly computerDaemonIdentityVerifier: ComputerDaemonIdentityVerifier;
+  deploymentFeatures: DeploymentPromptFeatures;
 }
 export interface RunnerGatewayControllers {
   readonly connections: () => RunnerConnections;
@@ -397,6 +403,10 @@ export function createRunnerGatewayContext(
     agentCliCredentialIssuer,
     computerRegistry,
     computerDaemonIdentityVerifier: options.computerDaemonIdentityVerifier,
+    deploymentFeatures: {
+      connectedApps: true,
+      permissionReview: false,
+    },
   };
 }
 export function validateRunnerGatewayContext(

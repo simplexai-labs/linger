@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskexecution"
 	teamhubinternal "github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 )
 
@@ -580,6 +582,57 @@ func TestVoiceLiveKeepsOutOfATaskWorkingRoomUnasked(t *testing.T) {
 	own := call("lt_open", "open-own", "page_action", map[string]any{"action": "open_room", "target": roomID})
 	if asked["status"] != "admitted" || own["status"] != "admitted" {
 		t.Fatalf("asked=%v own=%v", asked, own)
+	}
+}
+
+func TestVoiceLiveResumedTaskTellsItsHomeRoom(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, _, roomID, sessionID := newVoiceLiveRoom(t)
+	call := liveToolCaller(t, env, sessionID)
+	if started := call("lt_start", "task-1", "start_task", map[string]any{"goal": "Make a slide deck", "surface": "workspace"}); started["status"] != "started" {
+		t.Fatalf("start=%v", started)
+	}
+	var taskID string
+	if err := env.pool.QueryRow(t.Context(), `SELECT work_item_id FROM voice_live_tasks WHERE voice_session_id=$1`, sessionID).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	homeEvents := func() int {
+		var count int
+		if err := env.pool.QueryRow(t.Context(), `SELECT count(*) FROM room_events
+			WHERE room_id=$1 AND event_type='work_item.changed' AND resource_id=$2`, roomID, taskID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	// The Task is hidden, so no origin link names its Room; the Room's list of
+	// running Tasks is idle once it stops and only an Event refreshes it.
+	inTx := func(run func(*store.Queries) error) {
+		t.Helper()
+		tx, err := env.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		if err := run(store.New(tx)); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inTx(func(queries *store.Queries) error {
+		_, err := taskexecution.StopTask(t.Context(), queries, taskID, "actor_acme_alice")
+		return err
+	})
+	before := homeEvents()
+	inTx(func(queries *store.Queries) error {
+		_, err := taskexecution.AppendTaskInput(t.Context(), queries, taskexecution.TaskInput{
+			TaskID: taskID, Cause: taskexecution.TaskInputMetaMessage, Body: "Go on.",
+		})
+		return err
+	})
+	if after := homeEvents(); after != before+1 {
+		t.Fatalf("home Room work_item.changed events before=%d after=%d", before, after)
 	}
 }
 

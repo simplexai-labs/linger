@@ -183,7 +183,7 @@ This journey proves the updater mechanics. The [upgrade from the previous releas
 
 **Setup:** Signed-in Desktop connected to a server with Voice enabled (LiveKit running and provider key configured).
 
-**Journey:** Start Voice Mode or Recording and open its floating window (`window.open("", "linger-voice-window-<n>")`). Minimize or hide the main Desktop window to tray; confirm the floating window stays visible and always-on-top while active audio stays unthrottled. On **macOS**, switch Spaces and enter a fullscreen app to confirm `setVisibleOnAllWorkspaces` keeps the window visible. Use the return-to-main control (`showMainWindow`), then close or navigate the main window and verify the floating window closes without orphaning.
+**Journey:** Start Voice Mode or Recording and open its floating window (`window.open("", "linger-voice-window-<n>")`). Minimize or hide the main Desktop window to tray; confirm the floating window stays visible and always-on-top while active audio stays unthrottled. On **macOS**, switch Spaces and enter a fullscreen app to confirm `setVisibleOnAllWorkspaces` keeps the window visible. Drag it by its title bar and click the main window and other apps; it stays above them (on **Windows** also above the taskbar, and out of the taskbar list). Then close or navigate the main window and verify the floating window closes without orphaning.
 
 ### OS permissions and desktop control
 

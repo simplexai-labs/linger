@@ -131,16 +131,22 @@ async function prepare(
       utf8(snapshot.content);
       snapshot = await bundleDocumentImages(
         { ...snapshot, filePath: `./playground/${filename}` },
-        async (relative, readSignal) => ({
-          ...(await regular(
-            path.resolve(
-              path.dirname(source),
-              relative.slice("./playground/".length),
-            ),
-            readSignal,
-          )),
-          filePath: relative,
-        }),
+        async (relative, readSignal) => {
+          if (process.platform === "win32" && relative.includes(":"))
+            throw invalid(
+              "Document image paths cannot contain colons on Windows.",
+            );
+          return {
+            ...(await regular(
+              path.resolve(
+                path.dirname(source),
+                relative.slice("./playground/".length),
+              ),
+              readSignal,
+            )),
+            filePath: relative,
+          };
+        },
         signal,
       );
     }

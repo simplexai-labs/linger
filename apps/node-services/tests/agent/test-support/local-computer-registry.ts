@@ -128,9 +128,11 @@ export function createTestLocalComputerRegistry(
           : {}),
         generation: previous?.generation ?? 0,
       });
-      return [...placements.values()]
-        .filter((entry) => entry.computerId === computerId)
-        .map(({ placement }) => structuredClone(placement));
+      return {
+        placements: [...placements.values()]
+          .filter((entry) => entry.computerId === computerId)
+          .map(({ placement }) => structuredClone(placement)),
+      };
     },
     async touch(computerId, touch) {
       const computer = computers.get(computerId);

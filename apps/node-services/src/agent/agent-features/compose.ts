@@ -21,7 +21,7 @@ import {
   type RuntimePreparation,
   type RuntimePreparationInput,
 } from "./contracts.js";
-import { STATIC_PREFIX_END_MARKER } from "../prompt/index.js";
+import { STATIC_PREFIX_END_MARKER } from "../prompt/prefix-boundary.js";
 import type { AgentInput, RunEvent } from "../executor/provider.js";
 import type { ExecutionContextRef } from "../executor/context-ref.js";
 import type { Message, AgentCapability, AgentType } from "../executor/types.js";

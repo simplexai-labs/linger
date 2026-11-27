@@ -22,6 +22,7 @@ import {
   testRegistryOf,
 } from "../test-support/runner-gateway.js";
 import { TeamHubRuntimeStateError } from "../../../src/agent/executor/teamhub-runtime-state-client.js";
+import { renderStaticPrefixBundle } from "../../../src/agent/prompt/index.js";
 import { runtimeDiagnostics } from "./runtime-diagnostics-fixture.js";
 
 import {
@@ -1184,5 +1185,68 @@ describe("RunnerGateway local Computer reconnect wait", () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it("propagates TeamHub connect prompt feature flags to served static prefixes", async () => {
+    let flags = { connectedApps: false, permissionReview: true };
+    const inner = testRegistryOf(
+      createTestRunnerGateway({ heartbeatIntervalMs: 1_000 }),
+    );
+    const registry = {
+      ...inner,
+      connect: async (input: Parameters<typeof inner.connect>[0]) => ({
+        ...(await inner.connect(input)),
+        ...flags,
+      }),
+    };
+    const gateway = createTestRunnerGateway({
+      heartbeatIntervalMs: 1_000,
+      computerRegistry: registry,
+      contextContent: {
+        publicOrigin: "https://agent.example",
+        signingKey: "k".repeat(32),
+      },
+    });
+
+    const fetchPrefixes = async (epoch: number) => {
+      const content = gateway.contextViewContent;
+      expect(content).toBeDefined();
+      const baseUrl = content!.contentUrl("runner-local", epoch);
+      const token = baseUrl.slice(baseUrl.lastIndexOf("/") + 1);
+      const response = await content!.handle(
+        token,
+        "static-prefixes",
+        "v1",
+        new Request(`${baseUrl}/static-prefixes/v1`),
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        prefixes: { meta: { full: string } };
+      };
+    };
+
+    const conn1 = await acceptReadyConnection(gateway, new RecordingPeer());
+    const first = await fetchPrefixes(1);
+    expect(first.prefixes.meta.full).toBe(
+      renderStaticPrefixBundle({
+        connectedApps: false,
+        permissionReview: true,
+      }).prefixes.meta.full,
+    );
+    expect(first.prefixes.meta.full).toContain("<tool-approval-protocol>");
+    conn1.disconnect();
+
+    flags = { connectedApps: true, permissionReview: false };
+    const conn2 = await acceptReadyConnection(gateway, new RecordingPeer());
+    const second = await fetchPrefixes(2);
+    expect(second.prefixes.meta.full).toBe(
+      renderStaticPrefixBundle({
+        connectedApps: true,
+        permissionReview: false,
+      }).prefixes.meta.full,
+    );
+    expect(second.prefixes.meta.full).not.toContain("<tool-approval-protocol>");
+    expect(second.prefixes.meta.full).not.toBe(first.prefixes.meta.full);
+    conn2.disconnect();
   });
 });

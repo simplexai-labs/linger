@@ -607,10 +607,13 @@ Gateway and runs Agents. The daemon exits with the app.
   (`app-window.ts`), the main window after. The main window's server form
   without a server says Back to Setup instead of Cancel.
   Main window loading policy (`windowLoadDecision` in `src/main/navigation.ts`):
-  all server loads (`boot`, `local_ready`, `resume_ready`, `server_changed`,
-  `port_moved`, `retry`, `prewarm`) pass through one decision helper so
-  duplicate `loadURL` calls on hot start are skipped when the target origin is
-  already loaded or pending without a shell page or load failure. `BaseWindow`
+  all server loads (`boot`, `local_ready`, `resume_ready`, `resume_revived`,
+  `server_changed`, `port_moved`, `retry`, `prewarm`) pass through one decision
+  helper so duplicate `loadURL` calls on hot start are skipped when the target
+  origin is already loaded or pending without a shell page or load failure,
+  while `resume_revived` (emitted when `--resume` reports a cold start)
+  reloads the same origin without hijacking a window
+  viewing another server. `BaseWindow`
   is created with `show: false` and revealed on the first `did-finish-load` or
   `did-fail-load` after `show()`, with a short 1500 ms timeout fallback so a
   stalled load still reveals the window; `preloadAuthenticated` loads the
@@ -640,7 +643,10 @@ Gateway and runs Agents. The daemon exits with the app.
   `local-server.retry`, and after `UNREACHABLE_GRACE_MS` (longer than the
   supervisor's restart delays) on `local-server.unreachable` (WindowManager
   emits it when it shows `offline.html` for a failed load) or the
-  `WATCH_MS` watch. Those two resume at most once a minute, and only after
+  `WATCH_MS` watch. Readiness probes (`answers`) check `HEAD /readyz` first
+  (falling back to `HEAD /` when an older server returns 404) so a web host
+  whose TeamHub or database upstream is down is not mistaken for ready. Those
+  two resume at most once a minute, and only after
   `UNREACHABLE_PROBES` checks in a row spread over the grace went unanswered,
   each allowed `UNREACHABLE_PROBE_TIMEOUT_MS` (longer than the launch's 1 s
   fast check), so a server slowed by heavy load is not taken for a stopped
@@ -657,12 +663,20 @@ Gateway and runs Agents. The daemon exits with the app.
   is open the page is not background-throttled. Only a window the main page
   itself opened is kept; one from a frame in it is destroyed. It opens at the
   bottom right of the main window's screen and resizes down to 240x96. Its
-  native close button ends the call or the recording;
-  `lingerDesktop.voiceWindow.showMainWindow()` (its presence is how the SPA
-  knows the app supports this) restores and focuses the main window, on macOS
-  bringing the app in front of the active one, and the SPA then closes the
-  floating window and keeps the session in the page. An app without
-  `voiceWindow` keeps the in-page windows.
+  title is the one the page gives it in the interface language (in English,
+  "Meeting"); a blank title keeps "Linger". It is moved by its native title bar,
+  cannot be minimized, and its close button ends the call or the recording;
+  it has no way back into the page or to the main window, and the app has no
+  in-page voice windows. `lingerDesktop.voiceWindow.floats` tells the SPA the
+  app supports this; an app without `voiceWindow` keeps the in-page windows.
+  Stacking (`voiceWindowLevel`, `voiceWindowOptions`): macOS floats it at
+  `floating` on every Space and over full-screen apps; Windows and Linux use
+  `pop-up-menu`, because Electron moves a Windows window at the levels up to
+  `status` behind the taskbar each time it is activated. It is left out of
+  the Windows taskbar. The main window showing, restoring or taking focus,
+  and a display being added, removed or changed, call `setAlwaysOnTop(true)`
+  again, which only restacks it; never toggle it off and on (on Windows that
+  drops other apps' always-on-top windows).
 - `src/shell/*.html`: app-owned pages (title bar, offline/setup page). They
   have no network access and talk to the main process via `src/preload/shell.ts`.
   Their text lives in the `*.messages.ts` beside them; the main process

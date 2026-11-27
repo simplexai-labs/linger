@@ -836,7 +836,7 @@ function RoomHeader({
           </button>
           <h1
             aria-label={room.name}
-            className="pointer-events-none min-w-0 truncate text-sm leading-[18px] font-medium text-foreground"
+            className="pointer-events-none min-w-0 max-w-80 truncate text-sm leading-[18px] font-medium text-foreground"
           >
             {room.name}
           </h1>

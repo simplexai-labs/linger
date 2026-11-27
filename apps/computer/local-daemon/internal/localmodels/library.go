@@ -78,6 +78,8 @@ type Options struct {
 	EnsurePiRetryInterval time.Duration
 	// EnsureLoadTimeout bounds EnsureLoaded's wait for one model.
 	EnsureLoadTimeout time.Duration
+	// WarmupPrefix runs post-load static prefix warm-up for loaded PolyStrata models.
+	WarmupPrefix func(ctx context.Context, target PrefixWarmupTarget) (bool, error)
 }
 
 // Library runs the localmodels tool for one Computer.
@@ -141,15 +143,18 @@ type Library struct {
 	// status read (catalogKey); nil before the first one.
 	catalog *string
 	// unreadable is whether the last status read failed.
-	unreadable   bool
-	piExecutable string
-	piEnsuring   bool
-	piFailures   int
-	piRetryAt    time.Time
-	jobs         map[string]*job
-	probes       map[string]*activeProbe
-	probeUnknown map[string]probeFingerprint
-	prober       *concurrencyProber
+	unreadable    bool
+	piExecutable  string
+	piEnsuring    bool
+	piFailures    int
+	piRetryAt     time.Time
+	jobs          map[string]*job
+	probes        map[string]*activeProbe
+	probeUnknown  map[string]probeFingerprint
+	prober        *concurrencyProber
+	warmupPrefix  func(ctx context.Context, target PrefixWarmupTarget) (bool, error)
+	prefixWarmups map[string]*activePrefixWarmup
+	prefixWarmed  map[string]prefixWarmupFingerprint
 	// causes holds, by model, the cause the last job's error line gave. The
 	// tool's status keeps only the code, so each read puts the cause back on
 	// a row that still fails with that code.
@@ -191,7 +196,9 @@ func New(options Options) *Library {
 		progressInterval: options.ProgressInterval, statusTimeout: options.StatusTimeout, actionTimeout: options.ActionTimeout,
 		ensurePiTimeout: options.EnsurePiTimeout, ensurePiRetryInterval: options.EnsurePiRetryInterval,
 		ensureLoadTimeout: options.EnsureLoadTimeout,
+		warmupPrefix:      options.WarmupPrefix,
 		now:               time.Now, healthCheck: gatewayAnswers, ctx: ctx, stop: stop, jobs: make(map[string]*job), probes: make(map[string]*activeProbe), probeUnknown: make(map[string]probeFingerprint),
+		prefixWarmups: make(map[string]*activePrefixWarmup), prefixWarmed: make(map[string]prefixWarmupFingerprint),
 		causes:            make(map[string]*wire.LocalModelError),
 		installerLockWait: defaultInstallerLockWait, installerLockRetry: defaultInstallerLockRetry, settledCh: make(chan struct{}),
 		changed: make(chan struct{}), jobEnded: make(map[string]uint64), ensures: make(map[string]*ensureLoad),
@@ -253,6 +260,7 @@ func (l *Library) Close() {
 	if l.progressTimer != nil {
 		l.progressTimer.Stop()
 	}
+	l.cancelAllPrefixWarmupsLocked()
 	l.mu.Unlock()
 	l.wg.Wait()
 }
@@ -333,9 +341,19 @@ func (l *Library) scheduleEnsurePi() {
 			l.piExecutable = executable
 			l.piFailures = 0
 			l.piRetryAt = time.Time{}
+			shouldRefresh := l.warmupPrefix != nil && !l.closed && l.ctx.Err() == nil
+			if shouldRefresh {
+				l.wg.Add(1)
+			}
 			l.mu.Unlock()
 			slog.Info("local_models.pi_ready", "executable", executable)
 			l.runtimeChanged()
+			if shouldRefresh {
+				go func() {
+					defer l.wg.Done()
+					l.Refresh(l.ctx)
+				}()
+			}
 			return
 		}
 		l.piFailures++
@@ -363,8 +381,10 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 	}
 	if snapshot.Available {
 		l.reconcileProbes(&snapshot)
+		l.reconcilePrefixWarmups(&snapshot)
 	} else {
 		l.cancelAllProbes()
+		l.cancelAllPrefixWarmups()
 	}
 	changed := false
 	catalogChanged := false
@@ -535,6 +555,7 @@ func (l *Library) runAction(ctx context.Context, action Action, deadline time.Ti
 		cancelledProbe := false
 		if action.Name == ActionUnload || action.Name == ActionRemove {
 			cancelledProbe = l.cancelProbe(action.Model)
+			l.cancelPrefixWarmup(action.Model)
 		}
 		runCtx, cancel := context.WithTimeout(l.ctx, l.actionTimeout)
 		defer cancel()
@@ -798,8 +819,10 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 				l.mu.Lock()
 				if action.Name == ActionLoad {
 					l.cancelProbeLocked(action.Model)
+					l.cancelPrefixWarmupLocked(action.Model)
 					for _, unloadModel := range action.UnloadFirst {
 						l.cancelProbeLocked(unloadModel)
+						l.cancelPrefixWarmupLocked(unloadModel)
 					}
 				}
 				l.jobs[action.Model] = &job{action: action}

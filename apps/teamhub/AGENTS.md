@@ -91,7 +91,7 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   its answer in between.
 - `internal/<feature>`: business behavior, transactions and data access with
   package tests: `collaboration` (Human Rooms and Messages),
-  `agentregistry` (Agents, templates, Skill bindings, Another Me),
+  `agentregistry` (Agents, starter Agents, Skill bindings, Another Me),
   `voice` (voice features), and the older feature packages.
 - `internal/store/queries`: sqlc SQL sources; generated files live in `internal/store`.
 - `internal/skill`: parses Skill Packages, resolves effective Skill sets, and

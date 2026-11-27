@@ -108,7 +108,7 @@ func (s *Service) NotifyAgentRegistrationChanged(ctx context.Context, agentManag
 }
 
 // AgentRegistrationFromRecord copies a generic registration read, which names
-// every column except the avatar image and template installation, into the
+// every column except the avatar image, into the
 // registration value the Agent flows pass around.
 func AgentRegistrationFromRecord(row store.GetAgentRegistrationRow) store.AgentRegistration {
 	return store.AgentRegistration{

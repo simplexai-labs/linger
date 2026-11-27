@@ -46,14 +46,9 @@ export function ApiKeysSettings() {
 
   return (
     <section className="flex flex-col gap-3">
-      <header>
-        <h2 className="text-base text-foreground">
-          {t(accountSettingsMessages.apiKeys)}
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {t(accountSettingsMessages.apiKeysDescription)}
-        </p>
-      </header>
+      <h2 className="text-base text-foreground">
+        {t(accountSettingsMessages.apiKeys)}
+      </h2>
       <div className="rounded-2xl border border-border bg-background">
         <ComposioKeyRow onOpen={open} />
         {voicePolicy?.voice_available ? (
