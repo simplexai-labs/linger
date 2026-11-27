@@ -11,6 +11,9 @@ export const roomSettingsMessages = defineMessages("roomSettings", {
   loadingMembers: "Loading members...",
   shareConversation: "Share conversation",
   share: "Share",
+  exportRecentMessages: "Export recent messages (.md)",
+  exportRecentMessagesFailed: "Could not export recent messages.",
+  exportRecentMessagesEmpty: "There are no recent messages to export.",
   renameRoom: "Rename {name}",
   leaveRoom: "Leave Room",
   leaveDescription:

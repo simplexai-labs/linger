@@ -32,6 +32,7 @@ import {
 import { RoomAvatar } from "./members/room-avatar";
 import { RoomMembersSection } from "./members/room-members-section";
 import { RoomDeleteDialog } from "./room-delete-dialog";
+import { RoomMarkdownExport } from "./room-markdown-export";
 import { useRoomParticipation, RoomRejoinBanner } from "./room-participation";
 import type {
   TeamHubActorRef,
@@ -123,6 +124,14 @@ function RoomSettingsContent({
               tenantId={room.tenant_id}
             />
           </Suspense>
+          <div className="space-y-2 px-3">
+            <RoomMarkdownExport
+              key={room.id}
+              roomId={room.id}
+              roomName={room.name}
+              tenantId={room.tenant_id}
+            />
+          </div>
           {room.participation === "left" ? (
             <div className="px-3">
               <RoomRejoinBanner room={room} />

@@ -416,6 +416,23 @@ export function roomMessageQueryOptions(
   });
 }
 
+export async function readRoomMessagePage(
+  client: TeamHubClient,
+  tenantId: string,
+  roomId: string,
+  cursor?: string,
+) {
+  return requireMessagePageScope(
+    await teamHubData(
+      client.api.GET("/v0/rooms/{roomId}/messages", {
+        params: { path: { roomId }, query: { cursor, limit: 50 } },
+      }),
+    ),
+    tenantId,
+    roomId,
+  );
+}
+
 export function roomMessagesInfiniteQueryOptions(
   client: TeamHubClient,
   tenantId: string,
@@ -430,19 +447,8 @@ export function roomMessagesInfiniteQueryOptions(
   >({
     getNextPageParam: resolveNextMessagePageParam,
     initialPageParam: undefined as string | undefined,
-    queryFn: async ({ pageParam }) =>
-      requireMessagePageScope(
-        await teamHubData(
-          client.api.GET("/v0/rooms/{roomId}/messages", {
-            params: {
-              path: { roomId },
-              query: { cursor: pageParam, limit: 50 },
-            },
-          }),
-        ),
-        tenantId,
-        roomId,
-      ),
+    queryFn: ({ pageParam }) =>
+      readRoomMessagePage(client, tenantId, roomId, pageParam),
     queryKey: roomMessagesQueryKey(tenantId, roomId),
     // Bootstrap + event catch-up own navigation recovery. Avoid a second
     // snapshot request when the same history mounts again moments later.
