@@ -176,6 +176,8 @@ export async function prepareNativeDatabase(options: {
           "--encoding",
           "UTF8",
           "--no-locale",
+          // Skip fsyncing freshly created base catalog files for faster cold
+          // setup; normal kills before start self-heal via .partial and postmaster.opts.
           "--no-sync",
         ],
         // Antivirus scanning of the new files can make it take minutes.

@@ -1575,8 +1575,6 @@ async function runNativeSource(
         // network, then finalize the service region right before services start.
         let regionInfo: RegionResolutionInfo | undefined;
         let regionResolved = false;
-        let backgroundRegionInfo: RegionResolutionInfo | undefined;
-        let backgroundRegion: Region | undefined;
         const immediateRegion = await cachedRegion(home, {
           signal,
           onResolved: (info) => {
@@ -1601,16 +1599,7 @@ async function runNativeSource(
             signal,
             regionProbeController.signal,
           ]);
-          void resolveRegion(home, {
-            signal: regionProbeSignal,
-            onResolved: (info) => {
-              backgroundRegionInfo = info;
-              backgroundRegion = info.region;
-            },
-          }).then(
-            (resolved) => {
-              backgroundRegion ??= resolved;
-            },
+          void resolveRegion(home, { signal: regionProbeSignal }).catch(
             () => undefined,
           );
         }
@@ -1954,26 +1943,6 @@ async function runNativeSource(
           if (regionResolved) return;
           regionResolved = true;
           signal.throwIfAborted();
-          if (backgroundRegionInfo) {
-            baseEnv.SIMPLEX_REGION = backgroundRegionInfo.region;
-            env = buildEnv();
-            emit({
-              kind: "log",
-              stage: "services",
-              message: `${formatRegionResolution(backgroundRegionInfo)}\n`,
-            });
-            return;
-          }
-          if (backgroundRegion) {
-            baseEnv.SIMPLEX_REGION = backgroundRegion;
-            env = buildEnv();
-            emit({
-              kind: "log",
-              stage: "services",
-              message: `Download region: ${backgroundRegion}.\n`,
-            });
-            return;
-          }
           let lateInfo: RegionResolutionInfo | undefined;
           const lateRegion = await cachedRegion(home, {
             signal,
@@ -1981,25 +1950,16 @@ async function runNativeSource(
               lateInfo = info;
             },
           });
-          if (lateRegion) {
-            baseEnv.SIMPLEX_REGION = lateRegion;
-            env = buildEnv();
-            emit({
-              kind: "log",
-              stage: "services",
-              message: lateInfo
-                ? `${formatRegionResolution(lateInfo)}\n`
-                : `Download region: ${lateRegion}.\n`,
-            });
-            return;
-          }
-          baseEnv.SIMPLEX_REGION = "global";
+          baseEnv.SIMPLEX_REGION = lateRegion ?? "global";
           env = buildEnv();
           emit({
             kind: "log",
             stage: "services",
-            message:
-              "Download region: global (probe pending; continuing offline startup).\n",
+            message: lateRegion
+              ? lateInfo
+                ? `${formatRegionResolution(lateInfo)}\n`
+                : `Download region: ${lateRegion}.\n`
+              : "Download region: global (probe pending; continuing offline startup).\n",
           });
         };
         const provisionOwner = async (

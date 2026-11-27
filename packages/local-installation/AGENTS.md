@@ -195,7 +195,11 @@ moves it to `native/postgres-data` only once it succeeds, so a killed `initdb`
 never leaves a directory that later attempts treat as initialized. A
 `postgres-data` with `PG_VERSION` but no `postmaster.opts` (which only a started
 server writes) never served a connection, holds no data, and is initialized
-again. On a freshly initialized cluster (`!initialized`), `prepareNativeDatabase`
+again. Skipping `initdb` fsync trades a narrow unrecoverable-cluster window on
+OS crash or power loss before kernel writeback (if `postmaster.opts` survives
+while base catalog files are torn) for faster cold setup; normal process
+crashes or kills before `postgres` starts remain self-healing via `.partial`
+and the `postmaster.opts` guard. On a freshly initialized cluster (`!initialized`), `prepareNativeDatabase`
 starts `postgres` and runs a single `psql` readiness-and-create loop against
 `postgres` (`CREATE DATABASE simplexai ... \gexec`, up to 60 s per attempt
 bounded by the 120 s deadline, retrying only on `psql` exit code `2`,

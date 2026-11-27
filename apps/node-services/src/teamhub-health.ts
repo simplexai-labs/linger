@@ -44,7 +44,11 @@ export async function waitForTeamHubHealth(
   }
 }
 
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+/** Resolves after `milliseconds` or immediately when `signal` aborts. */
+export function delay(
+  milliseconds: number,
+  signal: AbortSignal,
+): Promise<void> {
   if (signal.aborted) return Promise.resolve();
 
   return new Promise((resolve) => {

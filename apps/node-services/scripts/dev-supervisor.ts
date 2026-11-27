@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
+  delay,
   readTeamHubHealthUrl,
   waitForTeamHubHealth,
 } from "../src/teamhub-health.js";
@@ -160,23 +161,6 @@ function waitForChildExit(
     child.once("exit", onExit);
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) onAbort();
-  });
-}
-
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(finish, milliseconds);
-    const onAbort = (): void => finish();
-
-    function finish(): void {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }
-
-    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 
