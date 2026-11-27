@@ -17,6 +17,41 @@ const node = (id: string, title: string, body = ""): WikiNode => ({
 });
 
 describe("mention edges", () => {
+  it.each([
+    "Jos\u00e9",
+    "\u00c9ric",
+    "\u0410\u043b\u0438\u043d\u0430",
+    "\u0623\u062d\u0645\u062f",
+  ])(
+    "counts Unicode letters when deciding whether a name is distinctive: %s",
+    (name) => {
+      const edges = mentionEdges([
+        node("contacts/person", name),
+        node(
+          "sessions/2026-10-03/meeting",
+          "Meeting",
+          `${name} will review the proposal.`,
+        ),
+      ]);
+      expect(edges).toEqual([
+        expect.objectContaining({ target: "contacts/person", count: 1 }),
+      ]);
+    },
+  );
+
+  it("does not treat emoji or punctuation as the letters of a name", () => {
+    expect(
+      mentionEdges([
+        node("contacts/person", "\u{1f680}\u{1f680}\u{1f680}\u{1f680}"),
+        node(
+          "sessions/2026-10-03/meeting",
+          "Meeting",
+          "\u{1f680}\u{1f680}\u{1f680}\u{1f680}",
+        ),
+      ]),
+    ).toEqual([]);
+  });
+
   it("links a page to the entities it names, weighting key sections and dates", () => {
     const edges = mentionEdges(
       [
@@ -131,6 +166,49 @@ describe("mention edges", () => {
       first.find((edge) => edge.target === target)!.weight;
     expect(weight("clients/orion")).toBeGreaterThan(weight("clients/acme"));
   });
+
+  it.each([
+    "\u041f\u0440\u043e\u0435\u043a\u0442",
+    "\u043f\u0440\u043e\u0435\u043a\u0442",
+    "\u03a3\u03c7\u03ad\u03b4\u03b9\u03bf",
+    "\u03c3\u03c7\u03ad\u03b4\u03b9\u03bf",
+  ])("ignores ordinary one-word aliases in cased scripts: %s", (alias) => {
+    const edges = mentionEdges(
+      [
+        node("projects/research", "Research Pilot"),
+        node("clients/epic", "Epic"),
+        node(
+          "sessions/2026-10-03/meeting",
+          "Meeting",
+          `${alias} needs work. Epic signed.`,
+        ),
+      ],
+      new Map([["projects/research", [alias]]]),
+    );
+    expect(edges).toEqual([
+      expect.objectContaining({ target: "clients/epic", count: 1 }),
+    ]);
+  });
+
+  it.each(["\u041f\u0420\u041e\u0415\u041a\u0422", "\u0623\u062d\u0645\u062f"])(
+    "keeps distinctive or uncased one-word aliases: %s",
+    (alias) => {
+      const edges = mentionEdges(
+        [
+          node("projects/research", "Research Pilot"),
+          node(
+            "sessions/2026-10-03/meeting",
+            "Meeting",
+            `${alias} approved the prototype.`,
+          ),
+        ],
+        new Map([["projects/research", [alias]]]),
+      );
+      expect(edges).toEqual([
+        expect.objectContaining({ target: "projects/research", count: 1 }),
+      ]);
+    },
+  );
 });
 
 describe("graph build with inferred edges", () => {

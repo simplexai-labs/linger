@@ -25,7 +25,7 @@ export interface InferredEdge {
 /** Pages with proper names that other pages can mention. */
 const mentionTargetPrefixes = ["projects/", "clients/", "contacts/"] as const;
 /** A one-word alias that reads as an ordinary word, not a coined name. */
-const plainWordPattern = /^[A-Z]?[a-z]+$/u;
+const plainWordPattern = /^\p{Lu}?\p{Ll}+$/u;
 /**
  * Application-rendered H2 sections where a name is the subject of the page,
  * not a passing remark.
@@ -40,9 +40,9 @@ const hanPattern = /\p{Script=Han}/u;
 
 /**
  * A page mentions an entity when its body names the entity's title or one
- * of its aliases exactly. Names shorter than 2 Han characters or 4 Latin
- * letters, plain one-word aliases ("Sequence"), and names shared by more than
- * one entity are not matched; a one-word Latin name must keep its capitals,
+ * of its aliases exactly. Names shorter than 2 Han characters or 4 letters or digits
+ * in other scripts, plain one-word aliases ("Sequence"), and names shared by more than
+ * one entity are not matched; a one-word name must keep its case,
  * so "Epic" the client is not "an epic effort". Directory index pages neither
  * mention nor are mentioned. Each mention counts twice in a heading or in a
  * key section, an H2 whose text is exactly one of the rendered
@@ -142,14 +142,18 @@ function normalizedName(name: string) {
   const key = name.trim().toLowerCase();
   if (!key) return undefined;
   const cjk = hanPattern.test(key);
-  if (cjk ? [...key].length < 2 : key.replace(/[^a-z0-9]/gu, "").length < 4)
+  if (
+    cjk
+      ? [...key].length < 2
+      : [...key.replace(/[^\p{L}\p{N}]/gu, "")].length < 4
+  )
     return undefined;
   return key;
 }
 
 function namePattern(name: string) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  // Han text has no word breaks. Latin names match whole words, and a
+  // Han text has no word breaks. Other names match whole words, and a
   // one-word name keeps its case so it is not read as a common word.
   if (hanPattern.test(name)) return new RegExp(escaped, "giu");
   const flags = /\s/u.test(name) ? "giu" : "gu";
