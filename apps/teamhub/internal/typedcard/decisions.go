@@ -881,11 +881,7 @@ func decisionNoticeText(decisionID string, decision decisionRecord) (string, err
 		}
 		return providerKeyNoticeText(decisionID, view, decision.Status, decision.AlterEgoTaskID.Valid), nil
 	case DecisionKindBrowserConnection:
-		// A delegated Task's AlterEgo is not woken by a browser connection.
-		if decision.AlterEgoTaskID.Valid {
-			return "", nil
-		}
-		return browserConnectionNoticeText(decisionID, decision.Status), nil
+		return browserConnectionNoticeText(decisionID, decision.Status, decision.AlterEgoTaskID.Valid), nil
 	case DecisionKindComputerPermission:
 		var view computerPermissionView
 		if err := json.Unmarshal(decision.View, &view); err != nil {
