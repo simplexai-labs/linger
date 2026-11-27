@@ -140,6 +140,7 @@ No second time needed. Name the kind and it changes whether you are told; name t
 - **[Model scheduling](docs/model-scheduling.md):** One model, many agents, your work first. Every agent, approval and background job shares the local model, so work you are waiting for starts at once and background work waits until the model is quiet.
 - **[Bring your own runtime](docs/local-inference.md):** Claude Code, Codex or Pi, on your GPU or your subscription. Each runs as it always does, on local models or on the plan you already pay for.
 - **[Voice](docs/voice.md):** Record a meeting with a live transcript, ask what was said, and hand the follow-ups to Another Me.
+- **[Remote access](docs/remote-access.md):** Reach your agent from your phone or another computer while it keeps running on your own machine.
 
 ## Quick start
 

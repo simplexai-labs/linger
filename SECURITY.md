@@ -60,5 +60,8 @@ Before serving other computers:
   database and the Node services' ports off public networks; only the
   Web port needs to be reachable.
 
+[Remote access](docs/remote-access.md) shows a supported private tailnet and
+public HTTPS proxy setup.
+
 The Vite development server (`pnpm dev`) is for one developer on one machine.
 It binds to `127.0.0.1`; do not expose it to a network.

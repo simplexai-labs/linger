@@ -43,6 +43,10 @@ AGENT_RUNNER_PUBLIC_GATEWAY_URL=ws://192.168.1.10:3000/v1/runner-gateway
 LINGER_SECRET_SEED=<output of: openssl rand -base64 32>
 ```
 
+To reach the server from outside your network, see
+[Remote access](remote-access.md). It covers a private tailnet, a public HTTPS
+proxy, and the security values both need.
+
 Voice needs a Soniox key; [Voice](voice.md) shows how to turn it on. To
 develop on the code with hot reload instead, `pnpm dev` runs every service on
 your machine against a PostgreSQL you provide; see
@@ -61,5 +65,6 @@ for [Diagnostics upload](diagnostics-upload.md) and set its address as
 | The computer shows offline, or agents never answer | On that computer, `linger-computer daemon status` and `linger-computer doctor`; read `linger-computer daemon logs`, then try `linger-computer daemon restart`    |
 | "No runtime is ready yet"                          | `linger-computer runtime check` lists what to install or sign in to; `linger-computer runtime check codex --live` also waits for a real model reply              |
 | Other computers cannot connect                     | Set the four variables under [Build from source](#build-from-source) and run `docker compose stop node-services`, then `docker compose up --detach --wait` again |
+| A device outside your network cannot reach the app | See [Remote access](remote-access.md)                                                                                                                            |
 | The microphone is blocked                          | Browsers allow it only on `localhost` or HTTPS; put an HTTPS proxy in front of port 3000                                                                         |
 | `pnpm dev` cannot reach the database               | `pnpm dev` starts no containers: run `docker compose up --detach --wait postgres` first, then check every service with `pnpm dev:check`                          |
