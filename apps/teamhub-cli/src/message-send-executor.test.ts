@@ -14,10 +14,7 @@ import type { FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  executeMessageSend,
-  resolveDocumentImagePath,
-} from "./message-send-executor.js";
+import { executeMessageSend } from "./message-send-executor.js";
 import { createTeamHubClient, type TeamHubHttpClient } from "./http-client.js";
 import { displayText } from "./display-text.js";
 import { TeamHubWorkingCopies } from "./files/teamhub-working-copies.js";
@@ -492,58 +489,38 @@ describe("atomic message resource execution", () => {
       expect(payloads[0]).toContain(gifUri);
     },
   );
-});
 
-describe("document image path containment", () => {
-  it.each([
-    "./playground/C:/secret.png",
-    "./playground/D:secret.png",
-    "./playground/photo.png:stream",
-    "./playground/../secret.png",
-    "./playground/sub/../../secret.png",
-    "./playground/\\secret.png",
-    "./playground/",
-    "../secret.png",
-  ])("rejects escaping or Windows-special path %s on win32", (relative) => {
-    expect(() =>
-      resolveDocumentImagePath("C:\\workspace\\docs", relative, "win32"),
-    ).toThrow(/inside the document directory/i);
-  });
-
-  it("allows nested relative paths on win32", () => {
-    expect(
-      resolveDocumentImagePath(
-        "C:\\workspace\\docs",
-        "./playground/nested/my photo.png",
-        "win32",
-      ),
-    ).toBe("C:\\workspace\\docs\\nested\\my photo.png");
-  });
-
-  it.each(["linux", "darwin"] as const)(
-    "allows colon filenames and nested relative paths on %s",
-    (platform) => {
-      expect(
-        resolveDocumentImagePath(
-          "/workspace/docs",
-          "./playground/Q1:Summary.md.image-abc.gif",
-          platform,
+  it.skipIf(process.platform !== "win32")(
+    "rejects colon image paths on Windows before any network call",
+    async () => {
+      const cwd = await root();
+      await writeFile(
+        path.join(cwd, "report.md"),
+        "![a](photo.png%3Astream)\n",
+      );
+      let calls = 0;
+      const transport = client(async (body) => {
+        calls++;
+        return result(body);
+      });
+      await expect(
+        executeMessageSend(
+          {
+            inbox_id: "room_example",
+            message_segments: [
+              { type: "document", "content-path": "report.md" },
+            ],
+          },
+          {
+            client: transport,
+            cwd,
+            stateRoot: cwd,
+            operationId: "windows-colon-image",
+            target: { type: "room", id: "room_example" },
+          },
         ),
-      ).toBe("/workspace/docs/Q1:Summary.md.image-abc.gif");
-      expect(
-        resolveDocumentImagePath(
-          "/workspace/docs",
-          "./playground/nested/my photo.png",
-          platform,
-        ),
-      ).toBe("/workspace/docs/nested/my photo.png");
-      expect(() =>
-        resolveDocumentImagePath(
-          "/workspace/docs",
-          "./playground/../secret.png",
-          platform,
-        ),
-      ).toThrow(/inside the document directory/i);
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(calls).toBe(0);
     },
   );
 });

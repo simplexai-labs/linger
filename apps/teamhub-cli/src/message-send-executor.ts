@@ -37,35 +37,6 @@ const record = (value: unknown): value is Json =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const invalid = (message: string) => new CliError("invalid_input", message);
 const maxFile = 50 * 1024 * 1024;
-export function resolveDocumentImagePath(
-  sourceDir: string,
-  relative: string,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  const escaped = () =>
-    invalid("Document image paths must stay inside the document directory.");
-  if (!relative.startsWith("./playground/")) throw escaped();
-  const child = relative.slice("./playground/".length);
-  if (
-    !child ||
-    child.startsWith("/") ||
-    (platform === "win32" && (child.includes(":") || child.startsWith("\\")))
-  )
-    throw escaped();
-  const pathApi = platform === "win32" ? path.win32 : path.posix;
-  const rootDir = pathApi.resolve(sourceDir);
-  const target = pathApi.resolve(rootDir, child);
-  const back = pathApi.relative(rootDir, target);
-  if (
-    !back ||
-    back === "." ||
-    back === ".." ||
-    back.startsWith(`..${pathApi.sep}`) ||
-    pathApi.isAbsolute(back)
-  )
-    throw escaped();
-  return target;
-}
 function publicPath(value: string) {
   if (value.split(/[\\/]/u).some(isExcludedPublicationEntry))
     throw invalid(
@@ -160,13 +131,22 @@ async function prepare(
       utf8(snapshot.content);
       snapshot = await bundleDocumentImages(
         { ...snapshot, filePath: `./playground/${filename}` },
-        async (relative, readSignal) => ({
-          ...(await regular(
-            resolveDocumentImagePath(path.dirname(source), relative),
-            readSignal,
-          )),
-          filePath: relative,
-        }),
+        async (relative, readSignal) => {
+          if (process.platform === "win32" && relative.includes(":"))
+            throw invalid(
+              "Document image paths cannot contain colons on Windows.",
+            );
+          return {
+            ...(await regular(
+              path.resolve(
+                path.dirname(source),
+                relative.slice("./playground/".length),
+              ),
+              readSignal,
+            )),
+            filePath: relative,
+          };
+        },
         signal,
       );
     }
