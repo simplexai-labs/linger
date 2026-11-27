@@ -194,13 +194,23 @@ export class ReleaseOrchestratorModule implements Module {
   }
 
   async onBundleStaged(appVersion: string): Promise<void> {
-    this.#stagedVersion = appVersion;
+    if (this.#state.kind === "applying") return;
+    if (this.#state.kind === "waiting" && this.#state.version === appVersion) {
+      return;
+    }
     const task = (async () => {
       const store = this.#ctx!.get<BundleStoreModule>("BundleStore");
       const next = await store.readRelease(appVersion);
       if (!next) return;
       const current = await store.currentRelease();
       const diff = diffReleaseModules(current, next);
+      if (this.#state.kind === "applying") return;
+      if (this.#state.kind === "waiting") {
+        if (this.#state.version === appVersion) return;
+        this.#stagedVersion = appVersion;
+        this.#setState({ kind: "waiting", version: appVersion, diff });
+        return;
+      }
       this.#stagedVersion = appVersion;
       this.#setState({ kind: "ready", version: appVersion, diff });
     })();

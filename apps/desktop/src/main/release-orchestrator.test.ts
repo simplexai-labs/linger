@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LocalReleaseDescriptor } from "@linger/local-installation/release-descriptor";
 import { BundleStoreModule } from "./bundle-store.js";
@@ -438,6 +438,252 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
       expect(events.indexOf("progress:rolled_back")).toBeLessThan(
         events.indexOf("rollbackComplete:baseline"),
       );
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("preserves waiting state on duplicate/newer staged polls and auto-applies when runtime.activity reaches 0", async () => {
+    const home = await makeTempDir("linger-orch-waiting-");
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const watchdog = new HealthWatchdogModule();
+    const config = new ConfigStore(path.join(home, "config.json"));
+    const bus = new EventBus();
+
+    let activeOps = 1;
+    const restarted: string[] = [];
+    const committed: string[] = [];
+    bus.on("release.committed", (v) => committed.push(v));
+
+    const orch = new ReleaseOrchestratorModule({
+      activeOperations: () => activeOps,
+      restartServices: async (rel) => {
+        restarted.push(rel.appVersion);
+      },
+      buildHealthProbes: () => [{ name: "healthz", check: async () => true }],
+      completePauseMs: 0,
+      rollbackPauseMs: 0,
+      healthGateTimeoutMs: 60,
+      healthGateIntervalMs: 15,
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        watchdog,
+        orch,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+    try {
+      // Seed baseline 0.1.11-v2test.0
+      await store.writeReleaseDescriptor(makeRelease("0.1.11-v2test.0"));
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.0",
+        releaseFile: "releases/0.1.11-v2test.0/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      // (a) Re-staging same version while waiting preserves waiting and auto-applies at activity 0.
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.2", { backend: "2" }),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.2");
+      expect(orch.state().kind).toBe("ready");
+
+      expect(await orch.applyStaged()).toBe(false);
+      expect(orch.state()).toMatchObject({
+        kind: "waiting",
+        version: "0.1.11-v2test.2",
+      });
+
+      await orch.onBundleStaged("0.1.11-v2test.2");
+      expect(orch.state()).toMatchObject({
+        kind: "waiting",
+        version: "0.1.11-v2test.2",
+      });
+
+      activeOps = 0;
+      bus.emit("runtime.activity", 0);
+      await vi.waitFor(() => {
+        expect(committed).toEqual(["0.1.11-v2test.2"]);
+      });
+      expect(orch.state()).toEqual({ kind: "idle" });
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
+
+      // (b) Staging a newer version while waiting keeps waiting with updated version/diff and auto-applies the newer version when idle.
+      activeOps = 1;
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.3", { backend: "3" }),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.3");
+      expect(await orch.applyStaged()).toBe(false);
+      expect(orch.state()).toMatchObject({
+        kind: "waiting",
+        version: "0.1.11-v2test.3",
+        diff: { changedModules: ["backend"], scope: "backend" },
+      });
+
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.4", { web: "2", backend: "4" }),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.4");
+      expect(orch.state()).toMatchObject({
+        kind: "waiting",
+        version: "0.1.11-v2test.4",
+        diff: { changedModules: ["web", "backend"], scope: "backend" },
+      });
+
+      activeOps = 0;
+      bus.emit("runtime.activity", 0);
+      await vi.waitFor(() => {
+        expect(committed).toEqual(["0.1.11-v2test.2", "0.1.11-v2test.4"]);
+      });
+      expect(restarted).toEqual(["0.1.11-v2test.2", "0.1.11-v2test.4"]);
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.4");
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("does not clobber applying state on synchronous or async-raced onBundleStaged calls", async () => {
+    const home = await makeTempDir("linger-orch-applying-");
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const watchdog = new HealthWatchdogModule();
+    const config = new ConfigStore(path.join(home, "config.json"));
+    const bus = new EventBus();
+
+    let releaseVoiceCheck!: () => void;
+    let enteredVoiceCheck!: () => void;
+    const voiceCheckEntered = new Promise<void>((resolve) => {
+      enteredVoiceCheck = resolve;
+    });
+    const voiceCheckGate = new Promise<void>((resolve) => {
+      releaseVoiceCheck = resolve;
+    });
+
+    let releaseRestart!: () => void;
+    let enteredRestart!: () => void;
+    const restartEntered = new Promise<void>((resolve) => {
+      enteredRestart = resolve;
+    });
+    const restartGate = new Promise<void>((resolve) => {
+      releaseRestart = resolve;
+    });
+
+    const orch = new ReleaseOrchestratorModule({
+      activeOperations: () => 0,
+      isVoiceIdle: async () => {
+        enteredVoiceCheck();
+        await voiceCheckGate;
+        return true;
+      },
+      restartServices: async () => {
+        enteredRestart();
+        await restartGate;
+      },
+      buildHealthProbes: () => [{ name: "healthz", check: async () => true }],
+      completePauseMs: 0,
+      rollbackPauseMs: 0,
+      healthGateTimeoutMs: 60,
+      healthGateIntervalMs: 15,
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        watchdog,
+        orch,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+    try {
+      await store.writeReleaseDescriptor(makeRelease("0.1.11-v2test.0"));
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.0",
+        releaseFile: "releases/0.1.11-v2test.0/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.2", { backend: "2" }),
+      );
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.3", { backend: "3" }),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.2");
+
+      // Delay store.readRelease for the raced 0.1.11-v2test.3 staging call so it starts
+      // while state is still "ready" and completes AFTER applyStaged enters "applying".
+      const origReadRelease = store.readRelease.bind(store);
+      let releaseRacedRead!: () => void;
+      const racedReadGate = new Promise<void>((resolve) => {
+        releaseRacedRead = resolve;
+      });
+      let enteredRacedRead!: () => void;
+      const racedReadEntered = new Promise<void>((resolve) => {
+        enteredRacedRead = resolve;
+      });
+      vi.spyOn(store, "readRelease").mockImplementation(async (version) => {
+        if (version === "0.1.11-v2test.3") {
+          enteredRacedRead();
+          await racedReadGate;
+        }
+        return origReadRelease(version);
+      });
+
+      const applyPromise = orch.applyStaged();
+      await voiceCheckEntered;
+
+      // Start an async-raced onBundleStaged before applying begins.
+      const racedStagePromise = orch.onBundleStaged("0.1.11-v2test.3");
+      await racedReadEntered;
+
+      // Let applyStaged transition into "applying" and pause inside restartServices.
+      releaseVoiceCheck();
+      await restartEntered;
+      expect(orch.state()).toMatchObject({
+        kind: "applying",
+        version: "0.1.11-v2test.2",
+      });
+
+      // Synchronous onBundleStaged while applying must be ignored immediately.
+      await orch.onBundleStaged("0.1.11-v2test.2");
+      expect(orch.state()).toMatchObject({
+        kind: "applying",
+        version: "0.1.11-v2test.2",
+      });
+
+      // Resolving the async-raced onBundleStaged must also NOT clobber "applying".
+      releaseRacedRead();
+      await racedStagePromise;
+      expect(orch.state()).toMatchObject({
+        kind: "applying",
+        version: "0.1.11-v2test.2",
+      });
+
+      // Finish applying -> commits 0.1.11-v2test.2 cleanly and returns to idle (not clobbered by .3).
+      releaseRestart();
+      expect(await applyPromise).toBe(true);
+      expect(orch.state()).toEqual({ kind: "idle" });
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
+      expect(await orch.applyStaged()).toBe(false);
     } finally {
       await host.stop("quit");
     }

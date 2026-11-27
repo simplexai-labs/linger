@@ -419,4 +419,233 @@ describe("BundleUpdaterModule", () => {
       await host.stop("quit");
     }
   });
+
+  it("does not re-emit bundle.staged on repeated polls for an intact staged release, and re-stages when removed, rolled back, or superseded", async () => {
+    const home = await makeTempDir("linger-updater-dedup-home-");
+    const payloadV1 = await makeTempDir("linger-updater-dedup-p1-");
+    const payloadV2 = await makeTempDir("linger-updater-dedup-p2-");
+    const payloadV3 = await makeTempDir("linger-updater-dedup-p3-");
+    const out = await makeTempDir("linger-updater-dedup-out-");
+
+    await writeFile(path.join(payloadV1, "index.html"), "v1", "utf8");
+    await writeFile(path.join(payloadV2, "index.html"), "v2", "utf8");
+    await writeFile(path.join(payloadV3, "index.html"), "v3", "utf8");
+
+    const basePack = await packDeterministicTarZst(payloadV1, out, "shared");
+    const backendV2Pack = await packDeterministicTarZst(
+      payloadV2,
+      out,
+      "backend-v2",
+    );
+    const backendV3Pack = await packDeterministicTarZst(
+      payloadV3,
+      out,
+      "backend-v3",
+    );
+    const baseBytes = await readFile(basePack.filePath);
+    const backendV2Bytes = await readFile(backendV2Pack.filePath);
+    const backendV3Bytes = await readFile(backendV3Pack.filePath);
+
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const publicPem = publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
+
+    const nodeDepsHash = `sha256:${"a".repeat(64)}`;
+    const nodeDepsShortId = `nd-${"a".repeat(16)}`;
+
+    const mkRef = (id: string, pack: typeof basePack, fileName: string) => ({
+      artifactId: `${id}-${pack.sha256.slice(0, 12)}`,
+      format: "tar.zst" as const,
+      url: `https://cdn.example.com/linger/bundles/${id}/${fileName}.tar.zst`,
+      sha256: pack.sha256,
+      size: pack.size,
+    });
+
+    const makeManifest = (
+      appVersion: string,
+      backendPack: typeof basePack,
+      backendFile: string,
+    ): AppManifestV3 => ({
+      schema: 3,
+      channel: "stable",
+      releaseId: `r-${appVersion}`,
+      appVersion,
+      publishedAt: "2026-11-24T12:00:00Z",
+      rollout: { percent: 100 },
+      compat: {
+        minShellVersion: "0.2.0",
+        minNativeDepsHash: nodeDepsHash,
+        runnerGatewayProtocol: 1,
+        dbSchemaEpoch: 892,
+        rollbackSafe: true,
+      },
+      bundles: {
+        web: {
+          arch: "noarch",
+          originAppVersion: "0.2.14",
+          inputHash: "1".repeat(64),
+          artifact: mkRef("web", basePack, "web-base"),
+        },
+        backend: {
+          arch: "per-target",
+          originAppVersion: appVersion,
+          inputHash: "2".repeat(64),
+          nativeDepsHash: nodeDepsHash,
+          targets: {
+            "darwin-arm64": mkRef("backend", backendPack, backendFile),
+          },
+        },
+        "node-native-deps": {
+          arch: "per-target",
+          originAppVersion: "0.2.0",
+          inputHash: "3".repeat(64),
+          targets: {
+            "darwin-arm64": mkRef("node-native-deps", basePack, "ndeps-base"),
+          },
+        },
+      },
+    });
+
+    const signedV2 = makeSignedPayload(
+      makeManifest("0.2.15", backendV2Pack, "backend-v2"),
+      privateKey,
+    );
+    const signedV3 = makeSignedPayload(
+      makeManifest("0.2.16", backendV3Pack, "backend-v3"),
+      privateKey,
+    );
+    let activeSigned = signedV2;
+
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const config = new ConfigStore(path.join(home, "config.json"), {
+      updateFeedUrl: "https://cdn.example.com/linger",
+      updateChannel: "stable",
+      installId: "dedup-test-install",
+    });
+    const bus = new EventBus();
+    const stagedEvents: Array<{ version: string; changed: readonly string[] }> =
+      [];
+    bus.on("bundle.staged", (version, changed) =>
+      stagedEvents.push({ version, changed }),
+    );
+
+    const updater = new BundleUpdaterModule({
+      shellVersion: "0.2.0",
+      target: "darwin-arm64",
+      enabled: true,
+      checkDelayMs: 60 * 60_000,
+      publicKey: publicPem,
+      fetch: async (input) => {
+        const url = input.toString();
+        if (url.endsWith("/app-manifest.json")) {
+          return new Response(new Uint8Array(activeSigned.bytes), {
+            status: 200,
+          });
+        }
+        if (url.endsWith("/app-manifest.json.sig")) {
+          return new Response(activeSigned.sig, { status: 200 });
+        }
+        if (url.includes("backend-v2.tar.zst")) {
+          return new Response(new Uint8Array(backendV2Bytes), { status: 200 });
+        }
+        if (url.includes("backend-v3.tar.zst")) {
+          return new Response(new Uint8Array(backendV3Bytes), { status: 200 });
+        }
+        return new Response(new Uint8Array(baseBytes), { status: 200 });
+      },
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        updater,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+    try {
+      await store.stageNodeDepsArchive(
+        nodeDepsShortId,
+        basePack.filePath,
+        basePack.sha256,
+      );
+      await store.stageModuleArchive(
+        "web",
+        `web-${basePack.sha256.slice(0, 12)}`,
+        basePack.filePath,
+        basePack.sha256,
+      );
+
+      // First poll stages 0.2.15 and emits bundle.staged once.
+      await updater.check();
+      expect(updater.state()).toEqual({
+        kind: "staged",
+        version: "0.2.15",
+        changedModules: ["backend"],
+      });
+      expect(updater.lastCheckSucceeded()).toBe(true);
+      expect(stagedEvents).toEqual([
+        { version: "0.2.15", changed: ["backend"] },
+      ]);
+
+      // Second poll for the same intact release MUST NOT re-emit bundle.staged.
+      await updater.check();
+      expect(updater.state()).toEqual({
+        kind: "staged",
+        version: "0.2.15",
+        changedModules: ["backend"],
+      });
+      expect(updater.lastCheckSucceeded()).toBe(true);
+      expect(stagedEvents).toHaveLength(1);
+
+      // Deleting the release descriptor from store causes the next poll to re-stage and emit.
+      await rm(path.join(store.releasesDir, "0.2.15"), {
+        recursive: true,
+        force: true,
+      });
+      await updater.check();
+      expect(stagedEvents).toHaveLength(2);
+      expect(stagedEvents[1]?.version).toBe("0.2.15");
+
+      // Rollback + denylist resets state to idle and skips the denylisted version on next poll.
+      await store.addDenylist({
+        appVersion: "0.2.15",
+        failedAt: new Date().toISOString(),
+        stage: "healthcheck",
+        reason: "simulated failure",
+      });
+      bus.emit("release.rolled_back", "0.2.15", "0.2.14", "simulated failure");
+      expect(updater.state()).toEqual({ kind: "idle" });
+      await updater.check();
+      expect(updater.state()).toEqual({ kind: "idle" });
+      expect(stagedEvents).toHaveLength(2);
+
+      // Switching feed to a newer version 0.2.16 stages it and emits bundle.staged.
+      activeSigned = signedV3;
+      await updater.check();
+      expect(updater.state()).toEqual({
+        kind: "staged",
+        version: "0.2.16",
+        changedModules: ["backend"],
+      });
+      expect(stagedEvents).toHaveLength(3);
+      expect(stagedEvents[2]).toEqual({
+        version: "0.2.16",
+        changed: ["backend"],
+      });
+
+      // Committing 0.2.16 resets updater state back to idle.
+      bus.emit("release.committed", "0.2.16");
+      expect(updater.state()).toEqual({ kind: "idle" });
+    } finally {
+      await host.stop("quit");
+    }
+  });
 });

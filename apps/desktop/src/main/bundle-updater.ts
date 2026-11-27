@@ -114,12 +114,14 @@ export class BundleUpdaterModule implements Module {
   readonly #options: BundleUpdaterOptions;
   #ctx: ModuleContext | undefined;
   #state: BundleUpdaterState = { kind: "idle" };
+  #staged: Extract<BundleUpdaterState, { kind: "staged" }> | undefined;
   #timer: NodeJS.Timeout | undefined;
   #checking: Promise<void> | undefined;
   #generation = 0;
   #started = false;
   #consecutiveFailures = 0;
   #lastCheckSucceeded = false;
+  readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: BundleUpdaterOptions) {
     this.#options = options;
@@ -135,6 +137,7 @@ export class BundleUpdaterModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
+    for (const off of this.#unsubscribe.splice(0)) off();
     const generation = ++this.#generation;
     clearTimeout(this.#timer);
     this.#timer = undefined;
@@ -142,6 +145,30 @@ export class BundleUpdaterModule implements Module {
       this.#started = false;
       return;
     }
+    this.#unsubscribe.push(
+      ctx.bus.on("release.committed", (appVersion) => {
+        if (this.#staged?.version === appVersion) {
+          this.#staged = undefined;
+        }
+        if (
+          this.#state.kind === "staged" &&
+          this.#state.version === appVersion
+        ) {
+          this.#setState({ kind: "idle" });
+        }
+      }),
+      ctx.bus.on("release.rolled_back", (fromVersion) => {
+        if (this.#staged?.version === fromVersion) {
+          this.#staged = undefined;
+        }
+        if (
+          this.#state.kind === "staged" &&
+          this.#state.version === fromVersion
+        ) {
+          this.#setState({ kind: "idle" });
+        }
+      }),
+    );
     this.#started = true;
     this.#schedule(generation, this.#options.checkDelayMs ?? CHECK_DELAY_MS);
   }
@@ -151,6 +178,7 @@ export class BundleUpdaterModule implements Module {
     this.#generation += 1;
     clearTimeout(this.#timer);
     this.#timer = undefined;
+    for (const off of this.#unsubscribe.splice(0)) off();
   }
 
   #schedule(generation: number, delay: number): void {
@@ -185,6 +213,7 @@ export class BundleUpdaterModule implements Module {
   async #check(): Promise<void> {
     const ctx = this.#ctx!;
     if (this.#options.isLocalMode && !(await this.#options.isLocalMode())) {
+      this.#staged = undefined;
       this.#setState({ kind: "idle" });
       return;
     }
@@ -201,6 +230,7 @@ export class BundleUpdaterModule implements Module {
     const installId = cfg.installId ?? "default-install";
     const publicKey = this.#options.publicKey ?? UPDATE_PUBLIC_KEY;
 
+    const previousState = this.#state;
     this.#setState({ kind: "checking" });
     try {
       const urls = channelFeedUrls(feed, channel);
@@ -212,6 +242,7 @@ export class BundleUpdaterModule implements Module {
       if (!manifest) {
         this.#consecutiveFailures = 0;
         this.#lastCheckSucceeded = true;
+        this.#staged = undefined;
         this.#setState({ kind: "idle" });
         return;
       }
@@ -223,6 +254,7 @@ export class BundleUpdaterModule implements Module {
       if (!resolved) {
         this.#consecutiveFailures = 0;
         this.#lastCheckSucceeded = true;
+        this.#staged = undefined;
         return;
       }
 
@@ -234,6 +266,7 @@ export class BundleUpdaterModule implements Module {
       ) {
         this.#consecutiveFailures = 0;
         this.#lastCheckSucceeded = true;
+        this.#staged = undefined;
         this.#setState({ kind: "idle" });
         return;
       }
@@ -244,6 +277,7 @@ export class BundleUpdaterModule implements Module {
         });
         this.#consecutiveFailures = 0;
         this.#lastCheckSucceeded = true;
+        this.#staged = undefined;
         this.#setState({ kind: "idle" });
         return;
       }
@@ -261,7 +295,20 @@ export class BundleUpdaterModule implements Module {
         });
         this.#consecutiveFailures = 0;
         this.#lastCheckSucceeded = true;
+        this.#staged = undefined;
         this.#setState({ kind: "idle" });
+        return;
+      }
+
+      if (
+        previousState.kind === "staged" &&
+        previousState.version === resolved.appVersion &&
+        this.#staged?.version === resolved.appVersion &&
+        (await store.readRelease(resolved.appVersion)) !== undefined
+      ) {
+        this.#consecutiveFailures = 0;
+        this.#lastCheckSucceeded = true;
+        this.#setState(previousState);
         return;
       }
 
@@ -271,13 +318,15 @@ export class BundleUpdaterModule implements Module {
         store,
         currentDesc,
       );
-      this.#consecutiveFailures = 0;
-      this.#lastCheckSucceeded = true;
-      this.#setState({
+      const stagedState: Extract<BundleUpdaterState, { kind: "staged" }> = {
         kind: "staged",
         version: resolved.appVersion,
         changedModules,
-      });
+      };
+      this.#consecutiveFailures = 0;
+      this.#lastCheckSucceeded = true;
+      this.#staged = stagedState;
+      this.#setState(stagedState);
       ctx.log.info("bundle_updater.staged", {
         appVersion: resolved.appVersion,
         changedModules,
