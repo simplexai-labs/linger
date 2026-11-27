@@ -51,6 +51,9 @@ Memory, and Voice services.
 - `skills`: versioned built-in Skill assets embedded into TeamHub.
 - `.agents/skills/verify-linger`: acceptance recipes and an isolated
   real-service proof for a coding Agent verifying user journeys.
+- `.agents/skills/delegated-task-approvals`: TLA+/TLC formal verification
+  model and runner for TeamHub's delegated Task (AlterEgo) and Connector Write
+  approval coordination protocol.
 
 ## Important Conventions
 
