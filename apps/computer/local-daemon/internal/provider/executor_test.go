@@ -387,6 +387,38 @@ func TestExecutorPrepareProviderAntigravityAndNotEligiblePropagation(t *testing.
 		}
 	})
 
+	t.Run("model authentication required", func(t *testing.T) {
+		// The Pi pre-flight has no provider response to classify, so the
+		// code must come from the sentinel or the Run reads as execution_failed.
+		executor := Executor{
+			RuntimeHomeRoot: t.TempDir(),
+			NewBackend: func(string, native.Profile) (native.Runtime, error) {
+				return failingStartBackend{err: fmt.Errorf("%w: Pi model %q has no credentials on this Computer: configure the provider's API key as the Computer user or run pi /login", native.ErrPiModelAuthenticationRequired, "anthropic/claude-haiku-4-5")}, nil
+			},
+		}
+		execution, err := executor.Start(t.Context(), OperationSpec{
+			OperationKind: "run.start", Provider: "pi", ExecutablePath: "/bin/pi",
+			WorkingDirectory: t.TempDir(), TaskID: "model-auth-required",
+			Environment: map[string]string{"HOME": t.TempDir()},
+			TenantID:    "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-1", ScopeID: "scope-1",
+		}, func(context.Context, protocol.Event) error { return nil })
+		if err != nil {
+			t.Fatalf("executor.Start err=%v", err)
+		}
+		result := <-execution.Result
+		if result.Status != "failed" || result.FailureCode != "authentication_required" {
+			t.Fatalf("result=%+v, want failed authentication_required", result)
+		}
+		if !strings.Contains(result.Error, "anthropic/claude-haiku-4-5") || !strings.Contains(result.Error, "no credentials") {
+			t.Fatalf("result.Error=%q, want the model id and the missing-credential hint", result.Error)
+		}
+		// The recovery hint must reach the client: the daemon only publishes
+		// PublicDetail, so Error alone would strand it in the Daemon log.
+		if !strings.Contains(result.PublicDetail, "run pi /login") {
+			t.Fatalf("result.PublicDetail=%q, want the recovery hint", result.PublicDetail)
+		}
+	})
+
 	t.Run("completed", func(t *testing.T) {
 		var specs []native.RunSpec
 		executor := Executor{

@@ -19,6 +19,10 @@ const (
 	piChildPipeDrain   = time.Second
 )
 
+// piAuthCheckTimeout bounds the pre-flight `pi auth check`. A var so tests can
+// shorten it without waiting the production budget.
+var piAuthCheckTimeout = 15 * time.Second
+
 func piUsesPowerShell(goos string) bool {
 	return goos == "windows"
 }
@@ -47,6 +51,10 @@ func newPiRuntime(profile Profile) Runtime { return &piRuntime{profile: profile}
 // ErrPiUnsupportedEffort reports that a requested reasoning effort is outside
 // Pi's supported --thinking vocabulary.
 var ErrPiUnsupportedEffort = errors.New("Pi reasoning effort is unsupported")
+
+// ErrPiModelAuthenticationRequired reports that Pi says the Run's selected
+// model has no usable credentials on this Computer.
+var ErrPiModelAuthenticationRequired = errors.New("Pi model authentication required")
 
 // piThinkingLevel maps a product effort to Pi's --thinking value. An empty
 // effort leaves Pi's own level in place.
@@ -108,6 +116,9 @@ func (p *piRuntime) Start(ctx context.Context, prompt string, spec RunSpec) (*Ru
 		if err := piCheckExtension(p.profile.ManagedMCPExtension); err != nil {
 			return nil, err
 		}
+	}
+	if err := p.checkModelAuthentication(ctx, plan); err != nil {
+		return nil, err
 	}
 	if spec.providerPrepare() {
 		return p.prestart(ctx, root, plan)
