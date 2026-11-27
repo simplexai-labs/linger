@@ -154,14 +154,29 @@ func braveErrorCode(body []byte) string {
 }
 
 func retryAfter(header http.Header) time.Duration {
-	value := header.Get("Retry-After")
+	const maximum = time.Duration(1<<63 - 1)
+	value := strings.TrimSpace(header.Get("Retry-After"))
 	if value == "" {
 		// Brave reports the reset of each window, the per-second one first.
 		value, _, _ = strings.Cut(header.Get("X-RateLimit-Reset"), ",")
+	} else if deadline, err := http.ParseTime(value); err == nil {
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			return 0
+		}
+		// The Agent API exposes whole seconds; round up so it cannot advise
+		// retrying before the provider's date. Saturate before duration overflow.
+		if wait > maximum-(time.Second-1) {
+			return maximum
+		}
+		return (wait + time.Second - 1).Truncate(time.Second)
 	}
 	seconds, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || seconds < 0 {
 		return 0
+	}
+	if uint64(seconds) > uint64(maximum/time.Second) {
+		return maximum
 	}
 	return time.Duration(seconds) * time.Second
 }

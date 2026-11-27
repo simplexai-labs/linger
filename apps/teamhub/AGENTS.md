@@ -411,6 +411,10 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   error code. Any save answers every other pending card `configured` with the
   saved backend, which the Agent reruns with; saves outside a card use the
   official check (Brave has none and stays unverified until its first call).
+  Rate-limit waits preserve both seconds and HTTP dates from `Retry-After`;
+  future dates round up to whole seconds for the Agent API, and expired dates
+  add no wait. Brave's reset-window fallback remains available when that header
+  is absent. Waits saturate at the maximum representable Go duration.
 - Local models: `local_computer_model_snapshots` keeps each Computer's latest
   model library snapshot and the last host any snapshot carried; removing the
   Computer deletes the row in the same transaction. Recording a snapshot
