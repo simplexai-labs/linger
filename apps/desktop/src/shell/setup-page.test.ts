@@ -415,6 +415,16 @@ describe("setup page two-step welcome", () => {
     expect($("source-continue").hidden).toBe(false);
     expect($("local-install").hidden).toBe(true);
     expect($("plan-line").textContent).toBe("");
+    // Step 1 offers no way off to a team server.
+    expect(document.getElementById("team")).toBeNull();
+    expect(
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          '[data-step="welcome"] [data-go="server"]',
+        ),
+      ].filter((el) => !el.closest("[hidden]")),
+    ).toEqual([]);
+    expect(document.body.textContent).not.toContain("team server");
     // Settled: a later sign-in does not move it again.
     push(
       welcome(capable, {

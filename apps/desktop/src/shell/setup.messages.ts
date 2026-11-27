@@ -80,8 +80,6 @@ export const setupMessages = defineMessages("setup", {
   install: "Install",
   getStarted: "Get Started",
   checkAgain: "Check again",
-  teamServer: "Have a team server?",
-  connectInstead: "Connect to it instead",
   cannotCheck: "Couldn't check this computer.",
   heldWhy: "On hold: {reasons}",
   apiKey: "API key",

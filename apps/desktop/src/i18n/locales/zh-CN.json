@@ -78,8 +78,6 @@
     "install": "安装",
     "getStarted": "开始使用",
     "checkAgain": "重新检查",
-    "teamServer": "已有团队服务器？",
-    "connectInstead": "改为连接到团队服务器",
     "cannotCheck": "无法检查这台电脑。",
     "heldWhy": "暂缓：{reasons}",
     "apiKey": "API 密钥",

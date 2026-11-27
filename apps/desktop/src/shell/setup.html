@@ -1580,14 +1580,6 @@
       .wz-aux p {
         margin: 0;
       }
-      .wz-aux .team .link {
-        font-size: 12.5px;
-        color: var(--muted);
-        text-decoration: none;
-        border-bottom: 1px solid #d9d9d2;
-        border-radius: 0;
-        padding: 0;
-      }
       .wz-aux .plan-why,
       .wz-aux #local-driver-status {
         max-width: 420px;
@@ -3346,15 +3338,6 @@
                 data-t="checkAgain"
               ></button>
             </div>
-            <p class="team" id="team">
-              <span data-t="teamServer"></span>
-              <button
-                class="link"
-                data-go="server"
-                type="button"
-                data-t="connectInstead"
-              ></button>
-            </p>
           </div>
           <div class="wz-behind stage-bar" id="stage-bar">
             <span class="eyebrow behind" id="model-behind" hidden
@@ -6171,7 +6154,6 @@
                 : order.length
                   ? ""
                   : t("planSignInFirst");
-        $("team").hidden = !available || settings || checkingStage;
       };
 
       // NVIDIA driver help for a local model held by the driver.
