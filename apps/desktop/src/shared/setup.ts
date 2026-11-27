@@ -403,6 +403,9 @@ export interface SetupState {
   readonly openAtLogin: boolean;
   readonly folders: readonly SetupFolder[];
   readonly localServer: SetupLocalServer;
+  // Whether the setup window has been shown; the welcome intro waits for this
+  // so slow startup does not consume the intro before the user sees it.
+  readonly windowShown?: boolean;
   // The diagnostics zip last saved from this window, or why it failed.
   readonly diagnostics?: { readonly file?: string; readonly error?: string };
   // Send Diagnostics, present only while a diagnostics server is set up.

@@ -27,18 +27,27 @@ const state = vi.hoisted(() => {
   class MockBrowserWindow extends EventEmitter {
     readonly webContents = new MockWebContents();
     destroyed = false;
-    readonly show = vi.fn();
+    visible = false;
+    readonly show = vi.fn(() => {
+      this.visible = true;
+      this.emit("show");
+    });
     readonly focus = vi.fn();
     readonly close = vi.fn(() => {
       this.destroyed = true;
+      this.visible = false;
       this.emit("closed");
     });
     readonly destroy = vi.fn(() => {
       this.destroyed = true;
+      this.visible = false;
     });
     readonly loadURL = vi.fn(async () => {});
     isDestroyed(): boolean {
       return this.destroyed;
+    }
+    isVisible(): boolean {
+      return this.visible;
     }
     constructor() {
       super();
@@ -547,6 +556,44 @@ describe("SetupWindowModule", () => {
       vi.advanceTimersByTime(2000);
       window.emit("focus");
       expect(refreshLocationSpace).toHaveBeenCalledTimes(2);
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("tracks windowShown from false before ready-to-show to true on show and resets on close", async () => {
+    const { host, setup } = setupHost({ show: true });
+    await host.start();
+    try {
+      const first = state.windows[0]!;
+      const handler = state.ipcHandlers.get(SETUP_IPC.state)!;
+      const beforeShow = (await handler({
+        sender: first.webContents,
+        senderFrame: { url: "app://setup/" },
+      })) as SetupState;
+      expect(beforeShow.windowShown).toBe(false);
+
+      first.emit("ready-to-show");
+      expect(first.show).toHaveBeenCalledOnce();
+      expect(first.webContents.send).toHaveBeenCalledWith(
+        SETUP_IPC.stateEvent,
+        expect.objectContaining({ windowShown: true }),
+      );
+      const afterShow = (await handler({
+        sender: first.webContents,
+        senderFrame: { url: "app://setup/" },
+      })) as SetupState;
+      expect(afterShow.windowShown).toBe(true);
+
+      // Closing and recreating resets windowShown until the new window shows.
+      first.close();
+      setup.show();
+      const second = state.windows[1]!;
+      const reopened = (await handler({
+        sender: second.webContents,
+        senderFrame: { url: "app://setup/" },
+      })) as SetupState;
+      expect(reopened.windowShown).toBe(false);
     } finally {
       await host.stop("quit");
     }

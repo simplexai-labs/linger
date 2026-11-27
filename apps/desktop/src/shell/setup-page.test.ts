@@ -348,6 +348,54 @@ describe("setup page two-step welcome", () => {
     );
   });
 
+  it("holds the welcome intro until windowShown becomes true, then starts INTRO_MS and hands off", async () => {
+    const { push } = await openPage(
+      { ...welcome({ state: "checking" }), windowShown: false },
+      "welcome",
+      "en",
+      80,
+    );
+    expect(stage()).toBe("intro");
+    expect($("welcome-checking").hidden).toBe(false);
+    expect($("intro-title").textContent).toBe("Welcome to Linger");
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    expect(stage()).toBe("intro");
+    push({ ...welcome({ state: "checking" }), windowShown: true });
+    expect(stage()).toBe("intro");
+    await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 2000 });
+  });
+
+  it("holds the welcome intro while hidden and starts once document visibility becomes visible", async () => {
+    const original = Object.getOwnPropertyDescriptor(
+      document,
+      "visibilityState",
+    );
+    let visibility: DocumentVisibilityState = "hidden";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      await openPage(
+        { ...welcome({ state: "checking" }), windowShown: true },
+        "welcome",
+        "en",
+        80,
+      );
+      expect(stage()).toBe("intro");
+      await new Promise((resolve) => setTimeout(resolve, 140));
+      expect(stage()).toBe("intro");
+      visibility = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(stage()).toBe("intro");
+      await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 2000 });
+    } finally {
+      if (original)
+        Object.defineProperty(document, "visibilityState", original);
+      else delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+
   it("plays the welcome, then offers the three sources while the check still runs", async () => {
     const { run, push } = await openPage(
       welcome({ state: "checking" }),

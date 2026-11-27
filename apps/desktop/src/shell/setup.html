@@ -6519,7 +6519,12 @@
         const models = local.localModels;
         if (available && step === "welcome") {
           if (stage === undefined) enterStage(introDone ? "choose" : "intro");
-          if (stage === "intro") startIntro();
+          if (
+            stage === "intro" &&
+            state.windowShown !== false &&
+            document.visibilityState !== "hidden"
+          )
+            startIntro();
           if (stage === "intro" && introDone) handOff();
           if (!runtimesAsked) {
             runtimesAsked = true;
@@ -7949,6 +7954,15 @@
       );
       $("finish").addEventListener("click", () => run({ op: "finish" }));
 
+      document.addEventListener("visibilitychange", () => {
+        if (
+          state &&
+          stage === "intro" &&
+          !introStarted &&
+          document.visibilityState !== "hidden"
+        )
+          render();
+      });
       setup.onState((next) => {
         const signedInNow = next.signedIn && !state?.signedIn;
         const localReady =

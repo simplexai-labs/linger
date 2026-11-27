@@ -102,6 +102,7 @@ export class SetupWindowModule implements Module {
   readonly #options: SetupWindowOptions;
   #ctx: ModuleContext | undefined;
   #window: BrowserWindow | undefined;
+  #windowShown = false;
   #signedIn = false;
   // The runtime's sign-in was waiting on the browser.
   #runtimeSigningIn = false;
@@ -198,6 +199,7 @@ export class SetupWindowModule implements Module {
     for (const off of this.#unsubscribe.splice(0)) off();
     this.#window?.destroy();
     this.#window = undefined;
+    this.#windowShown = false;
   }
 
   visible(): boolean {
@@ -248,6 +250,12 @@ export class SetupWindowModule implements Module {
     contents.on("will-navigate", (event) => event.preventDefault());
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     contents.on("will-attach-webview", (event) => event.preventDefault());
+    this.#windowShown = false;
+    window.on("show", () => {
+      if (this.#window !== window || this.#windowShown) return;
+      this.#windowShown = true;
+      this.#push();
+    });
     window.once("ready-to-show", () => window.show());
     // Back from System Settings, a driver updater, or freeing disk space:
     // show what changed there.
@@ -257,7 +265,10 @@ export class SetupWindowModule implements Module {
       this.#maybeRefreshLocationSpaceOnFocus();
     });
     window.on("closed", () => {
-      if (this.#window === window) this.#window = undefined;
+      if (this.#window === window) {
+        this.#window = undefined;
+        this.#windowShown = false;
+      }
       this.#account?.hide();
       // Idle background pre-staging and Bifrost pre-fetch stop when setup
       // closes before Install is started.
@@ -550,6 +561,12 @@ export class SetupWindowModule implements Module {
       localServer: localServerState(
         ctx.get<LocalServerModule>("LocalServer"),
         this.#account?.view(),
+      ),
+      windowShown: Boolean(
+        this.#windowShown ||
+        (this.#window &&
+          !this.#window.isDestroyed() &&
+          this.#window.isVisible()),
       ),
       ...(this.#diagnostics ? { diagnostics: this.#diagnostics } : {}),
       ...(this.#options.driverUpdater
