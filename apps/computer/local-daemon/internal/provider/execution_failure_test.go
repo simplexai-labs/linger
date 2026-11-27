@@ -20,6 +20,7 @@ func TestExecutionFailureClassificationUsesStructuredSignals(t *testing.T) {
 		want        string
 	}{
 		{"http 401", "failed", "", native.RuntimeFailureDiagnostics{Code: "httpConnectionFailed", StatusCode: status(401)}, "authentication_required"},
+		{"http 402", "failed", "", native.RuntimeFailureDiagnostics{Code: "APIError", StatusCode: status(402)}, "rate_limited"},
 		{"http 403", "failed", "", native.RuntimeFailureDiagnostics{Code: "api_error", StatusCode: status(403)}, "authentication_required"},
 		{"http 429", "failed", "", native.RuntimeFailureDiagnostics{Code: "httpConnectionFailed", StatusCode: status(429)}, "rate_limited"},
 		{"usage limit", "failed", "", native.RuntimeFailureDiagnostics{Code: "usageLimitExceeded"}, "rate_limited"},

@@ -567,9 +567,16 @@ A hook that cannot run lets the command through.
   prints it within two seconds. When that read fails or times out, the
   last `PATH` the same shell printed is used. With none, the user's own
   install folders come first. The common install folders are always
-  searched too: Homebrew, `~/.local/bin`, `~/.npm-global/bin`, Volta, Bun,
-  every nvm Node's `bin` (newest first), fnm's default Node and pnpm's
-  global bin.
+  searched too: Homebrew, `~/.local/bin`, `~/.claude/local`,
+  `~/.npm-global/bin`, Volta, Bun, every nvm Node's `bin` (newest first),
+  fnm's default Node, pnpm's global bin, and `%APPDATA%\npm` on Windows.
+- When a CLI is not on `PATH` or in those install folders, discovery also
+  checks platform desktop app bundles: on macOS, `Codex.app` and
+  `ChatGPT.app` (`Contents/Resources/codex-cli/bin/codex`), `Claude.app`
+  (`Contents/Resources/claude`), and Claude Desktop's versioned
+  `~/Library/Application Support/Claude/claude-code/<version>/…` (newest
+  semver first, preferring `.verified` bundles); on Windows, Claude Desktop's
+  `%APPDATA%\Claude\claude-code\<version>\claude.exe`.
 - Every 15 seconds the monitor rechecks sign-in. Every fourth tick it runs a
   full discovery, but not while an Operation runs.
 - On every tick it also searches again for each Runtime that was not

@@ -947,6 +947,9 @@ func TestRuntimeMonitorCreatesInternalTerminalCacheWhenNil(t *testing.T) {
 		t.Skip("POSIX terminal fixture")
 	}
 	root := t.TempDir()
+	prevSystemRoot := macApplicationSystemRoot
+	macApplicationSystemRoot = root
+	t.Cleanup(func() { macApplicationSystemRoot = prevSystemRoot })
 	binDir := filepath.Join(root, "term-bin")
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1034,6 +1037,9 @@ func TestRuntimeMonitorForceRecapturesTerminalEnvOnExecutableReplacement(t *test
 		t.Skip("POSIX terminal fixture")
 	}
 	root := t.TempDir()
+	prevSystemRoot := macApplicationSystemRoot
+	macApplicationSystemRoot = root
+	t.Cleanup(func() { macApplicationSystemRoot = prevSystemRoot })
 	binDir := filepath.Join(root, "term-bin")
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1144,6 +1150,9 @@ func TestRuntimeMonitorChangedInstallationsReusesTerminalEnvironmentCache(t *tes
 		t.Skip("POSIX terminal fixture")
 	}
 	root := t.TempDir()
+	prevSystemRoot := macApplicationSystemRoot
+	macApplicationSystemRoot = root
+	t.Cleanup(func() { macApplicationSystemRoot = prevSystemRoot })
 	binDir := filepath.Join(root, "term-bin")
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
