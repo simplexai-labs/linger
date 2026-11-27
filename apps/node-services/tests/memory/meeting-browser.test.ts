@@ -66,6 +66,7 @@ afterEach(async () => {
 async function publishSummary(
   sourceVersion = "text_v1:hash",
   subject = "agent_a",
+  body = "# Meeting summary\n\nDecisions.\n",
 ) {
   published.set(
     summaryPath,
@@ -76,10 +77,7 @@ sources:
     resource: teamhub://documents/text/versions/${sourceVersion.split(":")[0]}
 ---
 
-# Meeting summary
-
-Decisions.
-`,
+${body}`,
   );
   const state = path.join(root, subject, "memory-state");
   await fs.mkdir(state, { recursive: true });
@@ -243,5 +241,149 @@ describe("Meetings virtual browser", () => {
     expect(
       (await browseMeetings({ ...input, entryId: first.items[0]!.id })).items,
     ).toEqual([]);
+  });
+  it("keeps a page stable when a meeting is removed between requests", async () => {
+    mocks.subjects.mockResolvedValue([]);
+    const older: MeetingRow = {
+      ...row,
+      id: "capture_10000002",
+      started_at: new Date("2026-09-22T10:00:00Z"),
+    };
+    const oldest: MeetingRow = {
+      ...row,
+      id: "capture_10000001",
+      started_at: new Date("2026-09-21T10:00:00Z"),
+    };
+    mocks.query.mockResolvedValue([row, older, oldest]);
+    const input = {
+      dataRoot: root,
+      tenantId: "tenant_a",
+      ownerActorId: "human_a",
+    };
+    const first = await browseMeetings({ ...input, limit: 2 });
+    expect(first.items.map((item) => item.meeting?.capture_id)).toEqual([
+      "capture_12345678",
+      "capture_10000002",
+    ]);
+
+    // The newest meeting disappears before the reader asks for page two.
+    mocks.query.mockResolvedValue([older, oldest]);
+    const second = await browseMeetings({
+      ...input,
+      limit: 2,
+      cursor: first.next_cursor,
+    });
+    expect(second.items.map((item) => item.meeting?.capture_id)).toEqual([
+      "capture_10000001",
+    ]);
+  });
+
+  it("does not repeat a page when a newer meeting arrives", async () => {
+    mocks.subjects.mockResolvedValue([]);
+    const older: MeetingRow = {
+      ...row,
+      id: "capture_10000002",
+      started_at: new Date("2026-09-22T10:00:00Z"),
+    };
+    const newer: MeetingRow = {
+      ...row,
+      id: "capture_10000003",
+      started_at: new Date("2026-09-24T10:00:00Z"),
+    };
+    mocks.query.mockResolvedValue([row, older]);
+    const input = {
+      dataRoot: root,
+      tenantId: "tenant_a",
+      ownerActorId: "human_a",
+    };
+    const first = await browseMeetings({ ...input, limit: 1 });
+    expect(first.items[0]?.meeting?.capture_id).toBe("capture_12345678");
+
+    mocks.query.mockResolvedValue([newer, row, older]);
+    const second = await browseMeetings({
+      ...input,
+      limit: 1,
+      cursor: first.next_cursor,
+    });
+    expect(second.items.map((item) => item.meeting?.capture_id)).toEqual([
+      "capture_10000002",
+    ]);
+  });
+
+  it("still answers an offset cursor from an older server", async () => {
+    mocks.subjects.mockResolvedValue([]);
+    mocks.query.mockResolvedValue([
+      row,
+      {
+        ...row,
+        id: "capture_10000002",
+        started_at: new Date("2026-09-22T10:00:00Z"),
+      },
+    ]);
+    const page = await browseMeetings({
+      dataRoot: root,
+      tenantId: "tenant_a",
+      ownerActorId: "human_a",
+      limit: 1,
+      cursor: "1",
+    });
+    expect(page.items[0]?.meeting?.capture_id).toBe("capture_10000002");
+  });
+
+  it("rejects a cursor that is not page data", async () => {
+    mocks.query.mockResolvedValue([]);
+    await expect(
+      browseMeetings({
+        dataRoot: root,
+        tenantId: "tenant_a",
+        ownerActorId: "human_a",
+        cursor: "not a cursor!",
+      }),
+    ).rejects.toThrow(/cursor/i);
+  });
+
+  it("puts the first 240 characters of the published summary in the list", async () => {
+    await publishSummary();
+    mocks.query.mockResolvedValue([row]);
+    const page = await browseMeetings({
+      dataRoot: root,
+      tenantId: "tenant_a",
+      ownerActorId: "human_a",
+    });
+    expect(page.items[0]?.summary).toContain("Decisions.");
+    expect(page.items[0]?.summary).not.toContain("---");
+    expect(page.items[0]?.content).toBe("");
+  });
+
+  it("caps a summary at the contract's 240 characters", async () => {
+    await publishSummary(
+      "text_v1:hash",
+      "agent_a",
+      `# Meeting summary\n\n${"x".repeat(300)}\n`,
+    );
+    mocks.query.mockResolvedValue([row]);
+    const page = await browseMeetings({
+      dataRoot: root,
+      tenantId: "tenant_a",
+      ownerActorId: "human_a",
+    });
+    expect(page.items[0]?.summary).toHaveLength(240);
+    expect(page.items[0]?.summary?.endsWith("…")).toBe(true);
+  });
+
+  it("keeps a hyphen inside a summary word for search", async () => {
+    await publishSummary(
+      "text_v1:hash",
+      "agent_a",
+      "# Meeting summary\n\nFollow-up on Q3-plan and the go-live date.\n",
+    );
+    mocks.query.mockResolvedValue([row]);
+    const page = await browseMeetings({
+      dataRoot: root,
+      tenantId: "tenant_a",
+      ownerActorId: "human_a",
+    });
+    expect(page.items[0]?.summary).toContain("Follow-up on Q3-plan");
+    expect(page.items[0]?.summary).not.toContain("Follow up");
   });
 });

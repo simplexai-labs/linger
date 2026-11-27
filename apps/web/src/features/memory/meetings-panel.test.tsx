@@ -24,6 +24,7 @@ function meeting(
   path: string,
   filename: string,
   summaryReady = false,
+  summary = "",
 ): TeamHubMemoryEntry {
   return {
     id,
@@ -32,7 +33,7 @@ function meeting(
     title: path.split("/").at(-1)!,
     path,
     content: "",
-    summary: "",
+    summary,
     updated_at: "2026-10-01T08:00:00Z",
     meeting: {
       capture_id: `capture_${id}`,
@@ -72,6 +73,7 @@ function renderPanel(search = "") {
       "Meetings/2026/10/01/Meeting 17-41-02",
       "afternoon.m4a",
       true,
+      "We agreed on the launch plan.",
     ),
     meeting(
       "meeting_000000000000000000000001",
@@ -246,6 +248,20 @@ describe("Meetings panel", () => {
     expect(
       screen.getByRole("button", { name: "2026-10-01: 1 meeting" }),
     ).toBeInTheDocument();
+  });
+
+  it("finds a meeting by the summary text the server sends", async () => {
+    renderPanel();
+    const search = await screen.findByRole("searchbox", {
+      name: "Search meetings",
+    });
+    fireEvent.change(search, { target: { value: "launch plan" } });
+    expect(
+      await screen.findByRole("link", { name: "Meeting Oct 1, 17:41" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("link", { name: "Meeting Oct 1, 09:05" }),
+    ).toBeNull();
   });
 
   it("shows the year and every meeting newest day first under All meetings, and searches", async () => {

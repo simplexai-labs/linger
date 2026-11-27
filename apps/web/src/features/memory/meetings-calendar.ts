@@ -9,6 +9,7 @@ export interface CalendarMeeting {
   date: string;
   time: string;
   recordingFilename: string;
+  summary: string;
   summaryReady: boolean;
 }
 
@@ -61,6 +62,7 @@ export function meetingsByDate(
       date,
       time: `${hour}:${minute}:${second}`,
       recordingFilename: entry.meeting.recording_filename,
+      summary: entry.summary,
       summaryReady: entry.meeting.summary_ready,
     });
     days.set(date, meetings);

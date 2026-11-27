@@ -134,7 +134,7 @@ export function MeetingsPanel({ tenantId }: { tenantId: string }) {
       items: needle
         ? items.filter((item) =>
             // "meeting" finds every entry whatever the language on screen.
-            `meeting ${meetingName(item)} ${item.recordingFilename} ${date} ${item.time} ${formatMeetingDay(date)}`
+            `meeting ${meetingName(item)} ${item.recordingFilename} ${item.summary} ${date} ${item.time} ${formatMeetingDay(date)}`
               .toLowerCase()
               .includes(needle),
           )

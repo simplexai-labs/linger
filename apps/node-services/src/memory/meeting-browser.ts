@@ -29,6 +29,61 @@ function idForMeeting(tenantId: string, captureId: string): string {
   return `meeting_${crypto.createHash("sha256").update(`meeting\0${tenantId}\0${captureId}`).digest("hex").slice(0, 24)}`;
 }
 
+/** The last row read, so a meeting finalized between pages cannot shift one. */
+function encodeMeetingCursor(row: MeetingRow): string {
+  return Buffer.from(
+    JSON.stringify({ i: row.id, t: row.started_at.toISOString() }),
+    "utf8",
+  ).toString("base64url");
+}
+
+/** The index of the first row after `cursor` in `started_at` desc, `id` asc. */
+function meetingCursorStart(
+  rows: readonly MeetingRow[],
+  cursor: string | undefined,
+): number {
+  if (!cursor) return 0;
+  // Older servers paged by array offset; keep answering their cursors.
+  if (/^[0-9]{1,9}$/u.test(cursor))
+    return Math.min(Number(cursor), rows.length);
+  let key: { i?: unknown; t?: unknown };
+  try {
+    key = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      i?: unknown;
+      t?: unknown;
+    };
+  } catch {
+    throw new TypeError("Memory cursor is invalid");
+  }
+  const { i, t } = key;
+  if (typeof i !== "string" || typeof t !== "string")
+    throw new TypeError("Memory cursor is invalid");
+  const startedAt = Date.parse(t);
+  if (!Number.isFinite(startedAt))
+    throw new TypeError("Memory cursor is invalid");
+  const index = rows.findIndex(
+    (row) =>
+      row.started_at.getTime() < startedAt ||
+      (row.started_at.getTime() === startedAt && row.id.localeCompare(i) > 0),
+  );
+  return index === -1 ? rows.length : index;
+}
+
+/** The first 240 characters of the published summary, without Markdown, for
+ * search; a hyphen inside a word stays part of that word. */
+function summaryExcerpt(content: string | undefined): string {
+  if (!content) return "";
+  const body = content
+    .replace(/^---\n[\s\S]*?\n---\n/u, "")
+    .replace(/^#.*$/gmu, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .replace(/^\s*[-*+]\s+/gmu, "")
+    .replace(/[*_`>#]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return body.length > 240 ? `${body.slice(0, 239)}…` : body;
+}
+
 export function meetingDisplayPath(start: Date): string {
   const time = localMeetingTime(start);
   return `Meetings/${localDate(start).replaceAll("-", "/")}/Meeting ${time}`;
@@ -44,7 +99,6 @@ export async function readMeetingSummary(
   subjectKey: string,
   row: MeetingRow,
   wikiPages: ReadonlyMap<string, string>,
-  includeContent = true,
 ): Promise<{ content: string; path: string } | undefined> {
   const date = localDate(row.transcript_created_at);
   const input = {
@@ -84,29 +138,34 @@ export async function readMeetingSummary(
     )
   )
     return undefined;
-  return { content: includeContent ? content : "", path: relativePath };
+  return { content, path: relativePath };
 }
 
 export async function browseMeetings(
   input: Request,
 ): Promise<components["schemas"]["MemoryEntryPage"]> {
   const rows = await queryReadyMeetings(input.tenantId, input.ownerActorId);
+  // The database order, made explicit so the cursor and the page agree.
+  const ordered = [...rows].sort(
+    (left, right) =>
+      right.started_at.getTime() - left.started_at.getTime() ||
+      left.id.localeCompare(right.id),
+  );
   const subject = (
     await loadWikiGraphSubjectsForActor(input.ownerActorId)
   ).find((item) => item.tenantId === input.tenantId);
   const names = new Map<string, number>();
-  for (const row of rows) {
+  for (const row of ordered) {
     const name = meetingDisplayPath(row.started_at);
     names.set(name, (names.get(name) ?? 0) + 1);
   }
-  const offset = Number(input.cursor ?? 0);
-  if (!Number.isSafeInteger(offset) || offset < 0)
-    throw new TypeError("Memory cursor is invalid");
+  const start = input.entryId ? 0 : meetingCursorStart(ordered, input.cursor);
+  const limit = input.limit ?? 50;
   const selected = input.entryId
-    ? rows.filter(
+    ? ordered.filter(
         (row) => idForMeeting(input.tenantId, row.id) === input.entryId,
       )
-    : rows.slice(offset, offset + (input.limit ?? 50));
+    : ordered.slice(start, start + limit);
   const wikiPages = new Map(
     subject && selected.length
       ? (
@@ -151,7 +210,6 @@ export async function browseMeetings(
           subject.agentManagementId,
           row,
           wikiPages,
-          Boolean(input.entryId),
         )
       : undefined;
     items.push({
@@ -159,7 +217,7 @@ export async function browseMeetings(
       kind: "meeting",
       path: displayPath,
       title: displayPath.split("/").at(-1)!,
-      summary: "",
+      summary: input.entryId ? "" : summaryExcerpt(summary?.content),
       date: basePath.split("/").slice(1, 4).join("-"),
       updated_at: row.updated_at.toISOString(),
       content: input.entryId ? (summary?.content ?? "").slice(0, 200_000) : "",
@@ -178,11 +236,11 @@ export async function browseMeetings(
       },
     });
   }
-  const next = offset + selected.length;
+  const next = start + selected.length;
   return {
     items,
-    ...(!input.entryId && next < rows.length
-      ? { next_cursor: String(next) }
+    ...(!input.entryId && next < ordered.length && selected.length
+      ? { next_cursor: encodeMeetingCursor(selected.at(-1)!) }
       : {}),
   };
 }

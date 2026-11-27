@@ -1708,6 +1708,9 @@ type ConflictedDocumentChangeResult struct {
 // ConflictedDocumentChangeResultReason defines model for ConflictedDocumentChangeResult.Reason.
 type ConflictedDocumentChangeResultReason string
 
+// Cursor Opaque pagination cursor. Clients must not parse or modify it.
+type Cursor = string
+
 // DeleteDocumentBlocksSemanticOperation defines model for DeleteDocumentBlocksSemanticOperation.
 type DeleteDocumentBlocksSemanticOperation struct {
 	Kind           string               `json:"kind"`
@@ -2102,8 +2105,10 @@ type MemoryEntryKind string
 
 // MemoryEntryPage defines model for MemoryEntryPage.
 type MemoryEntryPage struct {
-	Items      []MemoryEntry `json:"items"`
-	NextCursor *string       `json:"next_cursor,omitempty"`
+	Items []MemoryEntry `json:"items"`
+
+	// NextCursor Opaque pagination cursor. Clients must not parse or modify it.
+	NextCursor *Cursor `json:"next_cursor,omitempty"`
 }
 
 // MemoryErrorResponse defines model for MemoryErrorResponse.

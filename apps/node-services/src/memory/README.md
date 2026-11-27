@@ -133,7 +133,7 @@ Memory's SQL references only these two schemas and that the pool is created only
   `message_attachments` view expands the `messages.attachments` list).
 - `subject_recordings`: the finished text transcripts in those Rooms. Private questions and task requests go only to
   the recorder's own AnotherMe.
-- `finalized_meetings` and `human_can_read_document()`: a meeting is listed while both its recording and transcript Documents are active; `hidden_meetings` holds the meetings the Space's Human removed (hid) from Meetings.
+- `finalized_meetings` and `human_can_read_document()`: a meeting is listed while both its recording and transcript Documents are active; `hidden_meetings` holds the meetings the Space's Human removed (hid) from Meetings. The browser pages by the last meeting's `started_at` and `id`, so a meeting finalized or hidden between two requests neither shifts nor repeats a page; a numeric cursor from an older server is still answered as an offset. List entries carry the first 240 characters of the published summary, which the Web search matches, while the full summary stays on the entry request.
 - `profile_revision_dates`: when each Profile Revision was written, used as the Profile Raw's date.
 - `pocket_notes` and `personal_documents()`: Pocket Notes (without deleted dates), and the current personal
   documents in My Pages and in the mail-import Wiki sources; a native page gives the Markdown Export Artifact of its
