@@ -93,7 +93,6 @@
     "localNotAvailable": "这台电脑无法使用",
     "recommendedRuntime": "推荐：{runtime}。",
     "subscriptionHint": "使用你的 ChatGPT 或 Claude 订阅登录。",
-    "locationHint": "请返回，把安装位置设为磁盘本身（Linger 会安装到 {folder}），或磁盘根目录下的一个空文件夹。",
     "featuredModelName": "Inkling 2 Mini",
     "featuredPartnerBadge": "精选 · Thinking Machines",
     "featuredModelSpecs": "26.4B Looped MoE · 3.4B 激活参数 · 原生视觉与 Agent 编程 · Apache 2.0",

@@ -67,8 +67,6 @@ export const setupMessages = defineMessages("setup", {
   localNotAvailable: "Not available on this computer",
   recommendedRuntime: "Recommended: {runtime}.",
   subscriptionHint: "Sign in with your ChatGPT or Claude subscription.",
-  locationHint:
-    "Go back and set the install location to the drive itself (Linger installs into {folder}) or an empty folder directly on the drive.",
 
   // Featured partner model spotlight (Inkling 2 Mini by Thinking Machines).
   featuredModelName: "Inkling 2 Mini",

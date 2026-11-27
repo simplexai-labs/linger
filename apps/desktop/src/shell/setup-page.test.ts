@@ -1474,60 +1474,37 @@ describe("setup page Send Diagnostics", () => {
   });
 });
 
-describe("setup page refused install location", () => {
+describe("setup page installation failure plan", () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = () => {};
   });
 
-  const message = (folder: string) =>
-    `Windows private path validation failed: ${folder} is inside a folder other accounts on this computer can rename or replace. Use a current-user owned local directory without links or shared access.`;
-  const failed = (
-    location: string,
-    reason?: NonNullable<SetupState["localServer"]["refusal"]>["reason"],
-  ): SetupState => {
+  it("shows data-kept guidance on installation failure and restores progress text on retry", async () => {
+    const folder = "D:\\Software\\Linger";
+    const errorMessage = `Windows private path validation failed: ${folder} is inside a linked folder. Use a current-user owned local directory without links or shared access.`;
     const base = state("failed");
-    return {
+    const failedState: SetupState = {
       ...base,
       platform: "win32",
       localServer: {
         ...base.localServer,
-        message: message(location),
-        location: { path: location, custom: true },
-        ...(reason
-          ? { refusal: { code: "WINDOWS_PRIVATE_PATH_UNSAFE", reason } }
-          : {}),
+        message: errorMessage,
+        location: { path: folder, custom: true },
+        refusal: {
+          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+          reason: "UNSAFE_PARENT_LINK",
+        },
       },
     };
-  };
-
-  const usual = "Your data is kept. Fix the problem and try again.";
-
-  it("says where to install when a nested folder on a drive is refused", async () => {
-    const folder = "D:\\Software\\Linger";
-    const { push } = await openPage(failed(folder, "UNSAFE_PARENT_ACCESS"));
-    expect($("installing-error").textContent).toBe(message(folder));
+    const { push } = await openPage(failedState);
+    expect($("installing-error").textContent).toBe(errorMessage);
     expect($("installing-plan").textContent).toBe(
-      "Go back and set the install location to the drive itself (Linger installs into D:\\Linger) or an empty folder directly on the drive.",
+      "Your data is kept. Fix the problem and try again.",
     );
-    // The hint leaves with the failure.
     push(state("installing"));
     expect($("installing-plan").textContent).toBe(
       "This takes a few minutes. You can keep working.",
     );
-  });
-
-  it("gives no hint the person has already followed", async () => {
-    // Directly on the drive, the drive's own permissions are what refuse it.
-    await openPage(failed("E:\\Linger", "UNSAFE_PARENT_ACCESS"));
-    expect($("installing-plan").textContent).toBe(usual);
-  });
-
-  it("keeps the hint to this refusal, known by its code", async () => {
-    await openPage(failed("D:\\Software\\Linger", "UNSAFE_OWNER"));
-    expect($("installing-plan").textContent).toBe(usual);
-    // The words alone do not bring the hint.
-    await openPage(failed("D:\\Software\\Linger"));
-    expect($("installing-plan").textContent).toBe(usual);
   });
 });
 

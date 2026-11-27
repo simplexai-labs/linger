@@ -435,7 +435,8 @@ export interface LocalServerOptions {
   readonly freeDiskBytes?: (directory: string) => Promise<number | undefined>;
   // Where the Desktop Computer daemon stores its config and state
   // (<userData>/computer); validated on Windows during setup preflight so
-  // ancestor ACL refusals fail immediately instead of after installation.
+  // private-path validation failures (such as symlink/junction ancestors or
+  // foreign target ownership) fail immediately instead of after installation.
   readonly daemonDirectory?: string;
   // Checks Windows private-path safety for a candidate directory without
   // creating it or mutating ACLs; windowsPrivateLocation by default on Windows.
@@ -2123,8 +2124,10 @@ export class LocalServerModule implements Module {
       );
       if (error) throw new Error(`${home}: ${error}`);
       // On Windows, pre-check both the install home and the Computer daemon
-      // directory (<userData>/computer) before unpacking so ancestor ACL
-      // refusals fail immediately instead of after installation and enrollment.
+      // directory (<userData>/computer) before unpacking so private-path
+      // validation failures (such as symlink/junction ancestors or foreign
+      // target ownership) fail immediately instead of after installation and
+      // enrollment.
       if (platform === "win32") {
         const checkPrivate =
           this.#options.checkPrivateLocation ?? windowsPrivateLocation;

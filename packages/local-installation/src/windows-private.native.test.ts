@@ -259,6 +259,9 @@ it.skipIf(process.platform !== "win32")(
     await expect(
       windowsPrivatePath(path.join(junction, "settings.json"), "file"),
     ).rejects.toMatchObject({ reason: "UNSAFE_PARENT_LINK" });
+    await expect(
+      windowsPrivateLocation(path.join(junction, "not-created-yet")),
+    ).rejects.toMatchObject({ reason: "UNSAFE_PARENT_LINK" });
   },
 );
 it.skipIf(process.platform !== "win32")(
@@ -293,11 +296,11 @@ it.skipIf(process.platform !== "win32")(
   },
 );
 it.skipIf(process.platform !== "win32")(
-  "accepts inherit-only ancestor Modify ACEs but rejects effective ancestor access and broad private target inheritance",
+  "accepts ancestor Modify ACEs while rejecting broad access on the private target itself",
   async () => {
     const root = await fixture();
     const child = path.join(root, "private");
-    const { mkdir } = await import("node:fs/promises");
+    const pending = path.join(root, "not-created-yet", "Linger");
     await mkdir(child);
     await windowsPrivatePath(child, "directory", true);
     const mutate = async (propagation: "InheritOnly" | "None") => {
@@ -324,23 +327,44 @@ it.skipIf(process.platform !== "win32")(
     await expect(
       windowsPrivatePath(child, "directory"),
     ).resolves.toBeUndefined();
-    // A private target also owns future descendants, so broad inheritance on
-    // the target remains forbidden even when it is inherit-only.
+    await expect(windowsPrivateLocation(child)).resolves.toBeUndefined();
+    await expect(windowsPrivateLocation(pending)).resolves.toBeUndefined();
+    // A private target also owns future descendants, so broad access on the
+    // target remains forbidden even when it is inherit-only.
     await expect(windowsPrivatePath(root, "directory")).rejects.toMatchObject({
       reason: "SHARED_ACCESS",
     });
     await mutate("None");
-    await expect(windowsPrivatePath(child, "directory")).rejects.toMatchObject({
-      reason: "UNSAFE_PARENT_ACCESS",
+    await expect(
+      windowsPrivatePath(child, "directory"),
+    ).resolves.toBeUndefined();
+    await expect(windowsPrivateLocation(child)).resolves.toBeUndefined();
+    await expect(windowsPrivateLocation(pending)).resolves.toBeUndefined();
+    await expect(windowsPrivatePath(root, "directory")).rejects.toMatchObject({
+      reason: "SHARED_ACCESS",
     });
+    const inheritedChild = path.join(root, "inherited-child");
+    await mkdir(inheritedChild);
+    await expect(
+      windowsPrivateLocation(inheritedChild),
+    ).resolves.toBeUndefined();
+    await expect(
+      windowsPrivatePath(inheritedChild, "directory", false),
+    ).rejects.toMatchObject({ reason: "INHERITED_ACCESS" });
+    await expect(
+      windowsPrivatePath(inheritedChild, "directory", true),
+    ).resolves.toBeUndefined();
+    await expect(
+      windowsPrivatePath(inheritedChild, "directory", false),
+    ).resolves.toBeUndefined();
   },
 );
 
 // Elevated runners return from Test-Administrator before the linked-token
 // check, so this builds and calls both Test-Administrator and
-// Test-LinkedTokenAdministrator directly, plus the PowerShell SID classifiers.
+// Test-LinkedTokenAdministrator directly.
 it.skipIf(process.platform !== "win32")(
-  "runs Test-Administrator, the in-memory linked-token check without Add-Type, and the PowerShell SID classifiers",
+  "runs Test-Administrator and the in-memory linked-token check without Add-Type",
   async () => {
     expect(WINDOWS_PRIVATE_PREAMBLE).not.toContain("Add-Type");
     expect(WINDOWS_PRIVATE_PREAMBLE).toContain("DefinePInvokeMethod");
@@ -353,12 +377,6 @@ it.skipIf(process.platform !== "win32")(
       "$res = [ordered]@{",
       "  admin = (Test-Administrator).GetType().FullName",
       "  linked = (Test-LinkedTokenAdministrator).GetType().FullName",
-      "  rid500 = Test-BuiltinAdminSid 'S-1-5-21-3623811015-3361044348-30300820-500'",
-      "  rid512 = Test-BuiltinAdminSid 'S-1-5-21-3623811015-3361044348-30300820-512'",
-      "  rid513 = Test-BuiltinAdminSid 'S-1-5-21-3623811015-3361044348-30300820-513'",
-      "  everyone = Test-EligibleAdminMemberSid 'S-1-1-0'",
-      "  member1006 = Test-EligibleAdminMemberSid 'S-1-5-21-3623811015-3361044348-30300820-1006'",
-      "  entra = Test-EligibleAdminMemberSid 'S-1-12-1-11-22-33-44'",
       "}",
       "[Console]::Out.Write(($res | ConvertTo-Json -Compress))",
     ].join("\n");
@@ -371,12 +389,6 @@ it.skipIf(process.platform !== "win32")(
     expect(JSON.parse(result.stdout)).toEqual({
       admin: "System.Boolean",
       linked: "System.Boolean",
-      rid500: true,
-      rid512: true,
-      rid513: false,
-      everyone: false,
-      member1006: true,
-      entra: true,
     });
   },
   60_000,

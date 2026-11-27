@@ -3098,20 +3098,6 @@
         value.length <= 46
           ? value
           : value.slice(0, 18) + "…" + value.slice(-27);
-      // Where to install instead, when the installer refused the location
-      // because another account could rename a folder on the way to it; the
-      // message, shown below, says why. A folder directly on the drive is
-      // refused for the drive's own permissions, which choosing the drive
-      // again would not change, so that case gets no hint.
-      const locationHint = (local) => {
-        const [, drive] =
-          /^([A-Za-z]:\\)[^\\]+\\[^\\]/.exec(local.location.path) ?? [];
-        return drive &&
-          local.refusal?.code === "WINDOWS_PRIVATE_PATH_UNSAFE" &&
-          local.refusal.reason === "UNSAFE_PARENT_ACCESS"
-          ? t("locationHint", { folder: drive + "Linger" })
-          : "";
-      };
       // Why the installation stopped: in the page's words when the main
       // process names the reason, else the message it passed on.
       const failureText = (local) =>
@@ -4677,7 +4663,7 @@
               : "installingTitle",
         );
         $("installing-plan").textContent = failed
-          ? locationHint(local) || t("dataKept")
+          ? t("dataKept")
           : t("takesMinutes");
         const section = document.querySelector('[data-step="installing"]');
         const steps = ALL_STEPS.filter(([id]) => local.steps.includes(id));

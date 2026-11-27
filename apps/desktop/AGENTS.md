@@ -85,9 +85,10 @@ Gateway and runs Agents. The daemon exits with the app.
 - `src/main/local-server.ts`: LocalServer, the setup page's Quick Install
   path. On Windows, install preflight checks both the install home and the
   Computer daemon directory (`<userData>/computer`) non-destructively via
-  `windowsPrivateLocation` before fetching Node or unpacking, so ancestor ACL
-  refusals fail immediately with the offending ancestor path and SID instead of
-  after enrollment. It reuses the pinned Node.js binary shipped with Computer
+  `windowsPrivateLocation` before fetching Node or unpacking, so private-path
+  validation failures (such as symlink/junction ancestors or foreign target
+  ownership) fail immediately with the offending ancestor path or SID instead
+  of after enrollment. It reuses the pinned Node.js binary shipped with Computer
   tools (`resources/runtime/bin/node(.exe)` via `bundledNodePath`, copied and
   SHA-256 verified into `<home>/desktop/node/v<version>/`, falling back to
   legacy bundled manifests or downloading in the download region's order,

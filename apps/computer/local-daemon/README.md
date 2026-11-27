@@ -743,21 +743,18 @@ forward slashes, as a lowercase SHA-256 digest. Private files are checked agains
 the current SID and ACL, not POSIX permission bits. Writing a separate credential
 does not change the permissions of an existing parent directory.
 
-The installer and the Daemon refuse a private path when another account can
-replace one of its parent directories, naming the offending ancestor path and
-SID. Ancestors trust the current user, `SYSTEM`, `BUILTIN\Administrators`,
-`TrustedInstaller`, built-in Administrator/Domain/Enterprise Admin SIDs
-(`S-1-5-21-*-*-*-500|512|519`), and direct individual/domain/Entra members of
-local `BUILTIN\Administrators` (excluding broad well-known groups). One
-additional exception applies on ancestor access rules: the Codex Windows
-sandbox may hold replace rights on a parent, such as AppData. The sandbox acts
-through the `CodexSandboxUsers` group and the capability SIDs in
-`%USERPROFILE%\.codex\cap_sid` (or `%CODEX_HOME%\cap_sid`). A sandboxed Codex
-command can therefore replace such a parent; Linger accepts this so it installs
-beside Codex. Private paths themselves still grant access only to the current
-user and SYSTEM. Their owner is the current user or, when that user is an
-administrator, Administrators, which owns what an elevated process (Run as
-administrator, the built-in Administrator) creates.
+Private targets themselves remain strictly owner-only (protected DACL granting
+access only to the current user and `SYSTEM` on creation; validation accepts
+the current user, `SYSTEM`, and `BUILTIN\Administrators`), reject reparse
+points and multi-link files, and require the owner to be the current user or,
+when that user is an administrator (via active or UAC-linked token),
+`BUILTIN\Administrators`, which owns what an elevated process (Run as
+administrator, the built-in Administrator) creates. Ancestor directories are
+pinned open without `FILE_SHARE_DELETE` while opening the target to prevent
+concurrent rename races and are checked only for links/reparse points and
+directory type (plus rejecting UNC paths and NTFS alternate data streams),
+without checking ancestor ownership or ACLs, so nested folders on Windows data
+drives such as `D:\program\Linger` are accepted.
 
 Process recovery uses the creation time and a held process handle, so a reused
 process ID is never mistaken for the original. Ordinary tasks are held by a Job

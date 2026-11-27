@@ -11,36 +11,33 @@ stop unrelated processes, pull mutable images, or delete volumes as recovery.
 Every installation runs natively from a Linger source checkout; Docker is not
 used.
 
-On Windows `windowsPrivatePath` makes a private path owner-only and refuses it
-when another account could put a different folder in its place: an ancestor
-that is a link, that another account owns, or that grants another account the
-right to replace a child, change permissions, or take ownership. Delete on an
-ancestor counts as well, because its holder can rename that folder, except on
-a volume root, which can be neither renamed nor removed. A folder directly on
-a data drive with the stock root ACL therefore passes, and a folder nested in
-one that inherits Modify for Authenticated Users does not. The Daemon's
-`privatefs` treats the volume root and trusted ancestor principals the same
-way: ancestors trust the current user, `SYSTEM`, `BUILTIN\Administrators`,
-`TrustedInstaller`, built-in Administrator/Domain/Enterprise Admin SIDs
-(`S-1-5-21-*-*-*-500|512|519`), direct individual/domain/Entra members of local
-`BUILTIN\Administrators` (never broad groups such as `Everyone`, `Users`, or
-`Authenticated Users`), and Codex Windows sandbox principals on access rules.
-Private targets themselves remain strictly owner-only. `windowsPrivateLocation`
-runs the same check non-destructively without creating folders or changing
-ACLs. The PowerShell script checks `$ExecutionContext.SessionState.LanguageMode`
-first, emits Win32 P/Invoke stubs in memory via `Reflection.Emit` instead of
-compiling C# through `Add-Type`, and reports the offending ancestor path and SID
-or sanitized exception/worker diagnostics (never raw stderr prose). A refusal leaves the installer as its code and reason
-(`windowsPrivateRefusal`), never as its words: in the `startFailure` line on
-stdout when the installer manager cannot start, in the `--user-keys` outcome,
-and in the `--inspect` failure outcome (`inspectSetup` propagates the
-`WINDOWS_PRIVATE_PATH_UNSAFE` refusal instead of wrapping it as
-`LOCALMODELS_SETUP_UNAVAILABLE`). The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
-to install instead. Repair skips propagation when the protected DACL already
-grants inheritable FullControl to the owner and SYSTEM on a directory, or
-FullControl to both on a file. Private paths with partial rights still receive
-the full repair. Rewriting a directory DACL propagates to its existing children
-and can time out on a large cache tree.
+On Windows `windowsPrivatePath` makes a private target strictly owner-only with
+a protected DACL (`owner + SYSTEM` FullControl), rejecting UNC paths, reparse
+points/links on the target or any existing ancestor directory
+(`UNSAFE_PARENT_LINK`), foreign target ownership (accepting
+`BUILTIN\Administrators` when the current user is an administrator via active
+or UAC-linked token), inherited access, and shared access on the target itself.
+Ancestor directories are checked only for links/reparse points and container
+type, not ancestor ownership or ACLs, so nested folders on Windows data drives
+such as `D:\program\Linger` are accepted. The Daemon's `privatefs` follows the
+same policy while holding ancestor directory handles open without
+`FILE_SHARE_DELETE` during target open to prevent concurrent rename races.
+`windowsPrivateLocation` runs the same check non-destructively without creating
+folders or changing ACLs. The PowerShell script checks
+`$ExecutionContext.SessionState.LanguageMode` first, emits Win32 P/Invoke stubs
+in memory via `Reflection.Emit` instead of compiling C# through `Add-Type`, and
+reports the offending ancestor path or SID or sanitized exception/worker
+diagnostics (never raw stderr prose). A refusal leaves the installer as its
+code and reason (`windowsPrivateRefusal`, keeping legacy parent-owner/access
+reason codes recognized for backward-compatible parsing), never as its words:
+in the `startFailure` line on stdout when the installer manager cannot start,
+in the `--user-keys` outcome, and in the `--inspect` failure outcome
+(`inspectSetup` propagates the `WINDOWS_PRIVATE_PATH_UNSAFE` refusal instead of
+wrapping it as `LOCALMODELS_SETUP_UNAVAILABLE`). Repair skips propagation when
+the protected DACL already grants inheritable FullControl to the owner and
+SYSTEM on a directory, or FullControl to both on a file. Private paths with
+partial rights still receive the full repair. Rewriting a directory DACL
+propagates to its existing children and can time out on a large cache tree.
 
 Launch the fixed private-path scripts with PowerShell `-Command`. Encoding
 the whole script lengthens the Windows command line and can stall startup.
@@ -215,7 +212,7 @@ tree, log and stop work as before. What an elevated process creates is owned
 by Administrators; `windowsPrivatePath` accepts that owner as well as the
 user when the user is an administrator (Administrators enabled in the token
 or in the elevated token UAC links to it, as Git for Windows decides), since
-the ancestor check already trusts that group. A standard user is refused.
+an administrator can take ownership of any file. A standard user is refused.
 
 On Windows the installer stages UTF-8 application manifests beside the bundled
 PostgreSQL tools before recording their file hashes. This lets `initdb`
