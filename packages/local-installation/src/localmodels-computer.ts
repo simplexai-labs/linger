@@ -1,5 +1,6 @@
 import path from "node:path";
 import { privateDirectory } from "./instance.js";
+import { readVerifiedActiveTool } from "./localmodels-manifest.js";
 import {
   ensureLocalmodelsTool,
   localmodelsBaseDirectory,
@@ -33,7 +34,11 @@ export async function localmodelsComputerTool(
   options: { signal?: AbortSignal } = {},
 ): Promise<LocalmodelsComputerTool | undefined> {
   if (!source) return undefined;
-  const tool = await ensureLocalmodelsTool(home, options, { source });
+  const active = await readVerifiedActiveTool(home, source);
+  const effective = active?.source ?? source;
+  const tool = await ensureLocalmodelsTool(home, options, {
+    source: effective,
+  });
   const stateDirectory = localmodelsStateDirectory(home);
   const baseDirectory = localmodelsBaseDirectory(home);
   await privateDirectory(stateDirectory);

@@ -606,7 +606,14 @@ Gateway and runs Agents. The daemon exits with the app.
   English. Errors from transfers and servers stay in English.
 - `src/preload/index.ts`: the only SPA API, `window.lingerDesktop`. Its
   `update` reads the Updater's state (without the release page URL) and runs
-  the tray's install and check, for the SPA's account menu; `settings` exposes
+  the tray's install and check, for the SPA's account menu; `localModelsUpdate`
+  reads `LocalModelsUpdaterModule` (`src/main/local-models-updater.ts`) for
+  independent Ed25519-signed localmodels kit updates on this desktop computer
+  (background checks fetch only small metadata, downloads and read-only smoke
+  checks run only on explicit user confirmation, activation waits until both
+  `active_operations` and `local_models_jobs` reach zero before restarting the
+  daemon via `computer.runtime`, and startup failures automatically roll back to
+  the bundled baseline); `settings` exposes
   `preventSleep` (`get`, `set`, `onChange`) so Settings › Computers mirrors and
   stays in sync with the tray's Prevent Sleep toggle; `driverUpdate`
   (`src/main/driver-updater.ts`, `src/main/windows-driver-platform.ts`) detects
@@ -629,7 +636,8 @@ Gateway and runs Agents. The daemon exits with the app.
   credential in `LINGER_COMPUTER_TOKEN` (`gateway.token_env`). The config's
   `desktop` section puts the daemon in Desktop mode: no self-update, it exits
   when its stdin closes, and it reports `{"type":"status",...}` lines on
-  stdout (`gateway_state`, `active_operations`, `active_model_invokes`).
+  stdout (`gateway_state`, `active_operations`, `active_model_invokes`,
+  `local_models_jobs`).
   `active_operations` drives the tray busy state, quit confirmation, idle
   restarts, updater waiting and the SPA status (`runtime.activity`);
   `active_model_invokes` (omitted by older daemons, treated as `0`) emits

@@ -32,12 +32,17 @@ type desktopStatus struct {
 	GatewayState       string `json:"gateway_state"`
 	ActiveOperations   int    `json:"active_operations"`
 	ActiveModelInvokes int    `json:"active_model_invokes"`
+	LocalModelsJobs    int    `json:"local_models_jobs,omitempty"`
 }
 
 type desktopStatusSource interface {
 	GatewayState() string
 	ActiveOperationCount() int
 	ActiveModelInvokeCount() int
+}
+
+type desktopLocalModelsJobSource interface {
+	ActiveLocalModelsJobCount() int
 }
 
 // desktopPermissionRequest asks the Desktop app about its own permissions.
@@ -175,11 +180,16 @@ func reportDesktopStatus(ctx context.Context, encode func(any) error, source des
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		localModelsJobs := 0
+		if jobSource, ok := source.(desktopLocalModelsJobSource); ok {
+			localModelsJobs = jobSource.ActiveLocalModelsJobCount()
+		}
 		current := desktopStatus{
 			Type:               "status",
 			GatewayState:       source.GatewayState(),
 			ActiveOperations:   source.ActiveOperationCount(),
 			ActiveModelInvokes: source.ActiveModelInvokeCount(),
+			LocalModelsJobs:    localModelsJobs,
 		}
 		if last == nil || current != *last {
 			if encode(current) != nil {

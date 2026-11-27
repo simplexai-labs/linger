@@ -10,13 +10,21 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDesktopUpdate } from "@/features/auth/desktop-update";
 import { relativeTime } from "@/features/local-computer/computer-relative-time";
 import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
 import { localComputersQueryOptions } from "@/features/local-computer/local-computer-queries";
@@ -114,6 +122,11 @@ import {
   type ModelSourceStatus,
   type ModelSourceView,
 } from "./model-source-queries";
+import {
+  useLocalModelsUpdate,
+  type LocalModelsUpdate,
+} from "./local-models-update";
+import { LocalModelsUpdateBanner } from "./local-models-update-banner";
 
 const offlinePollIntervalMs = 5_000;
 
@@ -538,6 +551,7 @@ function ComputerModels({
   defaultComputerName?: string;
   /** Absent for a Computer outside the viewer's own inventory. */
   displayName?: string;
+  /** True when the desktop app is viewing its own local Computer. */
   isLocalDesktop?: boolean;
   onOpenDefaultComputer?: () => void;
   onSelectComputer: (computerId: string) => void;
@@ -547,6 +561,16 @@ function ComputerModels({
   const t = useT();
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
+  const handleEngineApplied = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: localModelsQueryKey(tenantId, computerId),
+    });
+  }, [computerId, queryClient, tenantId]);
+  const engineUpdate = useLocalModelsUpdate(
+    isLocalDesktop,
+    handleEngineApplied,
+  );
+  const desktopUpdate = useDesktopUpdate();
   // Only the owner switches sources, and only their own Computers carry a
   // display name here.
   const hasOwnedSource = displayName !== undefined;
@@ -824,6 +848,13 @@ function ComputerModels({
           </div>
         </div>
       ) : null}
+      {isLocalDesktop && shownTab === "local" ? (
+        <LocalModelsUpdateBanner
+          desktopUpdate={desktopUpdate}
+          engineUpdate={engineUpdate}
+          updatedVersion={engineUpdate?.updatedVersion ?? null}
+        />
+      ) : null}
       {source.isError && !switcher.failure && !offline ? (
         <div className="mt-4">
           <FormFeedback tone="danger">
@@ -904,6 +935,7 @@ function ComputerModels({
             blocker={blocker}
             computer={computer}
             dialog={dialog}
+            engineUpdate={engineUpdate}
             guidance={guidance}
             guidanceRenderedInSummary={Boolean(
               hasMemorySummary && summaryGuidanceCopy,
@@ -1005,6 +1037,7 @@ function Library({
   blocker,
   computer,
   dialog,
+  engineUpdate,
   guidance,
   guidanceRenderedInSummary = false,
   isLocalDesktop = false,
@@ -1023,6 +1056,7 @@ function Library({
   blocker: ReturnType<typeof hostBlocker>;
   computer?: InventoryComputer;
   dialog: Dialog | null;
+  engineUpdate?: LocalModelsUpdate;
   guidance: ReturnType<typeof memoryGuidance>;
   guidanceRenderedInSummary?: boolean;
   isLocalDesktop?: boolean;
@@ -1944,7 +1978,11 @@ function Library({
       )}
 
       {dialog?.kind === "advanced" ? (
-        <AdvancedDialog onClose={() => setDialog(null)} view={view} />
+        <AdvancedDialog
+          engineUpdate={engineUpdate}
+          onClose={() => setDialog(null)}
+          view={view}
+        />
       ) : null}
       {dialog?.kind === "updateDriver" ? (
         <UpdateDriverDialog

@@ -2,6 +2,8 @@
   "platform": "linux",
   "arch": "x64",
   "localmodelsTool": {
+    "version": "0.1.0.dev60",
+    "npmVersion": "0.1.0-dev.60",
     "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev60/linux-x64.tgz",
     "mirrors": [
       "https://registry.npmjs.org/@simplexai/localmodels-linux-x64/-/localmodels-linux-x64-0.1.0-dev.60.tgz",

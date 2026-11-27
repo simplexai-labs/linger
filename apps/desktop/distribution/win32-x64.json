@@ -2,6 +2,8 @@
   "platform": "win32",
   "arch": "x64",
   "localmodelsTool": {
+    "version": "0.1.0.dev60",
+    "npmVersion": "0.1.0-dev.60",
     "url": "https://d2ikbbcl3j6jz9.cloudfront.net/cli/localmodels/0.1.0.dev60/win32-x64.tgz",
     "mirrors": [
       "https://registry.npmjs.org/@simplexai/localmodels-win32-x64/-/localmodels-win32-x64-0.1.0-dev.60.tgz",

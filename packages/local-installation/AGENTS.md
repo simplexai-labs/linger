@@ -302,6 +302,18 @@ that the shared `owned.json` owns, every call gets that directory as
 follow. Isolating such a home would read its deployments as removed and its
 plan as changed, and the upgraded app could not start.
 
+Signed component updates (`localmodels-manifest.ts`, `localmodels-update.ts`)
+store the verified Ed25519 manifest and signature in
+`<home>/tools/localmodels/active.json` (0600, atomic write). Setup, resume,
+the Daemon config, quit and uninstall all resolve through
+`resolveEffectiveToolSource` / `readVerifiedActiveTool`: an active record that
+is missing, tampered, incompatible, or superseded by a newer bundled
+`distribution.json` baseline falls back to the baseline (and removes stale
+overrides). Staging runs read-only smoke checks (`stack capabilities` and
+`library status`) using the same per-home isolation and UTF-8 environment
+before activation, and activation keeps earlier `<home>/tools/localmodels/<sha256>`
+kits on disk so existing deployments' launchers remain runnable for `stack up`.
+
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.

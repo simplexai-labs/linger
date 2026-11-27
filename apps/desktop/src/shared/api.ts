@@ -113,6 +113,47 @@ export interface PreviewViewApi {
   onState(callback: (id: string, state: PreviewViewState) => void): () => void;
 }
 
+export interface DesktopLocalModelsEngineInfo {
+  readonly currentVersion: string;
+  readonly source: "bundled" | "updated";
+  readonly sourceCommit: string;
+  readonly autoCheck: boolean;
+}
+
+// Signed localmodels component update state shown on the Models page.
+export type DesktopLocalModelsUpdateState =
+  | (DesktopLocalModelsEngineInfo & {
+      readonly kind: "idle";
+      readonly checkedAt?: string;
+    })
+  | (DesktopLocalModelsEngineInfo & { readonly kind: "checking" })
+  | (DesktopLocalModelsEngineInfo & {
+      readonly kind: "available";
+      readonly version: string;
+      readonly summary?: string;
+      readonly hasNotes: boolean;
+      readonly bytes: number;
+    })
+  | (DesktopLocalModelsEngineInfo & {
+      readonly kind: "requires_app_update";
+      readonly version: string;
+      readonly minLingerVersion: string;
+    })
+  | (DesktopLocalModelsEngineInfo & {
+      readonly kind: "downloading";
+      readonly version: string;
+      readonly completed: number;
+      readonly total?: number;
+    })
+  | (DesktopLocalModelsEngineInfo & {
+      readonly kind: "verifying" | "waiting" | "applying";
+      readonly version: string;
+    })
+  | (DesktopLocalModelsEngineInfo & {
+      readonly kind: "failed";
+      readonly error: string;
+    });
+
 export interface LingerDesktopApi {
   readonly version: string;
   readonly platform: "darwin" | "win32" | "linux";
@@ -155,6 +196,17 @@ export interface LingerDesktopApi {
     install(): Promise<void>;
     // Try Again after a failure.
     check(): Promise<void>;
+  };
+  // Independent signed updates of this computer's localmodels engine.
+  readonly localModelsUpdate?: {
+    getState(): Promise<DesktopLocalModelsUpdateState | null>;
+    onState(
+      callback: (state: DesktopLocalModelsUpdateState | null) => void,
+    ): () => void;
+    check(): Promise<void>;
+    install(): Promise<void>;
+    setAutoCheck(enabled: boolean): Promise<void>;
+    openNotes(): Promise<void>;
   };
   readonly connectorOAuth: {
     prepare(): Promise<string>;
@@ -240,6 +292,12 @@ export const IPC = {
   updateStateEvent: "update.state.event",
   updateInstall: "update.install",
   updateCheck: "update.check",
+  localModelsUpdateState: "local-models-update.state",
+  localModelsUpdateStateEvent: "local-models-update.state.event",
+  localModelsUpdateCheck: "local-models-update.check",
+  localModelsUpdateInstall: "local-models-update.install",
+  localModelsUpdateSetAutoCheck: "local-models-update.set-auto-check",
+  localModelsUpdateOpenNotes: "local-models-update.open-notes",
   connectorOAuthPrepare: "connector-oauth.prepare",
   connectorOAuthReturn: "connector-oauth.return",
   previewFrameRefused: "preview.frame-refused",
