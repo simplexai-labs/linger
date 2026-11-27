@@ -34,6 +34,7 @@ import {
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
   FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
   FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
+  FIRST_SYSTEM_TELEMETRY_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
   type LocalPlacementRequirement,
@@ -97,6 +98,7 @@ export class RunnerConnections {
       | "modelInvocation"
       | "computerTools"
       | "localModels"
+      | "systemTelemetry"
       | "operations"
       | "preparation"
       | "queue"
@@ -426,6 +428,7 @@ export class RunnerConnections {
     if (previous?.connected) {
       this.owners.capabilities().rejectConnectionWaiters(previous);
       this.owners.localModels().disconnected(previous);
+      this.owners.systemTelemetry().disconnected(previous);
       this.#clearHeartbeat(previous);
       previous.connected = false;
       previous.peer.close(1012, "Runner connection replaced");
@@ -497,6 +500,12 @@ export class RunnerConnections {
                 FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
               )
                 ? (["local_models_concurrency_probe"] as const)
+                : []),
+              ...(isComputerVersionAtLeast(
+                connection.hello.daemon_version,
+                FIRST_SYSTEM_TELEMETRY_COMPUTER_VERSION,
+              )
+                ? (["system_telemetry"] as const)
                 : []),
               // A Computer ignores a feature it does not know, so these
               // need no release gate.
@@ -783,6 +792,10 @@ export class RunnerConnections {
     }
     if (isLocalModelsOutcome(envelope)) {
       this.owners.localModels().receiveOutcome(connection, envelope);
+      return;
+    }
+    if (envelope.type === "runner.system_telemetry") {
+      this.owners.systemTelemetry().receiveFrame(connection, envelope);
       return;
     }
     if (envelope.type === "prepared" && envelope.target === "provider") {
@@ -1075,6 +1088,7 @@ export class RunnerConnections {
   disconnect(connection: ConnectedRunner): void {
     this.owners.capabilities().rejectConnectionWaiters(connection);
     this.owners.localModels().disconnected(connection);
+    this.owners.systemTelemetry().disconnected(connection);
     this.#clearHeartbeat(connection);
     connection.connected = false;
     this.owners.operations().wakeCapacityWaiters();

@@ -1223,6 +1223,213 @@ func (e PersonalKnowledgeSessionFactFactType) Valid() bool {
 	}
 }
 
+// Defines values for SystemTelemetryBottleneck.
+const (
+	SystemTelemetryBottleneckBalanced      SystemTelemetryBottleneck = "balanced"
+	SystemTelemetryBottleneckComputeBound  SystemTelemetryBottleneck = "compute_bound"
+	SystemTelemetryBottleneckIdle          SystemTelemetryBottleneck = "idle"
+	SystemTelemetryBottleneckIoBound       SystemTelemetryBottleneck = "io_bound"
+	SystemTelemetryBottleneckMemoryBwBound SystemTelemetryBottleneck = "memory_bw_bound"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryBottleneck enum.
+func (e SystemTelemetryBottleneck) Valid() bool {
+	switch e {
+	case SystemTelemetryBottleneckBalanced:
+		return true
+	case SystemTelemetryBottleneckComputeBound:
+		return true
+	case SystemTelemetryBottleneckIdle:
+		return true
+	case SystemTelemetryBottleneckIoBound:
+		return true
+	case SystemTelemetryBottleneckMemoryBwBound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryMeasuredMemory.
+const (
+	SystemTelemetryMeasuredMemoryRam  SystemTelemetryMeasuredMemory = "ram"
+	SystemTelemetryMeasuredMemoryVram SystemTelemetryMeasuredMemory = "vram"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryMeasuredMemory enum.
+func (e SystemTelemetryMeasuredMemory) Valid() bool {
+	switch e {
+	case SystemTelemetryMeasuredMemoryRam:
+		return true
+	case SystemTelemetryMeasuredMemoryVram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryMemoryPressureLevel.
+const (
+	SystemTelemetryMemoryPressureCritical SystemTelemetryMemoryPressureLevel = "critical"
+	SystemTelemetryMemoryPressureElevated SystemTelemetryMemoryPressureLevel = "elevated"
+	SystemTelemetryMemoryPressureNominal  SystemTelemetryMemoryPressureLevel = "nominal"
+	SystemTelemetryMemoryPressureUnknown  SystemTelemetryMemoryPressureLevel = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryMemoryPressureLevel enum.
+func (e SystemTelemetryMemoryPressureLevel) Valid() bool {
+	switch e {
+	case SystemTelemetryMemoryPressureCritical:
+		return true
+	case SystemTelemetryMemoryPressureElevated:
+		return true
+	case SystemTelemetryMemoryPressureNominal:
+		return true
+	case SystemTelemetryMemoryPressureUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryPoolKind.
+const (
+	SystemTelemetryPoolKindDiscrete SystemTelemetryPoolKind = "discrete"
+	SystemTelemetryPoolKindUnified  SystemTelemetryPoolKind = "unified"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryPoolKind enum.
+func (e SystemTelemetryPoolKind) Valid() bool {
+	switch e {
+	case SystemTelemetryPoolKindDiscrete:
+		return true
+	case SystemTelemetryPoolKindUnified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetrySlotPhase.
+const (
+	SystemTelemetrySlotPhaseDecoding SystemTelemetrySlotPhase = "decoding"
+	SystemTelemetrySlotPhaseIdle     SystemTelemetrySlotPhase = "idle"
+	SystemTelemetrySlotPhasePrefill  SystemTelemetrySlotPhase = "prefill"
+	SystemTelemetrySlotPhaseQueued   SystemTelemetrySlotPhase = "queued"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetrySlotPhase enum.
+func (e SystemTelemetrySlotPhase) Valid() bool {
+	switch e {
+	case SystemTelemetrySlotPhaseDecoding:
+		return true
+	case SystemTelemetrySlotPhaseIdle:
+		return true
+	case SystemTelemetrySlotPhasePrefill:
+		return true
+	case SystemTelemetrySlotPhaseQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetrySource.
+const (
+	SystemTelemetrySourceDemo  SystemTelemetrySource = "demo"
+	SystemTelemetrySourceEmpty SystemTelemetrySource = "empty"
+	SystemTelemetrySourceLive  SystemTelemetrySource = "live"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetrySource enum.
+func (e SystemTelemetrySource) Valid() bool {
+	switch e {
+	case SystemTelemetrySourceDemo:
+		return true
+	case SystemTelemetrySourceEmpty:
+		return true
+	case SystemTelemetrySourceLive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryWatchdogStatus.
+const (
+	SystemTelemetryWatchdogClean         SystemTelemetryWatchdogStatus = "clean"
+	SystemTelemetryWatchdogCrashed       SystemTelemetryWatchdogStatus = "crashed"
+	SystemTelemetryWatchdogMemoryStarved SystemTelemetryWatchdogStatus = "memory_starved"
+	SystemTelemetryWatchdogOom           SystemTelemetryWatchdogStatus = "oom"
+	SystemTelemetryWatchdogUnknown       SystemTelemetryWatchdogStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryWatchdogStatus enum.
+func (e SystemTelemetryWatchdogStatus) Valid() bool {
+	switch e {
+	case SystemTelemetryWatchdogClean:
+		return true
+	case SystemTelemetryWatchdogCrashed:
+		return true
+	case SystemTelemetryWatchdogMemoryStarved:
+		return true
+	case SystemTelemetryWatchdogOom:
+		return true
+	case SystemTelemetryWatchdogUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SystemTelemetryWaterfallStatus.
+const (
+	SystemTelemetryWaterfallCompleted SystemTelemetryWaterfallStatus = "completed"
+	SystemTelemetryWaterfallDeferred  SystemTelemetryWaterfallStatus = "deferred"
+	SystemTelemetryWaterfallStreaming SystemTelemetryWaterfallStatus = "streaming"
+)
+
+// Valid indicates whether the value is a known member of the SystemTelemetryWaterfallStatus enum.
+func (e SystemTelemetryWaterfallStatus) Valid() bool {
+	switch e {
+	case SystemTelemetryWaterfallCompleted:
+		return true
+	case SystemTelemetryWaterfallDeferred:
+		return true
+	case SystemTelemetryWaterfallStreaming:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TelemetryBasis.
+const (
+	TelemetryBasisDemo     TelemetryBasis = "demo"
+	TelemetryBasisEstimate TelemetryBasis = "estimate"
+	TelemetryBasisLive     TelemetryBasis = "live"
+	TelemetryBasisMeasured TelemetryBasis = "measured"
+	TelemetryBasisNone     TelemetryBasis = "none"
+)
+
+// Valid indicates whether the value is a known member of the TelemetryBasis enum.
+func (e TelemetryBasis) Valid() bool {
+	switch e {
+	case TelemetryBasisDemo:
+		return true
+	case TelemetryBasisEstimate:
+		return true
+	case TelemetryBasisLive:
+		return true
+	case TelemetryBasisMeasured:
+		return true
+	case TelemetryBasisNone:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WikiRefreshCandidateErrorResponseErrorDisposition.
 const (
 	Retryable WikiRefreshCandidateErrorResponseErrorDisposition = "retryable"
@@ -2678,8 +2885,371 @@ type StateHashVersion = int
 // StateVector defines model for StateVector.
 type StateVector = string
 
+// SystemTelemetryApply defines model for SystemTelemetryApply.
+type SystemTelemetryApply struct {
+	PlanId    string                    `json:"plan_id"`
+	Rollback  bool                      `json:"rollback"`
+	Rows      []SystemTelemetryApplyRow `json:"rows"`
+	StartedAt string                    `json:"started_at"`
+	UpdatedAt string                    `json:"updated_at"`
+}
+
+// SystemTelemetryApplyRow defines model for SystemTelemetryApplyRow.
+type SystemTelemetryApplyRow struct {
+	Detail *string `json:"detail,omitempty"`
+	Done   *int64  `json:"done,omitempty"`
+	Id     string  `json:"id"`
+	Label  string  `json:"label"`
+	Phase  *string `json:"phase,omitempty"`
+	State  string  `json:"state"`
+	Step   *string `json:"step,omitempty"`
+	Total  *int64  `json:"total,omitempty"`
+}
+
+// SystemTelemetryBottleneck Deterministic bottleneck classification computed from measured bandwidth, GPU utilization, and disk read throughput.
+type SystemTelemetryBottleneck string
+
+// SystemTelemetryClient defines model for SystemTelemetryClient.
+type SystemTelemetryClient struct {
+	Id    string `json:"id"`
+	Model string `json:"model"`
+	Name  string `json:"name"`
+}
+
+// SystemTelemetryComponent defines model for SystemTelemetryComponent.
+type SystemTelemetryComponent struct {
+	Device    *string                `json:"device,omitempty"`
+	Endpoint  *string                `json:"endpoint,omitempty"`
+	Explain   *string                `json:"explain,omitempty"`
+	Gpu       *int                   `json:"gpu,omitempty"`
+	Health    *string                `json:"health,omitempty"`
+	Id        string                 `json:"id"`
+	KvTypes   *string                `json:"kv_types,omitempty"`
+	LiveSlots *[]SystemTelemetrySlot `json:"live_slots,omitempty"`
+	Model     *string                `json:"model,omitempty"`
+	Perf      *SystemTelemetryPerf   `json:"perf,omitempty"`
+	Quant     *string                `json:"quant,omitempty"`
+	RamBytes  *int64                 `json:"ram_bytes,omitempty"`
+	Role      *string                `json:"role,omitempty"`
+	Slots     *int                   `json:"slots,omitempty"`
+	State     *string                `json:"state,omitempty"`
+	Title     *string                `json:"title,omitempty"`
+	VramBytes *int64                 `json:"vram_bytes,omitempty"`
+	Window    *int                   `json:"window,omitempty"`
+}
+
+// SystemTelemetryCoreUsage defines model for SystemTelemetryCoreUsage.
+type SystemTelemetryCoreUsage struct {
+	Core    int     `json:"core"`
+	UtilPct float32 `json:"util_pct"`
+}
+
+// SystemTelemetryCounters defines model for SystemTelemetryCounters.
+type SystemTelemetryCounters struct {
+	KvCacheUsageRatio      *float32 `json:"kv_cache_usage_ratio,omitempty"`
+	PredictedSeconds       *float32 `json:"predicted_seconds,omitempty"`
+	PredictedTokens        *float32 `json:"predicted_tokens,omitempty"`
+	PredictedTokensSeconds *float32 `json:"predicted_tokens_seconds,omitempty"`
+	Processing             *float32 `json:"processing,omitempty"`
+	PromptSeconds          *float32 `json:"prompt_seconds,omitempty"`
+	PromptTokens           *float32 `json:"prompt_tokens,omitempty"`
+	PromptTokensSeconds    *float32 `json:"prompt_tokens_seconds,omitempty"`
+	RequestsDeferred       *float32 `json:"requests_deferred,omitempty"`
+}
+
+// SystemTelemetryCpuSensors defines model for SystemTelemetryCpuSensors.
+type SystemTelemetryCpuSensors struct {
+	LogicalCores *int                        `json:"logical_cores,omitempty"`
+	OverallPct   SystemTelemetryFigure       `json:"overall_pct"`
+	PerCore      *[]SystemTelemetryCoreUsage `json:"per_core,omitempty"`
+}
+
+// SystemTelemetryDiskSensors defines model for SystemTelemetryDiskSensors.
+type SystemTelemetryDiskSensors struct {
+	ReadMbS  SystemTelemetryFigure `json:"read_mb_s"`
+	WriteMbS SystemTelemetryFigure `json:"write_mb_s"`
+}
+
+// SystemTelemetryEnvelope Internal Agent Service payload carrying one monotonic revision-stamped system telemetry snapshot for a connected Local Computer.
+type SystemTelemetryEnvelope struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId Id `json:"computer_id"`
+
+	// ObservedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ObservedAt Timestamp `json:"observed_at"`
+	Revision   int64     `json:"revision"`
+
+	// Snapshot Structured live telemetry snapshot matching localmodels.stack-view/v1 (v1.1). Fields beyond schema, generated_at, and source are additive and optional so schema evolution never breaks older daemons or viewers.
+	Snapshot SystemTelemetrySnapshot `json:"snapshot"`
+}
+
+// SystemTelemetryEvent defines model for SystemTelemetryEvent.
+type SystemTelemetryEvent struct {
+	At        string   `json:"at"`
+	Component *string  `json:"component,omitempty"`
+	GatewayMs *float32 `json:"gateway_ms,omitempty"`
+	Id        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	LatencyMs *float32 `json:"latency_ms,omitempty"`
+	Ok        bool     `json:"ok"`
+	Tier      *string  `json:"tier,omitempty"`
+	TokensIn  *int     `json:"tokens_in,omitempty"`
+	TokensOut *int     `json:"tokens_out,omitempty"`
+	TtftMs    *float32 `json:"ttft_ms,omitempty"`
+}
+
+// SystemTelemetryFigure defines model for SystemTelemetryFigure.
+type SystemTelemetryFigure struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis TelemetryBasis `json:"basis"`
+	Note  *string        `json:"note,omitempty"`
+	Value *float32       `json:"value,omitempty"`
+}
+
+// SystemTelemetryFit defines model for SystemTelemetryFit.
+type SystemTelemetryFit struct {
+	DecodeTokS *float32 `json:"decode_tok_s,omitempty"`
+	Id         string   `json:"id"`
+	Quant      string   `json:"quant"`
+}
+
+// SystemTelemetryGateway defines model for SystemTelemetryGateway.
+type SystemTelemetryGateway struct {
+	Addr        string                 `json:"addr"`
+	ClientLanes *map[string]int        `json:"client_lanes,omitempty"`
+	InFlight    *int                   `json:"in_flight,omitempty"`
+	Kind        string                 `json:"kind"`
+	P50TtftMs   *SystemTelemetryFigure `json:"p50_ttft_ms,omitempty"`
+	Route       string                 `json:"route"`
+}
+
+// SystemTelemetryGpu defines model for SystemTelemetryGpu.
+type SystemTelemetryGpu struct {
+	BandwidthGbS *float32                  `json:"bandwidth_gb_s,omitempty"`
+	Fits         *[]SystemTelemetryFit     `json:"fits,omitempty"`
+	Holders      *[]string                 `json:"holders,omitempty"`
+	Index        int                       `json:"index"`
+	Name         string                    `json:"name"`
+	Segments     *[]SystemTelemetrySegment `json:"segments,omitempty"`
+	TotalBytes   int64                     `json:"total_bytes"`
+	UsedBytes    int64                     `json:"used_bytes"`
+}
+
+// SystemTelemetryGpuLoad defines model for SystemTelemetryGpuLoad.
+type SystemTelemetryGpuLoad struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis          TelemetryBasis `json:"basis"`
+	Index          int            `json:"index"`
+	MemCtrlUtilPct *float32       `json:"mem_ctrl_util_pct,omitempty"`
+	PowerLimitW    *float32       `json:"power_limit_w,omitempty"`
+	PowerW         *float32       `json:"power_w,omitempty"`
+	Source         *string        `json:"source,omitempty"`
+	TempC          *float32       `json:"temp_c,omitempty"`
+	UtilPct        *float32       `json:"util_pct,omitempty"`
+	VramFreeBytes  *int64         `json:"vram_free_bytes,omitempty"`
+	VramTotalBytes *int64         `json:"vram_total_bytes,omitempty"`
+	VramUsedBytes  *int64         `json:"vram_used_bytes,omitempty"`
+}
+
+// SystemTelemetryHost defines model for SystemTelemetryHost.
+type SystemTelemetryHost struct {
+	Hostname string `json:"hostname"`
+	System   string `json:"system"`
+	Tier     string `json:"tier"`
+}
+
+// SystemTelemetryHostSensors defines model for SystemTelemetryHostSensors.
+type SystemTelemetryHostSensors struct {
+	Collector      *string                       `json:"collector,omitempty"`
+	Cpu            SystemTelemetryCpuSensors     `json:"cpu"`
+	Disk           SystemTelemetryDiskSensors    `json:"disk"`
+	MemoryPressure SystemTelemetryMemoryPressure `json:"memory_pressure"`
+	Watchdog       SystemTelemetryWatchdogHealth `json:"watchdog"`
+}
+
+// SystemTelemetryMeasuredMemory defines model for SystemTelemetryMeasuredMemory.
+type SystemTelemetryMeasuredMemory string
+
+// SystemTelemetryMeasuredRow defines model for SystemTelemetryMeasuredRow.
+type SystemTelemetryMeasuredRow struct {
+	Gpu           *int                          `json:"gpu,omitempty"`
+	Id            string                        `json:"id"`
+	MeasuredBytes *int64                        `json:"measured_bytes,omitempty"`
+	Memory        SystemTelemetryMeasuredMemory `json:"memory"`
+	Over          bool                          `json:"over"`
+	PlannedBytes  int64                         `json:"planned_bytes"`
+}
+
+// SystemTelemetryMemory defines model for SystemTelemetryMemory.
+type SystemTelemetryMemory struct {
+	AvailableBytes int64                     `json:"available_bytes"`
+	Segments       *[]SystemTelemetrySegment `json:"segments,omitempty"`
+	TotalBytes     int64                     `json:"total_bytes"`
+}
+
+// SystemTelemetryMemoryPressure defines model for SystemTelemetryMemoryPressure.
+type SystemTelemetryMemoryPressure struct {
+	AvailableRatio *float32 `json:"available_ratio,omitempty"`
+
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis         TelemetryBasis                     `json:"basis"`
+	Level         SystemTelemetryMemoryPressureLevel `json:"level"`
+	PsiSomeAvg10  *float32                           `json:"psi_some_avg10,omitempty"`
+	SwapUsedBytes *int64                             `json:"swap_used_bytes,omitempty"`
+}
+
+// SystemTelemetryMemoryPressureLevel defines model for SystemTelemetryMemoryPressureLevel.
+type SystemTelemetryMemoryPressureLevel string
+
+// SystemTelemetryPerf defines model for SystemTelemetryPerf.
+type SystemTelemetryPerf struct {
+	Calls       *int                     `json:"calls,omitempty"`
+	Counters    *SystemTelemetryCounters `json:"counters,omitempty"`
+	DecodeBound *SystemTelemetryFigure   `json:"decode_bound,omitempty"`
+	DecodeTokS  *SystemTelemetryFigure   `json:"decode_tok_s,omitempty"`
+	Failed      *int                     `json:"failed,omitempty"`
+	LatencyMs   *SystemTelemetryFigure   `json:"latency_ms,omitempty"`
+	PrefillTokS *SystemTelemetryFigure   `json:"prefill_tok_s,omitempty"`
+	Tiers       *map[string]int          `json:"tiers,omitempty"`
+}
+
+// SystemTelemetryPoolKind defines model for SystemTelemetryPoolKind.
+type SystemTelemetryPoolKind string
+
+// SystemTelemetrySegment defines model for SystemTelemetrySegment.
+type SystemTelemetrySegment struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis     TelemetryBasis `json:"basis"`
+	Bytes     int64          `json:"bytes"`
+	Component *string        `json:"component,omitempty"`
+	Kind      string         `json:"kind"`
+	Label     string         `json:"label"`
+	Note      *string        `json:"note,omitempty"`
+}
+
+// SystemTelemetrySlot Numeric and phase counters of one inference engine slot. Prompt and completion text are stripped before serialization and never carried.
+type SystemTelemetrySlot struct {
+	Busy               bool                      `json:"busy"`
+	Cached             *int                      `json:"cached,omitempty"`
+	CachedPrefixTokens *int                      `json:"cached_prefix_tokens,omitempty"`
+	Decoded            *int                      `json:"decoded,omitempty"`
+	Id                 int                       `json:"id"`
+	NCtx               *int                      `json:"n_ctx,omitempty"`
+	NDecoded           *int                      `json:"n_decoded,omitempty"`
+	NPrompt            *int                      `json:"n_prompt,omitempty"`
+	Phase              *SystemTelemetrySlotPhase `json:"phase,omitempty"`
+	PromptDone         *int                      `json:"prompt_done,omitempty"`
+	PromptTokens       *int                      `json:"prompt_tokens,omitempty"`
+	TokS               *float32                  `json:"tok_s,omitempty"`
+	TtftMs             *float32                  `json:"ttft_ms,omitempty"`
+}
+
+// SystemTelemetrySlotPhase defines model for SystemTelemetrySlotPhase.
+type SystemTelemetrySlotPhase string
+
+// SystemTelemetrySnapshot Structured live telemetry snapshot matching localmodels.stack-view/v1 (v1.1). Fields beyond schema, generated_at, and source are additive and optional so schema evolution never breaks older daemons or viewers.
+type SystemTelemetrySnapshot struct {
+	Apply *SystemTelemetryApply `json:"apply,omitempty"`
+
+	// Bottleneck Deterministic bottleneck classification computed from measured bandwidth, GPU utilization, and disk read throughput.
+	Bottleneck           *SystemTelemetryBottleneck       `json:"bottleneck,omitempty"`
+	ClientLanes          *map[string]int                  `json:"client_lanes,omitempty"`
+	Clients              *[]SystemTelemetryClient         `json:"clients,omitempty"`
+	Components           *[]SystemTelemetryComponent      `json:"components,omitempty"`
+	EffectiveDecodeBwGbS *SystemTelemetryFigure           `json:"effective_decode_bw_gb_s,omitempty"`
+	Events               *[]SystemTelemetryEvent          `json:"events,omitempty"`
+	Gateway              *SystemTelemetryGateway          `json:"gateway,omitempty"`
+	GeneratedAt          string                           `json:"generated_at"`
+	GpuLoad              *[]SystemTelemetryGpuLoad        `json:"gpu_load,omitempty"`
+	Gpus                 *[]SystemTelemetryGpu            `json:"gpus,omitempty"`
+	Host                 *SystemTelemetryHost             `json:"host,omitempty"`
+	InFlight             *int                             `json:"in_flight,omitempty"`
+	KvCacheUsageRatio    *SystemTelemetryFigure           `json:"kv_cache_usage_ratio,omitempty"`
+	Lang                 *string                          `json:"lang,omitempty"`
+	Measured             *[]SystemTelemetryMeasuredRow    `json:"measured,omitempty"`
+	MemoryBwCeilingGbS   *SystemTelemetryFigure           `json:"memory_bw_ceiling_gb_s,omitempty"`
+	NextSteps            *[]SystemTelemetryStep           `json:"next_steps,omitempty"`
+	Notes                *[]string                        `json:"notes,omitempty"`
+	P50TtftMs            *SystemTelemetryFigure           `json:"p50_ttft_ms,omitempty"`
+	PlanId               *string                          `json:"plan_id,omitempty"`
+	PrefixHitPct         *SystemTelemetryFigure           `json:"prefix_hit_pct,omitempty"`
+	Ram                  *SystemTelemetryMemory           `json:"ram,omitempty"`
+	RequestsDeferred     *SystemTelemetryFigure           `json:"requests_deferred,omitempty"`
+	Schema               string                           `json:"schema"`
+	SchemaVersion        *string                          `json:"schema_version,omitempty"`
+	Sensors              *SystemTelemetryHostSensors      `json:"sensors,omitempty"`
+	Source               SystemTelemetrySource            `json:"source"`
+	Waterfall            *[]SystemTelemetryWaterfallEntry `json:"waterfall,omitempty"`
+
+	// WhatIf Authoritative memory and roofline coefficients from localmodels so the client can compute What-If capacity forecasts with zero round trips.
+	WhatIf *SystemTelemetryWhatIf `json:"what_if,omitempty"`
+}
+
+// SystemTelemetrySource defines model for SystemTelemetrySource.
+type SystemTelemetrySource string
+
+// SystemTelemetryStep defines model for SystemTelemetryStep.
+type SystemTelemetryStep struct {
+	Command string `json:"command"`
+	Why     string `json:"why"`
+}
+
+// SystemTelemetryWatchdogHealth defines model for SystemTelemetryWatchdogHealth.
+type SystemTelemetryWatchdogHealth struct {
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis  TelemetryBasis                `json:"basis"`
+	Detail *string                       `json:"detail,omitempty"`
+	Status SystemTelemetryWatchdogStatus `json:"status"`
+}
+
+// SystemTelemetryWatchdogStatus defines model for SystemTelemetryWatchdogStatus.
+type SystemTelemetryWatchdogStatus string
+
+// SystemTelemetryWaterfallEntry defines model for SystemTelemetryWaterfallEntry.
+type SystemTelemetryWaterfallEntry struct {
+	At string `json:"at"`
+
+	// Basis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+	Basis            TelemetryBasis                 `json:"basis"`
+	CachedPrefixPct  *float32                       `json:"cached_prefix_pct,omitempty"`
+	ClientId         string                         `json:"client_id"`
+	CompletionTokens *int                           `json:"completion_tokens,omitempty"`
+	DecodeMs         *float32                       `json:"decode_ms,omitempty"`
+	DecodeTokS       *float32                       `json:"decode_tok_s,omitempty"`
+	GatewayMs        *float32                       `json:"gateway_ms,omitempty"`
+	ModelId          string                         `json:"model_id"`
+	PromptTokens     *int                           `json:"prompt_tokens,omitempty"`
+	RequestId        string                         `json:"request_id"`
+	Status           SystemTelemetryWaterfallStatus `json:"status"`
+	TtftMs           *float32                       `json:"ttft_ms,omitempty"`
+}
+
+// SystemTelemetryWaterfallStatus defines model for SystemTelemetryWaterfallStatus.
+type SystemTelemetryWaterfallStatus string
+
+// SystemTelemetryWhatIf Authoritative memory and roofline coefficients from localmodels so the client can compute What-If capacity forecasts with zero round trips.
+type SystemTelemetryWhatIf struct {
+	ActiveWeightBytes     *int64                   `json:"active_weight_bytes,omitempty"`
+	ComputeBytesPerToken  float32                  `json:"compute_bytes_per_token"`
+	FixedBytes            int64                    `json:"fixed_bytes"`
+	Gpu                   int                      `json:"gpu"`
+	HostRamAvailableBytes *int64                   `json:"host_ram_available_bytes,omitempty"`
+	KvBytesPerToken       float32                  `json:"kv_bytes_per_token"`
+	KvDtypeFactors        *map[string]float32      `json:"kv_dtype_factors,omitempty"`
+	MemoryBwCeilingGbS    *float32                 `json:"memory_bw_ceiling_gb_s,omitempty"`
+	PcieBandwidthGbS      *float32                 `json:"pcie_bandwidth_gb_s,omitempty"`
+	PoolKind              *SystemTelemetryPoolKind `json:"pool_kind,omitempty"`
+	RoomBytes             int64                    `json:"room_bytes"`
+	Slots                 int                      `json:"slots"`
+	WeightsBytes          *int64                   `json:"weights_bytes,omitempty"`
+	Window                int                      `json:"window"`
+}
+
 // TeamHubId Opaque, case-sensitive TeamHub identifier.
 type TeamHubId = string
+
+// TelemetryBasis Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+type TelemetryBasis string
 
 // Timestamp UTC timestamp in RFC 3339 format with an explicit offset.
 type Timestamp = time.Time
@@ -4030,6 +4600,12 @@ type ClientInterface interface {
 
 	ScanLocalComputerSkills(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ScanLocalComputerSkillsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetLocalComputerSystemTelemetry request
+	GetLocalComputerSystemTelemetry(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamLocalComputerSystemTelemetry request
+	StreamLocalComputerSystemTelemetry(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ReconcileVoiceWorkers request
 	ReconcileVoiceWorkers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
@@ -4780,6 +5356,30 @@ func (c *Client) ScanLocalComputerSkillsWithBody(ctx context.Context, tenantId T
 
 func (c *Client) ScanLocalComputerSkills(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ScanLocalComputerSkillsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewScanLocalComputerSkillsRequest(c.Server, tenantId, ownerActorId, computerId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetLocalComputerSystemTelemetry(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetLocalComputerSystemTelemetryRequest(c.Server, tenantId, ownerActorId, computerId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StreamLocalComputerSystemTelemetry(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamLocalComputerSystemTelemetryRequest(c.Server, tenantId, ownerActorId, computerId)
 	if err != nil {
 		return nil, err
 	}
@@ -6619,6 +7219,102 @@ func NewScanLocalComputerSkillsRequestWithBody(server string, tenantId TenantId,
 	return req, nil
 }
 
+// NewGetLocalComputerSystemTelemetryRequest generates requests for GetLocalComputerSystemTelemetry
+func NewGetLocalComputerSystemTelemetryRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenantId", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "ownerActorId", ownerActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "computerId", computerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/owners/%s/local-computers/%s/system-telemetry", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewStreamLocalComputerSystemTelemetryRequest generates requests for StreamLocalComputerSystemTelemetry
+func NewStreamLocalComputerSystemTelemetryRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenantId", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "ownerActorId", ownerActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "computerId", computerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/owners/%s/local-computers/%s/system-telemetry/stream", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewReconcileVoiceWorkersRequest generates requests for ReconcileVoiceWorkers
 func NewReconcileVoiceWorkersRequest(server string) (*http.Request, error) {
 	var err error
@@ -6852,6 +7548,12 @@ type ClientWithResponsesInterface interface {
 	ScanLocalComputerSkillsWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ScanLocalComputerSkillsResponse, error)
 
 	ScanLocalComputerSkillsWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ScanLocalComputerSkillsJSONRequestBody, reqEditors ...RequestEditorFn) (*ScanLocalComputerSkillsResponse, error)
+
+	// GetLocalComputerSystemTelemetryWithResponse request
+	GetLocalComputerSystemTelemetryWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*GetLocalComputerSystemTelemetryResponse, error)
+
+	// StreamLocalComputerSystemTelemetryWithResponse request
+	StreamLocalComputerSystemTelemetryWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*StreamLocalComputerSystemTelemetryResponse, error)
 
 	// ReconcileVoiceWorkersWithResponse request
 	ReconcileVoiceWorkersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ReconcileVoiceWorkersResponse, error)
@@ -8141,6 +8843,74 @@ func (r ScanLocalComputerSkillsResponse) ContentType() string {
 	return ""
 }
 
+type GetLocalComputerSystemTelemetryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SystemTelemetryEnvelope
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON503      *ServiceUnavailable
+	JSON504      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r GetLocalComputerSystemTelemetryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetLocalComputerSystemTelemetryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetLocalComputerSystemTelemetryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StreamLocalComputerSystemTelemetryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON503      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamLocalComputerSystemTelemetryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamLocalComputerSystemTelemetryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StreamLocalComputerSystemTelemetryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ReconcileVoiceWorkersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8712,6 +9482,24 @@ func (c *ClientWithResponses) ScanLocalComputerSkillsWithResponse(ctx context.Co
 		return nil, err
 	}
 	return ParseScanLocalComputerSkillsResponse(rsp)
+}
+
+// GetLocalComputerSystemTelemetryWithResponse request returning *GetLocalComputerSystemTelemetryResponse
+func (c *ClientWithResponses) GetLocalComputerSystemTelemetryWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*GetLocalComputerSystemTelemetryResponse, error) {
+	rsp, err := c.GetLocalComputerSystemTelemetry(ctx, tenantId, ownerActorId, computerId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetLocalComputerSystemTelemetryResponse(rsp)
+}
+
+// StreamLocalComputerSystemTelemetryWithResponse request returning *StreamLocalComputerSystemTelemetryResponse
+func (c *ClientWithResponses) StreamLocalComputerSystemTelemetryWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*StreamLocalComputerSystemTelemetryResponse, error) {
+	rsp, err := c.StreamLocalComputerSystemTelemetry(ctx, tenantId, ownerActorId, computerId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamLocalComputerSystemTelemetryResponse(rsp)
 }
 
 // ReconcileVoiceWorkersWithResponse request returning *ReconcileVoiceWorkersResponse
@@ -10647,6 +11435,114 @@ func ParseScanLocalComputerSkillsResponse(rsp *http.Response) (*ScanLocalCompute
 		}
 		response.JSON400 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetLocalComputerSystemTelemetryResponse parses an HTTP response from a GetLocalComputerSystemTelemetryWithResponse call
+func ParseGetLocalComputerSystemTelemetryResponse(rsp *http.Response) (*GetLocalComputerSystemTelemetryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetLocalComputerSystemTelemetryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SystemTelemetryEnvelope
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamLocalComputerSystemTelemetryResponse parses an HTTP response from a StreamLocalComputerSystemTelemetryWithResponse call
+func ParseStreamLocalComputerSystemTelemetryResponse(rsp *http.Response) (*StreamLocalComputerSystemTelemetryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamLocalComputerSystemTelemetryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthenticated
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -47,6 +47,7 @@ import type { RunnerOperations } from "./runner-operations.js";
 import { operationMCPPrepareIdentity } from "./runner-operations.js";
 import type { RunnerComputerTools } from "./runner-computer-tools.js";
 import type { RunnerLocalModels } from "./runner-local-models.js";
+import type { RunnerSystemTelemetry } from "./runner-system-telemetry.js";
 import type { ModelQueue } from "./model-queue.js";
 import type { RunnerModelInvocation } from "./runner-model-invocation.js";
 import type { RunnerSessionCompaction } from "./runner-session-compaction.js";
@@ -349,6 +350,7 @@ export interface RunnerGatewayControllers {
   readonly queue: () => ModelQueue;
   readonly computerTools: () => RunnerComputerTools;
   readonly localModels: () => RunnerLocalModels;
+  readonly systemTelemetry: () => RunnerSystemTelemetry;
   readonly contextViewContent: () => ContextViewContent | undefined;
 }
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;

@@ -114,28 +114,30 @@ func Route(message wire.Message) string {
 
 // Command routes, one per Agent frame shape.
 const (
-	CommandRunnerWelcome                = wire.TypeRunnerWelcome
-	CommandRunnerReconciled             = wire.TypeRunnerReconciled
-	CommandRegistrationSnapshot         = wire.TypeRuntimeRegistrationSnapshot
-	CommandAgentRunnerEnsure            = wire.TypeAgentRunnerEnsure
-	CommandAgentRunnerRemove            = wire.TypeAgentRunnerRemove
-	CommandAgentCLICredentialPut        = wire.TypeExecute + ":" + wire.KindCLICredential
-	CommandDebugInspect                 = wire.TypeExecute + ":" + wire.KindDebugHistory
-	CommandCapabilitySkillsScan         = wire.TypeExecute + ":" + wire.KindSkillsScan
-	CommandCapabilityBrowserConnect     = wire.TypeExecute + ":" + wire.KindBrowserConnect
-	CommandCapabilityComputerPermission = wire.TypeExecute + ":" + wire.KindComputerPermission
-	CommandCapabilityLocalModels        = wire.TypeExecute + ":" + wire.KindLocalModels
-	CommandCapabilityModelSource        = wire.TypeExecute + ":" + wire.KindModelSource
-	CommandSessionCompact               = wire.TypeExecute + ":" + wire.KindSessionCompact
-	CommandModelInvoke                  = wire.TypeExecute + ":" + wire.KindModelInvoke
-	CommandComputerToolCall             = wire.TypeExecute + ":" + wire.KindComputerTool
-	CommandOperationPrepare             = wire.TypePrepare + ":" + wire.TargetOperation
-	CommandProviderPrepare              = wire.TypePrepare + ":" + wire.TargetProvider
-	CommandOperationCancel              = wire.TypeCancel + ":" + wire.TargetOperation
-	CommandModelInvokeCancel            = wire.TypeCancel + ":" + wire.TargetModelInvoke
-	CommandOperationStart               = wire.TypeOperationStart
-	CommandOperationInput               = wire.TypeOperationInput
-	CommandOperationAck                 = wire.TypeOperationAck
+	CommandRunnerWelcome                        = wire.TypeRunnerWelcome
+	CommandRunnerReconciled                     = wire.TypeRunnerReconciled
+	CommandRegistrationSnapshot                 = wire.TypeRuntimeRegistrationSnapshot
+	CommandAgentRunnerEnsure                    = wire.TypeAgentRunnerEnsure
+	CommandAgentRunnerRemove                    = wire.TypeAgentRunnerRemove
+	CommandAgentCLICredentialPut                = wire.TypeExecute + ":" + wire.KindCLICredential
+	CommandDebugInspect                         = wire.TypeExecute + ":" + wire.KindDebugHistory
+	CommandCapabilitySkillsScan                 = wire.TypeExecute + ":" + wire.KindSkillsScan
+	CommandCapabilityBrowserConnect             = wire.TypeExecute + ":" + wire.KindBrowserConnect
+	CommandCapabilityComputerPermission         = wire.TypeExecute + ":" + wire.KindComputerPermission
+	CommandCapabilityLocalModels                = wire.TypeExecute + ":" + wire.KindLocalModels
+	CommandCapabilityModelSource                = wire.TypeExecute + ":" + wire.KindModelSource
+	CommandCapabilitySystemTelemetrySubscribe   = wire.TypeCapabilitySystemTelemetrySubscribe
+	CommandCapabilitySystemTelemetryUnsubscribe = wire.TypeCapabilitySystemTelemetryUnsubscribe
+	CommandSessionCompact                       = wire.TypeExecute + ":" + wire.KindSessionCompact
+	CommandModelInvoke                          = wire.TypeExecute + ":" + wire.KindModelInvoke
+	CommandComputerToolCall                     = wire.TypeExecute + ":" + wire.KindComputerTool
+	CommandOperationPrepare                     = wire.TypePrepare + ":" + wire.TargetOperation
+	CommandProviderPrepare                      = wire.TypePrepare + ":" + wire.TargetProvider
+	CommandOperationCancel                      = wire.TypeCancel + ":" + wire.TargetOperation
+	CommandModelInvokeCancel                    = wire.TypeCancel + ":" + wire.TargetModelInvoke
+	CommandOperationStart                       = wire.TypeOperationStart
+	CommandOperationInput                       = wire.TypeOperationInput
+	CommandOperationAck                         = wire.TypeOperationAck
 )
 
 // Event routes, one per Daemon frame shape.
@@ -145,6 +147,7 @@ const (
 	EventRuntimeObserved                       = wire.TypeRuntimeRegistrationObserved
 	EventRuntimeDiagnostics                    = wire.TypeRunnerRuntimeDiagnostics
 	EventLocalModels                           = wire.TypeRunnerLocalModels
+	EventSystemTelemetry                       = wire.TypeRunnerSystemTelemetry
 	EventAgentRunnerReady                      = wire.TypeAgentRunnerState + ":" + wire.StateReady
 	EventAgentRunnerRemoved                    = wire.TypeAgentRunnerState + ":" + wire.StateRemoved
 	EventAgentRunnerFailed                     = wire.TypeAgentRunnerState + ":" + wire.StateFailed

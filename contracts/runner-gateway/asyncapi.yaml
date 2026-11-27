@@ -101,6 +101,13 @@ info:
     runner.welcome whose service_features names dynamic_reasoning_efforts;
     runner.hello always filters to legacy efforts so older Agent Services can
     accept the connection.
+    capability.system_telemetry.subscribe and
+    capability.system_telemetry.unsubscribe manage an on-demand lease for live
+    system and inference telemetry on Computer 0.67.0 and later. The Computer
+    starts localmodels stack view --json --live-tick --stream only while an
+    active lease exists and emits monotonic runner.system_telemetry frames only
+    after a runner.welcome whose service_features names system_telemetry,
+    stopping collection immediately on unsubscribe, disconnect, or lease expiry.
 x-frame-limits:
   maxBytes: 4194304
   maxDepth: 32

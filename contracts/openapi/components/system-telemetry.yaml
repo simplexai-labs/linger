@@ -1,0 +1,1093 @@
+components:
+  responses:
+    SystemTelemetryRefused:
+      description: >-
+        The Computer, Agent Service, or TeamHub refused or could not serve the
+        system telemetry request; error.code is one of SystemTelemetryErrorCode.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SystemTelemetryErrorResponse"
+  schemas:
+    TelemetryBasis:
+      description: >-
+        Provenance of a telemetry figure matching localmodels.stack-view/v1.1.
+        Unavailable counters carry basis none with a null/absent value rather
+        than fabricated zeros.
+      type: string
+      enum: [live, measured, estimate, demo, none]
+      x-enum-varnames:
+        - TelemetryBasisLive
+        - TelemetryBasisMeasured
+        - TelemetryBasisEstimate
+        - TelemetryBasisDemo
+        - TelemetryBasisNone
+    SystemTelemetryBottleneck:
+      description: >-
+        Deterministic bottleneck classification computed from measured bandwidth,
+        GPU utilization, and disk read throughput.
+      type: string
+      enum: [memory_bw_bound, compute_bound, io_bound, balanced, idle]
+      x-enum-varnames:
+        - SystemTelemetryBottleneckMemoryBwBound
+        - SystemTelemetryBottleneckComputeBound
+        - SystemTelemetryBottleneckIoBound
+        - SystemTelemetryBottleneckBalanced
+        - SystemTelemetryBottleneckIdle
+    SystemTelemetryFigure:
+      type: object
+      additionalProperties: false
+      required: [basis]
+      properties:
+        value:
+          type: number
+          nullable: true
+        basis:
+          $ref: "#/components/schemas/TelemetryBasis"
+        note:
+          type: string
+          maxLength: 500
+    SystemTelemetrySegment:
+      type: object
+      additionalProperties: false
+      required: [kind, label, bytes, basis]
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+        label:
+          type: string
+          maxLength: 200
+        bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        basis:
+          $ref: "#/components/schemas/TelemetryBasis"
+        component:
+          type: string
+          nullable: true
+          maxLength: 64
+        note:
+          type: string
+          maxLength: 500
+    SystemTelemetryFit:
+      type: object
+      additionalProperties: false
+      required: [id, quant]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 160
+        quant:
+          type: string
+          maxLength: 64
+        decode_tok_s:
+          type: number
+          nullable: true
+          minimum: 0
+    SystemTelemetryGpu:
+      type: object
+      additionalProperties: false
+      required: [index, name, total_bytes, used_bytes]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        name:
+          type: string
+          maxLength: 200
+        total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        used_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        bandwidth_gb_s:
+          type: number
+          nullable: true
+          minimum: 0
+        holders:
+          type: array
+          maxItems: 128
+          items:
+            type: string
+            maxLength: 200
+        segments:
+          type: array
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/SystemTelemetrySegment"
+        fits:
+          type: array
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/SystemTelemetryFit"
+    SystemTelemetryGpuLoad:
+      type: object
+      additionalProperties: false
+      required: [index, basis]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        util_pct:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+        mem_ctrl_util_pct:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+        vram_total_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        vram_used_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        vram_free_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        power_w:
+          type: number
+          nullable: true
+          minimum: 0
+        power_limit_w:
+          type: number
+          nullable: true
+          minimum: 0
+        temp_c:
+          type: number
+          nullable: true
+        basis:
+          $ref: "#/components/schemas/TelemetryBasis"
+        source:
+          type: string
+          maxLength: 64
+    SystemTelemetryMemory:
+      type: object
+      additionalProperties: false
+      required: [total_bytes, available_bytes]
+      properties:
+        total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        available_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        segments:
+          type: array
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/SystemTelemetrySegment"
+    SystemTelemetryCounters:
+      type: object
+      additionalProperties: false
+      properties:
+        prompt_tokens:
+          type: number
+          minimum: 0
+        prompt_seconds:
+          type: number
+          minimum: 0
+        predicted_tokens:
+          type: number
+          minimum: 0
+        predicted_seconds:
+          type: number
+          minimum: 0
+        processing:
+          type: number
+          minimum: 0
+        requests_deferred:
+          type: number
+          nullable: true
+          minimum: 0
+        kv_cache_usage_ratio:
+          type: number
+          nullable: true
+          minimum: 0
+        prompt_tokens_seconds:
+          type: number
+          nullable: true
+          minimum: 0
+        predicted_tokens_seconds:
+          type: number
+          nullable: true
+          minimum: 0
+    SystemTelemetrySlotPhase:
+      type: string
+      enum: [idle, prefill, decoding, queued]
+      x-enum-varnames:
+        - SystemTelemetrySlotPhaseIdle
+        - SystemTelemetrySlotPhasePrefill
+        - SystemTelemetrySlotPhaseDecoding
+        - SystemTelemetrySlotPhaseQueued
+    SystemTelemetrySlot:
+      description: >-
+        Numeric and phase counters of one inference engine slot. Prompt and
+        completion text are stripped before serialization and never carried.
+      type: object
+      additionalProperties: false
+      required: [id, busy]
+      properties:
+        id:
+          type: integer
+          minimum: 0
+        n_ctx:
+          type: integer
+          nullable: true
+          minimum: 0
+        busy:
+          type: boolean
+        phase:
+          $ref: "#/components/schemas/SystemTelemetrySlotPhase"
+        prompt_tokens:
+          type: integer
+          nullable: true
+          minimum: 0
+        prompt_done:
+          type: integer
+          nullable: true
+          minimum: 0
+        cached:
+          type: integer
+          nullable: true
+          minimum: 0
+        decoded:
+          type: integer
+          nullable: true
+          minimum: 0
+        n_prompt:
+          type: integer
+          nullable: true
+          minimum: 0
+        cached_prefix_tokens:
+          type: integer
+          nullable: true
+          minimum: 0
+        n_decoded:
+          type: integer
+          nullable: true
+          minimum: 0
+        tok_s:
+          type: number
+          nullable: true
+          minimum: 0
+        ttft_ms:
+          type: number
+          nullable: true
+          minimum: 0
+    SystemTelemetryPerf:
+      type: object
+      additionalProperties: false
+      properties:
+        prefill_tok_s:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        decode_tok_s:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        decode_bound:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        latency_ms:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        calls:
+          type: integer
+          nullable: true
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        tiers:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: integer
+            minimum: 0
+        counters:
+          $ref: "#/components/schemas/SystemTelemetryCounters"
+          nullable: true
+    SystemTelemetryComponent:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        role:
+          type: string
+          maxLength: 64
+        title:
+          type: string
+          maxLength: 200
+        model:
+          type: string
+          maxLength: 200
+        quant:
+          type: string
+          maxLength: 64
+        device:
+          type: string
+          maxLength: 120
+        gpu:
+          type: integer
+          nullable: true
+          minimum: 0
+        endpoint:
+          type: string
+          maxLength: 512
+        state:
+          type: string
+          maxLength: 32
+        health:
+          type: string
+          maxLength: 64
+        window:
+          type: integer
+          nullable: true
+          minimum: 0
+        slots:
+          type: integer
+          nullable: true
+          minimum: 0
+        kv_types:
+          type: string
+          nullable: true
+          maxLength: 64
+        vram_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        ram_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        perf:
+          $ref: "#/components/schemas/SystemTelemetryPerf"
+        explain:
+          type: string
+          maxLength: 500
+        live_slots:
+          type: array
+          nullable: true
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/SystemTelemetrySlot"
+    SystemTelemetryClient:
+      type: object
+      additionalProperties: false
+      required: [id, name, model]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 120
+        name:
+          type: string
+          maxLength: 200
+        model:
+          type: string
+          maxLength: 200
+    SystemTelemetryGateway:
+      type: object
+      additionalProperties: false
+      required: [kind, addr, route]
+      properties:
+        kind:
+          type: string
+          maxLength: 64
+        addr:
+          type: string
+          maxLength: 256
+        route:
+          type: string
+          maxLength: 200
+        in_flight:
+          type: integer
+          minimum: 0
+        client_lanes:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        p50_ttft_ms:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+    SystemTelemetryPoolKind:
+      type: string
+      enum: [unified, discrete]
+      x-enum-varnames:
+        - SystemTelemetryPoolKindUnified
+        - SystemTelemetryPoolKindDiscrete
+    SystemTelemetryWhatIf:
+      description: >-
+        Authoritative memory and roofline coefficients from localmodels so the
+        client can compute What-If capacity forecasts with zero round trips.
+      type: object
+      additionalProperties: false
+      required:
+        - gpu
+        - window
+        - slots
+        - kv_bytes_per_token
+        - compute_bytes_per_token
+        - fixed_bytes
+        - room_bytes
+      properties:
+        gpu:
+          type: integer
+          minimum: 0
+        window:
+          type: integer
+          minimum: 0
+        slots:
+          type: integer
+          minimum: 0
+        kv_bytes_per_token:
+          type: number
+          minimum: 0
+        compute_bytes_per_token:
+          type: number
+          minimum: 0
+        fixed_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        room_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        active_weight_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        weights_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        memory_bw_ceiling_gb_s:
+          type: number
+          nullable: true
+          minimum: 0
+        pcie_bandwidth_gb_s:
+          type: number
+          nullable: true
+          minimum: 0
+        kv_dtype_factors:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+        pool_kind:
+          $ref: "#/components/schemas/SystemTelemetryPoolKind"
+        host_ram_available_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    SystemTelemetryHost:
+      type: object
+      additionalProperties: false
+      required: [hostname, system, tier]
+      properties:
+        hostname:
+          type: string
+          maxLength: 256
+        system:
+          type: string
+          maxLength: 200
+        tier:
+          type: string
+          maxLength: 120
+    SystemTelemetryCoreUsage:
+      type: object
+      additionalProperties: false
+      required: [core, util_pct]
+      properties:
+        core:
+          type: integer
+          minimum: 0
+        util_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+    SystemTelemetryCpuSensors:
+      type: object
+      additionalProperties: false
+      required: [overall_pct]
+      properties:
+        overall_pct:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        per_core:
+          type: array
+          maxItems: 512
+          items:
+            $ref: "#/components/schemas/SystemTelemetryCoreUsage"
+        logical_cores:
+          type: integer
+          nullable: true
+          minimum: 0
+    SystemTelemetryDiskSensors:
+      type: object
+      additionalProperties: false
+      required: [read_mb_s, write_mb_s]
+      properties:
+        read_mb_s:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        write_mb_s:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+    SystemTelemetryMemoryPressureLevel:
+      type: string
+      enum: [nominal, elevated, critical, unknown]
+      x-enum-varnames:
+        - SystemTelemetryMemoryPressureNominal
+        - SystemTelemetryMemoryPressureElevated
+        - SystemTelemetryMemoryPressureCritical
+        - SystemTelemetryMemoryPressureUnknown
+    SystemTelemetryMemoryPressure:
+      type: object
+      additionalProperties: false
+      required: [level, basis]
+      properties:
+        level:
+          $ref: "#/components/schemas/SystemTelemetryMemoryPressureLevel"
+        basis:
+          $ref: "#/components/schemas/TelemetryBasis"
+        available_ratio:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 1
+        psi_some_avg10:
+          type: number
+          nullable: true
+          minimum: 0
+        swap_used_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+    SystemTelemetryWatchdogStatus:
+      type: string
+      enum: [clean, oom, memory_starved, crashed, unknown]
+      x-enum-varnames:
+        - SystemTelemetryWatchdogClean
+        - SystemTelemetryWatchdogOom
+        - SystemTelemetryWatchdogMemoryStarved
+        - SystemTelemetryWatchdogCrashed
+        - SystemTelemetryWatchdogUnknown
+    SystemTelemetryWatchdogHealth:
+      type: object
+      additionalProperties: false
+      required: [status, basis]
+      properties:
+        status:
+          $ref: "#/components/schemas/SystemTelemetryWatchdogStatus"
+        basis:
+          $ref: "#/components/schemas/TelemetryBasis"
+        detail:
+          type: string
+          maxLength: 500
+    SystemTelemetryHostSensors:
+      type: object
+      additionalProperties: false
+      required: [cpu, disk, memory_pressure, watchdog]
+      properties:
+        cpu:
+          $ref: "#/components/schemas/SystemTelemetryCpuSensors"
+        disk:
+          $ref: "#/components/schemas/SystemTelemetryDiskSensors"
+        memory_pressure:
+          $ref: "#/components/schemas/SystemTelemetryMemoryPressure"
+        watchdog:
+          $ref: "#/components/schemas/SystemTelemetryWatchdogHealth"
+        collector:
+          type: string
+          maxLength: 200
+    SystemTelemetryWaterfallStatus:
+      type: string
+      enum: [streaming, completed, deferred]
+      x-enum-varnames:
+        - SystemTelemetryWaterfallStreaming
+        - SystemTelemetryWaterfallCompleted
+        - SystemTelemetryWaterfallDeferred
+    SystemTelemetryWaterfallEntry:
+      type: object
+      additionalProperties: false
+      required: [request_id, at, client_id, model_id, status, basis]
+      properties:
+        request_id:
+          type: string
+          maxLength: 128
+        at:
+          type: string
+          maxLength: 64
+        client_id:
+          type: string
+          maxLength: 120
+        model_id:
+          type: string
+          maxLength: 200
+        status:
+          $ref: "#/components/schemas/SystemTelemetryWaterfallStatus"
+        gateway_ms:
+          type: number
+          nullable: true
+          minimum: 0
+        ttft_ms:
+          type: number
+          nullable: true
+          minimum: 0
+        decode_ms:
+          type: number
+          nullable: true
+          minimum: 0
+        prompt_tokens:
+          type: integer
+          nullable: true
+          minimum: 0
+        completion_tokens:
+          type: integer
+          nullable: true
+          minimum: 0
+        cached_prefix_pct:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+        decode_tok_s:
+          type: number
+          nullable: true
+          minimum: 0
+        basis:
+          $ref: "#/components/schemas/TelemetryBasis"
+    SystemTelemetryEvent:
+      type: object
+      additionalProperties: false
+      required: [id, at, kind, ok]
+      properties:
+        id:
+          type: string
+          maxLength: 128
+        at:
+          type: string
+          maxLength: 64
+        kind:
+          type: string
+          maxLength: 32
+        component:
+          type: string
+          nullable: true
+          maxLength: 64
+        ok:
+          type: boolean
+        latency_ms:
+          type: number
+          nullable: true
+          minimum: 0
+        gateway_ms:
+          type: number
+          nullable: true
+          minimum: 0
+        tier:
+          type: string
+          nullable: true
+          maxLength: 32
+        tokens_in:
+          type: integer
+          nullable: true
+          minimum: 0
+        tokens_out:
+          type: integer
+          nullable: true
+          minimum: 0
+        ttft_ms:
+          type: number
+          nullable: true
+          minimum: 0
+    SystemTelemetryMeasuredMemory:
+      type: string
+      enum: [vram, ram]
+      x-enum-varnames:
+        - SystemTelemetryMeasuredMemoryVram
+        - SystemTelemetryMeasuredMemoryRam
+    SystemTelemetryMeasuredRow:
+      type: object
+      additionalProperties: false
+      required: [id, memory, planned_bytes, over]
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        memory:
+          $ref: "#/components/schemas/SystemTelemetryMeasuredMemory"
+        gpu:
+          type: integer
+          nullable: true
+          minimum: 0
+        planned_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        measured_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        over:
+          type: boolean
+    SystemTelemetryApplyRow:
+      type: object
+      additionalProperties: false
+      required: [id, label, state]
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        label:
+          type: string
+          maxLength: 200
+        detail:
+          type: string
+          maxLength: 300
+        state:
+          type: string
+          maxLength: 32
+        step:
+          type: string
+          maxLength: 64
+        phase:
+          type: string
+          maxLength: 64
+        done:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        total:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+    SystemTelemetryApply:
+      type: object
+      additionalProperties: false
+      required: [plan_id, started_at, updated_at, rollback, rows]
+      properties:
+        plan_id:
+          type: string
+          maxLength: 128
+        started_at:
+          type: string
+          maxLength: 64
+        updated_at:
+          type: string
+          maxLength: 64
+        rollback:
+          type: boolean
+        rows:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryApplyRow"
+    SystemTelemetryStep:
+      type: object
+      additionalProperties: false
+      required: [command, why]
+      properties:
+        command:
+          type: string
+          maxLength: 300
+        why:
+          type: string
+          maxLength: 500
+    SystemTelemetrySource:
+      type: string
+      enum: [live, demo, empty]
+      x-enum-varnames:
+        - SystemTelemetrySourceLive
+        - SystemTelemetrySourceDemo
+        - SystemTelemetrySourceEmpty
+    SystemTelemetrySnapshot:
+      description: >-
+        Structured live telemetry snapshot matching localmodels.stack-view/v1
+        (v1.1). Fields beyond schema, generated_at, and source are additive and
+        optional so schema evolution never breaks older daemons or viewers.
+      type: object
+      additionalProperties: false
+      required: [schema, generated_at, source]
+      properties:
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+        schema_version:
+          type: string
+          maxLength: 32
+        generated_at:
+          type: string
+          minLength: 1
+          maxLength: 64
+        source:
+          $ref: "#/components/schemas/SystemTelemetrySource"
+        lang:
+          type: string
+          maxLength: 16
+        plan_id:
+          type: string
+          nullable: true
+          maxLength: 128
+        host:
+          $ref: "#/components/schemas/SystemTelemetryHost"
+        gateway:
+          $ref: "#/components/schemas/SystemTelemetryGateway"
+          nullable: true
+        clients:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryClient"
+        components:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryComponent"
+        gpus:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryGpu"
+        gpu_load:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryGpuLoad"
+        ram:
+          $ref: "#/components/schemas/SystemTelemetryMemory"
+        what_if:
+          $ref: "#/components/schemas/SystemTelemetryWhatIf"
+          nullable: true
+        events:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/SystemTelemetryEvent"
+        measured:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryMeasuredRow"
+        notes:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            maxLength: 500
+        next_steps:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/SystemTelemetryStep"
+        apply:
+          $ref: "#/components/schemas/SystemTelemetryApply"
+          nullable: true
+        sensors:
+          $ref: "#/components/schemas/SystemTelemetryHostSensors"
+          nullable: true
+        effective_decode_bw_gb_s:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        memory_bw_ceiling_gb_s:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        bottleneck:
+          $ref: "#/components/schemas/SystemTelemetryBottleneck"
+        waterfall:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/SystemTelemetryWaterfallEntry"
+        p50_ttft_ms:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        prefix_hit_pct:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        requests_deferred:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        kv_cache_usage_ratio:
+          $ref: "#/components/schemas/SystemTelemetryFigure"
+        in_flight:
+          type: integer
+          minimum: 0
+        client_lanes:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+    SystemTelemetryEnvelope:
+      description: >-
+        Internal Agent Service payload carrying one monotonic revision-stamped
+        system telemetry snapshot for a connected Local Computer.
+      type: object
+      additionalProperties: false
+      required: [computer_id, revision, observed_at, snapshot]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        observed_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        snapshot:
+          $ref: "#/components/schemas/SystemTelemetrySnapshot"
+    SystemTelemetryComputerStatus:
+      type: string
+      enum: [online, offline]
+      x-enum-varnames:
+        - SystemTelemetryComputerOnline
+        - SystemTelemetryComputerOffline
+    SystemTelemetryComputer:
+      type: object
+      additionalProperties: false
+      required: [computer_id, display_name, status]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        status:
+          $ref: "#/components/schemas/SystemTelemetryComputerStatus"
+        last_seen_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    SystemTelemetryView:
+      description: >-
+        One live system telemetry snapshot paired with TeamHub's Computer
+        metadata for GET .../system-telemetry and SSE telemetry.snapshot events.
+      type: object
+      additionalProperties: false
+      required: [computer, viewer_is_owner, revision, observed_at, snapshot]
+      properties:
+        computer:
+          $ref: "#/components/schemas/SystemTelemetryComputer"
+        viewer_is_owner:
+          type: boolean
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        observed_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        snapshot:
+          $ref: "#/components/schemas/SystemTelemetrySnapshot"
+    SystemTelemetryStreamStatusKind:
+      type: string
+      enum: [offline, unsupported, unavailable]
+      x-enum-varnames:
+        - SystemTelemetryStreamStatusOffline
+        - SystemTelemetryStreamStatusUnsupported
+        - SystemTelemetryStreamStatusUnavailable
+    SystemTelemetryStreamStatus:
+      description: >-
+        Terminal or degraded status event sent on an open SSE stream when the
+        Computer disconnects or reports telemetry unsupported/unavailable.
+      type: object
+      additionalProperties: false
+      required: [computer_id, status, code, message]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        status:
+          $ref: "#/components/schemas/SystemTelemetryStreamStatusKind"
+        code:
+          $ref: "#/components/schemas/SystemTelemetryErrorCode"
+        message:
+          type: string
+          minLength: 1
+          maxLength: 500
+    SystemTelemetryStreamEventType:
+      type: string
+      enum: [telemetry.snapshot, telemetry.status]
+      x-enum-varnames:
+        - SystemTelemetryStreamEventSnapshot
+        - SystemTelemetryStreamEventStatus
+    SystemTelemetryStreamEvent:
+      description: >-
+        Typed representation of one SSE event emitted by
+        GET .../system-telemetry/stream.
+      type: object
+      additionalProperties: false
+      required: [event]
+      properties:
+        event:
+          $ref: "#/components/schemas/SystemTelemetryStreamEventType"
+        snapshot:
+          $ref: "#/components/schemas/SystemTelemetryView"
+        status:
+          $ref: "#/components/schemas/SystemTelemetryStreamStatus"
+    SystemTelemetryErrorCode:
+      description: >-
+        Closed error code set for system telemetry endpoints.
+        LOCAL_COMPUTER_OFFLINE: the Computer is not connected (503).
+        SYSTEM_TELEMETRY_UNSUPPORTED: the Computer Daemon or its localmodels kit
+        does not support live-tick system telemetry (409).
+        SYSTEM_TELEMETRY_FORBIDDEN: only the Computer's owner can read live
+        system telemetry (403).
+        SYSTEM_TELEMETRY_TIMEOUT: the Computer did not emit a live snapshot
+        before the request deadline (504).
+        SYSTEM_TELEMETRY_UNAVAILABLE: Agent Service or collector is temporarily
+        unavailable (503).
+      type: string
+      enum:
+        - LOCAL_COMPUTER_OFFLINE
+        - SYSTEM_TELEMETRY_UNSUPPORTED
+        - SYSTEM_TELEMETRY_UNAVAILABLE
+        - SYSTEM_TELEMETRY_TIMEOUT
+        - SYSTEM_TELEMETRY_FORBIDDEN
+      x-enum-varnames:
+        - SystemTelemetryErrorCodeLocalComputerOffline
+        - SystemTelemetryErrorCodeUnsupported
+        - SystemTelemetryErrorCodeUnavailable
+        - SystemTelemetryErrorCodeTimeout
+        - SystemTelemetryErrorCodeForbidden
+    SystemTelemetryError:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: "#/components/schemas/SystemTelemetryErrorCode"
+        message:
+          type: string
+          minLength: 1
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        details:
+          type: array
+          items:
+            $ref: "./common.yaml#/components/schemas/ErrorDetail"
+        retryable:
+          type: boolean
+          default: false
+    SystemTelemetryErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/SystemTelemetryError"

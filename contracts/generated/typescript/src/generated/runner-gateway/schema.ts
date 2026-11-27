@@ -52,6 +52,12 @@ export const runnerGatewayEnvelopeSchema = {
           $ref: "#/$defs/CapabilityModelSource",
         },
         {
+          $ref: "#/$defs/CapabilitySystemTelemetrySubscribe",
+        },
+        {
+          $ref: "#/$defs/CapabilitySystemTelemetryUnsubscribe",
+        },
+        {
           $ref: "#/$defs/OperationPrepare",
         },
         {
@@ -96,6 +102,9 @@ export const runnerGatewayEnvelopeSchema = {
         },
         {
           $ref: "#/$defs/RunnerLocalModels",
+        },
+        {
+          $ref: "#/$defs/RunnerSystemTelemetry",
         },
         {
           $ref: "#/$defs/RuntimeRegistrationObserved",
@@ -217,6 +226,7 @@ export const runnerGatewayEnvelopeSchema = {
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
+        "system_telemetry",
       ],
     },
     ReasoningEffort: {
@@ -3102,6 +3112,1154 @@ export const runnerGatewayEnvelopeSchema = {
         },
         local_models: {
           $ref: "#/$defs/LocalModelsSnapshot",
+        },
+      },
+    },
+    TelemetryBasis: {
+      type: "string",
+      enum: ["live", "measured", "estimate", "demo", "none"],
+    },
+    SystemTelemetryBottleneck: {
+      type: "string",
+      enum: [
+        "memory_bw_bound",
+        "compute_bound",
+        "io_bound",
+        "balanced",
+        "idle",
+      ],
+    },
+    SystemTelemetryFigure: {
+      type: "object",
+      additionalProperties: false,
+      required: ["basis"],
+      properties: {
+        value: {
+          type: "number",
+        },
+        basis: {
+          $ref: "#/$defs/TelemetryBasis",
+        },
+        note: {
+          type: "string",
+          maxLength: 500,
+        },
+      },
+    },
+    SystemTelemetrySegment: {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "label", "bytes", "basis"],
+      properties: {
+        kind: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        label: {
+          type: "string",
+          maxLength: 200,
+        },
+        bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        basis: {
+          $ref: "#/$defs/TelemetryBasis",
+        },
+        component: {
+          type: "string",
+          maxLength: 64,
+        },
+        note: {
+          type: "string",
+          maxLength: 500,
+        },
+      },
+    },
+    SystemTelemetryFit: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "quant"],
+      properties: {
+        id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 160,
+        },
+        quant: {
+          type: "string",
+          maxLength: 64,
+        },
+        decode_tok_s: {
+          type: "number",
+          minimum: 0,
+        },
+      },
+    },
+    SystemTelemetryGpu: {
+      type: "object",
+      additionalProperties: false,
+      required: ["index", "name", "total_bytes", "used_bytes"],
+      properties: {
+        index: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        name: {
+          type: "string",
+          maxLength: 200,
+        },
+        total_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        used_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        bandwidth_gb_s: {
+          type: "number",
+          minimum: 0,
+        },
+        holders: {
+          type: "array",
+          maxItems: 128,
+          items: {
+            type: "string",
+            maxLength: 200,
+          },
+        },
+        segments: {
+          type: "array",
+          maxItems: 128,
+          items: {
+            $ref: "#/$defs/SystemTelemetrySegment",
+          },
+        },
+        fits: {
+          type: "array",
+          maxItems: 128,
+          items: {
+            $ref: "#/$defs/SystemTelemetryFit",
+          },
+        },
+      },
+    },
+    SystemTelemetryGpuLoad: {
+      type: "object",
+      additionalProperties: false,
+      required: ["index", "basis"],
+      properties: {
+        index: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        util_pct: {
+          type: "number",
+          minimum: 0,
+          maximum: 100,
+        },
+        mem_ctrl_util_pct: {
+          type: "number",
+          minimum: 0,
+          maximum: 100,
+        },
+        vram_total_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        vram_used_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        vram_free_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        power_w: {
+          type: "number",
+          minimum: 0,
+        },
+        power_limit_w: {
+          type: "number",
+          minimum: 0,
+        },
+        temp_c: {
+          type: "number",
+        },
+        basis: {
+          $ref: "#/$defs/TelemetryBasis",
+        },
+        source: {
+          type: "string",
+          maxLength: 64,
+        },
+      },
+    },
+    SystemTelemetryMemory: {
+      type: "object",
+      additionalProperties: false,
+      required: ["total_bytes", "available_bytes"],
+      properties: {
+        total_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        available_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        segments: {
+          type: "array",
+          maxItems: 128,
+          items: {
+            $ref: "#/$defs/SystemTelemetrySegment",
+          },
+        },
+      },
+    },
+    SystemTelemetryCounters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        prompt_tokens: {
+          type: "number",
+          minimum: 0,
+        },
+        prompt_seconds: {
+          type: "number",
+          minimum: 0,
+        },
+        predicted_tokens: {
+          type: "number",
+          minimum: 0,
+        },
+        predicted_seconds: {
+          type: "number",
+          minimum: 0,
+        },
+        processing: {
+          type: "number",
+          minimum: 0,
+        },
+        requests_deferred: {
+          type: "number",
+          minimum: 0,
+        },
+        kv_cache_usage_ratio: {
+          type: "number",
+          minimum: 0,
+        },
+        prompt_tokens_seconds: {
+          type: "number",
+          minimum: 0,
+        },
+        predicted_tokens_seconds: {
+          type: "number",
+          minimum: 0,
+        },
+      },
+    },
+    SystemTelemetrySlot: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "busy"],
+      properties: {
+        id: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        n_ctx: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        busy: {
+          type: "boolean",
+        },
+        phase: {
+          type: "string",
+          enum: ["idle", "prefill", "decoding", "queued"],
+        },
+        prompt_tokens: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        prompt_done: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        cached: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        decoded: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        n_prompt: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        cached_prefix_tokens: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        n_decoded: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        tok_s: {
+          type: "number",
+          minimum: 0,
+        },
+        ttft_ms: {
+          type: "number",
+          minimum: 0,
+        },
+      },
+    },
+    SystemTelemetryPerf: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        prefill_tok_s: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        decode_tok_s: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        decode_bound: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        latency_ms: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        calls: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        failed: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        tiers: {
+          type: "object",
+          additionalProperties: {
+            $ref: "#/$defs/NonNegativeInteger",
+          },
+        },
+        counters: {
+          $ref: "#/$defs/SystemTelemetryCounters",
+        },
+      },
+    },
+    SystemTelemetryComponent: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: {
+        id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        role: {
+          type: "string",
+          maxLength: 64,
+        },
+        title: {
+          type: "string",
+          maxLength: 200,
+        },
+        model: {
+          type: "string",
+          maxLength: 200,
+        },
+        quant: {
+          type: "string",
+          maxLength: 64,
+        },
+        device: {
+          type: "string",
+          maxLength: 120,
+        },
+        gpu: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        endpoint: {
+          type: "string",
+          maxLength: 512,
+        },
+        state: {
+          type: "string",
+          maxLength: 32,
+        },
+        health: {
+          type: "string",
+          maxLength: 64,
+        },
+        window: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        slots: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        kv_types: {
+          type: "string",
+          maxLength: 64,
+        },
+        vram_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        ram_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        perf: {
+          $ref: "#/$defs/SystemTelemetryPerf",
+        },
+        explain: {
+          type: "string",
+          maxLength: 500,
+        },
+        live_slots: {
+          type: "array",
+          maxItems: 256,
+          items: {
+            $ref: "#/$defs/SystemTelemetrySlot",
+          },
+        },
+      },
+    },
+    SystemTelemetryClient: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "name", "model"],
+      properties: {
+        id: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+        },
+        name: {
+          type: "string",
+          maxLength: 200,
+        },
+        model: {
+          type: "string",
+          maxLength: 200,
+        },
+      },
+    },
+    SystemTelemetryGateway: {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "addr", "route"],
+      properties: {
+        kind: {
+          type: "string",
+          maxLength: 64,
+        },
+        addr: {
+          type: "string",
+          maxLength: 256,
+        },
+        route: {
+          type: "string",
+          maxLength: 200,
+        },
+        in_flight: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        client_lanes: {
+          type: "object",
+          additionalProperties: {
+            $ref: "#/$defs/NonNegativeInteger",
+          },
+        },
+        p50_ttft_ms: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+      },
+    },
+    SystemTelemetryWhatIf: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "gpu",
+        "window",
+        "slots",
+        "kv_bytes_per_token",
+        "compute_bytes_per_token",
+        "fixed_bytes",
+        "room_bytes",
+      ],
+      properties: {
+        gpu: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        window: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        slots: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        kv_bytes_per_token: {
+          type: "number",
+          minimum: 0,
+        },
+        compute_bytes_per_token: {
+          type: "number",
+          minimum: 0,
+        },
+        fixed_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        room_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        active_weight_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        weights_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        memory_bw_ceiling_gb_s: {
+          type: "number",
+          minimum: 0,
+        },
+        pcie_bandwidth_gb_s: {
+          type: "number",
+          minimum: 0,
+        },
+        kv_dtype_factors: {
+          type: "object",
+          additionalProperties: {
+            type: "number",
+            minimum: 0,
+          },
+        },
+        pool_kind: {
+          type: "string",
+          enum: ["unified", "discrete"],
+        },
+        host_ram_available_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    SystemTelemetryHost: {
+      type: "object",
+      additionalProperties: false,
+      required: ["hostname", "system", "tier"],
+      properties: {
+        hostname: {
+          type: "string",
+          maxLength: 256,
+        },
+        system: {
+          type: "string",
+          maxLength: 200,
+        },
+        tier: {
+          type: "string",
+          maxLength: 120,
+        },
+      },
+    },
+    SystemTelemetryCoreUsage: {
+      type: "object",
+      additionalProperties: false,
+      required: ["core", "util_pct"],
+      properties: {
+        core: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        util_pct: {
+          type: "number",
+          minimum: 0,
+          maximum: 100,
+        },
+      },
+    },
+    SystemTelemetryCpuSensors: {
+      type: "object",
+      additionalProperties: false,
+      required: ["overall_pct"],
+      properties: {
+        overall_pct: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        per_core: {
+          type: "array",
+          maxItems: 512,
+          items: {
+            $ref: "#/$defs/SystemTelemetryCoreUsage",
+          },
+        },
+        logical_cores: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    SystemTelemetryDiskSensors: {
+      type: "object",
+      additionalProperties: false,
+      required: ["read_mb_s", "write_mb_s"],
+      properties: {
+        read_mb_s: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        write_mb_s: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+      },
+    },
+    SystemTelemetryMemoryPressure: {
+      type: "object",
+      additionalProperties: false,
+      required: ["level", "basis"],
+      properties: {
+        level: {
+          type: "string",
+          enum: ["nominal", "elevated", "critical", "unknown"],
+        },
+        basis: {
+          $ref: "#/$defs/TelemetryBasis",
+        },
+        available_ratio: {
+          type: "number",
+          minimum: 0,
+          maximum: 1,
+        },
+        psi_some_avg10: {
+          type: "number",
+          minimum: 0,
+        },
+        swap_used_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    SystemTelemetryWatchdogHealth: {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "basis"],
+      properties: {
+        status: {
+          type: "string",
+          enum: ["clean", "oom", "memory_starved", "crashed", "unknown"],
+        },
+        basis: {
+          $ref: "#/$defs/TelemetryBasis",
+        },
+        detail: {
+          type: "string",
+          maxLength: 500,
+        },
+      },
+    },
+    SystemTelemetryHostSensors: {
+      type: "object",
+      additionalProperties: false,
+      required: ["cpu", "disk", "memory_pressure", "watchdog"],
+      properties: {
+        cpu: {
+          $ref: "#/$defs/SystemTelemetryCpuSensors",
+        },
+        disk: {
+          $ref: "#/$defs/SystemTelemetryDiskSensors",
+        },
+        memory_pressure: {
+          $ref: "#/$defs/SystemTelemetryMemoryPressure",
+        },
+        watchdog: {
+          $ref: "#/$defs/SystemTelemetryWatchdogHealth",
+        },
+        collector: {
+          type: "string",
+          maxLength: 200,
+        },
+      },
+    },
+    SystemTelemetryWaterfallEntry: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "request_id",
+        "at",
+        "client_id",
+        "model_id",
+        "status",
+        "basis",
+      ],
+      properties: {
+        request_id: {
+          type: "string",
+          maxLength: 128,
+        },
+        at: {
+          type: "string",
+          maxLength: 64,
+        },
+        client_id: {
+          type: "string",
+          maxLength: 120,
+        },
+        model_id: {
+          type: "string",
+          maxLength: 200,
+        },
+        status: {
+          type: "string",
+          enum: ["streaming", "completed", "deferred"],
+        },
+        gateway_ms: {
+          type: "number",
+          minimum: 0,
+        },
+        ttft_ms: {
+          type: "number",
+          minimum: 0,
+        },
+        decode_ms: {
+          type: "number",
+          minimum: 0,
+        },
+        prompt_tokens: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        completion_tokens: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        cached_prefix_pct: {
+          type: "number",
+          minimum: 0,
+          maximum: 100,
+        },
+        decode_tok_s: {
+          type: "number",
+          minimum: 0,
+        },
+        basis: {
+          $ref: "#/$defs/TelemetryBasis",
+        },
+      },
+    },
+    SystemTelemetryEvent: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "at", "kind", "ok"],
+      properties: {
+        id: {
+          type: "string",
+          maxLength: 128,
+        },
+        at: {
+          type: "string",
+          maxLength: 64,
+        },
+        kind: {
+          type: "string",
+          maxLength: 32,
+        },
+        component: {
+          type: "string",
+          maxLength: 64,
+        },
+        ok: {
+          type: "boolean",
+        },
+        latency_ms: {
+          type: "number",
+          minimum: 0,
+        },
+        gateway_ms: {
+          type: "number",
+          minimum: 0,
+        },
+        tier: {
+          type: "string",
+          maxLength: 32,
+        },
+        tokens_in: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        tokens_out: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        ttft_ms: {
+          type: "number",
+          minimum: 0,
+        },
+      },
+    },
+    SystemTelemetryMeasuredRow: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "memory", "planned_bytes", "over"],
+      properties: {
+        id: {
+          type: "string",
+          maxLength: 64,
+        },
+        memory: {
+          type: "string",
+          enum: ["vram", "ram"],
+        },
+        gpu: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        planned_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        measured_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        over: {
+          type: "boolean",
+        },
+      },
+    },
+    SystemTelemetryApplyRow: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "label", "state"],
+      properties: {
+        id: {
+          type: "string",
+          maxLength: 64,
+        },
+        label: {
+          type: "string",
+          maxLength: 200,
+        },
+        detail: {
+          type: "string",
+          maxLength: 300,
+        },
+        state: {
+          type: "string",
+          maxLength: 32,
+        },
+        step: {
+          type: "string",
+          maxLength: 64,
+        },
+        phase: {
+          type: "string",
+          maxLength: 64,
+        },
+        done: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        total: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+      },
+    },
+    SystemTelemetryApply: {
+      type: "object",
+      additionalProperties: false,
+      required: ["plan_id", "started_at", "updated_at", "rollback", "rows"],
+      properties: {
+        plan_id: {
+          type: "string",
+          maxLength: 128,
+        },
+        started_at: {
+          type: "string",
+          maxLength: 64,
+        },
+        updated_at: {
+          type: "string",
+          maxLength: 64,
+        },
+        rollback: {
+          type: "boolean",
+        },
+        rows: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryApplyRow",
+          },
+        },
+      },
+    },
+    SystemTelemetryStep: {
+      type: "object",
+      additionalProperties: false,
+      required: ["command", "why"],
+      properties: {
+        command: {
+          type: "string",
+          maxLength: 300,
+        },
+        why: {
+          type: "string",
+          maxLength: 500,
+        },
+      },
+    },
+    SystemTelemetrySnapshot: {
+      description:
+        "Allowlisted live telemetry snapshot mapped from localmodels.stack-view/v1 (v1.1). Additive fields remain optional for forward and backward compatibility.",
+      type: "object",
+      additionalProperties: false,
+      required: ["schema", "generated_at", "source"],
+      properties: {
+        schema: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        schema_version: {
+          type: "string",
+          maxLength: 32,
+        },
+        generated_at: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+        },
+        source: {
+          type: "string",
+          enum: ["live", "demo", "empty"],
+        },
+        lang: {
+          type: "string",
+          maxLength: 16,
+        },
+        plan_id: {
+          type: "string",
+          maxLength: 128,
+        },
+        host: {
+          $ref: "#/$defs/SystemTelemetryHost",
+        },
+        gateway: {
+          $ref: "#/$defs/SystemTelemetryGateway",
+        },
+        clients: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryClient",
+          },
+        },
+        components: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryComponent",
+          },
+        },
+        gpus: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryGpu",
+          },
+        },
+        gpu_load: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryGpuLoad",
+          },
+        },
+        ram: {
+          $ref: "#/$defs/SystemTelemetryMemory",
+        },
+        what_if: {
+          $ref: "#/$defs/SystemTelemetryWhatIf",
+        },
+        events: {
+          type: "array",
+          maxItems: 100,
+          items: {
+            $ref: "#/$defs/SystemTelemetryEvent",
+          },
+        },
+        measured: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryMeasuredRow",
+          },
+        },
+        notes: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            type: "string",
+            maxLength: 500,
+          },
+        },
+        next_steps: {
+          type: "array",
+          maxItems: 32,
+          items: {
+            $ref: "#/$defs/SystemTelemetryStep",
+          },
+        },
+        apply: {
+          $ref: "#/$defs/SystemTelemetryApply",
+        },
+        sensors: {
+          $ref: "#/$defs/SystemTelemetryHostSensors",
+        },
+        effective_decode_bw_gb_s: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        memory_bw_ceiling_gb_s: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        bottleneck: {
+          $ref: "#/$defs/SystemTelemetryBottleneck",
+        },
+        waterfall: {
+          type: "array",
+          maxItems: 64,
+          items: {
+            $ref: "#/$defs/SystemTelemetryWaterfallEntry",
+          },
+        },
+        p50_ttft_ms: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        prefix_hit_pct: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        requests_deferred: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        kv_cache_usage_ratio: {
+          $ref: "#/$defs/SystemTelemetryFigure",
+        },
+        in_flight: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        client_lanes: {
+          type: "object",
+          additionalProperties: {
+            $ref: "#/$defs/NonNegativeInteger",
+          },
+        },
+      },
+    },
+    SystemTelemetryUnavailableReason: {
+      type: "object",
+      additionalProperties: false,
+      required: ["code"],
+      properties: {
+        code: {
+          type: "string",
+          enum: [
+            "TOOL_NOT_INSTALLED",
+            "LIVE_TICK_UNSUPPORTED",
+            "COLLECTOR_FAILED",
+          ],
+        },
+        detail: {
+          type: "string",
+          maxLength: 2000,
+        },
+      },
+    },
+    CapabilitySystemTelemetrySubscribe: {
+      description:
+        "Start or renew an on-demand system telemetry collection lease on Computer 0.67.0 or later. The Daemon stops collecting immediately when the lease expires, when unsubscribed, or when the connection closes.",
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "protocol_version",
+        "command_id",
+        "runner_id",
+        "connection_epoch",
+        "lease_ttl_ms",
+      ],
+      properties: {
+        type: {
+          const: "capability.system_telemetry.subscribe",
+        },
+        protocol_version: {
+          $ref: "#/$defs/ProtocolVersion",
+        },
+        command_id: {
+          $ref: "#/$defs/Id",
+        },
+        runner_id: {
+          $ref: "#/$defs/Id",
+        },
+        connection_epoch: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        lease_ttl_ms: {
+          type: "integer",
+          minimum: 1000,
+          maximum: 120000,
+        },
+        interval_ms: {
+          type: "integer",
+          minimum: 250,
+          maximum: 10000,
+        },
+      },
+    },
+    CapabilitySystemTelemetryUnsubscribe: {
+      description:
+        "Cancel the active system telemetry lease on the Computer immediately so zero background collection runs when no viewer is attached.",
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "protocol_version",
+        "command_id",
+        "runner_id",
+        "connection_epoch",
+      ],
+      properties: {
+        type: {
+          const: "capability.system_telemetry.unsubscribe",
+        },
+        protocol_version: {
+          $ref: "#/$defs/ProtocolVersion",
+        },
+        command_id: {
+          $ref: "#/$defs/Id",
+        },
+        runner_id: {
+          $ref: "#/$defs/Id",
+        },
+        connection_epoch: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+      },
+    },
+    RunnerSystemTelemetry: {
+      description:
+        "One revision-stamped live system telemetry frame emitted by the Computer while a telemetry lease is active and runner.welcome service_features names system_telemetry.",
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "protocol_version",
+        "runner_id",
+        "connection_epoch",
+        "sent_at",
+        "revision",
+        "status",
+      ],
+      properties: {
+        type: {
+          const: "runner.system_telemetry",
+        },
+        protocol_version: {
+          $ref: "#/$defs/ProtocolVersion",
+        },
+        runner_id: {
+          $ref: "#/$defs/Id",
+        },
+        connection_epoch: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        sent_at: {
+          $ref: "#/$defs/Timestamp",
+        },
+        revision: {
+          $ref: "#/$defs/PositiveInteger",
+        },
+        status: {
+          type: "string",
+          enum: ["ok", "unsupported", "unavailable"],
+        },
+        snapshot: {
+          $ref: "#/$defs/SystemTelemetrySnapshot",
+        },
+        reason: {
+          $ref: "#/$defs/SystemTelemetryUnavailableReason",
         },
       },
     },

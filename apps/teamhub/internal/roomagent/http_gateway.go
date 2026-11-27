@@ -25,6 +25,10 @@ type HTTPGateway struct {
 	localModelsClient *agentapi.ClientWithResponses
 	// modelSourceClient waits out a model-source switch.
 	modelSourceClient *agentapi.ClientWithResponses
+	// telemetrySnapshotClient reads one-shot live system telemetry snapshots.
+	telemetrySnapshotClient *agentapi.ClientWithResponses
+	// telemetryStreamClient holds no whole-request timeout for long-lived SSE streams.
+	telemetryStreamClient *agentapi.ClientWithResponses
 }
 
 const agentManagementRequestTimeout = 15 * time.Second
@@ -71,7 +75,23 @@ func NewHTTPGateway(baseURL, token string, client *http.Client) (*HTTPGateway, e
 	if err != nil {
 		return nil, fmt.Errorf("create model source contract client: %w", err)
 	}
-	return &HTTPGateway{client: generatedClient, browserClient: browserClient, toolClient: toolClient, localModelsClient: localModelsClient, modelSourceClient: modelSourceClient}, nil
+	telemetrySnapshotHTTPClient := *client
+	telemetrySnapshotHTTPClient.Timeout = localSystemTelemetrySnapshotTimeout
+	telemetrySnapshotClient, err := NewAgentManagementClient(baseURL, token, &telemetrySnapshotHTTPClient)
+	if err != nil {
+		return nil, fmt.Errorf("create system telemetry snapshot contract client: %w", err)
+	}
+	telemetryStreamHTTPClient := *client
+	telemetryStreamHTTPClient.Timeout = 0
+	telemetryStreamClient, err := NewAgentManagementClient(baseURL, token, &telemetryStreamHTTPClient)
+	if err != nil {
+		return nil, fmt.Errorf("create system telemetry stream contract client: %w", err)
+	}
+	return &HTTPGateway{
+		client: generatedClient, browserClient: browserClient, toolClient: toolClient,
+		localModelsClient: localModelsClient, modelSourceClient: modelSourceClient,
+		telemetrySnapshotClient: telemetrySnapshotClient, telemetryStreamClient: telemetryStreamClient,
+	}, nil
 }
 
 // NewAgentManagementClient validates the Agent Service origin and creates a

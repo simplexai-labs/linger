@@ -498,6 +498,52 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/system-telemetry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read one live system and inference telemetry snapshot from an owned Local Computer.
+     * @description Returns the latest live localmodels.stack-view/v1.1 snapshot when a stream is active on the Computer, or acquires a brief on-demand lease for one live tick. Only the Computer's owner may read live telemetry. Older Daemons or older localmodels kits without --live-tick answer 409 SYSTEM_TELEMETRY_UNSUPPORTED.
+     */
+    get: operations["getLocalComputerSystemTelemetry"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/system-telemetry/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Stream live system and inference telemetry snapshots from an owned Local Computer via SSE.
+     * @description Opens an on-demand 1 Hz Server-Sent Events stream multiplexed onto a single renewable Daemon lease per Computer. When the last viewer closes, Agent Service unsubscribes immediately so the Computer has zero idle telemetry overhead. Periodic keepalive comments keep idle proxies open.
+     */
+    get: operations["streamLocalComputerSystemTelemetry"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/tenants/{tenantId}/local-computers/{computerId}/model-source": {
     parameters: {
       query?: never;
@@ -5075,6 +5121,370 @@ export interface components {
       /** @enum {string} */
       action: "download" | "cancel" | "load" | "unload" | "remove";
     };
+    /** @enum {string} */
+    SystemTelemetryComputerStatus: "online" | "offline";
+    SystemTelemetryComputer: {
+      computer_id: components["schemas"]["Id"];
+      display_name: string;
+      status: components["schemas"]["SystemTelemetryComputerStatus"];
+      last_seen_at?: components["schemas"]["Timestamp"];
+    };
+    /** @enum {string} */
+    SystemTelemetrySource: "live" | "demo" | "empty";
+    SystemTelemetryHost: {
+      hostname: string;
+      system: string;
+      tier: string;
+    };
+    /**
+     * @description Provenance of a telemetry figure matching localmodels.stack-view/v1.1. Unavailable counters carry basis none with a null/absent value rather than fabricated zeros.
+     * @enum {string}
+     */
+    TelemetryBasis: "live" | "measured" | "estimate" | "demo" | "none";
+    SystemTelemetryFigure: {
+      value?: number | null;
+      basis: components["schemas"]["TelemetryBasis"];
+      note?: string;
+    };
+    SystemTelemetryGateway: {
+      kind: string;
+      addr: string;
+      route: string;
+      in_flight?: number;
+      client_lanes?: {
+        [key: string]: number;
+      };
+      p50_ttft_ms?: components["schemas"]["SystemTelemetryFigure"];
+    };
+    SystemTelemetryClient: {
+      id: string;
+      name: string;
+      model: string;
+    };
+    SystemTelemetryCounters: {
+      prompt_tokens?: number;
+      prompt_seconds?: number;
+      predicted_tokens?: number;
+      predicted_seconds?: number;
+      processing?: number;
+      requests_deferred?: number | null;
+      kv_cache_usage_ratio?: number | null;
+      prompt_tokens_seconds?: number | null;
+      predicted_tokens_seconds?: number | null;
+    };
+    SystemTelemetryPerf: {
+      prefill_tok_s?: components["schemas"]["SystemTelemetryFigure"];
+      decode_tok_s?: components["schemas"]["SystemTelemetryFigure"];
+      decode_bound?: components["schemas"]["SystemTelemetryFigure"];
+      latency_ms?: components["schemas"]["SystemTelemetryFigure"];
+      calls?: number | null;
+      failed?: number;
+      tiers?: {
+        [key: string]: number;
+      } | null;
+      counters?: components["schemas"]["SystemTelemetryCounters"];
+    };
+    /** @enum {string} */
+    SystemTelemetrySlotPhase: "idle" | "prefill" | "decoding" | "queued";
+    /** @description Numeric and phase counters of one inference engine slot. Prompt and completion text are stripped before serialization and never carried. */
+    SystemTelemetrySlot: {
+      id: number;
+      n_ctx?: number | null;
+      busy: boolean;
+      phase?: components["schemas"]["SystemTelemetrySlotPhase"];
+      prompt_tokens?: number | null;
+      prompt_done?: number | null;
+      cached?: number | null;
+      decoded?: number | null;
+      n_prompt?: number | null;
+      cached_prefix_tokens?: number | null;
+      n_decoded?: number | null;
+      tok_s?: number | null;
+      ttft_ms?: number | null;
+    };
+    SystemTelemetryComponent: {
+      id: string;
+      role?: string;
+      title?: string;
+      model?: string;
+      quant?: string;
+      device?: string;
+      gpu?: number | null;
+      endpoint?: string;
+      state?: string;
+      health?: string;
+      window?: number | null;
+      slots?: number | null;
+      kv_types?: string | null;
+      /** Format: int64 */
+      vram_bytes?: number;
+      /** Format: int64 */
+      ram_bytes?: number;
+      perf?: components["schemas"]["SystemTelemetryPerf"];
+      explain?: string;
+      live_slots?: components["schemas"]["SystemTelemetrySlot"][] | null;
+    };
+    SystemTelemetrySegment: {
+      kind: string;
+      label: string;
+      /** Format: int64 */
+      bytes: number;
+      basis: components["schemas"]["TelemetryBasis"];
+      component?: string | null;
+      note?: string;
+    };
+    SystemTelemetryFit: {
+      id: string;
+      quant: string;
+      decode_tok_s?: number | null;
+    };
+    SystemTelemetryGpu: {
+      index: number;
+      name: string;
+      /** Format: int64 */
+      total_bytes: number;
+      /** Format: int64 */
+      used_bytes: number;
+      bandwidth_gb_s?: number | null;
+      holders?: string[];
+      segments?: components["schemas"]["SystemTelemetrySegment"][];
+      fits?: components["schemas"]["SystemTelemetryFit"][];
+    };
+    SystemTelemetryGpuLoad: {
+      index: number;
+      util_pct?: number | null;
+      mem_ctrl_util_pct?: number | null;
+      /** Format: int64 */
+      vram_total_bytes?: number | null;
+      /** Format: int64 */
+      vram_used_bytes?: number | null;
+      /** Format: int64 */
+      vram_free_bytes?: number | null;
+      power_w?: number | null;
+      power_limit_w?: number | null;
+      temp_c?: number | null;
+      basis: components["schemas"]["TelemetryBasis"];
+      source?: string;
+    };
+    SystemTelemetryMemory: {
+      /** Format: int64 */
+      total_bytes: number;
+      /** Format: int64 */
+      available_bytes: number;
+      segments?: components["schemas"]["SystemTelemetrySegment"][];
+    };
+    /** @enum {string} */
+    SystemTelemetryPoolKind: "unified" | "discrete";
+    /** @description Authoritative memory and roofline coefficients from localmodels so the client can compute What-If capacity forecasts with zero round trips. */
+    SystemTelemetryWhatIf: {
+      gpu: number;
+      window: number;
+      slots: number;
+      kv_bytes_per_token: number;
+      compute_bytes_per_token: number;
+      /** Format: int64 */
+      fixed_bytes: number;
+      /** Format: int64 */
+      room_bytes: number;
+      /** Format: int64 */
+      active_weight_bytes?: number;
+      /** Format: int64 */
+      weights_bytes?: number;
+      memory_bw_ceiling_gb_s?: number | null;
+      pcie_bandwidth_gb_s?: number | null;
+      kv_dtype_factors?: {
+        [key: string]: number;
+      };
+      pool_kind?: components["schemas"]["SystemTelemetryPoolKind"];
+      /** Format: int64 */
+      host_ram_available_bytes?: number;
+    };
+    SystemTelemetryEvent: {
+      id: string;
+      at: string;
+      kind: string;
+      component?: string | null;
+      ok: boolean;
+      latency_ms?: number | null;
+      gateway_ms?: number | null;
+      tier?: string | null;
+      tokens_in?: number | null;
+      tokens_out?: number | null;
+      ttft_ms?: number | null;
+    };
+    /** @enum {string} */
+    SystemTelemetryMeasuredMemory: "vram" | "ram";
+    SystemTelemetryMeasuredRow: {
+      id: string;
+      memory: components["schemas"]["SystemTelemetryMeasuredMemory"];
+      gpu?: number | null;
+      /** Format: int64 */
+      planned_bytes: number;
+      /** Format: int64 */
+      measured_bytes?: number | null;
+      over: boolean;
+    };
+    SystemTelemetryStep: {
+      command: string;
+      why: string;
+    };
+    SystemTelemetryApplyRow: {
+      id: string;
+      label: string;
+      detail?: string;
+      state: string;
+      step?: string;
+      phase?: string;
+      /** Format: int64 */
+      done?: number | null;
+      /** Format: int64 */
+      total?: number | null;
+    };
+    SystemTelemetryApply: {
+      plan_id: string;
+      started_at: string;
+      updated_at: string;
+      rollback: boolean;
+      rows: components["schemas"]["SystemTelemetryApplyRow"][];
+    };
+    SystemTelemetryCoreUsage: {
+      core: number;
+      util_pct: number;
+    };
+    SystemTelemetryCpuSensors: {
+      overall_pct: components["schemas"]["SystemTelemetryFigure"];
+      per_core?: components["schemas"]["SystemTelemetryCoreUsage"][];
+      logical_cores?: number | null;
+    };
+    SystemTelemetryDiskSensors: {
+      read_mb_s: components["schemas"]["SystemTelemetryFigure"];
+      write_mb_s: components["schemas"]["SystemTelemetryFigure"];
+    };
+    /** @enum {string} */
+    SystemTelemetryMemoryPressureLevel:
+      | "nominal"
+      | "elevated"
+      | "critical"
+      | "unknown";
+    SystemTelemetryMemoryPressure: {
+      level: components["schemas"]["SystemTelemetryMemoryPressureLevel"];
+      basis: components["schemas"]["TelemetryBasis"];
+      available_ratio?: number | null;
+      psi_some_avg10?: number | null;
+      /** Format: int64 */
+      swap_used_bytes?: number | null;
+    };
+    /** @enum {string} */
+    SystemTelemetryWatchdogStatus:
+      | "clean"
+      | "oom"
+      | "memory_starved"
+      | "crashed"
+      | "unknown";
+    SystemTelemetryWatchdogHealth: {
+      status: components["schemas"]["SystemTelemetryWatchdogStatus"];
+      basis: components["schemas"]["TelemetryBasis"];
+      detail?: string;
+    };
+    SystemTelemetryHostSensors: {
+      cpu: components["schemas"]["SystemTelemetryCpuSensors"];
+      disk: components["schemas"]["SystemTelemetryDiskSensors"];
+      memory_pressure: components["schemas"]["SystemTelemetryMemoryPressure"];
+      watchdog: components["schemas"]["SystemTelemetryWatchdogHealth"];
+      collector?: string;
+    };
+    /**
+     * @description Deterministic bottleneck classification computed from measured bandwidth, GPU utilization, and disk read throughput.
+     * @enum {string}
+     */
+    SystemTelemetryBottleneck:
+      | "memory_bw_bound"
+      | "compute_bound"
+      | "io_bound"
+      | "balanced"
+      | "idle";
+    /** @enum {string} */
+    SystemTelemetryWaterfallStatus: "streaming" | "completed" | "deferred";
+    SystemTelemetryWaterfallEntry: {
+      request_id: string;
+      at: string;
+      client_id: string;
+      model_id: string;
+      status: components["schemas"]["SystemTelemetryWaterfallStatus"];
+      gateway_ms?: number | null;
+      ttft_ms?: number | null;
+      decode_ms?: number | null;
+      prompt_tokens?: number | null;
+      completion_tokens?: number | null;
+      cached_prefix_pct?: number | null;
+      decode_tok_s?: number | null;
+      basis: components["schemas"]["TelemetryBasis"];
+    };
+    /** @description Structured live telemetry snapshot matching localmodels.stack-view/v1 (v1.1). Fields beyond schema, generated_at, and source are additive and optional so schema evolution never breaks older daemons or viewers. */
+    SystemTelemetrySnapshot: {
+      schema: string;
+      schema_version?: string;
+      generated_at: string;
+      source: components["schemas"]["SystemTelemetrySource"];
+      lang?: string;
+      plan_id?: string | null;
+      host?: components["schemas"]["SystemTelemetryHost"];
+      gateway?: components["schemas"]["SystemTelemetryGateway"];
+      clients?: components["schemas"]["SystemTelemetryClient"][];
+      components?: components["schemas"]["SystemTelemetryComponent"][];
+      gpus?: components["schemas"]["SystemTelemetryGpu"][];
+      gpu_load?: components["schemas"]["SystemTelemetryGpuLoad"][];
+      ram?: components["schemas"]["SystemTelemetryMemory"];
+      what_if?: components["schemas"]["SystemTelemetryWhatIf"];
+      events?: components["schemas"]["SystemTelemetryEvent"][];
+      measured?: components["schemas"]["SystemTelemetryMeasuredRow"][];
+      notes?: string[];
+      next_steps?: components["schemas"]["SystemTelemetryStep"][];
+      apply?: components["schemas"]["SystemTelemetryApply"];
+      sensors?: components["schemas"]["SystemTelemetryHostSensors"];
+      effective_decode_bw_gb_s?: components["schemas"]["SystemTelemetryFigure"];
+      memory_bw_ceiling_gb_s?: components["schemas"]["SystemTelemetryFigure"];
+      bottleneck?: components["schemas"]["SystemTelemetryBottleneck"];
+      waterfall?: components["schemas"]["SystemTelemetryWaterfallEntry"][];
+      p50_ttft_ms?: components["schemas"]["SystemTelemetryFigure"];
+      prefix_hit_pct?: components["schemas"]["SystemTelemetryFigure"];
+      requests_deferred?: components["schemas"]["SystemTelemetryFigure"];
+      kv_cache_usage_ratio?: components["schemas"]["SystemTelemetryFigure"];
+      in_flight?: number;
+      client_lanes?: {
+        [key: string]: number;
+      };
+    };
+    /** @description One live system telemetry snapshot paired with TeamHub's Computer metadata for GET .../system-telemetry and SSE telemetry.snapshot events. */
+    SystemTelemetryView: {
+      computer: components["schemas"]["SystemTelemetryComputer"];
+      viewer_is_owner: boolean;
+      /** Format: int64 */
+      revision: number;
+      observed_at: components["schemas"]["Timestamp"];
+      snapshot: components["schemas"]["SystemTelemetrySnapshot"];
+    };
+    /**
+     * @description Closed error code set for system telemetry endpoints. LOCAL_COMPUTER_OFFLINE: the Computer is not connected (503). SYSTEM_TELEMETRY_UNSUPPORTED: the Computer Daemon or its localmodels kit does not support live-tick system telemetry (409). SYSTEM_TELEMETRY_FORBIDDEN: only the Computer's owner can read live system telemetry (403). SYSTEM_TELEMETRY_TIMEOUT: the Computer did not emit a live snapshot before the request deadline (504). SYSTEM_TELEMETRY_UNAVAILABLE: Agent Service or collector is temporarily unavailable (503).
+     * @enum {string}
+     */
+    SystemTelemetryErrorCode:
+      | "LOCAL_COMPUTER_OFFLINE"
+      | "SYSTEM_TELEMETRY_UNSUPPORTED"
+      | "SYSTEM_TELEMETRY_UNAVAILABLE"
+      | "SYSTEM_TELEMETRY_TIMEOUT"
+      | "SYSTEM_TELEMETRY_FORBIDDEN";
+    SystemTelemetryError: {
+      code: components["schemas"]["SystemTelemetryErrorCode"];
+      message: string;
+      request_id: string;
+      details?: components["schemas"]["ErrorDetail"][];
+      /** @default false */
+      retryable: boolean;
+    };
+    SystemTelemetryErrorResponse: {
+      error: components["schemas"]["SystemTelemetryError"];
+    };
     /**
      * @description Active model source mode on a Local Computer.
      * @enum {string}
@@ -8754,6 +9164,15 @@ export interface components {
         "application/json": components["schemas"]["LocalModelsErrorResponse"];
       };
     };
+    /** @description The Computer, Agent Service, or TeamHub refused or could not serve the system telemetry request; error.code is one of SystemTelemetryErrorCode. */
+    SystemTelemetryRefused: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["SystemTelemetryErrorResponse"];
+      };
+    };
     /** @description The Computer or TeamHub refused the model-source request; error.code is one of ModelSourceErrorCode. */
     ModelSourceRefused: {
       headers: {
@@ -9650,6 +10069,63 @@ export interface operations {
       502: components["responses"]["LocalModelsRefused"];
       503: components["responses"]["LocalModelsRefused"];
       504: components["responses"]["LocalModelsRefused"];
+    };
+  };
+  getLocalComputerSystemTelemetry: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current live system telemetry snapshot with Computer metadata. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SystemTelemetryView"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["SystemTelemetryRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["SystemTelemetryRefused"];
+      503: components["responses"]["SystemTelemetryRefused"];
+      504: components["responses"]["SystemTelemetryRefused"];
+    };
+  };
+  streamLocalComputerSystemTelemetry: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Live telemetry snapshots, status transitions, keepalive comments, and session expiry notices. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["SystemTelemetryRefused"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["SystemTelemetryRefused"];
+      503: components["responses"]["SystemTelemetryRefused"];
     };
   };
   getLocalComputerModelSource: {

@@ -306,6 +306,20 @@ func (d *Daemon) handleConnectionCommand(ctx, connectionCtx context.Context, str
 				slog.Warn("model_source.outcome_not_sent", "error", err)
 			}
 		}()
+	case protocol.CommandCapabilitySystemTelemetrySubscribe:
+		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
+			return errors.New("System telemetry subscribe command uses a stale connection epoch")
+		}
+		if err := d.handleSystemTelemetrySubscribe(stream, command); err != nil {
+			return err
+		}
+	case protocol.CommandCapabilitySystemTelemetryUnsubscribe:
+		if !d.welcomeSeen || command.ConnectionEpoch != d.connectionEpoch {
+			return errors.New("System telemetry unsubscribe command uses a stale connection epoch")
+		}
+		if err := d.handleSystemTelemetryUnsubscribe(stream, command); err != nil {
+			return err
+		}
 	case protocol.CommandOperationCancel:
 		if !dispatch.followOperation(command, func() error { return d.handleOperationCancel(command) }) {
 			if err := d.handleOperationCancel(command); err != nil {
@@ -355,9 +369,22 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.operationBackgroundWait.Store(slices.Contains(command.ServiceFeatures, serviceFeatureOperationBackgroundWait))
 	d.dynamicReasoningEfforts.Store(slices.Contains(command.ServiceFeatures, serviceFeatureDynamicReasoningEfforts))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
+	systemTelemetry := slices.Contains(command.ServiceFeatures, serviceFeatureSystemTelemetry)
 	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels, helloRev); err != nil {
 		return err
 	}
+	d.systemTelemetryMu.Lock()
+	d.connectionMu.Lock()
+	if systemTelemetry {
+		d.systemTelemetryStream = stream
+		d.systemTelemetryEpoch = command.ConnectionEpoch
+	} else {
+		d.systemTelemetryStream = nil
+		d.systemTelemetryEpoch = 0
+	}
+	d.connectionMu.Unlock()
+	d.systemTelemetryRevision = 0
+	d.systemTelemetryMu.Unlock()
 	go d.heartbeatLoop(connectionCtx, stream, command.HeartbeatIntervalMs)
 	if localModels {
 		d.refreshLocalModels(connectionCtx)
@@ -541,7 +568,16 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsExternalHolders.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
+	stopTelemetry := false
+	if d.systemTelemetryStream == stream {
+		d.systemTelemetryStream = nil
+		d.systemTelemetryEpoch = 0
+		stopTelemetry = true
+	}
 	d.connectionMu.Unlock()
+	if stopTelemetry && d.systemTelemetry != nil {
+		d.systemTelemetry.Unsubscribe()
+	}
 }
 
 // capabilities lists the host features this Computer has; everything else is

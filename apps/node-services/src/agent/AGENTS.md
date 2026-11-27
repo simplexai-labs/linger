@@ -229,6 +229,15 @@ take precedence.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.
+- On-demand live system telemetry (`system_telemetry` in `runner.welcome`'s
+  `service_features`, `capability.system_telemetry.subscribe`,
+  `capability.system_telemetry.unsubscribe`, and `runner.system_telemetry`) is
+  negotiated only with Computer 0.67.0 or later
+  (`FIRST_SYSTEM_TELEMETRY_COMPUTER_VERSION`), because older Computers reject
+  unknown frames and close the connection. `RunnerSystemTelemetry` multiplexes
+  viewers per Computer onto one renewable Daemon lease, coalesces frames to
+  the latest snapshot per viewer, and unsubscribes immediately when the last
+  viewer disconnects.
 - `operation_background_wait` in `runner.welcome`'s `service_features` is
   advertised to every Computer (a Daemon ignores an unknown feature); only a
   Daemon that sees it emits `run.background_waiting` and

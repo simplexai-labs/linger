@@ -59,6 +59,12 @@ import {
   type LocalModelActionAck,
   type LocalModelActionCommand,
 } from "./runner-local-models.js";
+import {
+  RunnerSystemTelemetry,
+  type LocalSystemTelemetrySnapshotEnvelope,
+  type LocalSystemTelemetrySubscription,
+  type LocalSystemTelemetryTarget,
+} from "./runner-system-telemetry.js";
 import { RunnerOperationPreparation } from "./runner-operation-preparation.js";
 import type {
   RunnerCapacityPermit,
@@ -150,6 +156,7 @@ export class RunnerGateway
   readonly #queue: ModelQueue;
   readonly #computerTools: RunnerComputerTools;
   readonly #localModels: RunnerLocalModels;
+  readonly #systemTelemetry: RunnerSystemTelemetry;
   constructor(options: RunnerGatewayOptions) {
     const context = createRunnerGatewayContext(options);
     const owners: RunnerGatewayControllers = {
@@ -165,6 +172,7 @@ export class RunnerGateway
       queue: () => this.#queue,
       computerTools: () => this.#computerTools,
       localModels: () => this.#localModels,
+      systemTelemetry: () => this.#systemTelemetry,
       contextViewContent: () => this.contextViewContent,
     };
     this.#connections = new RunnerConnections(context, owners);
@@ -217,6 +225,7 @@ export class RunnerGateway
     );
     this.#computerTools = new RunnerComputerTools(context, owners);
     this.#localModels = new RunnerLocalModels(context, owners);
+    this.#systemTelemetry = new RunnerSystemTelemetry(context, owners);
     validateRunnerGatewayContext(context);
     if (options.contextContent) {
       this.contextViewContent = createContextViewContent({
@@ -369,6 +378,18 @@ export class RunnerGateway
 
   async modelSource(command: LocalModelSourceCommand) {
     return this.#capabilities.modelSource(command);
+  }
+
+  async getSystemTelemetrySnapshot(
+    target: LocalSystemTelemetryTarget,
+  ): Promise<LocalSystemTelemetrySnapshotEnvelope> {
+    return this.#systemTelemetry.getSnapshot(target);
+  }
+
+  async subscribeSystemTelemetry(
+    target: LocalSystemTelemetryTarget,
+  ): Promise<LocalSystemTelemetrySubscription> {
+    return this.#systemTelemetry.subscribe(target);
   }
 
   async runLocalComputerMutation<T>(

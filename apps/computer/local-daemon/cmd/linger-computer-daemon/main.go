@@ -411,6 +411,16 @@ func run(args []string) (resultErr error) {
 		},
 	})
 	defer localModels.Close()
+	systemTelemetry := localmodels.NewTelemetryCollector(localmodels.TelemetryOptions{
+		Tool:        localModelsTool,
+		Environment: baseProviderEnvironment,
+		Publish: func(update localmodels.TelemetryUpdate) {
+			if localDaemon != nil {
+				localDaemon.PublishSystemTelemetry(update)
+			}
+		},
+	})
+	defer systemTelemetry.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
 	applyDiscovered := func(publishCtx context.Context, next provider.DiscoveryResult) error {
 		reconcileLocalModelsHarness(localModels, piEnabled, localModelsStateDir, next)
@@ -477,6 +487,7 @@ func run(args []string) (resultErr error) {
 		TeamHubCLIBin:       teamhubBin,
 		LocalModels:         localModels,
 		ModelSource:         modelSource,
+		SystemTelemetry:     systemTelemetry,
 		ModelInvoker: provider.ModelInvoker{
 			TempBase:         operationTempBase,
 			ClaudeConfigRoot: filepath.Join(computer.StateDirectory, "model-invoke", "claude", ".claude"),
