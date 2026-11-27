@@ -334,10 +334,10 @@
     "stepModelNamed": "正在下载 {model}",
     "lineAlmost": "马上就好",
     "useMeanwhile": "先用订阅或 BYOK",
-    "agentInbox": "收件箱",
-    "agentInboxAbout": "整理收到的消息",
-    "agentAssistant": "助理",
-    "agentAssistantAbout": "处理你的任务"
+    "agentLocal": "本地运行",
+    "agentLocalAbout": "数据留在这台 Mac",
+    "agentPersonal": "个人 Agent",
+    "agentPersonalAbout": "只为你工作"
   },
   "status": {
     "notConnected": "未连接",

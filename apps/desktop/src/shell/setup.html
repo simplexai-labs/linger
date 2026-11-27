@@ -2594,10 +2594,12 @@
       body[data-expanded] .sc-ready {
         transform: translateY(-104px);
       }
+      /* The cards stay readable while installing (subtitle about 4.3:1
+         against the card) and come fully up once the agents wake. */
       .floaters {
         position: absolute;
         inset: 0;
-        opacity: 0.4;
+        opacity: 0.9;
         transition:
           opacity 1.2s var(--ease),
           filter 0.6s,
@@ -2605,7 +2607,7 @@
       }
       body[data-scene="ready"] .floaters,
       body[data-agents] .floaters {
-        opacity: 0.85;
+        opacity: 1;
       }
       body[data-failed] .floaters {
         opacity: 0.22;
@@ -2637,9 +2639,10 @@
       }
       .agent small {
         display: block;
+        white-space: nowrap;
         font-size: 11px;
         line-height: 15px;
-        color: var(--faint);
+        color: #6b6a62;
         margin-top: 3px;
       }
       /* The agent cards hang almost level and drift a few pixels, out of
@@ -2879,17 +2882,18 @@
       <span class="pips" id="pips" aria-hidden="true"><i></i><i></i></span>
       <span id="step-label"></span>
     </header>
-    <!-- The install scene: one orb and two of the agents it sets up,
-         shared by installing, its failure and ready. -->
+    <!-- The install scene: one orb between two cards, one saying Linger
+         runs locally and one that it is your personal agent; shared by
+         installing, its failure and ready. -->
     <div class="sc" id="sc" aria-hidden="true">
       <div class="floaters" id="floaters">
         <div class="agent a1">
-          <span class="orb k-byok"></span><b data-t="agentInbox"></b
-          ><small data-t="agentInboxAbout"></small>
+          <span class="orb k-byok"></span><b data-t="agentLocal"></b
+          ><small data-t="agentLocalAbout"></small>
         </div>
         <div class="agent a2">
-          <span class="orb"></span><b data-t="agentAssistant"></b
-          ><small data-t="agentAssistantAbout"></small>
+          <span class="orb"></span><b data-t="agentPersonal"></b
+          ><small data-t="agentPersonalAbout"></small>
         </div>
       </div>
       <div class="sc-orb" id="sc-orb">

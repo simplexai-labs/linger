@@ -224,11 +224,12 @@ export const setupMessages = defineMessages("setup", {
   waitingRuntime: "Checking the AI runtime…",
   lineAlmost: "Almost there",
   useMeanwhile: "Use Subscription or BYOK meanwhile",
-  // The two agents the install scene shows waking up.
-  agentInbox: "Inbox",
-  agentInboxAbout: "Sorts what comes in",
-  agentAssistant: "Assistant",
-  agentAssistantAbout: "Works on your tasks",
+  // The two cards beside the install scene's orb: Linger runs locally,
+  // and it is your own agent.
+  agentLocal: "Local",
+  agentLocalAbout: "Runs on this Mac",
+  agentPersonal: "Personal agent",
+  agentPersonalAbout: "Works just for you",
   runtimeLookupTimedOut: "Checking the AI runtime took too long.",
   runtimeLookupUnreachable: "Lost the connection to the installer.",
   installerUnreachable: "Couldn't reconnect to the installation.",

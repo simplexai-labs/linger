@@ -1688,6 +1688,32 @@ describe("setup page installing", () => {
     expect($("report-issue").textContent).toBe(zhCN.setup.reportIssue);
   });
 
+  it("says beside the install orb that Linger runs locally and is your own agent", async () => {
+    for (const [language, want] of [
+      [
+        "en",
+        ["Local", "Runs on this Mac", "Personal agent", "Works just for you"],
+      ],
+      [
+        "zh-CN",
+        [
+          zhCN.setup.agentLocal,
+          zhCN.setup.agentLocalAbout,
+          zhCN.setup.agentPersonal,
+          zhCN.setup.agentPersonalAbout,
+        ],
+      ],
+    ] as const) {
+      await openPage(withLocal("installing"), "installing", language);
+      const cards = [...document.querySelectorAll("#floaters .agent")];
+      expect(
+        cards.flatMap((card) =>
+          [...card.querySelectorAll("b, small")].map((el) => el.textContent),
+        ),
+      ).toEqual(want);
+    }
+  });
+
   it("words a lost installer without asking to try again", async () => {
     for (const [language, want] of [
       ["en", "Couldn't reconnect to the installation."],
