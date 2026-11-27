@@ -223,3 +223,55 @@ jobs:
         run: >-
           scripts/ci/desktop-release.sh github-release release
           "${{ needs.prepare.outputs.tag }}" "${{ needs.prepare.outputs.version }}"
+
+  # For non-release verification builds, sign manifest.json + manifest.json.sig
+  # and upload them with SHA256SUMS.txt as a short-lived workflow artifact
+  # without creating any GitHub Release or tag.
+  sign-test-manifest:
+    needs: [prepare, build, build-win32, windows-smoke]
+    if: needs.prepare.outputs.publish == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Linger-${{ needs.prepare.outputs.version }}-*
+          path: release
+          merge-multiple: true
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-setup.sha256
+          path: release
+          skip-decompress: true
+      - name: Verify the Windows Setup that passed smoke
+        working-directory: release
+        run: sha256sum -c windows-setup.sha256 && rm windows-setup.sha256
+      - name: Sign the update manifest
+        env:
+          DESKTOP_UPDATE_KEY_PEM: ${{ secrets.DESKTOP_UPDATE_KEY_PEM }}
+          DESKTOP_REQUIRE_UPDATE_KEY: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -n "$DESKTOP_UPDATE_KEY_PEM" ]; then
+            key="$RUNNER_TEMP/update.pem"
+            trap 'rm -f "$key"' EXIT
+            printf '%s\n' "$DESKTOP_UPDATE_KEY_PEM" >"$key"
+            export DESKTOP_UPDATE_KEY="$key"
+          fi
+          scripts/ci/desktop-release.sh manifest release "${{ needs.prepare.outputs.version }}"
+      - run: scripts/ci/desktop-release.sh checksums release "${{ needs.prepare.outputs.version }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Linger-${{ needs.prepare.outputs.version }}-update-manifest
+          path: |
+            release/manifest.json
+            release/manifest.json.sig
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 3
