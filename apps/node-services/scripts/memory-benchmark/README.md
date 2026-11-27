@@ -19,6 +19,7 @@ scripts/memory-benchmark/
   knowledge.ts  shared by both: Memory indexes on a throwaway database, Wiki generation, publishing into the index, search and read, bounded retries
   answer.ts     how Another Me answers: memory.md + Personal Knowledge policy + a knowledge search/read tool loop
   judge.ts      judging prompts (AMB + LongMemEval abstention questions), calibrated on known answers before a run
+  abstention.ts abstention figures: correct abstention on unanswerable questions, false abstention on answerable ones
 ```
 
 ## Full-flow test (lifecycle)
@@ -117,10 +118,19 @@ An interrupted run continues when started again with the same arguments: finishe
 
 ## Reading the results
 
-- `report.md`: each arm's accuracy per round, the mean, the min to max, failures, tool calls and time per question, and accuracy by question type.
+- `report.md`: each arm's accuracy per round, the mean, the min to max, failures, tool calls and time per question, accuracy by question type, and abstention.
 - `summary.json`: the same data, plus preparation statistics (nights, failures, Wiki pages, Daily reports) and model usage (`preparation` covers storage, extraction and nights, `judge` covers judging; answering usage is in each question).
 - `manifest.json`: the question list, models, judging protocol, and the checkout's commit and a hash of its uncommitted changes.
 - Each question's JSON has the full tool-call record and the judge's reasoning, to investigate question by question.
+
+### Abstention
+
+Accuracy cannot tell an answer that is wrong from one that declines, and declining more often raises the score on unanswerable questions while lowering it on answerable ones. The report's Abstention table gives each side per arm, over all rounds:
+
+- **Correct abstention**: the share of unanswerable questions whose answer declined. Only LongMemEval has them (question IDs ending in `_abs`); for a LoCoMo plan the column is empty.
+- **False abstention**: the share of answerable questions whose answer declined instead of answering. An answerable question graded wrong gets one more judge call (`judgeDeclined`) that separates a wrong answer from a declined one, with its own known-answer controls before the run. A correct answer is never counted as declined.
+
+A change to the Personal Knowledge policy or to search that moves one figure should be read against the other. A wrong answer without a declined verdict, because that call failed or the answer was stored before these figures existed, keeps its grade and leaves False abstention empty for its arm. Starting the run again with the same arguments asks only for the missing verdicts, without answering or grading those questions again.
 
 To call a regression, run each arm at least 3 rounds and check whether the difference of the means is outside the baseline's own min-to-max range. Results vary a fair amount: with LoCoMo amb120 and only the Wiki, the same arm can differ by ±5 questions between rounds.
 

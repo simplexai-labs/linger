@@ -20,6 +20,13 @@ import { parseArgs } from "node:util";
 
 import { createGatewayModelCall } from "../gateway-model-call.js";
 import {
+  type AbstentionSummary,
+  calibrateDeclinedJudge,
+  judgeDeclined,
+  needsDeclinedVerdict,
+  summarizeAbstention,
+} from "./abstention.js";
+import {
   type AnswerRecord,
   ARMS,
   type Arm,
@@ -191,6 +198,7 @@ const judgeGateway = createGatewayModelCall({
   concurrency,
 });
 await calibrateJudge(judgeGateway.modelCall, plan.benchmark);
+await calibrateDeclinedJudge(judgeGateway.modelCall);
 console.log(`Judge ${args["judge-model"]} passed its known-answer controls`);
 
 const product = await openProduct({
@@ -211,6 +219,8 @@ interface StoredAnswer {
   gold: string;
   record?: AnswerRecord;
   judgment?: Judgment;
+  /** For an answerable question graded wrong: whether the answer declined. */
+  declined?: { declined: boolean; reason: string };
   error?: string;
   source: typeof source;
 }
@@ -230,7 +240,13 @@ async function runOne(arm: Arm, round: number, item: Case) {
     .readFile(file, "utf8")
     .then((text) => JSON.parse(text) as StoredAnswer)
     .catch(() => undefined);
-  if (stored && !(stored.error && args["retry-errors"])) return;
+  if (stored && !(stored.error && args["retry-errors"])) {
+    if (needsDeclinedVerdict(stored) && stored.record) {
+      await addDeclinedVerdict(arm, round, item, stored, stored.record.answer);
+      await fs.writeFile(file, JSON.stringify(stored, null, 2));
+    }
+    return;
+  }
   const result: StoredAnswer = {
     case_id: item.id,
     arm,
@@ -264,8 +280,36 @@ async function runOne(arm: Arm, round: number, item: Case) {
       `ERROR ${arm} r${round} ${item.id}: ${result.error.slice(0, 300)}`,
     );
   }
+  if (needsDeclinedVerdict(result) && result.record)
+    await addDeclinedVerdict(arm, round, item, result, result.record.answer);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(result, null, 2));
+}
+
+/**
+ * Classifies a wrong answer as declined or not. A failure keeps the answer's
+ * grade: the arm's False abstention stays empty, and the next resume asks
+ * again without answering or grading the question again.
+ */
+async function addDeclinedVerdict(
+  arm: Arm,
+  round: number,
+  item: Case,
+  stored: StoredAnswer,
+  answer: string,
+) {
+  try {
+    stored.declined = await judgeDeclined(
+      judgeGateway.modelCall,
+      `${arm}:${round}:${item.id}`,
+      item.question,
+      answer,
+    );
+  } catch (error) {
+    console.error(
+      `ERROR declined verdict ${arm} r${round} ${item.id}: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`,
+    );
+  }
 }
 
 // Prepare each history once before answering on it; a failed history fails
@@ -338,6 +382,7 @@ interface ArmSummary {
   max: number;
   errors: number;
   by_type: Record<string, number>;
+  abstention: AbstentionSummary;
   tokens: { prompt: number; completion: number };
   seconds_per_answer: number;
   tool_calls_per_answer: number;
@@ -375,6 +420,7 @@ function summarize(
           ];
         }),
       ),
+      abstention: summarizeAbstention(own),
       tokens: {
         prompt: answered.reduce(
           (sum, answer) => sum + answer.record!.usage.prompt,
@@ -469,6 +515,22 @@ const lines = [
     ),
   ),
 ];
+const share = (value: number | null | undefined) =>
+  value === null || value === undefined ? "—" : percent(value);
+lines.push(
+  "",
+  "## Abstention (all rounds)",
+  "",
+  "Correct abstention: unanswerable questions the answer declined. False abstention: answerable questions the answer declined instead of answering.",
+  "",
+  "| Arm | Unanswerable | Correct abstention | Baseline | Answerable | False abstention | Baseline |",
+  "| --- | --- | --- | --- | --- | --- | --- |",
+  ...Object.entries(summary.arms).map(([arm, { abstention }]) => {
+    // A baseline written before these figures has no abstention block.
+    const other = baseline?.arms[arm]?.abstention;
+    return `| ${arm} | ${abstention.unanswerable} | ${share(abstention.correct_abstention)} | ${share(other?.correct_abstention)} | ${abstention.answerable} | ${share(abstention.false_abstention)} | ${share(other?.false_abstention)} |`;
+  }),
+);
 if (baseline)
   lines.push(
     "",
