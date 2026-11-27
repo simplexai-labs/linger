@@ -26,18 +26,21 @@ const isWindows = process.platform === "win32";
 const target = `${process.platform}-${process.arch}`;
 const args = new Set(process.argv.slice(2));
 const smokeOnly = args.has("--smoke-only");
+const withSetupInspect = args.has("--with-setup-inspect");
 
 if (args.has("--help") || args.has("-h")) {
   process.stdout.write(
     [
-      "Usage: node .agents/skills/verify-linger/scripts/verify-local-client.mjs [--smoke-only]",
+      "Usage: node .agents/skills/verify-linger/scripts/verify-local-client.mjs [--smoke-only] [--with-setup-inspect]",
       "",
       "Runs platform-aware deterministic checks for Desktop, Local Installer,",
       "Local Installation, BYOK helpers, and Go Daemon localmodels/model_source,",
       "followed by an isolated live Local Installer loopback proof.",
       "",
       "Options:",
-      "  --smoke-only  Skip unit/check suites and run only the isolated live installer proof.",
+      "  --smoke-only          Skip unit/check suites and run only the isolated live installer proof.",
+      "  --with-setup-inspect  Drive an authenticated Chromium session through GET /api/setup",
+      "                        (requires network access to download the localmodels kit).",
       "",
     ].join("\n"),
   );
@@ -127,6 +130,7 @@ const sourceInfo = [
   `pnpm=${pnpmVersion || "unavailable"}`,
   `go=${goVersion || "unavailable"}`,
   `smoke_only=${smokeOnly}`,
+  `with_setup_inspect=${withSetupInspect}`,
   ...(statusShort ? ["dirty:", statusShort] : ["dirty=none"]),
 ].join("\n");
 writeFileSync(path.join(evidenceDir, "source.txt"), `${sourceInfo}\n`, {
@@ -239,6 +243,9 @@ async function runLiveInstallerProof() {
       ? "/private/tmp"
       : tmpdir();
   const tempHome = mkdtempSync(path.join(tmpBase, "linger-verify-installer-"));
+  writeFileSync(path.join(evidenceDir, "temp-homes.txt"), `${tempHome}\n`, {
+    mode: 0o600,
+  });
   const installerEntry = path.join(
     repoRoot,
     "apps",
@@ -247,7 +254,7 @@ async function runLiveInstallerProof() {
     "installer.js",
   );
   let child;
-  const assertions = {};
+  const assertions = { withSetupInspect };
 
   try {
     logLine(
@@ -273,6 +280,11 @@ async function runLiveInstallerProof() {
         windowsHide: true,
       },
     );
+    if (child.pid) {
+      writeFileSync(path.join(evidenceDir, "pids.txt"), `${child.pid}\n`, {
+        mode: 0o600,
+      });
+    }
     child.stdout.on("data", (chunk) => logStream.write(chunk));
     child.stderr.on("data", (chunk) => logStream.write(chunk));
 
@@ -326,30 +338,191 @@ async function runLiveInstallerProof() {
       );
     }
 
-    const sessionRes = await fetch(`${origin}/api/session`, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ token }),
-    });
-    assertions.sessionExchangeStatus = sessionRes.status;
-    const setCookie = sessionRes.headers.get("set-cookie") ?? "";
-    assertions.cookieFlags = {
-      httpOnly: /;\s*HttpOnly/i.test(setCookie),
-      sameSiteStrict: /;\s*SameSite=Strict/i.test(setCookie),
-    };
-    if (
-      sessionRes.status !== 200 ||
-      !assertions.cookieFlags.httpOnly ||
-      !assertions.cookieFlags.sameSiteStrict
-    ) {
+    // Optional Chromium SPA verification when Playwright Chromium is installed.
+    let chromiumMod;
+    try {
+      const pw = await import("@playwright/test");
+      if (existsSync(pw.chromium.executablePath())) {
+        chromiumMod = pw.chromium;
+      }
+    } catch {
+      chromiumMod = undefined;
+    }
+
+    if (chromiumMod) {
+      const browserDir = path.join(evidenceDir, "browser");
+      mkdirSync(browserDir, { recursive: true, mode: 0o700 });
+      const browser = await chromiumMod.launch({ headless: true });
+      try {
+        const unauthContext = await browser.newContext({
+          viewport: { width: 1280, height: 800 },
+        });
+        try {
+          const unauthPage = await unauthContext.newPage();
+          const pageErrors = [];
+          unauthPage.on("pageerror", (err) => pageErrors.push(err.message));
+          await unauthPage.goto(`${origin}/`, {
+            waitUntil: "domcontentloaded",
+          });
+          const alert = unauthPage.getByRole("alert");
+          await alert.waitFor({ state: "visible", timeout: 15_000 });
+          const alertText = (await alert.textContent()) ?? "";
+          if (!alertText.includes("Open the installer again.")) {
+            throw new Error(
+              `Expected unauthenticated installer alert, got: ${alertText}`,
+            );
+          }
+          assertions.unauthenticatedSpaRendered = true;
+          assertions.unauthenticatedPageErrors = pageErrors.length;
+          if (pageErrors.length > 0) {
+            throw new Error(
+              `Unexpected pageerror in installer SPA: ${pageErrors.join("; ")}`,
+            );
+          }
+          await unauthPage.screenshot({
+            path: path.join(browserDir, "installer-unauthenticated-guard.png"),
+            fullPage: true,
+          });
+          writeFileSync(
+            path.join(browserDir, "installer-unauthenticated-guard.aria.yml"),
+            await unauthPage.locator("body").ariaSnapshot(),
+            { mode: 0o600 },
+          );
+        } finally {
+          await unauthContext.close();
+        }
+
+        if (withSetupInspect) {
+          const authContext = await browser.newContext({
+            viewport: { width: 1280, height: 800 },
+          });
+          try {
+            const page = await authContext.newPage();
+            await page.goto(urlMatch[0], { waitUntil: "domcontentloaded" });
+            const heading = page.getByRole("heading", {
+              name: "Choose your harness",
+              exact: true,
+            });
+            await heading.waitFor({ state: "visible", timeout: 180_000 });
+            assertions.authenticatedHeading = await heading.textContent();
+            await page.screenshot({
+              path: path.join(browserDir, "installer-choose-harness.png"),
+              fullPage: true,
+            });
+            writeFileSync(
+              path.join(browserDir, "installer-choose-harness.aria.yml"),
+              await page.locator("body").ariaSnapshot(),
+              { mode: 0o600 },
+            );
+            const planGroup = page.getByRole("radiogroup", {
+              name: "Installation plan",
+            });
+            await planGroup.getByRole("radio", { name: /BYOK/ }).check();
+            await page
+              .getByRole("textbox", { name: "Base URL", exact: true })
+              .fill("http://169.254.169.254/latest");
+            await page
+              .getByRole("combobox", { name: "Model", exact: true })
+              .fill("stub-model");
+            const byokResPromise = page.waitForResponse(
+              (res) =>
+                res.url() === `${origin}/api/byok/check` &&
+                res.request().method() === "POST",
+              { timeout: 15_000 },
+            );
+            await page
+              .getByRole("button", { name: "Test", exact: true })
+              .click();
+            const byokRes = await byokResPromise;
+            const byokBody = await byokRes.json().catch(() => ({}));
+            assertions.byokSsrfCheck = {
+              status: byokRes.status(),
+              code: byokBody.code ?? null,
+            };
+            if (
+              byokRes.status() !== 400 ||
+              byokBody.code !== "BYOK_INVALID_CONFIG"
+            ) {
+              throw new Error(
+                `Expected 400 BYOK_INVALID_CONFIG, got ${byokRes.status()} ${JSON.stringify(byokBody)}`,
+              );
+            }
+            await page
+              .getByRole("status")
+              .filter({ hasText: "Couldn't connect" })
+              .waitFor({ state: "visible", timeout: 10_000 });
+            assertions.byokUiRefusalVisible = true;
+            await page.screenshot({
+              path: path.join(browserDir, "installer-byok-ssrf-refused.png"),
+              fullPage: true,
+            });
+            writeFileSync(
+              path.join(browserDir, "installer-byok-ssrf-refused.aria.yml"),
+              await page.locator("body").ariaSnapshot(),
+              { mode: 0o600 },
+            );
+            const cookies = await authContext.cookies(origin);
+            const sessionCookie = cookies.find(
+              (c) => c.httpOnly && c.sameSite === "Strict",
+            );
+            assertions.cookieFlags = {
+              httpOnly: Boolean(sessionCookie?.httpOnly),
+              sameSiteStrict: sessionCookie?.sameSite === "Strict",
+            };
+            if (!sessionCookie) {
+              throw new Error(
+                "Expected HttpOnly SameSite=Strict cookie after browser bootstrap",
+              );
+            }
+          } finally {
+            await authContext.close();
+          }
+        }
+      } finally {
+        await browser.close();
+      }
+    } else if (withSetupInspect) {
       throw new Error(
-        `Session exchange failed or missing cookie flags (HTTP ${sessionRes.status})`,
+        "--with-setup-inspect requires Playwright Chromium (pnpm exec playwright install chromium)",
+      );
+    } else {
+      assertions.chromiumSpaCheck = "skipped (Playwright Chromium unavailable)";
+    }
+
+    let cookiePair = "";
+    if (!withSetupInspect) {
+      const sessionRes = await fetch(`${origin}/api/session`, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+      });
+      assertions.sessionExchangeStatus = sessionRes.status;
+      const setCookie = sessionRes.headers.get("set-cookie") ?? "";
+      assertions.cookieFlags = {
+        httpOnly: /;\s*HttpOnly/i.test(setCookie),
+        sameSiteStrict: /;\s*SameSite=Strict/i.test(setCookie),
+      };
+      if (
+        sessionRes.status !== 200 ||
+        !assertions.cookieFlags.httpOnly ||
+        !assertions.cookieFlags.sameSiteStrict
+      ) {
+        throw new Error(
+          `Session exchange failed or missing cookie flags (HTTP ${sessionRes.status})`,
+        );
+      }
+      cookiePair = setCookie.split(";")[0];
+    }
+
+    assertions.launchFileDeletedAfterExchange = !existsSync(launchFile);
+    if (!assertions.launchFileDeletedAfterExchange) {
+      throw new Error(
+        "Expected launch.html to be deleted immediately after bootstrap token exchange",
       );
     }
-    const cookiePair = setCookie.split(";")[0];
 
     const replayRes = await fetch(`${origin}/api/session`, {
       method: "POST",
@@ -366,51 +539,71 @@ async function runLiveInstallerProof() {
       );
     }
 
-    const envRes = await fetch(`${origin}/api/environment`, {
-      headers: { Cookie: cookiePair },
-    });
-    assertions.environmentStatus = envRes.status;
-    if (envRes.status !== 200) {
-      throw new Error(
-        `Expected 200 from /api/environment, got ${envRes.status}`,
-      );
-    }
+    if (!withSetupInspect) {
+      const envRes = await fetch(`${origin}/api/environment`, {
+        headers: { Cookie: cookiePair },
+      });
+      assertions.environmentStatus = envRes.status;
+      if (envRes.status !== 200) {
+        throw new Error(
+          `Expected 200 from /api/environment, got ${envRes.status}`,
+        );
+      }
 
-    const instancesRes = await fetch(`${origin}/api/instances`, {
-      headers: { Cookie: cookiePair },
-    });
-    assertions.instancesStatus = instancesRes.status;
-    if (instancesRes.status !== 200) {
-      throw new Error(
-        `Expected 200 from /api/instances, got ${instancesRes.status}`,
-      );
-    }
+      const configRes = await fetch(`${origin}/api/config`, {
+        headers: { Cookie: cookiePair },
+      });
+      assertions.configStatus = configRes.status;
+      if (configRes.status !== 200) {
+        throw new Error(
+          `Expected 200 from /api/config, got ${configRes.status}`,
+        );
+      }
 
-    const ssrfRes = await fetch(`${origin}/api/byok/check`, {
-      method: "POST",
-      headers: {
-        Origin: origin,
-        Cookie: cookiePair,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        runtime: "pi",
-        baseUrl: "http://169.254.169.254/latest",
-        path: "/v1",
-        endpoint: "/chat/completions",
-        apiKey: "disposable-verify-key",
-        model: "stub-model",
-      }),
-    });
-    const ssrfBody = await ssrfRes.json().catch(() => ({}));
-    assertions.byokSsrfCheck = {
-      status: ssrfRes.status,
-      code: ssrfBody.code ?? null,
-    };
-    if (ssrfRes.status !== 400 || ssrfBody.code !== "BYOK_INVALID_CONFIG") {
-      throw new Error(
-        `Expected 400 BYOK_INVALID_CONFIG for metadata URL, got ${ssrfRes.status} ${JSON.stringify(ssrfBody)}`,
-      );
+      const instancesRes = await fetch(`${origin}/api/instances`, {
+        headers: { Cookie: cookiePair },
+      });
+      assertions.instancesStatus = instancesRes.status;
+      if (instancesRes.status !== 200) {
+        throw new Error(
+          `Expected 200 from /api/instances, got ${instancesRes.status}`,
+        );
+      }
+
+      const jobsRes = await fetch(`${origin}/api/jobs`, {
+        headers: { Cookie: cookiePair },
+      });
+      assertions.jobsStatus = jobsRes.status;
+      if (jobsRes.status !== 200) {
+        throw new Error(`Expected 200 from /api/jobs, got ${jobsRes.status}`);
+      }
+
+      const ssrfRes = await fetch(`${origin}/api/byok/check`, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          Cookie: cookiePair,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          runtime: "pi",
+          baseUrl: "http://169.254.169.254/latest",
+          path: "/v1",
+          endpoint: "/chat/completions",
+          apiKey: "disposable-verify-key",
+          model: "stub-model",
+        }),
+      });
+      const ssrfBody = await ssrfRes.json().catch(() => ({}));
+      assertions.byokSsrfCheck = {
+        status: ssrfRes.status,
+        code: ssrfBody.code ?? null,
+      };
+      if (ssrfRes.status !== 400 || ssrfBody.code !== "BYOK_INVALID_CONFIG") {
+        throw new Error(
+          `Expected 400 BYOK_INVALID_CONFIG for metadata URL, got ${ssrfRes.status} ${JSON.stringify(ssrfBody)}`,
+        );
+      }
     }
 
     child.kill("SIGTERM");
@@ -583,10 +776,16 @@ const proof = {
   head,
   hostTarget: target,
   smokeOnly,
+  withSetupInspect,
   results,
   skippedOs,
   limitations: [
     "Does not launch Electron GUI, download multi-GB local model weights, invoke a real GPU/Metal/CUDA engine, or call an external BYOK provider.",
+    ...(withSetupInspect
+      ? []
+      : [
+          "Skipped GET /api/setup (localmodels kit download + hardware plan) to avoid external network downloads by default; pass --with-setup-inspect to exercise it.",
+        ]),
     "Run platform-specific GUI, auto-updater, hardware model deployment, and uninstall recipes in features/desktop-and-installer.md and features/local-models-and-byok.md on each target OS.",
   ],
   status: exitCode === 0 ? "passed" : "failed",
