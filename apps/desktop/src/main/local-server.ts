@@ -874,14 +874,17 @@ export class LocalServerModule implements Module {
       !config.computerId
     )
       return;
-    const installerDirectory = path.join(
-      stagedBundle,
-      "Contents",
-      "Resources",
-      "app",
-      "dist",
-      "installer",
-    );
+    const isWindows = (this.#options.platform ?? process.platform) === "win32";
+    const installerDirectory = isWindows
+      ? path.join(stagedBundle, "resources", "app", "dist", "installer")
+      : path.join(
+          stagedBundle,
+          "Contents",
+          "Resources",
+          "app",
+          "dist",
+          "installer",
+        );
     const prepareTool = async (): Promise<void> => {
       const distributionFile = path.join(
         installerDirectory,
@@ -926,12 +929,13 @@ export class LocalServerModule implements Module {
     signal.throwIfAborted();
     const bundle = await this.#bundledRuntime(installerDirectory);
     signal.throwIfAborted();
-    const spec = this.#sharedNodeSpec(bundle, false);
+    const isWindows = (this.#options.platform ?? process.platform) === "win32";
+    const spec = this.#sharedNodeSpec(bundle, isWindows);
     if (!spec) return;
-    const source = this.#sharedBundledNodePath(false, installerDirectory);
+    const source = this.#sharedBundledNodePath(isWindows, installerDirectory);
     if (!source) return;
     const directory = this.#desktopDirectory("node", `v${spec.version}`);
-    const relativeBinary = path.join("bin", "node");
+    const relativeBinary = isWindows ? "node.exe" : path.join("bin", "node");
     if (existsSync(path.join(directory, relativeBinary))) return;
     const startedAt = Date.now();
     const copied = await this.#copySharedNode(
@@ -939,7 +943,7 @@ export class LocalServerModule implements Module {
       directory,
       relativeBinary,
       spec.sha256,
-      false,
+      isWindows,
       signal,
     );
     if (copied) {

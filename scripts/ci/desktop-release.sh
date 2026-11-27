@@ -388,9 +388,13 @@ cmd_build() {
 }
 
 # The package each platform's installed app updates from, keyed like
-# packageFor in apps/desktop/src/main/update-manifest.ts. Linux and the
-# portable Windows folder only link to the release.
+# packageFor and archivePackageFor in apps/desktop/src/main/update-manifest.ts.
+# win32-x64 stays pointed at setup.exe for backward compatibility with older
+# installed Windows clients; win32-x64-archive points at the portable zip when
+# present so newer Windows clients extract and pre-stage in the background.
+# Linux and the portable Windows folder only link to the release.
 update_packages='darwin-arm64:macos-arm64.app.tar.gz linux-x64:linux-x64.tar.gz win32-x64:windows-x64-setup.exe'
+optional_update_packages='win32-x64-archive:windows-x64-portable.zip'
 required_installers='macos-arm64.dmg linux-x64.tar.gz windows-x64-setup.exe'
 
 # manifest.json lists every platform's package with its size and sha256, and
@@ -416,6 +420,13 @@ cmd_manifest() {
     suffix="${entry#*:}"
     [[ -f "$dir/Linger-$version-$suffix" ]] || die "$dir has no Linger-$version-$suffix"
     packages+=("$target" "Linger-$version-$suffix")
+  done
+  for entry in $optional_update_packages; do
+    target="${entry%%:*}"
+    suffix="${entry#*:}"
+    if [[ -f "$dir/Linger-$version-$suffix" ]]; then
+      packages+=("$target" "Linger-$version-$suffix")
+    fi
   done
   # The key file is read only here; the built-in public key decides whether
   # installed apps would accept the signature.

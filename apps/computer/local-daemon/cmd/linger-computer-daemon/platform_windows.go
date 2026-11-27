@@ -17,6 +17,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/control"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/winprocess"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/winupdate"
 	localprocess "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 )
 
@@ -207,6 +208,8 @@ func platformEntry(args []string) (bool, error) {
 		return true, runPlatformWorker(os.Stdin, os.Stdout)
 	case len(args) == 1 && args[0] == "supervise-service":
 		return true, localprocess.SuperviseManagedService(os.Stdin, os.Stdout)
+	case len(args) == 2 && args[0] == "apply-windows-update":
+		return true, winupdate.ApplyConfigFile(context.Background(), args[1])
 	}
 	return false, nil
 }

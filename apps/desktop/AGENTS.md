@@ -44,9 +44,11 @@ Gateway and runs Agents. The daemon exits with the app.
   `out/Linger-<version>-x64.zip` on Linux after `node build.mjs` with the
   `win32-x64` daemon target. Needs the
   `wintool` image from `packaging/win/Dockerfile`. Neither is
-  Authenticode-signed. The updater runs the setup program with
-  `/update /relaunch` (a progress page only; Retry/Cancel prompts stay
-  visible); the portable folder only links to the release page.
+  Authenticode-signed. Installed Windows builds prefer the signed
+  `win32-x64-archive` portable zip for background pre-staged self-updates (via
+  `apply-windows-update`) and fall back to running the `win32-x64` setup
+  program with `/update /relaunch` (a progress page only; Retry/Cancel prompts
+  stay visible); a standalone portable folder only links to the release page.
 - `python3 packaging/linux/package.py`: build
   `out/Linger-<version>-linux-x64.tar.gz` (one folder with the `linger`
   executable) after `node build.mjs` with the `linux-x64` daemon target.
@@ -341,13 +343,16 @@ Gateway and runs Agents. The daemon exits with the app.
   starts, opens Setup cleanly without disturbing external loopback dev servers.
   On macOS, bundled runtime copies clone via APFS when available and probe for
   `com.apple.quarantine` before running recursive `xattr -dr`. Before
-  `UpdaterModule` announces an unpacked macOS bundle `ready`,
-  `prepareUpdateTool` best-effort pre-fetches that bundle's pinned `localmodels`
-  tool into the enrolled local installation's tool cache, pre-stages the
-  staged bundle's packed source checkout, TeamHub binaries, and offline runtime
-  directory (when present) into the enrolled home's versioned source directory,
-  and pre-stages its shared bundled Node.js binary (`runtime/bin/node`)
-  into `<defaultHome>/desktop/node/v<version>/` (logged as
+  `UpdaterModule` announces an unpacked macOS bundle or Windows archive `ready`,
+  `prepareUpdateTool` (resolving `resources/app/dist/installer` on Windows and
+  `Contents/Resources/app/dist/installer` on macOS) best-effort pre-fetches
+  that bundle's pinned `localmodels` tool into the enrolled local
+  installation's tool cache, pre-stages the staged bundle's packed source
+  checkout, TeamHub binaries, and offline runtime directory or `.tar.zst`
+  archive (when present) into the enrolled home's versioned source directory,
+  and pre-stages its shared bundled Node.js binary (`runtime/bin/node.exe` to
+  `<defaultHome>/desktop/node/v<version>/node.exe` on Windows, or
+  `runtime/bin/node` to `.../bin/node` on macOS, logged as
   `local_server.update_node_prepared`) without mutating setup/resume progress or
   getting deleted by background pruning (failures warn as
   `update.prepare_failed` without blocking the app update). A prune never removes a folder a running process
@@ -469,11 +474,26 @@ Gateway and runs Agents. The daemon exits with the app.
   runtime lookup) before recording state, calling `enroll()`, preloading the
   hidden window (`preloadAuthenticated`), and awaiting agents.
 - `src/main/updater.ts`: `UpdaterModule` defers startup leftover cleanup
-  (`.Linger-old-*`, stale `.Linger-update-*`, and previous downloads) until 5 s
-  after `local-server.busy` clears (pausing while busy, with a 60 s fallback
-  when no busy event arrives), runs it at most once via a memoized promise, and
-  flushes or coalesces onto any in-flight cleanup before downloading in
-  `check()`.
+  (`.Linger-old-*`, stale `.Linger-update-*` beside the macOS app bundle or
+  Windows `installDir`, and previous downloads including update helper copies)
+  until 5 s after `local-server.busy` clears (pausing while busy, with a 60 s
+  fallback when no busy event arrives), runs it at most once via a memoized
+  promise, and flushes or coalesces onto any in-flight cleanup before
+  downloading in `check()`. On installed Windows builds (`windows-setup` with
+  `installDir`), when the signed manifest includes `win32-x64-archive`
+  (`archivePackageFor`, pointing to `Linger-<ver>-windows-x64-portable.zip`
+  while keeping `win32-x64` at `setup.exe` for older clients), it downloads and
+  verifies the zip, extracts it in the background with native
+  `System32\tar.exe` into `<parent>\.Linger-update-<ver>\Linger`, removes the
+  zip, and runs `prepareUpdate` before announcing `ready`; on install it copies
+  `resources\computer\linger-computer-daemon.exe` and a 0600 JSON apply config
+  into `downloadDirectory` (outside both `installDir` and `stagedDir`, writing
+  helper logs to `logDirectory` / `<userData>/logs` so diagnostics retain them
+  across restarts), spawns `apply-windows-update` detached (retrying transient
+  `EBUSY`/`EPERM`/`EACCES` Defender locks), and calls `quit()` while leaving
+  warm local services running. When `win32-x64-archive` or `installDir` is
+  absent, it falls back cleanly to downloading and running `setup.exe`
+  (`/update /relaunch`).
 - `src/main/diagnostics.ts`: Diagnostics, "Show Logs" (opens
   `<userData>/logs`) and "Save Diagnostics" (a redacted
   `linger-diagnostics-<time>.zip` in Downloads) for the setup page's failed

@@ -61,7 +61,13 @@
   Daemon's Windows-only `platform` subcommand (including persistent NDJSON
   `platform --worker` mode) serves the Windows installer helper (owner-only
   files, `validate-private-path`, `process-snapshot`, process identity, and
-  owned-process cleanup); nothing else calls it.
+  owned-process cleanup); its Windows-only `apply-windows-update <config-json>`
+  subcommand (`internal/platform/winupdate`) serves Desktop background
+  self-updates by waiting for the exiting Desktop PID, preserving
+  `Uninstall Linger.exe` and `resources\stops-services`, swapping `installDir`
+  atomically with bounded retries and rollback, updating HKCU `DisplayVersion`
+  when `InstallLocation` matches, removing the empty `.Linger-update-*`
+  wrapper, and relaunching `Linger.exe` detached; nothing else calls either.
 - `scripts/` builds the development bundle, and `tests/` holds the Vitest
   checks of the bundle tools and the Runner Gateway wire against the Go
   Daemon. Do not add a second Runtime detector, Runtime executor, Gateway
