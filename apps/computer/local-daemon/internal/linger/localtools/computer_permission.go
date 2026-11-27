@@ -192,6 +192,12 @@ func (p *ComputerPermissions) ComputerPermission(ctx context.Context, action, su
 	}
 	status.Subjects = append(status.Subjects, lingerGroup(linger, answered))
 	if p.options.EmbeddedCua {
+		// The embedded driver inherits Linger's own TCC grants, so its
+		// readings are Linger's readings. Report them under the
+		// computer_use subject too: every consumer of a computer_use
+		// status (the settle path, the card's steps) keys on that
+		// subject, and a status without it reads as never granted.
+		status.Subjects = append(status.Subjects, embeddedComputerUseGroup(linger, answered))
 		return status, nil
 	}
 	if cua == nil {
@@ -285,6 +291,15 @@ func lingerGroup(reported []LingerPermission, known bool) ComputerPermissionGrou
 		}
 		group.Permissions = append(group.Permissions, state)
 	}
+	return group
+}
+
+// embeddedComputerUseGroup reports Linger's readings under the
+// computer_use subject: the embedded driver inherits Linger's TCC grants,
+// so the two subjects hold the same permissions.
+func embeddedComputerUseGroup(reported []LingerPermission, answered bool) ComputerPermissionGroup {
+	group := lingerGroup(reported, answered)
+	group.Subject = PermissionSubjectComputerUse
 	return group
 }
 

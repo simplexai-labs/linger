@@ -318,7 +318,20 @@ func TestEmbeddedComputerUsePromptsOnlyLinger(t *testing.T) {
 	fixture := newPermissionFixture("darwin", true, true)
 	fixture.service.options.EmbeddedCua = true
 	status, err := fixture.service.ComputerPermission(t.Context(), "prompt", "computer_use", "accessibility")
-	if err != nil || len(status.Subjects) != 1 || status.Subjects[0].Subject != "linger" || !slices.Equal(fixture.linger.calls, []string{"prompt/accessibility"}) || fixture.cua.reads+fixture.cua.requests+fixture.cua.restarts != 0 {
+	if err != nil || !slices.Equal(fixture.linger.calls, []string{"prompt/accessibility"}) || fixture.cua.reads+fixture.cua.requests+fixture.cua.restarts != 0 {
 		t.Fatalf("unexpected embedded permission route: %+v, %v, calls %v", status, err, fixture.linger.calls)
+	}
+	// The embedded driver inherits Linger's TCC grants, so its readings are
+	// reported under both subjects: a computer_use card settles against the
+	// computer_use subject, and without the mirror it would read as never
+	// granted.
+	if len(status.Subjects) != 2 || status.Subjects[0].Subject != "linger" || status.Subjects[1].Subject != "computer_use" {
+		t.Fatalf("unexpected embedded subjects: %+v", status.Subjects)
+	}
+	for index, permission := range status.Subjects[1].Permissions {
+		mirror := status.Subjects[0].Permissions[index]
+		if permission.ID != mirror.ID || permission.State != mirror.State {
+			t.Fatalf("computer_use entry %d does not mirror linger: %+v vs %+v", index, permission, mirror)
+		}
 	}
 }
