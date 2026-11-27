@@ -136,8 +136,11 @@ vi.mock("./managed-codex.js", () => ({
 }));
 vi.mock("./native-process.js", () => {
   const inspectNativeProcess = vi.fn();
+  const stopNativeProcess = vi.fn();
   return {
     inspectNativeProcess,
+    inspectNativeProcesses: async (root: string, names: readonly string[]) =>
+      Promise.all(names.map((name) => inspectNativeProcess(root, name))),
     // Port ownership is checked only on Windows; elsewhere it is the
     // process state.
     inspectNativeListeners: vi.fn(
@@ -157,7 +160,32 @@ vi.mock("./native-process.js", () => {
     reclaimNativeOrphans: vi.fn(async () => []),
     nativeConfigurationChanged: vi.fn(),
     startNativeProcess: vi.fn(),
-    stopNativeProcess: vi.fn(),
+    stopNativeProcess,
+    stopNativeProcesses: async (
+      root: string,
+      names: readonly string[],
+      options: {
+        signal?: AbortSignal;
+        interruptMs?: number;
+        onServiceDone?: (
+          name: string,
+          durationMs: number,
+          error?: unknown,
+        ) => void;
+      } = {},
+    ) => {
+      for (const name of names) {
+        options.signal?.throwIfAborted();
+        const startedAt = Date.now();
+        try {
+          await stopNativeProcess(root, name);
+        } catch (error) {
+          options.onServiceDone?.(name, Date.now() - startedAt, error);
+          throw error;
+        }
+        options.onServiceDone?.(name, Date.now() - startedAt);
+      }
+    },
     SERVICE_RESTART_POLICY: {
       delaysMs: [1_000],
       windowMs: 60_000,

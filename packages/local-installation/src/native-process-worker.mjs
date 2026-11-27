@@ -191,6 +191,7 @@ try {
   const policy = job.restart;
   const exits = [];
   let armed = false;
+  let stopReason;
   for (;;) {
     const { code, signal } = await run.exited;
     for (const stream of streams) stream.flush();
@@ -209,6 +210,7 @@ try {
       if (exits.length >= policy.limit) reason = "crash_loop";
     }
     if (reason) {
+      stopReason = reason;
       note(`${exit} restart=no reason=${reason}`);
       if (reason === "crash_loop")
         note(
@@ -223,6 +225,7 @@ try {
     // What the exited service started would hold its port and files.
     await endLeftovers(lease);
     if (stopRequested()) {
+      stopReason = "stop_requested";
       note("restart cancelled reason=stop_requested");
       break;
     }
@@ -233,6 +236,16 @@ try {
     } catch (error) {
       note(`restart failed error=${error?.code ?? "unknown"}`);
     }
+  }
+  if (
+    process.platform === "win32" &&
+    (stopReason === "stop_requested" || stopRequested())
+  ) {
+    // On Windows, parent links are already severed once the direct child exits
+    // and the installer owns stopping the full tree leaves-first after writing
+    // `.stop`, so skip the PowerShell lease check and exit immediately.
+    closeSync(output.fd);
+    process.exit(0);
   }
   const check = async () => {
     try {

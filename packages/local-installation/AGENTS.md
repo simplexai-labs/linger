@@ -395,6 +395,30 @@ health check for a service that could not bind, and a port held by another
 program fails the start after 15 seconds instead of at the deadline. The
 listener lookup streams IPv4 TCP rows from the Windows system netstat in
 parallel with the process listing; process-only inspections need no port lookup.
+Every `windowsProcesses` call runs a fresh PowerShell CIM query so callers after
+a concurrent spawn or kill never observe a pre-mutation snapshot. Multi-service
+inspection (`inspectNativeProcesses`) and shutdown (`stopNativeProcesses`, which
+single-service `stopNativeProcess` also delegates to on Windows) batch
+explicitly across services on Windows: inspection skips PowerShell when no
+records exist and otherwise reuses one snapshot; batch shutdown validates
+identity in dependency order (giving each service its own retry on transient
+empty-command-line CIM rows), writes `.stop` request files sequentially before
+signalling, terminates children leaves-first in dependency order, never
+terminates a supervisor-only tree until a post-`.stop` snapshot confirms no
+child was spawned before `.stop` landed, uses bounded `process.kill(pid, 0)`
+liveness waits for terminated children and fast-exiting supervisors, and at the
+12-second deadline checks cancellation and refreshes each subsequent service's
+snapshot immediately before invoking `taskkill /T /F`. Record-load failures,
+Pass 1 identity-verification failures, and `.stop` write failures truncate
+before signalling so downstream services stay untouched; once Pass 1 enters
+leaves-first child termination across verified services in dependency order, a
+later failure (such as a 12-second deadline timeout or record cleanup error on
+an earlier service) surfaces at that earlier service while verified downstream
+services may already have been terminated. Because Windows stops verified
+services concurrently in one batch, `onServiceDone` durations (and the
+per-service values in `Native stop timings (s)`) measure cumulative elapsed
+time from the start of the batch rather than isolated per-service wall-clock
+time.
 
 On POSIX, a start that finds the recorded supervisor gone but processes
 still carrying its lease (the app was killed with it) ends them as a stop
@@ -404,6 +428,14 @@ stale PID whose `kill(pid, 0)` returns `EPERM` and whose `/proc/<pid>` UID
 differs from the current user is treated as foreign and cleared without
 signalling it, and `EPERM` while signalling a leased process revalidates the
 lease before raising `NATIVE_PROCESS_SIGNAL_DENIED` with the service and PID.
+During POSIX `stopLease`, draining descendants are polled by PID
+(`posixLivePids`: `/bin/ps -p ... -o pid=,stat=` on macOS, `/proc/<pid>/stat`
+on Linux, excluding zombies) with full `nativeLeaseProcesses` refreshes once
+tracked PIDs exit or every 500 ms so newly spawned descendants are caught and
+reused PIDs cannot stall shutdown; after `SIGKILL` to the supervisor,
+`stopLease` waits briefly for the supervisor PID to exit before running the
+post-supervisor lease and process-group confirmation, and skips any extra scan
+once that loop settles cleanly.
 On macOS every identity check reads `ps` start times in the C locale.
 Linger 0.1.2 recorded them in the locale it ran in; such a record is
 converted once to the C-locale birth when `ps` in the installer's own
@@ -429,11 +461,14 @@ An exit within the first 10 seconds of the first run is a startup failure the
 installer reports, never restarted; five exits within a minute end
 supervision with a `gave up restarting` line, the supervisor exits, and the
 next resume starts the service as one that is not running. Every intended
-stop (`stopNativeProcess`, a configuration restart, quit, uninstall,
-`reclaimNativeOrphans`) first writes `<name>.<lease>.stop` beside the record;
-the supervisor reads it before deciding and again right before restarting,
-and the POSIX stop also kills what holds the lease after the supervisor, so a
-restart racing the stop cannot outlive it. PostgreSQL and LiveKit are not
+stop (`stopNativeProcess`, `stopNativeProcesses`, a configuration restart, quit,
+uninstall, `reclaimNativeOrphans`) first writes `<name>.<lease>.stop` beside the
+record; the supervisor reads it before deciding and again right before
+restarting, and on Windows skips its post-exit PowerShell lease check and exits
+immediately once `.stop` is present (since child parent links are already
+severed and the installer stops the tree leaves-first), while the POSIX stop
+also kills what holds the lease after the supervisor, so a restart racing the
+stop cannot outlive it. PostgreSQL and LiveKit are not
 restarted; their exits are logged with `reason=not_supervised`.
 
 Native runtime and localmodels kit verification (`native-runtime.ts` and
@@ -553,7 +588,9 @@ breakdowns (`download`, retries/switches, `extract`, `verify`, `install`,
 `post-download`) alongside its `tool checked in / ran in` line; `waitHealthy`
 logs per-service readiness times and a summary across `web`, `teamhub`,
 `node-services`, and `document-runtime`; `stopNativeSource` and
-`stopLocalmodels` log per-step stop durations and `Native stop timings (s)`.
+`stopLocalmodels` log per-step stop durations and `Native stop timings (s)` (on
+Windows, native service entries report cumulative elapsed time from the start
+of the batched stop rather than isolated per-service wall-clock time).
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

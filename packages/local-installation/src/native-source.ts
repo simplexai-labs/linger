@@ -48,11 +48,13 @@ import { prepareNativeDatabase } from "./native-database.js";
 import {
   inspectNativeListeners,
   inspectNativeProcess,
+  inspectNativeProcesses,
   nativeConfigurationChanged,
   reclaimNativeOrphans,
   SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
+  stopNativeProcesses,
   type NativeListenerState,
   type NativeService,
 } from "./native-process.js";
@@ -297,20 +299,19 @@ export async function prepareVoiceToolsAndStartLiveKit(
             await log("LiveKit settings are missing; skipping LiveKit.");
             return;
           }
-          const [postgresState, teamhubState, livekitState] = await Promise.all(
-            [
-              inspectNativeProcess(instance.root, "postgres"),
-              inspectNativeProcess(instance.root, "teamhub"),
-              inspectNativeProcess(instance.root, "livekit"),
-            ],
-          );
-          if (!postgresState.running || !teamhubState.running) {
+          const [postgresState, teamhubState, livekitState] =
+            await inspectNativeProcesses(instance.root, [
+              "postgres",
+              "teamhub",
+              "livekit",
+            ]);
+          if (!postgresState?.running || !teamhubState?.running) {
             await log(
               "Instance core services are not running; skipping background LiveKit startup.",
             );
             return;
           }
-          if (livekitState.running) {
+          if (livekitState?.running) {
             await log(
               "Native LiveKit is already running; skipping duplicate startup.",
             );
@@ -1775,16 +1776,19 @@ async function runNativeSource(
           storedBefore?.source &&
           storedBefore.releaseDir !== current.releaseDir,
         );
-        const anyServiceRunning = (
-          await Promise.all(
-            (["teamhub", "node-services", "web"] as const).map((name) =>
-              inspectNativeProcess(current.root, name),
-            ),
-          )
-        ).some((state) => state.running);
-        const postgresWasRunning = (
-          await inspectNativeProcess(current.root, "postgres")
-        ).running;
+        const [teamhubState, nodeServicesState, webState, postgresState] =
+          await inspectNativeProcesses(current.root, [
+            "teamhub",
+            "node-services",
+            "web",
+            "postgres",
+          ]);
+        const anyServiceRunning = Boolean(
+          teamhubState?.running ||
+          nodeServicesState?.running ||
+          webState?.running,
+        );
+        const postgresWasRunning = Boolean(postgresState?.running);
         // Mark before startup so a failed init/readiness step can stop a process
         // it managed to create without touching a previously running cluster.
         if (!postgresWasRunning) started.push("postgres");
@@ -1891,10 +1895,9 @@ async function runNativeSource(
           if (preStopped)
             await stopNativeProcess(current.root, "node-services");
           const serviceNames = ["teamhub", "node-services", "web"] as const;
-          const states = await Promise.all(
-            serviceNames.map((name) =>
-              inspectNativeProcess(current.root, name),
-            ),
+          const states = await inspectNativeProcesses(
+            current.root,
+            serviceNames,
           );
           for (const [index, name] of serviceNames.entries()) {
             if (
@@ -2441,24 +2444,38 @@ export async function stopNativeSource(
       await timedStep("computer", "native computer", () =>
         stopComputer(instance, { signal }),
       );
-      for (const name of nativeServices) {
-        signal?.throwIfAborted();
-        await timedStep(name, `native ${name}`, async () => {
-          try {
-            await stopNativeProcess(instance.root, name);
-          } catch (error) {
-            const code = (error as NodeJS.ErrnoException | null)?.code;
-            throw Object.assign(
-              new Error(
-                error instanceof Error
-                  ? error.message
-                  : `Could not stop ${name}.`,
-                { cause: error },
-              ),
-              { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
-            );
-          }
+      let failedService: NativeService | undefined;
+      try {
+        await stopNativeProcesses(instance.root, nativeServices, {
+          signal,
+          onServiceDone: (name, durationMs, error) => {
+            const elapsed = seconds(durationMs);
+            timings.push([name, elapsed]);
+            if (error !== undefined) {
+              failedService = name;
+              options.log?.(
+                `Stopping native ${name} failed after ${elapsed}s.`,
+              );
+            } else {
+              options.log?.(`Stopped native ${name} in ${elapsed}s.`);
+            }
+          },
         });
+      } catch (error) {
+        if (!failedService) throw error;
+        const code = (error as NodeJS.ErrnoException | null)?.code;
+        throw Object.assign(
+          new Error(
+            error instanceof Error
+              ? error.message
+              : `Could not stop ${failedService}.`,
+            { cause: error },
+          ),
+          {
+            code: code ?? NATIVE_SERVICE_STOP_FAILED,
+            nativeService: failedService,
+          },
+        );
       }
       await timedStep("orphans", "native orphans", () =>
         reclaimEarlierProcesses(instance, path.resolve(instance.root, "../..")),
