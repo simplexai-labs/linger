@@ -30,6 +30,7 @@ export function parseInstallerArguments(args: string[]) {
     migrate?: boolean;
     stop?: boolean;
     stopLocalModels?: boolean;
+    stopServices?: ("teamhub" | "node-services" | "web")[];
     switchRelease?: string;
     switchServices?: ("teamhub" | "node-services" | "web")[];
     prepareVoiceTools?: boolean;
@@ -95,6 +96,7 @@ export function parseInstallerArguments(args: string[]) {
         "--inspect-target",
         "--switch-release",
         "--services",
+        "--stop-services",
       ].includes(flag ?? "")
     )
       throw new Error("Invalid installer option.");
@@ -109,19 +111,31 @@ export function parseInstallerArguments(args: string[]) {
       if (!/^[A-Za-z0-9._+-]{1,64}$/.test(value))
         throw new Error("Invalid release version.");
       options.switchRelease = value;
-    } else if (flag === "--services") {
+    } else if (flag === "--services" || flag === "--stop-services") {
       const valid = new Set(["teamhub", "node-services", "web"]);
       const parsed = value
         .split(",")
         .map((item) => item.trim())
         .filter(Boolean);
       if (parsed.length === 0 || parsed.some((item) => !valid.has(item)))
-        throw new Error("Invalid switch-release services.");
-      options.switchServices = parsed as (
-        | "teamhub"
-        | "node-services"
-        | "web"
-      )[];
+        throw new Error(
+          flag === "--stop-services"
+            ? "Invalid stop-services list."
+            : "Invalid switch-release services.",
+        );
+      if (flag === "--stop-services") {
+        options.stopServices = parsed as (
+          | "teamhub"
+          | "node-services"
+          | "web"
+        )[];
+      } else {
+        options.switchServices = parsed as (
+          | "teamhub"
+          | "node-services"
+          | "web"
+        )[];
+      }
     } else if (flag === "--instance") {
       if (!/^[a-z][a-z0-9-]{0,39}$/.test(value))
         throw new Error("Invalid instance name.");
@@ -142,6 +156,7 @@ export function parseInstallerArguments(args: string[]) {
     !options.migrate &&
     !options.stop &&
     !options.stopLocalModels &&
+    !options.stopServices &&
     !options.switchRelease &&
     !options.prepareVoiceTools
   )
@@ -156,6 +171,8 @@ export function parseInstallerArguments(args: string[]) {
     throw new Error("Keys need an instance.");
   if (options.stop && !options.instanceName)
     throw new Error("Stop needs an instance.");
+  if (options.stopServices && !options.instanceName)
+    throw new Error("Stop services needs an instance.");
   if (options.switchRelease && !options.instanceName)
     throw new Error("Switch release needs an instance.");
   if (options.switchServices && !options.switchRelease)
@@ -515,6 +532,51 @@ async function stopLocalModels(
     process.exit(outcome.failed.length ? 1 : 0),
   );
 }
+// Headless selective service stop for V2 upgrades: stops only the requested
+// switchable services (`teamhub`, `node-services`, `web`) while keeping
+// PostgreSQL and LiveKit running.
+async function stopServicesCommand(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const [{ loadInstance }, { stopNativeReleaseServices }] = await Promise.all([
+    import("@linger/local-installation/instance"),
+    import("@linger/local-installation/native-source"),
+  ]);
+  const controller = new AbortController();
+  process.once("SIGTERM", () => controller.abort());
+  try {
+    const instance = await loadInstance({
+      name: options.instanceName!,
+      home: options.home,
+    });
+    if (!instance) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          message: `No source instance named ${options.instanceName}.`,
+        })}\n`,
+        () => process.exit(1),
+      );
+      return;
+    }
+    const result = await stopNativeReleaseServices(instance, {
+      services: options.stopServices!,
+      signal: controller.signal,
+      log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
+    });
+    process.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`, () =>
+      process.exit(0),
+    );
+  } catch (error: unknown) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      })}\n`,
+      () => process.exit(1),
+    );
+  }
+}
 // Headless backend release switch for V2 incremental updates: switches only
 // `teamhub` and `node-services` under the instance lock and native/state PID
 // tracking while keeping PostgreSQL, LiveKit, and Web alive.
@@ -686,6 +748,7 @@ if (
     !options.prefetchBifrost &&
     !options.stop &&
     !options.stopLocalModels &&
+    !options.stopServices &&
     !options.switchRelease &&
     !options.prepareVoiceTools
   )
@@ -702,6 +765,7 @@ if (
       });
   if (options?.stop) await stopInstallation(options);
   else if (options?.stopLocalModels) await stopLocalModels(options);
+  else if (options?.stopServices) await stopServicesCommand(options);
   else if (options?.switchRelease) await switchReleaseCommand(options);
   else if (options?.prepareVoiceTools) await prepareVoiceTools(options);
   else if (options?.migrate)

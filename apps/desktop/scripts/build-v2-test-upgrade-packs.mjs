@@ -1,8 +1,9 @@
 // Builds the Linger V2 2+1 signed upgrade test kit (web + unified backend + cached node-native-deps):
-//   - step-00-baseline        (0.1.11-v2test.0) : baseline 2+1 bundles (web + backend + node-native-deps)
-//   - step-01-web             (0.1.11-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload, 2/3 skipped)
-//   - step-02-backend         (0.1.11-v2test.2) : ONLY unified backend changed (3-platform signed teamhub + daemon + node-services/skills/installer, 2/3 skipped)
-//   - step-03-rollback-faulty (0.1.11-v2test.3) : ONLY faulty signed backend (rollbackSafe:false -> pg_dump/pg_restore + atomic rollback to .2 + denylist)
+//   - step-00-baseline          (0.1.11-v2test.0) : baseline 2+1 bundles (web + backend + node-native-deps)
+//   - step-01-web               (0.1.11-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload, 2/3 skipped)
+//   - step-02-backend           (0.1.11-v2test.2) : ONLY unified backend changed (3-platform signed teamhub + daemon + node-services/skills/installer, 2/3 skipped)
+//   - step-03-rollback-faulty   (0.1.11-v2test.3) : ONLY faulty signed backend (rollbackSafe:false, teamhub exit 42 -> stop-before-dump + pg_dump/pg_restore + rollback to .2 + denylist)
+//   - step-04-fence-node-faulty (0.1.11-v2test.4) : REAL signed teamhub (with write fence 503 + Retry-After) + crashing node-services stub (exit 43, rollbackSafe:false) to verify Window 2 write fence + rollback
 //
 // Every step's Schema 3 `app-manifest.json` strictly inherits unchanged
 // bundles' exact `artifactId`, `sha256`, `inputHash`, `originAppVersion`, and
@@ -63,6 +64,7 @@ export function deriveStepVersions(baseVersion = "0.1.11-v2test.0") {
     "step-01-web": v(1),
     "step-02-backend": v(2),
     "step-03-rollback-faulty": v(3),
+    "step-04-fence-node-faulty": v(4),
   };
 }
 
@@ -95,7 +97,15 @@ export const STEP_DEFINITIONS = Object.freeze([
     id: "step-03-rollback-faulty",
     changedModules: ["backend"],
     updateBehavior:
-      "Faulty signed backend (rollbackSafe:false, exit 42) -> pg_dump/pg_restore + atomic rollback to step-02 + denylist",
+      "Faulty signed backend (rollbackSafe:false, teamhub exit 42) -> stop-before-dump + pg_dump/pg_restore + atomic rollback to step-02 + denylist",
+    rollbackSafe: false,
+    dbSchemaEpoch: defaultDbSchemaEpoch + 1,
+  },
+  {
+    id: "step-04-fence-node-faulty",
+    changedModules: ["backend"],
+    updateBehavior:
+      "Real signed teamhub (write fence 503 + Retry-After) + crashing node-services stub (exit 43, rollbackSafe:false) -> verifies Window 2 0-write fence, stop-before-pg_restore, rollback to step-02, failedServices:[node-services] + log tail in rollback-history.jsonl",
     rollbackSafe: false,
     dbSchemaEpoch: defaultDbSchemaEpoch + 1,
   },
@@ -207,6 +217,7 @@ async function stageUnifiedBackendDir(
     installerDistDir = null,
     addUpgradeMarkers = false,
     faulty = false,
+    faultyNodeServices = false,
   },
 ) {
   const stage = path.join(workDir, `backend-${stepId}-${target}`);
@@ -300,6 +311,19 @@ async function stageUnifiedBackendDir(
       "utf8",
     );
   }
+  if (faultyNodeServices) {
+    // Crashing supervisor.js stub paired with the REAL signed teamhub binary
+    // so teamhub-healthz passes while node-services-healthz fails, enabling
+    // end-to-end verification of the Window 2 write fence (503 + Retry-After)
+    // and stop-before-pg_restore rollback with node-services log capture.
+    await mkdir(path.join(nodeServicesDest, "dist"), { recursive: true });
+    await writeFile(
+      path.join(nodeServicesDest, "dist", "supervisor.js"),
+      `console.error(${JSON.stringify(`[V2-TEST-FAULTY-NODE-SERVICES-${version}] intentional startup failure to verify write fence 503 + rollback`)});\n` +
+        `process.exit(43);\n`,
+      "utf8",
+    );
+  }
 
   // 3. skills/
   await copyIfExists(path.join(repoRoot, "skills/builtin"), skillsDest);
@@ -370,6 +394,7 @@ async function stageUnifiedBackendDir(
         stepId,
         appVersion: version,
         faulty,
+        faultyNodeServices,
       },
       null,
       2,
@@ -423,7 +448,7 @@ cd ~/linger-v2-test-packs
 node serve-test-feed.mjs --step 00 --port 8787
 \`\`\`
 
-- Open **http://127.0.0.1:8787** in your browser to use the interactive Step Control Panel (or type \`00\`..\`03\` + Enter in the terminal).
+- Open **http://127.0.0.1:8787** in your browser to use the interactive Step Control Panel (or type \`00\`..\`04\` + Enter in the terminal).
 - For **multi-device LAN HTTPS testing**, run:
   \`\`\`bash
   node serve-test-feed.mjs --step 00 --host 0.0.0.0 --port 8443 --https
@@ -465,7 +490,7 @@ LINGER_BUNDLE_CHECK_INTERVAL_MS=10000 \\
 
 ---
 
-## 4. 4-Step Real-Device Verification Matrix (2+1 Model)
+## 4. 5-Step Real-Device Verification Matrix (2+1 Model)
 
 > **Automatic Shell Baseline Seeding:** The installed Desktop Shell ships a lightweight \`dist/seed/seed-manifest.json\` (\`mode: "shell-baseline"\`) that automatically seeds \`<LINGER_HOME>/state/current.json\` on first launch / post-setup with zero archive extraction. You can switch the test feed **directly to \`step-01-web\`** to verify a pure-Web hot update (\`scope=web\`, \`reload-page\`, 0B \`backend\` download, 0B \`node-native-deps\` download, zero backend restart) without activating \`step-00-baseline\` first. \`step-00-baseline\` remains available if you want to seed full store archives explicitly.
 
@@ -474,7 +499,8 @@ LINGER_BUNDLE_CHECK_INTERVAL_MS=10000 \\
 | \`step-00-baseline\` | \`${versions["step-00-baseline"]}\` | All 3 (\`web\` + \`backend\` + \`node-native-deps\`, optional) | Matches the Shell's built-in \`seed-manifest.json\` version and \`inputHash\`. On a fresh Shell install, \`seed-manifest.json\` already establishes this baseline automatically; you may skip straight to \`step-01-web\`. |
 | \`step-01-web\` | \`${versions["step-01-web"]}\` | **ONLY \`web\`** (\`backend\` & \`node-native-deps\` skipped 0B) | Feed log shows **only \`bundles/web/...\` downloaded**. Web UI hot-reloads with bottom-right pill **\`Linger V2 Test · step-01-web · ${versions["step-01-web"]}\`**. No re-login; PG / TeamHub / LiveKit / Electron PIDs do NOT change. |
 | \`step-02-backend\` | \`${versions["step-02-backend"]}\` | **ONLY \`backend\`** (\`web\` & \`node-native-deps\` skipped 0B) | Feed log shows **only \`bundles/backend/backend-<target>-...\` downloaded**. Active agent tasks / voice sessions drain first (\`waiting\`); macOS Gatekeeper / Windows Authenticode accepts signed \`teamhub\` + \`linger-computer-daemon\`; atomic backend rolling restart completes while PG, LiveKit & Electron stay alive. \`skills/v2-upgrade-probe/SKILL.md\` and \`node-services/prompts/v2-upgrade-marker.txt\` appear on disk. |
-| \`step-03-rollback-faulty\` | \`${versions["step-03-rollback-faulty"]}\` | **ONLY faulty \`backend\`** (\`rollbackSafe: false\`) | Pre-migration \`pg_dump\` runs → faulty signed \`teamhub\` exits with code \`42\` → HealthWatchdog triggers \`pg_restore\` + atomic rollback to \`${versions["step-02-backend"]}\` → \`${versions["step-03-rollback-faulty"]}\` is written to \`state/denylist.json\` → subsequent update checks skip it (zero upgrade loop!). |
+| \`step-03-rollback-faulty\` | \`${versions["step-03-rollback-faulty"]}\` | **ONLY faulty \`backend\`** (\`rollbackSafe: false\`) | Pre-backup stop of \`teamhub\` + \`node-services\` → \`pg_dump\` against quiesced DB → write fence enabled → faulty signed \`teamhub\` exits with code \`42\` → HealthWatchdog stops new services, runs \`pg_restore\`, rolls back to \`${versions["step-02-backend"]}\`, clears write fence, writes \`${versions["step-03-rollback-faulty"]}\` to \`state/denylist.json\` + \`state/rollback-history.jsonl\`. |
+| \`step-04-fence-node-faulty\` | \`${versions["step-04-fence-node-faulty"]}\` | **ONLY \`backend\`** (real \`teamhub\` + crashing \`node-services\` exit 43, \`rollbackSafe: false\`) | **Window 2 write-fence E2E check:** real signed \`teamhub\` starts and passes \`teamhub-healthz\` while \`node-services\` crashes (exit 43, failing \`node-services-healthz\`). During the health probe window, live writes to \`teamhub\` return **HTTP 503** with \`Retry-After: 5\` and \`code: "service_upgrading"\` (0 writes accepted), and \`teamhub\` CLI reports an explicit retryable \`service_upgrading\` error (never \`outcome_unknown\` or success). On probe timeout, orchestrator stops new services, runs \`pg_restore\`, restores \`${versions["step-02-backend"]}\`, clears \`state/upgrade-write-fence\`, and records \`failedServices: ["node-services"]\` + sanitized \`node-services.log\` tail in \`state/rollback-history.jsonl\`. |
 `;
 }
 
@@ -833,6 +859,35 @@ export async function buildV2TestUpgradePacks({
             path.join(repoRoot, "apps/linger-installer/dist"),
           addUpgradeMarkers: true,
           faulty: true,
+        });
+      }
+      next.backend = await packPerTarget("backend", stages, ver);
+      await writeStep(def, next);
+    }
+
+    // --- Step 04: Real signed teamhub (with write fence) + crashing node-services stub (rollbackSafe: false) ---
+    {
+      const def = STEP_DEFINITIONS[4];
+      const ver = versions[def.id];
+      const next = structuredClone(prevBundles);
+      const stages = {};
+      for (const target of targets) {
+        stages[target] = await stageUnifiedBackendDir(work, {
+          repoRoot,
+          target,
+          version: ver,
+          stepId: def.id,
+          teamhubRoot: teamhubV2Dir ?? teamhubDir,
+          daemonRoot: daemonV2Dir ?? daemonDir,
+          teamhubCliDir,
+          nodeServicesDir,
+          nodeNativeDepsDir,
+          installerDistDir:
+            installerDistDir ??
+            path.join(repoRoot, "apps/linger-installer/dist"),
+          addUpgradeMarkers: true,
+          faulty: false,
+          faultyNodeServices: true,
         });
       }
       next.backend = await packPerTarget("backend", stages, ver);

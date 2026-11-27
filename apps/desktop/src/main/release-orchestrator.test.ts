@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1058,6 +1059,203 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
       ).toBe(true);
       expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
       expect(await store.isDenylisted("0.1.11-v2test.4")).toBe(true);
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("enforces V2-3 stop-before-dump + write fence order on commit, restores old services if pg_dump fails, and stops new services before pg_restore on rollback", async () => {
+    const home = await makeTempDir("linger-orch-write-fence-");
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const watchdog = new HealthWatchdogModule();
+    const config = new ConfigStore(path.join(home, "config.json"));
+    const bus = new EventBus();
+
+    const events: string[] = [];
+    let backupShouldFail = false;
+    let healthShouldPass = true;
+    const aborts: string[] = [];
+
+    const origEnableFence = store.enableUpgradeWriteFence.bind(store);
+    const origClearFence = store.clearUpgradeWriteFence.bind(store);
+    vi.spyOn(store, "enableUpgradeWriteFence").mockImplementation(
+      async (ver) => {
+        events.push(`enableFence:${ver}`);
+        return origEnableFence(ver);
+      },
+    );
+    vi.spyOn(store, "clearUpgradeWriteFence").mockImplementation(async () => {
+      events.push("clearFence");
+      return origClearFence();
+    });
+
+    const orch = new ReleaseOrchestratorModule({
+      activeOperations: () => 0,
+      stopServicesBeforeBackup: async (services) => {
+        events.push(
+          `stop:${services.join(",")}:fence=${existsSync(store.upgradeWriteFencePath)}`,
+        );
+      },
+      backupDatabase: async (ver) => {
+        events.push(
+          `backup:${ver}:fence=${existsSync(store.upgradeWriteFencePath)}`,
+        );
+        if (backupShouldFail) {
+          throw new Error("pg_dump failed");
+        }
+        return `backups/pre-${ver}.dump`;
+      },
+      restoreDatabase: async (file) => {
+        events.push(
+          `restoreDb:${path.basename(file)}:fence=${existsSync(store.upgradeWriteFencePath)}`,
+        );
+      },
+      restartServices: async (rel, changed) => {
+        events.push(
+          `restart:${rel.appVersion}:${changed.join(",")}:fence=${existsSync(store.upgradeWriteFencePath)}`,
+        );
+      },
+      buildHealthProbes: (rel) => [
+        {
+          name: "node-services-healthz",
+          check: async () => {
+            events.push(
+              `probe:${rel?.appVersion}:fence=${existsSync(store.upgradeWriteFencePath)}`,
+            );
+            return healthShouldPass || rel?.appVersion === "0.1.11-v2test.2";
+          },
+        },
+      ],
+      onAbort: (ver) => {
+        aborts.push(ver);
+      },
+      completePauseMs: 0,
+      rollbackPauseMs: 0,
+      healthGateTimeoutMs: 45,
+      healthGateIntervalMs: 15,
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        watchdog,
+        orch,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+    try {
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.2", { backend: "2" }),
+      );
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.2",
+        releaseFile: "releases/0.1.11-v2test.2/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      // 1. rollbackSafe: true does NOT pre-stop services or enable write fence.
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.21", { backend: "21" }, true),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.21");
+      expect(await orch.applyStaged()).toBe(true);
+      expect(events.some((e) => e.startsWith("stop:"))).toBe(false);
+      expect(events.some((e) => e.startsWith("enableFence:"))).toBe(false);
+      expect(existsSync(store.upgradeWriteFencePath)).toBe(false);
+
+      // Reset current back to 0.1.11-v2test.2 for non-rollbackSafe scenarios.
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.2",
+        releaseFile: "releases/0.1.11-v2test.2/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      // 2. pg_dump failure after stopping services MUST restore previous backend services.
+      events.length = 0;
+      backupShouldFail = true;
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.3", { backend: "3" }, false),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.3");
+      expect(await orch.applyStaged()).toBe(false);
+      expect(events).toEqual([
+        "stop:teamhub,node-services:fence=false",
+        "backup:0.1.11-v2test.3:fence=false",
+        "restart:0.1.11-v2test.2:backend:fence=false",
+      ]);
+      expect(aborts).toEqual(["0.1.11-v2test.3"]);
+      expect(orch.state()).toMatchObject({
+        kind: "ready",
+        version: "0.1.11-v2test.3",
+      });
+      expect(existsSync(store.upgradeWriteFencePath)).toBe(false);
+
+      // 3. Healthcheck failure on rollbackSafe: false stops new services BEFORE
+      //    pg_restore while fence stays active, then restores previous services
+      //    and clears the write fence.
+      events.length = 0;
+      backupShouldFail = false;
+      healthShouldPass = false;
+      await orch.onBundleStaged("0.1.11-v2test.3");
+      expect(await orch.applyStaged()).toBe(false);
+
+      const stopPreIdx = events.indexOf(
+        "stop:teamhub,node-services:fence=false",
+      );
+      const backupIdx = events.indexOf("backup:0.1.11-v2test.3:fence=false");
+      const enableIdx = events.indexOf("enableFence:0.1.11-v2test.3");
+      const restartNewIdx = events.indexOf(
+        "restart:0.1.11-v2test.3:backend:fence=true",
+      );
+      const stopNewIdx = events.indexOf(
+        "stop:teamhub,node-services:fence=true",
+      );
+      const restoreDbIdx = events.indexOf(
+        "restoreDb:pre-0.1.11-v2test.3.dump:fence=true",
+      );
+      const restartOldIdx = events.indexOf(
+        "restart:0.1.11-v2test.2:backend:fence=true",
+      );
+      const clearFenceIdx = events.indexOf("clearFence");
+
+      expect(stopPreIdx).toBe(0);
+      expect(backupIdx).toBeGreaterThan(stopPreIdx);
+      expect(enableIdx).toBeGreaterThan(backupIdx);
+      expect(restartNewIdx).toBeGreaterThan(enableIdx);
+      expect(stopNewIdx).toBeGreaterThan(restartNewIdx);
+      expect(restoreDbIdx).toBeGreaterThan(stopNewIdx);
+      expect(restartOldIdx).toBeGreaterThan(restoreDbIdx);
+      expect(clearFenceIdx).toBeGreaterThan(restartOldIdx);
+      expect(existsSync(store.upgradeWriteFencePath)).toBe(false);
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
+
+      // 4. Successful rollbackSafe: false commit clears write fence AFTER commit.
+      events.length = 0;
+      healthShouldPass = true;
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.5", { backend: "5" }, false),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.5");
+      expect(await orch.applyStaged()).toBe(true);
+      expect(events.slice(0, 4)).toEqual([
+        "stop:teamhub,node-services:fence=false",
+        "backup:0.1.11-v2test.5:fence=false",
+        "enableFence:0.1.11-v2test.5",
+        "restart:0.1.11-v2test.5:backend:fence=true",
+      ]);
+      expect(events).toContain("probe:0.1.11-v2test.5:fence=true");
+      expect(events.at(-1)).toBe("clearFence");
+      expect(existsSync(store.upgradeWriteFencePath)).toBe(false);
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.5");
     } finally {
       await host.stop("quit");
     }

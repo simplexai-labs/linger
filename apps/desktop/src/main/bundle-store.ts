@@ -187,6 +187,33 @@ export class BundleStoreModule implements Module {
     return path.join(this.home, "downloads");
   }
 
+  get upgradeWriteFencePath(): string {
+    return path.join(this.stateDir, "upgrade-write-fence");
+  }
+
+  async enableUpgradeWriteFence(appVersion: string): Promise<string> {
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await writeJsonAtomic(this.upgradeWriteFencePath, {
+      appVersion,
+      createdAt: new Date().toISOString(),
+    });
+    this.#ctx?.log.info("bundle_store.write_fence_enabled", {
+      appVersion,
+      fenceFile: this.upgradeWriteFencePath,
+    });
+    return this.upgradeWriteFencePath;
+  }
+
+  async clearUpgradeWriteFence(): Promise<void> {
+    const existed = existsSync(this.upgradeWriteFencePath);
+    await rm(this.upgradeWriteFencePath, { force: true });
+    if (existed) {
+      this.#ctx?.log.info("bundle_store.write_fence_cleared", {
+        fenceFile: this.upgradeWriteFencePath,
+      });
+    }
+  }
+
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
     await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
@@ -194,6 +221,16 @@ export class BundleStoreModule implements Module {
     await mkdir(this.storeDir, { recursive: true, mode: 0o700 });
     await mkdir(this.infraDir, { recursive: true, mode: 0o700 });
     await mkdir(this.downloadsDir, { recursive: true, mode: 0o700 });
+
+    // Crash recovery: remove any stale upgrade write fence left by an
+    // interrupted upgrade so TeamHub never stays stuck returning 503 after
+    // restart.
+    if (existsSync(this.upgradeWriteFencePath)) {
+      ctx.log.warn("bundle_store.discarded_stale_write_fence", {
+        fenceFile: this.upgradeWriteFencePath,
+      });
+      await rm(this.upgradeWriteFencePath, { force: true });
+    }
 
     // Crash recovery: if a previous switch died mid-flight leaving a stale or
     // corrupted pending.json while current.json still points to the old release,

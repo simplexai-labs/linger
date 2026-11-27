@@ -353,4 +353,30 @@ describe("BundleStoreModule", () => {
     await store.rollbackToPrevious("0.2.15", "healthcheck", "failed");
     expect(await store.currentDaemonExecutable("darwin")).toBe(v1Daemon);
   });
+
+  it("manages upgrade-write-fence lifecycle and clears stale fence on startup crash recovery", async () => {
+    const home = await makeTempDir("linger-fence-home-");
+    const { store, host } = await startStore(home);
+    try {
+      expect(existsSync(store.upgradeWriteFencePath)).toBe(false);
+      const fencePath = await store.enableUpgradeWriteFence("0.1.11-v2test.4");
+      expect(fencePath).toBe(path.join(home, "state", "upgrade-write-fence"));
+      expect(existsSync(fencePath)).toBe(true);
+      await store.clearUpgradeWriteFence();
+      expect(existsSync(fencePath)).toBe(false);
+
+      // Leave a stale fence behind as if the previous process crashed mid-switch.
+      await store.enableUpgradeWriteFence("0.1.11-v2test.4");
+      expect(existsSync(fencePath)).toBe(true);
+    } finally {
+      await host.stop("quit");
+    }
+
+    const restarted = await startStore(home);
+    try {
+      expect(existsSync(restarted.store.upgradeWriteFencePath)).toBe(false);
+    } finally {
+      await restarted.host.stop("quit");
+    }
+  });
 });

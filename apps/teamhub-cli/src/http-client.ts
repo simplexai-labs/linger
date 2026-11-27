@@ -37,10 +37,67 @@ export async function teamHubData<T>(call: Promise<{ data?: T }>): Promise<T> {
   return ((await call).data ?? {}) as T;
 }
 
+const DEFAULT_UPGRADE_MAX_RETRIES = 3;
+const DEFAULT_UPGRADE_RETRY_AFTER_SECONDS = 5;
+const MAX_UPGRADE_RETRY_AFTER_SECONDS = 10;
+
+function parseRetryAfterSeconds(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  if (Number.isNaN(timestamp)) return undefined;
+  return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
+}
+
+function isRepeatableBody(body: RequestInit["body"]): boolean {
+  return (
+    body === undefined ||
+    body === null ||
+    typeof body === "string" ||
+    body instanceof Uint8Array ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body) ||
+    body instanceof URLSearchParams ||
+    body instanceof FormData
+  );
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("Aborted"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("Aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export function createTeamHubClient(
   config: TeamHubConfig,
-  dependencies: { fetch: typeof fetch; timing?: CliTiming },
+  dependencies: {
+    fetch: typeof fetch;
+    timing?: CliTiming;
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    maxUpgradeRetries?: number;
+  },
 ): TeamHubHttpClient {
+  const sleep = dependencies.sleep ?? sleepAbortable;
+  const maxUpgradeRetries = Math.max(
+    0,
+    dependencies.maxUpgradeRetries ?? DEFAULT_UPGRADE_MAX_RETRIES,
+  );
   const request = async (endpoint: string, options: RequestInit = {}) => {
     const requestPath = endpoint.split("?")[0]!;
     const sharedDocument = endpoint === "/v0/shared-documents/content";
@@ -71,90 +128,138 @@ export function createTeamHubClient(
         ? { operation_id: operationId }
         : {};
     const timing = dependencies.timing;
-    const started = timing?.now() ?? 0;
-    const requestId = timing ? randomUUID() : undefined;
-    if (requestId) headers.set("x-request-id", requestId);
     const method = options.method ?? "GET";
-    let response: Response;
-    try {
-      response = await dependencies.fetch(`${config.url}${endpoint}`, {
-        ...options,
-        headers,
-        redirect: "error",
-        signal: options.signal ?? AbortSignal.timeout(180_000),
-      });
-    } catch {
-      timing?.record("http", timing.now() - started, {
-        request_id: requestId,
-        ...operationTiming,
-        method,
-        outcome: "failure",
-      });
-      if (operationId) throw unknownWriteOutcome(operationId);
-      throw new CliError("connection_failed", "Could not reach TeamHub.");
-    }
-    if (timing) {
-      const returnedId = response.headers.get("x-request-id");
-      const fields: TimingFields = {
-        ...operationTiming,
-        request_id:
-          returnedId && /^[A-Za-z0-9._:-]{1,128}$/u.test(returnedId)
-            ? returnedId
-            : requestId,
-        method,
-        http_status: response.status,
-      };
-      timing.record("http_headers", timing.now() - started, fields);
-      response = timedResponse(response, timing, started, fields);
-    }
-    if (!response.ok) {
-      let value: unknown;
+    const repeatable = isRepeatableBody(options.body);
+
+    for (let attempt = 0; ; attempt += 1) {
+      const started = timing?.now() ?? 0;
+      const requestId = timing ? randomUUID() : undefined;
+      if (requestId) headers.set("x-request-id", requestId);
+      let response: Response;
       try {
-        value = await readJson(response);
+        response = await dependencies.fetch(`${config.url}${endpoint}`, {
+          ...options,
+          headers,
+          redirect: "error",
+          signal: options.signal ?? AbortSignal.timeout(180_000),
+        });
       } catch {
-        /* Preserve HTTP status below. */
+        timing?.record("http", timing.now() - started, {
+          request_id: requestId,
+          ...operationTiming,
+          method,
+          outcome: "failure",
+        });
+        if (operationId) throw unknownWriteOutcome(operationId);
+        throw new CliError("connection_failed", "Could not reach TeamHub.");
       }
-      const envelope =
-        record(value) && record(value.error) ? value.error : undefined;
-      if (envelope && typeof envelope.code === "string") {
+      if (timing) {
+        const returnedId = response.headers.get("x-request-id");
+        const fields: TimingFields = {
+          ...operationTiming,
+          request_id:
+            returnedId && /^[A-Za-z0-9._:-]{1,128}$/u.test(returnedId)
+              ? returnedId
+              : requestId,
+          method,
+          http_status: response.status,
+        };
+        timing.record("http_headers", timing.now() - started, fields);
+        response = timedResponse(response, timing, started, fields);
+      }
+      if (!response.ok) {
+        const retryAfterSeconds = parseRetryAfterSeconds(
+          response.headers.get("retry-after"),
+        );
+        let value: unknown;
+        try {
+          value = await readJson(response);
+        } catch {
+          /* Preserve HTTP status below. */
+        }
+        const envelope =
+          record(value) && record(value.error) ? value.error : undefined;
+        const normalizedCode =
+          envelope && typeof envelope.code === "string"
+            ? envelope.code.toLowerCase()
+            : undefined;
+        // TeamHub's upgrade write fence middleware rejects requests BEFORE
+        // executing any route handler (503 + Retry-After + code:
+        // "service_upgrading"). Because the write definitely did not execute,
+        // bounded retry is safe even for mutating requests with an operationId,
+        // and exhaustion throws an explicit retryable `service_upgrading` error
+        // rather than `outcome_unknown`.
+        if (
+          response.status === 503 &&
+          normalizedCode === "service_upgrading" &&
+          repeatable &&
+          attempt < maxUpgradeRetries &&
+          !options.signal?.aborted
+        ) {
+          const waitSeconds = Math.min(
+            Math.max(
+              retryAfterSeconds ?? DEFAULT_UPGRADE_RETRY_AFTER_SECONDS,
+              1,
+            ),
+            MAX_UPGRADE_RETRY_AFTER_SECONDS,
+          );
+          try {
+            await sleep(waitSeconds * 1000, options.signal ?? undefined);
+            continue;
+          } catch {
+            // Aborted while waiting for upgrade; fall through and throw explicit
+            // `service_upgrading` error rather than `outcome_unknown`.
+          }
+        }
+        if (envelope && normalizedCode) {
+          throw new CliError(
+            // Some routes send UPPER_SNAKE. A code this build does not know
+            // still passes through; it gets the generic template and an exit
+            // code from the HTTP status.
+            normalizedCode as ErrorCode,
+            typeof envelope.message === "string"
+              ? envelope.message
+              : "TeamHub rejected the request.",
+            {
+              ...envelope,
+              ...(record(envelope.details) ? envelope.details : {}),
+              http_status: response.status,
+              ...(normalizedCode === "service_upgrading"
+                ? { retryable: true }
+                : {}),
+              ...(retryAfterSeconds !== undefined
+                ? { retry_after_seconds: retryAfterSeconds }
+                : {}),
+              ...(operationId ? { operation_id: operationId } : {}),
+            },
+            "remote",
+          );
+        }
         throw new CliError(
-          // Some routes send UPPER_SNAKE. A code this build does not know
-          // still passes through; it gets the generic template and an exit
-          // code from the HTTP status.
-          envelope.code.toLowerCase() as ErrorCode,
-          typeof envelope.message === "string"
-            ? envelope.message
-            : "TeamHub rejected the request.",
+          statusCodes[response.status] ??
+            (response.status >= 500
+              ? "dependency_unavailable"
+              : "invalid_request"),
+          `TeamHub request failed (HTTP ${response.status}).`,
           {
-            ...envelope,
-            ...(record(envelope.details) ? envelope.details : {}),
             http_status: response.status,
+            ...(retryAfterSeconds !== undefined
+              ? { retry_after_seconds: retryAfterSeconds }
+              : {}),
             ...(operationId ? { operation_id: operationId } : {}),
           },
           "remote",
         );
       }
-      throw new CliError(
-        statusCodes[response.status] ??
-          (response.status >= 500
-            ? "dependency_unavailable"
-            : "invalid_request"),
-        `TeamHub request failed (HTTP ${response.status}).`,
-        {
-          http_status: response.status,
-          ...(operationId ? { operation_id: operationId } : {}),
-        },
-        "remote",
-      );
-    }
-    if (operationId && response.status !== 204) {
-      try {
-        return await jsonResponse(response);
-      } catch {
-        throw unknownWriteOutcome(operationId);
+      if (operationId && response.status !== 204) {
+        try {
+          return await jsonResponse(response);
+        } catch {
+          throw unknownWriteOutcome(operationId);
+        }
       }
+      return response;
     }
-    return response;
   };
   // The base URL only shapes the Request: the transport above prefixes the
   // configured TeamHub URL and checks the endpoint before any credential leaves.

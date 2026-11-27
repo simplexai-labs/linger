@@ -2,7 +2,7 @@
 // Zero-dependency local/LAN test feed server for Linger V2 signed per-service
 // upgrade packs. Serves the exact CI-signed `app-manifest.json` + `.sig` bytes
 // without modification so Ed25519 signature verification stays 100% intact,
-// and lets testers switch between step-00..step-07 live via Web UI, HTTP API,
+// and lets testers switch between step-00..step-04 live via Web UI, HTTP API,
 // or interactive terminal commands.
 //
 // Usage:
@@ -480,7 +480,7 @@ if (
     );
   }
   process.stdout.write("\n Switch step anytime:\n");
-  process.stdout.write("   - Type 00..03 + Enter in this terminal, OR\n");
+  process.stdout.write("   - Type 00..04 + Enter in this terminal, OR\n");
   process.stdout.write(`   - Open ${instance.feedUrl} in your browser, OR\n`);
   process.stdout.write(
     `   - curl -X POST "${instance.feedUrl}/__test/switch?step=01"\n\n`,

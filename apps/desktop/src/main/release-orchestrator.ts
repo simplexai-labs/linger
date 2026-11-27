@@ -51,6 +51,9 @@ export interface ReleaseProgressUpdate {
 export interface ReleaseOrchestratorHooks {
   readonly activeOperations: () => number;
   readonly isVoiceIdle?: () => Promise<boolean>;
+  readonly stopServicesBeforeBackup?: (
+    services: readonly ("teamhub" | "node-services" | "web")[],
+  ) => Promise<void>;
   readonly backupDatabase?: (appVersion: string) => Promise<string | undefined>;
   readonly restoreDatabase?: (backupFile: string) => Promise<void>;
   readonly restartServices: (
@@ -264,17 +267,34 @@ export class ReleaseOrchestratorModule implements Module {
       version,
     });
 
+    const requiresWriteFence =
+      !next.compat.rollbackSafe && diff.scope === "backend";
     let dbBackupFile: string | undefined;
     let switchStarted = false;
+    let stoppedBeforeBackup = false;
+    let writeFenceEnabled = false;
     let failedServices: readonly string[] | undefined;
     let capturedServiceLogTails: Readonly<Record<string, string>> | undefined;
     try {
-      if (
-        !next.compat.rollbackSafe &&
-        diff.scope === "backend" &&
-        this.#hooks.backupDatabase
-      ) {
-        dbBackupFile = await this.#hooks.backupDatabase(version);
+      if (requiresWriteFence) {
+        this.#hooks.onProgress?.({
+          stage: "stopping",
+          percent: 20,
+          tone: "normal",
+          version,
+        });
+        if (this.#hooks.stopServicesBeforeBackup) {
+          await this.#hooks.stopServicesBeforeBackup([
+            "teamhub",
+            "node-services",
+          ]);
+          stoppedBeforeBackup = true;
+        }
+        if (this.#hooks.backupDatabase) {
+          dbBackupFile = await this.#hooks.backupDatabase(version);
+        }
+        await store.enableUpgradeWriteFence(version);
+        writeFenceEnabled = true;
       }
 
       switchStarted = true;
@@ -285,12 +305,14 @@ export class ReleaseOrchestratorModule implements Module {
         ...(dbBackupFile ? { dbBackupFile } : {}),
       });
 
-      this.#hooks.onProgress?.({
-        stage: "stopping",
-        percent: 25,
-        tone: "normal",
-        version,
-      });
+      if (!requiresWriteFence) {
+        this.#hooks.onProgress?.({
+          stage: "stopping",
+          percent: 25,
+          tone: "normal",
+          version,
+        });
+      }
       this.#hooks.onProgress?.({
         stage: "switching",
         percent: 45,
@@ -332,6 +354,10 @@ export class ReleaseOrchestratorModule implements Module {
       }
 
       await store.commitPending();
+      if (writeFenceEnabled) {
+        await store.clearUpgradeWriteFence();
+        writeFenceEnabled = false;
+      }
       this.#stagedVersion = undefined;
       this.#setState({ kind: "idle" });
       ctx.log.info("release_orchestrator.committed", {
@@ -375,6 +401,7 @@ export class ReleaseOrchestratorModule implements Module {
               next.compat.rollbackSafe,
               services,
               tails,
+              false,
             );
           },
         });
@@ -390,6 +417,43 @@ export class ReleaseOrchestratorModule implements Module {
           appVersion: version,
           reason,
         });
+        if (writeFenceEnabled) {
+          await store.clearUpgradeWriteFence().catch(() => undefined);
+        }
+        if (stoppedBeforeBackup) {
+          if (current) {
+            await this.#hooks
+              .restartServices(current, ["backend"])
+              .catch((restoreErr) => {
+                ctx.log.warn(
+                  "release_orchestrator.preflight_restore_services_failed",
+                  {
+                    appVersion: version,
+                    targetVersion: current.appVersion,
+                    error:
+                      restoreErr instanceof Error
+                        ? restoreErr.message
+                        : String(restoreErr),
+                  },
+                );
+              });
+          } else if (this.#hooks.restoreBaselineServices) {
+            await this.#hooks
+              .restoreBaselineServices(["backend"])
+              .catch((restoreErr) => {
+                ctx.log.warn(
+                  "release_orchestrator.preflight_restore_baseline_failed",
+                  {
+                    appVersion: version,
+                    error:
+                      restoreErr instanceof Error
+                        ? restoreErr.message
+                        : String(restoreErr),
+                  },
+                );
+              });
+          }
+        }
         this.#setState({ kind: "ready", version, diff });
         await this.#hooks.onAbort?.(version, reason);
         return false;
@@ -409,6 +473,7 @@ export class ReleaseOrchestratorModule implements Module {
         next.compat.rollbackSafe,
         services,
         tails,
+        writeFenceEnabled,
       );
       return false;
     }
@@ -472,6 +537,7 @@ export class ReleaseOrchestratorModule implements Module {
     rollbackSafe = true,
     failedServices: readonly string[] = [],
     serviceLogTails?: Readonly<Record<string, string>>,
+    writeFenceActive = false,
   ): Promise<void> {
     const ctx = this.#ctx!;
     const store = ctx.get<BundleStoreModule>("BundleStore");
@@ -564,122 +630,142 @@ export class ReleaseOrchestratorModule implements Module {
       targetVersion: previousRelease?.appVersion,
     });
     let dbRestored = false;
-    if (isPreCommit && dbBackupFile && this.#hooks.restoreDatabase) {
-      try {
-        await this.#hooks.restoreDatabase(dbBackupFile);
-        dbRestored = true;
-      } catch (err) {
-        ctx.log.warn("release_orchestrator.db_restore_failed", {
-          error: redactServiceLogText(
-            err instanceof Error ? err.message : String(err),
-          ),
-        });
+    try {
+      if (isPreCommit && dbBackupFile && this.#hooks.restoreDatabase) {
+        // Stop new backend processes FIRST (while the write fence remains
+        // active) so `pg_restore --clean` never collides with live DB
+        // connections from a running new TeamHub process.
+        if (this.#hooks.stopServicesBeforeBackup) {
+          await this.#hooks
+            .stopServicesBeforeBackup(["teamhub", "node-services"])
+            .catch((stopErr) => {
+              ctx.log.warn(
+                "release_orchestrator.rollback_stop_services_failed",
+                {
+                  failedVersion,
+                  error:
+                    stopErr instanceof Error
+                      ? stopErr.message
+                      : String(stopErr),
+                },
+              );
+            });
+        }
+        try {
+          await this.#hooks.restoreDatabase(dbBackupFile);
+          dbRestored = true;
+        } catch (err) {
+          ctx.log.warn("release_orchestrator.db_restore_failed", {
+            error: redactServiceLogText(
+              err instanceof Error ? err.message : String(err),
+            ),
+          });
+        }
       }
-    }
-    const restoredPtr = await store.rollbackToPrevious(
-      failedVersion,
-      stage,
-      sanitizedReason,
-    );
-    if (previousRelease) {
-      await this.#hooks
-        .restartServices(previousRelease, changedModules)
-        .catch(() => undefined);
-      const watchdog = ctx.get<HealthWatchdogModule>("HealthWatchdog");
-      const restoreProbes = this.#hooks.buildHealthProbes(
-        previousRelease,
-        changedModules,
+      const restoredPtr = await store.rollbackToPrevious(
+        failedVersion,
+        stage,
+        sanitizedReason,
       );
-      if (restoreProbes.length > 0) {
-        await watchdog
-          .waitForHealthy(restoreProbes, {
-            timeoutMs: this.#hooks.healthGateTimeoutMs,
-            intervalMs: this.#hooks.healthGateIntervalMs,
-          })
+      if (previousRelease) {
+        await this.#hooks
+          .restartServices(previousRelease, changedModules)
           .catch(() => undefined);
+      } else if (this.#hooks.restoreBaselineServices) {
+        await this.#hooks
+          .restoreBaselineServices(changedModules)
+          .catch((err) => {
+            ctx.log.warn("release_orchestrator.baseline_restore_failed", {
+              failedVersion,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
       }
-    } else if (this.#hooks.restoreBaselineServices) {
-      await this.#hooks.restoreBaselineServices(changedModules).catch((err) => {
-        ctx.log.warn("release_orchestrator.baseline_restore_failed", {
-          failedVersion,
+      if (writeFenceActive) {
+        await store.clearUpgradeWriteFence().catch(() => undefined);
+        writeFenceActive = false;
+      }
+      if (previousRelease || this.#hooks.restoreBaselineServices) {
+        const watchdog = ctx.get<HealthWatchdogModule>("HealthWatchdog");
+        const restoreProbes = this.#hooks.buildHealthProbes(
+          previousRelease,
+          changedModules,
+        );
+        if (restoreProbes.length > 0) {
+          await watchdog
+            .waitForHealthy(restoreProbes, {
+              timeoutMs: this.#hooks.healthGateTimeoutMs,
+              intervalMs: this.#hooks.healthGateIntervalMs,
+            })
+            .catch(() => undefined);
+        }
+      }
+      this.#stagedVersion = undefined;
+      const restoredVersion =
+        restoredPtr?.appVersion ??
+        previousRelease?.appVersion ??
+        (this.#hooks.restoreBaselineServices ? "baseline" : "previous");
+      const notice: RollbackNotice = {
+        fromVersion: failedVersion,
+        toVersion: restoredVersion,
+        reason: sanitizedReason,
+      };
+      ctx.log.warn("release_orchestrator.rolled_back", {
+        failedVersion,
+        restoredVersion,
+        stage,
+        changedModules,
+        failedServices: resolvedFailedServices,
+        reason: sanitizedReason,
+        ...(serviceLogTails ? { serviceLogTails } : {}),
+        rollbackSafe,
+        ...(dbBackupFile ? { dbBackupFile } : {}),
+        dbRestored,
+        manualRecoveryRequired: false,
+        denylisted: true,
+      });
+      await appendRollbackHistory(store.home, {
+        timestamp: new Date().toISOString(),
+        failedVersion,
+        restoredVersion,
+        stage,
+        changedModules,
+        failedServices: resolvedFailedServices,
+        reason: sanitizedReason,
+        ...(serviceLogTails ? { serviceLogTails } : {}),
+        rollbackSafe,
+        ...(dbBackupFile ? { dbBackupFile } : {}),
+        dbRestored,
+        manualRecoveryRequired: false,
+        denylisted: true,
+      }).catch((err) => {
+        ctx.log.warn("release_orchestrator.rollback_history_write_failed", {
           error: err instanceof Error ? err.message : String(err),
         });
       });
-      const watchdog = ctx.get<HealthWatchdogModule>("HealthWatchdog");
-      const restoreProbes = this.#hooks.buildHealthProbes(
-        undefined,
-        changedModules,
+      this.#rollbackNotice = notice;
+      this.#setState({ kind: "rolled_back", notice });
+      ctx.bus.emit(
+        "release.rolled_back",
+        notice.fromVersion,
+        notice.toVersion,
+        notice.reason,
       );
-      if (restoreProbes.length > 0) {
-        await watchdog
-          .waitForHealthy(restoreProbes, {
-            timeoutMs: this.#hooks.healthGateTimeoutMs,
-            intervalMs: this.#hooks.healthGateIntervalMs,
-          })
-          .catch(() => undefined);
+      this.#hooks.onProgress?.({
+        stage: "rolled_back",
+        percent: 100,
+        tone: "rollback",
+        version: failedVersion,
+        targetVersion: notice.toVersion,
+      });
+      const rollbackPauseMs = this.#hooks.rollbackPauseMs ?? 900;
+      if (rollbackPauseMs > 0) await delay(rollbackPauseMs);
+      await this.#hooks.onRollbackComplete?.(notice);
+    } finally {
+      if (writeFenceActive) {
+        await store.clearUpgradeWriteFence().catch(() => undefined);
       }
     }
-    this.#stagedVersion = undefined;
-    const restoredVersion =
-      restoredPtr?.appVersion ??
-      previousRelease?.appVersion ??
-      (this.#hooks.restoreBaselineServices ? "baseline" : "previous");
-    const notice: RollbackNotice = {
-      fromVersion: failedVersion,
-      toVersion: restoredVersion,
-      reason: sanitizedReason,
-    };
-    ctx.log.warn("release_orchestrator.rolled_back", {
-      failedVersion,
-      restoredVersion,
-      stage,
-      changedModules,
-      failedServices: resolvedFailedServices,
-      reason: sanitizedReason,
-      ...(serviceLogTails ? { serviceLogTails } : {}),
-      rollbackSafe,
-      ...(dbBackupFile ? { dbBackupFile } : {}),
-      dbRestored,
-      manualRecoveryRequired: false,
-      denylisted: true,
-    });
-    await appendRollbackHistory(store.home, {
-      timestamp: new Date().toISOString(),
-      failedVersion,
-      restoredVersion,
-      stage,
-      changedModules,
-      failedServices: resolvedFailedServices,
-      reason: sanitizedReason,
-      ...(serviceLogTails ? { serviceLogTails } : {}),
-      rollbackSafe,
-      ...(dbBackupFile ? { dbBackupFile } : {}),
-      dbRestored,
-      manualRecoveryRequired: false,
-      denylisted: true,
-    }).catch((err) => {
-      ctx.log.warn("release_orchestrator.rollback_history_write_failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-    this.#rollbackNotice = notice;
-    this.#setState({ kind: "rolled_back", notice });
-    ctx.bus.emit(
-      "release.rolled_back",
-      notice.fromVersion,
-      notice.toVersion,
-      notice.reason,
-    );
-    this.#hooks.onProgress?.({
-      stage: "rolled_back",
-      percent: 100,
-      tone: "rollback",
-      version: failedVersion,
-      targetVersion: notice.toVersion,
-    });
-    const rollbackPauseMs = this.#hooks.rollbackPauseMs ?? 900;
-    if (rollbackPauseMs > 0) await delay(rollbackPauseMs);
-    await this.#hooks.onRollbackComplete?.(notice);
   }
 
   #setState(state: OrchestratorState): void {

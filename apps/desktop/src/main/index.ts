@@ -505,6 +505,11 @@ async function main(): Promise<void> {
     Number.isFinite(healthGateIntervalMs)
       ? { healthGateIntervalMs }
       : {}),
+    stopServicesBeforeBackup: async (services) => {
+      if (await localServer.hasLocalInstance()) {
+        await localServer.stopServices(services);
+      }
+    },
     backupDatabase: dbBackupHooks.backupDatabase,
     restoreDatabase: dbBackupHooks.restoreDatabase,
     readFailedServiceLogs: createFailedServiceLogReader({

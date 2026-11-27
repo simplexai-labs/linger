@@ -41,13 +41,14 @@ afterEach(async () => {
 const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
 
 describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
-  it("derives deterministic SemVer-monotonic 4-step versions within 0.1.11-v2test.0..3 above 0.1.10 and 0.1.11-mobile.1", () => {
+  it("derives deterministic SemVer-monotonic 5-step versions within 0.1.11-v2test.0..4 above 0.1.10 and 0.1.11-mobile.1", () => {
     const v2test = deriveStepVersions("0.1.11-v2test.0");
     expect(v2test).toEqual({
       "step-00-baseline": "0.1.11-v2test.0",
       "step-01-web": "0.1.11-v2test.1",
       "step-02-backend": "0.1.11-v2test.2",
       "step-03-rollback-faulty": "0.1.11-v2test.3",
+      "step-04-fence-node-faulty": "0.1.11-v2test.4",
     });
 
     expect(compareVersions("0.1.11-v2test.0", "0.1.10")).toBeGreaterThan(0);
@@ -84,7 +85,7 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
     ).toBe("https://cdn.example.com/bundles/web/web-1234567890ab.tar.zst");
   });
 
-  it("builds all 4 signed 2+1 steps, verifies exact 1/3 diffs, and serves incremental updates over live HTTP feed", async () => {
+  it("builds all 5 signed 2+1 steps, verifies exact 1/3 diffs, and serves incremental updates over live HTTP feed", async () => {
     const kitDir = await makeTempDir("linger-v2-kit-");
     const home = await makeTempDir("linger-v2-home-");
     const tinyWeb = await makeTempDir("linger-v2-web-");
@@ -133,7 +134,7 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
     });
 
     expect(built.verification.ok).toBe(true);
-    expect(built.verification.stepCount).toBe(4);
+    expect(built.verification.stepCount).toBe(5);
     expect(built.verification.steps.every((s) => s.signatureVerified)).toBe(
       true,
     );
@@ -219,12 +220,14 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       });
       await store.commitPending();
 
-      // 3. Switch live through step-01 (web), step-02 (backend), step-03 (faulty backend):
+      // 3. Switch live through step-01 (web), step-02 (backend), step-03 (faulty teamhub),
+      //    and step-04 (real teamhub + crashing node-services):
       //    each step MUST download strictly 1/3 bundle (0B for the other 2)!
       for (const [stepNum, expectedVersion, expectedMod] of [
         ["01", "0.1.11-v2test.1", "web"],
         ["02", "0.1.11-v2test.2", "backend"],
         ["03", "0.1.11-v2test.3", "backend"],
+        ["04", "0.1.11-v2test.4", "backend"],
       ] as const) {
         const sw = await fetch(
           `${server.feedUrl}/__test/switch?step=${stepNum}`,
@@ -252,13 +255,38 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
         await store.commitPending();
       }
 
-      // Confirm step-03 descriptor carries rollbackSafe: false
+      // Confirm step-03 and step-04 descriptors carry rollbackSafe: false
       const step3Desc = await store.readRelease("0.1.11-v2test.3");
       expect(step3Desc?.compat.rollbackSafe).toBe(false);
+      const step4Desc = await store.readRelease("0.1.11-v2test.4");
+      expect(step4Desc?.compat.rollbackSafe).toBe(false);
+      expect(step4Desc?.compat.dbSchemaEpoch).toBe(
+        step3Desc?.compat.dbSchemaEpoch,
+      );
+
+      // Verify step-04 extracted backend ships the crashing node-services stub
+      // (exit 43) paired with the non-faulty teamhub payload.
+      const step4BackendDir = path.join(home, step4Desc!.modules.backend.path);
+      const step4Supervisor = await readFile(
+        path.join(step4BackendDir, "node-services", "dist", "supervisor.js"),
+        "utf8",
+      );
+      expect(step4Supervisor).toContain(
+        "[V2-TEST-FAULTY-NODE-SERVICES-0.1.11-v2test.4]",
+      );
+      expect(step4Supervisor).toContain("process.exit(43)");
+      const step4Meta = JSON.parse(
+        await readFile(
+          path.join(step4BackendDir, "v2-service-version.json"),
+          "utf8",
+        ),
+      ) as { faulty: boolean; faultyNodeServices: boolean };
+      expect(step4Meta.faulty).toBe(false);
+      expect(step4Meta.faultyNodeServices).toBe(true);
 
       await host.stop("quit");
     } finally {
       await server.close();
     }
-  }, 30_000);
+  }, 60_000);
 });

@@ -2,7 +2,7 @@ name: V2 Signed Test Pack (2+1 Non-Release Artifacts)
 
 # Builds signed 3-platform baseline installers (macOS arm64, Windows x64,
 # Linux x64) PLUS the 2+1 V2 signed incremental upgrade kit
-# (step-00-baseline through step-03-rollback-faulty: web + unified backend +
+# (step-00-baseline through step-04-fence-node-faulty: web + unified backend +
 # cached node-native-deps) and zero-dependency `serve-test-feed.mjs`.
 #
 # SAFETY GUARANTEE:
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       base_version:
-        description: Baseline test version (e.g. 0.1.11-v2test.0; steps 01-03 derive 0.1.11-v2test.1..0.1.11-v2test.3)
+        description: Baseline test version (e.g. 0.1.11-v2test.0; steps 01-04 derive 0.1.11-v2test.1..0.1.11-v2test.4)
         type: string
         required: true
         default: "0.1.11-v2test.0"
@@ -267,7 +267,7 @@ jobs:
           scripts/ci/windows-desktop-smoke.ps1 -Setup $setup -ExpectedSha256 $digest
 
   # -------------------------------------------------------------------------
-  # Output 2: 2+1 Signed Upgrade Kit (step-00..step-03) + Local Test Feed Server
+  # Output 2: 2+1 Signed Upgrade Kit (step-00..step-04) + Local Test Feed Server
   # Compiles real web/installer/node-services/teamhub/computer-daemon/faulty-go
   # payloads for all 3 targets, signs macOS Mach-O binaries with rcodesign and
   # Windows .exe binaries with osslsigncode, packs unified atomic `backend`
@@ -275,7 +275,7 @@ jobs:
   # DESKTOP_UPDATE_KEY_PEM (matching built-in UPDATE_PUBLIC_KEY).
   # -------------------------------------------------------------------------
   build-service-upgrade-packs:
-    name: 2+1 signed upgrade packs (step-00..step-03)
+    name: 2+1 signed upgrade packs (step-00..step-04)
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -308,7 +308,7 @@ jobs:
           sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 update -q &&
             sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 install -y -q osslsigncode
 
-      - name: Build real 2+1 payloads for step-00..step-03
+      - name: Build real 2+1 payloads for step-00..step-04
         shell: bash
         env:
           BASE_VERSION: ${{ needs.prepare.outputs.version }}
@@ -502,7 +502,7 @@ jobs:
             done
           fi
 
-      - name: Assemble, Ed25519-sign, and verify all 4 steps (step-00..step-03)
+      - name: Assemble, Ed25519-sign, and verify all 5 steps (step-00..step-04)
         shell: bash
         env:
           BASE_VERSION: ${{ needs.prepare.outputs.version }}
@@ -575,9 +575,9 @@ jobs:
               "2. \`v2-test-installer-macos-arm64-tarball\` (signed + notarized \`.app.tar.gz\` + \`SHA256SUMS.txt\`, optional)",
               "3. \`v2-test-installer-windows-x64\` (Authenticode signed Setup EXE & portable ZIP)",
               "4. \`v2-test-installer-linux-x64\` (Linux x64 tar.gz)",
-              "5. \`v2-test-service-upgrade-packs\` (4-step 2+1 upgrade kit + \`serve-test-feed.mjs\` + \`REAL-DEVICE-TEST-GUIDE.md\`)",
+              "5. \`v2-test-service-upgrade-packs\` (5-step 2+1 upgrade kit + \`serve-test-feed.mjs\` + \`REAL-DEVICE-TEST-GUIDE.md\`)",
               "",
-              "### 4-Step 2+1 Upgrade Matrix",
+              "### 5-Step 2+1 Upgrade Matrix",
               "| Step | Version | Changed Module(s) | Inherited | Rollback Safe | Signed |",
               "|---|---|---|---|---|---|",
               ...idx.steps.map(s => `| \`${s.id}\` | \`${s.appVersion}\` | \`${s.changedModules.join(", ")}\` | ${s.inheritedModules.length}/3 | ${s.rollbackSafe} | ${s.signed} |`),

@@ -2207,6 +2207,7 @@ async function runNativeSource(
                     ...env,
                     ...proxyEnv,
                     TEAMHUB_LOCAL_IDENTITY_KEY: identityKey,
+                    TEAMHUB_WRITE_FENCE_FILE: upgradeWriteFencePath(home),
                     ...(voice ? { TEAMHUB_VOICE_TOOLS_BIN: voice.bin } : {}),
                   }
                 : name === "node-services"
@@ -2948,6 +2949,59 @@ export async function stopNativeSource(
 
 export type SwitchableReleaseService = "teamhub" | "node-services" | "web";
 
+/**
+ * Deterministic path of the V2 upgrade write-fence file passed to TeamHub via
+ * `TEAMHUB_WRITE_FENCE_FILE`. While this file exists on disk, TeamHub rejects
+ * non-probe HTTP requests with `503 Service Unavailable` + `Retry-After` and
+ * defers background DB writers until the upgrade commits or rolls back.
+ */
+export function upgradeWriteFencePath(home: string): string {
+  return path.join(path.resolve(home), "state", "upgrade-write-fence");
+}
+
+export interface StopNativeReleaseServicesOptions {
+  readonly services: readonly SwitchableReleaseService[];
+  readonly signal?: AbortSignal;
+  readonly log?: (message: string) => void;
+}
+
+export interface StopNativeReleaseServicesResult {
+  readonly stopped: readonly SwitchableReleaseService[];
+}
+
+const RELEASE_SERVICE_STOP_ORDER: readonly SwitchableReleaseService[] = [
+  "web",
+  "node-services",
+  "teamhub",
+];
+
+/**
+ * Stops only the requested switchable application services (`teamhub`,
+ * `node-services`, and/or `web`) under `withInstanceLock` while leaving
+ * `postgres` and `livekit` running. Used before `pg_dump` and `pg_restore`
+ * during non-rollbackSafe V2 backend upgrades to eliminate write-loss windows.
+ */
+export async function stopNativeReleaseServices(
+  instance: Instance,
+  options: StopNativeReleaseServicesOptions,
+): Promise<StopNativeReleaseServicesResult> {
+  requireNative(instance);
+  const requested = new Set<SwitchableReleaseService>(options.services);
+  const ordered = RELEASE_SERVICE_STOP_ORDER.filter((service) =>
+    requested.has(service),
+  );
+  return withInstanceLock(instance, async () => {
+    const stopped: SwitchableReleaseService[] = [];
+    for (const service of ordered) {
+      options.signal?.throwIfAborted();
+      options.log?.(`Stopping native ${service} for release transition.`);
+      await stopNativeProcess(instance.root, service);
+      stopped.push(service);
+    }
+    return { stopped };
+  });
+}
+
 export interface SwitchNativeReleaseOptions {
   readonly home: string;
   readonly appVersion: string;
@@ -3149,6 +3203,7 @@ export async function switchNativeRelease(
               ...baseEnv,
               ...proxyEnv,
               ...teamhubCmd.env,
+              TEAMHUB_WRITE_FENCE_FILE: upgradeWriteFencePath(home),
               ...(identityKey
                 ? { TEAMHUB_LOCAL_IDENTITY_KEY: identityKey }
                 : {}),
@@ -3334,6 +3389,7 @@ async function restoreBaselineServicesLocked(
         ...baselineEnv,
         ...proxyEnv,
         GIN_MODE: "release",
+        TEAMHUB_WRITE_FENCE_FILE: upgradeWriteFencePath(home),
         ...(identityKey ? { TEAMHUB_LOCAL_IDENTITY_KEY: identityKey } : {}),
         ...(voiceBin ? { TEAMHUB_VOICE_TOOLS_BIN: voiceBin } : {}),
       };

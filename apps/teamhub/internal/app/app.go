@@ -108,7 +108,9 @@ type App struct {
 	stopStreams              context.CancelFunc
 	workerContext            context.Context
 	stopWorkers              context.CancelFunc
+	workerStartMu            sync.Mutex
 	workerWG                 sync.WaitGroup
+	writeFencePollInterval   time.Duration
 	riverClient              *river.Client[pgx.Tx]
 	artifacts                artifactstore.ObjectStore
 	documentPreviews         *document.PreviewService
@@ -718,7 +720,42 @@ func (a *App) closeBuilt() {
 // the River jobs and sweeps, the presentation loop and the Skill Package probe.
 // A process calls it once, after New and before it serves. A test skips the
 // parts it drives itself.
+//
+// When TEAMHUB_WRITE_FENCE_FILE exists on disk at startup, background workers
+// are deferred asynchronously until the fence file is removed so the HTTP
+// server starts immediately for /healthz and /v0/local/identity probes without
+// issuing any background DB writes while an upgrade switch is unverified.
 func (a *App) StartWorkers(ctx context.Context, skip ...Worker) error {
+	fenceFile := strings.TrimSpace(a.cfg.WriteFenceFile)
+	if fenceFile != "" && writeFenceActive(fenceFile) {
+		a.logger.Info("deferring background workers while upgrade write fence is active", "fence_file", fenceFile)
+		skipped := slices.Clone(skip)
+		a.workerWG.Add(1)
+		go func() {
+			defer a.workerWG.Done()
+			started := waitForWriteFence(ctx, a.workerContext, fenceFile, a.writeFencePollInterval, func() error {
+				a.workerStartMu.Lock()
+				defer a.workerStartMu.Unlock()
+				if a.draining.Load() || a.workerContext.Err() != nil || ctx.Err() != nil {
+					return nil
+				}
+				a.logger.Info("upgrade write fence cleared; starting deferred background workers", "fence_file", fenceFile)
+				return a.startWorkersNow(a.workerContext, skipped...)
+			}, func(err error) {
+				a.logger.Error("start deferred background workers", "error", err)
+			})
+			if !started {
+				a.logger.Info("canceled deferred background workers before upgrade write fence cleared", "fence_file", fenceFile)
+			}
+		}()
+		return nil
+	}
+	a.workerStartMu.Lock()
+	defer a.workerStartMu.Unlock()
+	return a.startWorkersNow(ctx, skip...)
+}
+
+func (a *App) startWorkersNow(ctx context.Context, skip ...Worker) error {
 	runs := func(worker Worker) bool { return !slices.Contains(skip, worker) }
 	if runs(SkillInstall) {
 		if err := skill.Ensure(ctx, a.pool, a.artifacts); err != nil {
@@ -950,6 +987,8 @@ func (a *App) CloseContext(ctx context.Context) error {
 		a.stopWorkers()
 		go func() {
 			defer close(a.closeDone)
+			a.workerStartMu.Lock()
+			a.workerStartMu.Unlock()
 			a.stopRiverJobs()
 			a.workerWG.Wait()
 			if a.realtimeListener != nil {
@@ -970,10 +1009,11 @@ func (a *App) CloseContext(ctx context.Context) error {
 
 func (a *App) routes() *gin.Engine {
 	engine := gin.New()
-	engine.Use(a.requestContext(), a.cors(), gin.Recovery())
+	engine.Use(a.requestContext(), a.cors(), gin.Recovery(), a.writeFenceMiddleware())
 	// health, login, and idempotent logout are the only routes that bypass requireSession;
 	// all other resource APIs must be mounted under the authenticated group, and queries narrow permissions for Tenant/Room scopes.
 	engine.GET("/healthz", a.healthz)
+	engine.HEAD("/healthz", a.healthz)
 	engine.GET("/readyz", a.readyz)
 	engine.GET("/v0/document-previews/:token/*previewPath", a.serveDocumentPreview)
 	engine.HEAD("/v0/document-previews/:token/*previewPath", a.headDocumentPreview)

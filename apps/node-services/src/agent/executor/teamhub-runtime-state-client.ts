@@ -32,6 +32,7 @@ export interface TeamHubRuntimeStateClientOptions {
   readonly fetch?: TeamHubAgentCallbackFetch;
   readonly requestTimeoutMs?: number;
   readonly epoch?: string;
+  readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 export class TeamHubRuntimeStateError extends Error {
@@ -202,6 +203,7 @@ export const createTeamHubRuntimeStateClient = (
     throw new TypeError("requestTimeoutMs must be a positive safe integer");
   }
   const fetchRequest = options.fetch ?? globalThis.fetch;
+  const sleep = options.sleep ?? sleepAbortable;
   const responsesAfterUnknownAttempt = new WeakSet<Response>();
   const retryingFetch: TeamHubAgentCallbackFetch = async (input, init) => {
     const retryableRequest =
@@ -224,9 +226,21 @@ export const createTeamHubRuntimeStateClient = (
         ]);
         if (configRead) configRead.httpStatus = response.status;
         if (response.status >= 500 && attempt < attempts) {
-          priorAttemptOutcomeUnknown = true;
+          const isUpgradeFence =
+            response.status === 503 &&
+            (await isServiceUpgradingResponse(response));
+          const retryAfterMs =
+            response.status === 503
+              ? parseRetryAfterMs(response.headers.get("retry-after"))
+              : undefined;
+          if (!isUpgradeFence) {
+            priorAttemptOutcomeUnknown = true;
+          }
           await response.body?.cancel().catch(() => undefined);
           lastError = new Error(`HTTP ${response.status}`);
+          if (retryAfterMs !== undefined && retryAfterMs > 0) {
+            await sleep(Math.min(retryAfterMs, 5_000), signal);
+          }
           continue;
         }
         const result = retryableRequest
@@ -554,6 +568,53 @@ const rejectWhenAborted = (signal: AbortSignal): Promise<never> =>
     signal.addEventListener("abort", () => reject(signal.reason), {
       once: true,
     });
+  });
+
+const parseRetryAfterMs = (header: string | null): number | undefined => {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isSafeInteger(seconds) && seconds >= 0
+      ? seconds * 1000
+      : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  if (Number.isNaN(timestamp)) return undefined;
+  return Math.max(0, timestamp - Date.now());
+};
+
+const isServiceUpgradingResponse = async (
+  response: Response,
+): Promise<boolean> => {
+  try {
+    const body = (await response.clone().json()) as unknown;
+    return (
+      isRecord(body) &&
+      isRecord(body.error) &&
+      typeof body.error.code === "string" &&
+      body.error.code.toLowerCase() === "service_upgrading"
+    );
+  } catch {
+    return false;
+  }
+};
+
+const sleepAbortable = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 
 const errorMessage = (error: unknown): string =>

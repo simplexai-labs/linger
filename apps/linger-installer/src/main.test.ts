@@ -976,3 +976,32 @@ it("aborts --prefetch-bifrost --abort-on-stdin-close on stdin EOF and cleans up 
     vi.resetModules();
   }
 });
+
+it("parses and validates --stop-services options without requiring --source-repo", async () => {
+  const { parseInstallerArguments } = await import("./main.js");
+  expect(
+    parseInstallerArguments([
+      "--home",
+      "/tmp/linger-home",
+      "--instance",
+      "desktop",
+      "--stop-services",
+      "teamhub,node-services",
+    ]),
+  ).toMatchObject({
+    home: path.resolve("/tmp/linger-home"),
+    instanceName: "desktop",
+    stopServices: ["teamhub", "node-services"],
+  });
+  expect(() => parseInstallerArguments(["--stop-services", "teamhub"])).toThrow(
+    "Stop services needs an instance.",
+  );
+  expect(() =>
+    parseInstallerArguments([
+      "--instance",
+      "desktop",
+      "--stop-services",
+      "postgres",
+    ]),
+  ).toThrow("Invalid stop-services list.");
+});

@@ -110,6 +110,8 @@ const templates: Record<RemoteCode, string> = {
   asset_unavailable: "The file content is unavailable.",
   unavailable:
     "The file operation could not be completed; run this command again later.",
+  service_upgrading:
+    "TeamHub is upgrading; nothing was written—retry this command shortly.",
 };
 
 /**
@@ -180,6 +182,7 @@ const exitCodes: Record<ErrorCode, 1 | 2 | 3 | 4 | 5> = {
   too_large: 2,
   asset_unavailable: 1,
   unavailable: 1,
+  service_upgrading: 1,
 };
 
 /** Every code with an exit code; the closed-set test reads it. */
@@ -273,6 +276,9 @@ export function renderCommandError(error: CommandError): string {
       : "",
     typeof error.details?.request_id === "string"
       ? `Request ID: ${singleLine(error.details.request_id)}`
+      : "",
+    typeof error.details?.retry_after_seconds === "number"
+      ? `Retry after: ${error.details.retry_after_seconds}s`
       : "",
     typeof error.details?.message_id === "string"
       ? `Authorization card: ${singleLine(error.details.message_id)}`

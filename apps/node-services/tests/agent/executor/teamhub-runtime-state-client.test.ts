@@ -376,6 +376,91 @@ describe("TeamHubRuntimeStateClient retries", () => {
     });
     expect(interrupted).toHaveBeenCalledOnce();
   });
+
+  it("honors Retry-After on 503 service_upgrading and does not mark priorAttemptOutcomeUnknown", async () => {
+    const sleeps: number[] = [];
+    const fetchRequest = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "service_upgrading",
+              message: "Service upgrade in progress; please retry shortly",
+              retryable: true,
+            },
+          }),
+          {
+            status: 503,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "5",
+            },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "service_upgrading",
+              message: "Service upgrade in progress; please retry shortly",
+              retryable: true,
+            },
+          }),
+          {
+            status: 503,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "12",
+            },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "service_upgrading",
+              message: "Service upgrade in progress; please retry shortly",
+              retryable: true,
+            },
+          }),
+          {
+            status: 503,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "5",
+            },
+          },
+        ),
+      );
+    const client = createTeamHubRuntimeStateClient({
+      baseUrl: "https://teamhub.example.test",
+      serviceToken: "agent-service-token",
+      fetch: fetchRequest,
+      epoch: "agent-epoch-test",
+      requestTimeoutMs: 1_000,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    await expect(
+      client.requeueRun({
+        context_key: "context",
+        epoch: client.epoch,
+        run_id: "run-1",
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "service_upgrading",
+      retryable: true,
+      priorAttemptOutcomeUnknown: false,
+    });
+    expect(fetchRequest).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([5_000, 5_000]);
+  });
 });
 
 const runtimeStateClient = (

@@ -2767,6 +2767,107 @@ export class LocalServerModule implements Module {
     return this.switchRelease("baseline", optionsOrSignal);
   }
 
+  /**
+   * Stops selected local application services (`teamhub`, `node-services`,
+   * and/or `web`) via `installer.js --stop-services` while keeping PostgreSQL
+   * and LiveKit running. Used before `pg_dump` and `pg_restore` during
+   * non-rollbackSafe V2 backend upgrades.
+   */
+  async stopServices(
+    services: readonly ("teamhub" | "node-services" | "web")[],
+    signal: AbortSignal = this.#abort.signal,
+  ): Promise<void> {
+    if (services.length === 0) return;
+    const record = await this.#readRecord();
+    if (!record) {
+      throw new Error("Cannot stop services: no local Linger installation.");
+    }
+    if (!existsSync(this.#installerScript())) {
+      throw new Error("Cannot stop services: bundled installer.js is missing.");
+    }
+    const [daemonEnv, proxyEnv, node] = await Promise.all([
+      this.#daemonEnv(),
+      this.#systemProxyEnv(),
+      this.#ensureNode(signal),
+    ]);
+    const env = {
+      ...daemonEnv,
+      ...proxyEnv,
+      LINGER_HOME: record.home,
+    };
+    const outcome = await new Promise<{ ok?: boolean; message?: string }>(
+      (resolve, reject) => {
+        const child = spawn(
+          node,
+          [
+            ...linuxNodeFdHygieneArgs(this.#options.platform),
+            this.#installerScript(),
+            "--home",
+            record.home,
+            "--instance",
+            LOCAL_INSTANCE,
+            "--stop-services",
+            services.join(","),
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+            env,
+            signal,
+          },
+        );
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const finish = (code: number | null) => {
+          if (settled) return;
+          settled = true;
+          const lastLine = stdout.trim().split("\n").at(-1) ?? "";
+          try {
+            const parsed = JSON.parse(lastLine) as {
+              ok?: boolean;
+              message?: string;
+            };
+            if (code === 0 && parsed.ok) {
+              resolve(parsed);
+            } else {
+              reject(
+                new Error(
+                  parsed.message ||
+                    stderr.trim().slice(-500) ||
+                    `installer --stop-services exited with code ${code}`,
+                ),
+              );
+            }
+          } catch {
+            reject(
+              new Error(
+                stderr.trim().slice(-500) ||
+                  `installer --stop-services exited with code ${code}`,
+              ),
+            );
+          }
+        };
+        child.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf8");
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr = (stderr + chunk.toString("utf8")).slice(-8_192);
+        });
+        child.once("error", (error) => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        });
+        child.once("close", (code) => finish(code));
+      },
+    );
+    this.#ctx?.log.info("local_server.services_stopped", {
+      services,
+      ok: Boolean(outcome.ok),
+    });
+  }
+
   // The owner account the installer created, read from its private file on
   // every call so the password is never kept in memory.
   async account(): Promise<LocalAccount> {

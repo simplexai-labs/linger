@@ -162,7 +162,8 @@
         "LINGER_SYSTEM_HTTPS_PROXY",
         "LINGER_VOICE_RUNTIME_DIR",
         "SIMPLEX_REGION",
-        "TEAMHUB_VOICE_TOOLS_BIN"
+        "TEAMHUB_VOICE_TOOLS_BIN",
+        "TEAMHUB_WRITE_FENCE_FILE"
       ]
     },
     "voice-workers": {
