@@ -73,7 +73,21 @@ pin that breaks the managed Runtimes cannot land. The
 localmodels kit opens a lock update merge request for each new stable Codex
 or Claude Code at least seven days old; it should merge only after that
 Runtime's canary passes on that version.
-It performs bounded protocol and authentication probes.
+It performs bounded protocol and authentication probes across ordered,
+deduplicated executable candidates (`ConfiguredPaths`, every matching
+executable on `PATH` and standard install directories, desktop app bundles,
+`ManagedPaths`, and `BundledPaths`). An explicit `ConfiguredPaths` override
+with no managed or bundled fallback remains exclusive so discovery does not
+silently switch to `PATH`. When a candidate definitively fails (the version
+command exits with an error, its version is unusable or too old, or the
+protocol handshake fails, as with an incompatible `PATH` shim) and more
+candidates remain, discovery logs a redacted
+`runner.runtime_discovery.candidate_skipped` warning and probes the next
+candidate, preserving the highest-priority failure if all candidates fail. A
+timeout or cancellation reports that candidate instead of falling through,
+so a slow cold start does not pin a lower-priority copy. One deadline, a
+single candidate's worst case (two version attempts plus the protocol and
+catalog phases), bounds the whole walk.
 A protocol probe passes once the Runtime answers the handshake, however the
 process exits after its input closes. When the handshake fails, the daemon log
 records `runner.runtime_probe.handshake_failed` with the exit status and the
@@ -444,8 +458,12 @@ environment (`OverlayEnvironment`) and executable paths
 managed Runtime updates take effect without rewriting `model-source.json`. It
 also drops any stale `byok-home` entry in `local` mode in favor of the managed
 `gateway-home` Pi profile, never falls back to cloud models in `local` mode
-(`agentRuntimeModel`), and under BYOK lists only the BYOK model in each
-Runtime's catalog.
+(`agentRuntimeModel`), verifies that an explicit `local` model switch
+(`local_model_id` set) resolves to the requested library row's `pi_model`
+without falling back to another loaded model (logging redacted
+`model_source.target_mismatch` and refusing with `MODEL_SOURCE_FAILED` on
+mismatch, and logging redacted `model_source.command_succeeded` on successful
+`apply`), and under BYOK lists only the BYOK model in each Runtime's catalog.
 
 Before a Run or model call on a Runtime whose profile is the BYOK source's,
 the Daemon checks the saved loopback gateway's `/health` (`EnsureGateway` in

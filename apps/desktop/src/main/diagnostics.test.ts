@@ -67,6 +67,8 @@ describe("excludedFromDiagnostics", () => {
     "/home/me/.linger/instances/desktop/.env.local",
     "/home/me/.linger/instances/desktop/postgres-password",
     "/home/me/.linger/runtime/localmodels/state/byok.json",
+    "/home/me/.linger/runtime/localmodels/state/byok-credentials.json",
+    "/home/me/.linger/runtime/localmodels/state/library/models/model.key",
     "/home/me/.linger/runtime/localmodels/models/deployments/llm/api-key",
   ])("leaves out %s", (file) => {
     expect(excludedFromDiagnostics(file)).toBe(true);
@@ -76,6 +78,8 @@ describe("excludedFromDiagnostics", () => {
     "C:\\Users\\me\\.linger\\installer\\jobs\\job_1.json",
     "C:\\Users\\me\\AppData\\Roaming\\Linger\\logs\\computer-daemon.log",
     "/home/me/.linger/instances/desktop/instance.json",
+    "/home/me/.linger/runtime/localmodels/state/model-source.json",
+    "/home/me/.linger/runtime/localmodels/state/library/models/qwen-4b.json",
   ])("keeps %s", (file) => {
     expect(excludedFromDiagnostics(file)).toBe(false);
   });
@@ -306,6 +310,55 @@ describe("collectDiagnostics", () => {
       JSON.stringify({ api_key: "byok-secret-never-bundle" }),
     );
     write(
+      path.join(localmodels, "state", "byok-credentials.json"),
+      JSON.stringify({ api_key: "byok-cred-never-bundle" }),
+    );
+    write(
+      path.join(localmodels, "state", "model-source.json"),
+      JSON.stringify({
+        schema: "localmodels.model-source/v1",
+        mode: "local",
+        runtime: "pi",
+        runtime_model: "localmodels-library/qwen-llm",
+        environment: {
+          PI_CODING_AGENT_DIR: path.join(
+            localmodels,
+            "tools",
+            "gateway-home",
+            ".pi",
+            "agent",
+          ),
+        },
+        authorization: "Bearer model-source-bearer-secret",
+        api_key: "model-source-inline-secret",
+      }),
+    );
+    write(
+      path.join(localmodels, "state", "library", "models", "qwen-llm.json"),
+      JSON.stringify({
+        id: "qwen-llm:Q4_K_M",
+        state: "loaded",
+        pi_model: "localmodels-library/qwen-llm",
+        deploy_dir: path.join(localmodels, "models", "deployments", "qwen-llm"),
+        token: "library-model-secret-token",
+        note: "using deployment-raw-key and Bearer library-bearer-secret",
+      }),
+    );
+    write(
+      path.join(localmodels, "state", "library", "models", "leak.key"),
+      "library-key-never-bundle",
+    );
+    write(
+      path.join(
+        localmodels,
+        "state",
+        "library",
+        "models",
+        "byok-credentials.json",
+      ),
+      JSON.stringify({ api_key: "nested-cred-never-bundle" }),
+    );
+    write(
       path.join(localmodels, "state", "deployments", "local", "qwen-llm.json"),
       JSON.stringify({
         ok: false,
@@ -350,6 +403,10 @@ describe("collectDiagnostics", () => {
         outside,
         path.join(localmodels, "state", "stacks", "symlinked.run.json"),
       );
+      symlinkSync(
+        outside,
+        path.join(localmodels, "state", "library", "models", "symlinked.json"),
+      );
       mkdirSync(path.join(localmodels, "models", "deployments", "sym-llm"), {
         recursive: true,
       });
@@ -376,6 +433,8 @@ describe("collectDiagnostics", () => {
     expect([...entries.keys()].sort()).toEqual([
       "linger-home/runtime/localmodels/models/deployments/qwen-llm/server.log",
       "linger-home/runtime/localmodels/state/deployments/local/qwen-llm.json",
+      "linger-home/runtime/localmodels/state/library/models/qwen-llm.json",
+      "linger-home/runtime/localmodels/state/model-source.json",
       "linger-home/runtime/localmodels/state/stacks/abcdef123456.progress",
       "linger-home/runtime/localmodels/state/stacks/abcdef123456.run.json",
       "summary.json",
@@ -385,9 +444,28 @@ describe("collectDiagnostics", () => {
     expect(joined).not.toContain("lm-secret-token");
     expect(joined).not.toContain("lm-inline-secret");
     expect(joined).not.toContain("byok-secret-never-bundle");
+    expect(joined).not.toContain("byok-cred-never-bundle");
+    expect(joined).not.toContain("nested-cred-never-bundle");
+    expect(joined).not.toContain("library-key-never-bundle");
+    expect(joined).not.toContain("model-source-bearer-secret");
+    expect(joined).not.toContain("model-source-inline-secret");
+    expect(joined).not.toContain("library-model-secret-token");
+    expect(joined).not.toContain("library-bearer-secret");
     expect(joined).not.toContain("step-secret-999");
     expect(joined).not.toContain("server-log-secret");
     expect(joined).not.toContain("deployment-raw-key");
+    const bundledSource = entries.get(
+      "linger-home/runtime/localmodels/state/model-source.json",
+    )!;
+    expect(bundledSource).toContain(
+      '"runtime_model":"localmodels-library/qwen-llm"',
+    );
+    expect(bundledSource).toContain("~");
+    const bundledLibraryModel = entries.get(
+      "linger-home/runtime/localmodels/state/library/models/qwen-llm.json",
+    )!;
+    expect(bundledLibraryModel).toContain('"state":"loaded"');
+    expect(bundledLibraryModel).toContain("~");
     expect(
       entries.get(
         "linger-home/runtime/localmodels/models/deployments/qwen-llm/server.log",
@@ -445,6 +523,58 @@ describe("collectDiagnostics", () => {
     expect(newest).toContain("final-failure-line");
     expect(Buffer.byteLength(newest, "utf8")).toBeLessThanOrEqual(
       MAX_LOCALMODELS_BYTES + 128,
+    );
+  });
+
+  it("caps localmodels library model records by count and skips symlinked model-source.json", async () => {
+    const root = tempDirectory();
+    const home = path.join(root, "home");
+    const output = path.join(root, "out");
+    mkdirSync(output);
+    const localmodels = path.join(home, "runtime", "localmodels");
+    const libraryModels = path.join(localmodels, "state", "library", "models");
+    const baseTime = 1_700_000_000;
+    for (let index = 0; index < MAX_LOCALMODELS_FILES + 2; index++) {
+      const target = path.join(libraryModels, `model-${index}.json`);
+      write(target, JSON.stringify({ id: `model-${index}`, state: "loaded" }));
+      const stamp = new Date((baseTime + index * 10) * 1000);
+      utimesSync(target, stamp, stamp);
+    }
+    const outside = path.join(root, "outside-model-source.json");
+    write(outside, JSON.stringify({ secret: "never-read-symlink" }));
+    if (process.platform !== "win32") {
+      symlinkSync(
+        outside,
+        path.join(localmodels, "state", "model-source.json"),
+      );
+    }
+
+    const { file } = await collectDiagnostics({
+      userData: path.join(root, "userData"),
+      homes: [home],
+      output,
+      summary: {},
+    });
+    const entries = unzip(file);
+    const bundledModels = [...entries.keys()]
+      .filter((entry) =>
+        entry.startsWith(
+          "linger-home/runtime/localmodels/state/library/models/",
+        ),
+      )
+      .sort();
+    expect(bundledModels).toHaveLength(MAX_LOCALMODELS_FILES);
+    expect(bundledModels).not.toContain(
+      "linger-home/runtime/localmodels/state/library/models/model-0.json",
+    );
+    expect(bundledModels).not.toContain(
+      "linger-home/runtime/localmodels/state/library/models/model-1.json",
+    );
+    expect(
+      entries.has("linger-home/runtime/localmodels/state/model-source.json"),
+    ).toBe(false);
+    expect([...entries.values()].join("\n")).not.toContain(
+      "never-read-symlink",
     );
   });
 });

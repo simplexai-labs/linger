@@ -3045,6 +3045,53 @@ describe("Model source", () => {
     expect(within(card("Qwen3.8 27B")).getByText("Selected")).toBeVisible();
   });
 
+  it("shows an error banner and keeps the original Selected model when inline Switch fails", async () => {
+    const small = localModel({
+      id: "spark-4b:Q4_K_M",
+      memory_bytes: gb(4),
+      name: "Spark 4B",
+      pi_model: "localmodels-library/spark-4b",
+      pool: "gpu:0",
+      state: "loaded",
+    });
+    const large = localModel({
+      id: "qwen3.8-27b:IQ3_S",
+      memory_bytes: gb(16),
+      name: "Qwen3.8 27B",
+      pi_model: "localmodels-library/qwen3.8-27b",
+      pool: "gpu:0",
+      state: "loaded",
+    });
+    const view = labView({
+      models: [modelView(small), modelView(large)],
+    });
+    const fixture = setup([view]);
+    withSource(fixture, {
+      ...byokStatus,
+      mode: "local",
+      runtime: "pi",
+      runtime_model: "localmodels-library/spark-4b",
+    });
+    fixture.runtime.server.on("POST", switchPath, () =>
+      teamHubErrorResponse(502, "MODEL_SOURCE_FAILED"),
+    );
+    await renderPage(fixture);
+    await findModels();
+
+    expect(within(card("Spark 4B")).getByText("Selected")).toBeVisible();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Switch to Qwen3.8 27B" }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The computer couldn't switch. Try again.");
+    expect(screen.queryByText(/Switched/u)).not.toBeInTheDocument();
+    expect(within(card("Spark 4B")).getByText("Selected")).toBeVisible();
+    expect(
+      within(card("Qwen3.8 27B")).queryByText("Selected"),
+    ).not.toBeInTheDocument();
+  });
+
   it("hides Recheck memory and Switch when read-only or offline while keeping one status notice", async () => {
     const busyView = labView({
       models: [

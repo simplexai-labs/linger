@@ -442,18 +442,14 @@ func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, 
 		}
 		diagnosticEnv := maps.Clone(environment)
 		diagnosticEnv["PATH"] = searchPath
-		entry, err := resolveExecutableEntry(ctx, diagnostic.Type, runtimeDefinitions[definition].Command,
+		candidates := resolveExecutableCandidates(ctx, diagnostic.Type, runtimeDefinitions[definition].Command,
 			DiscoveryOptions{
 				ConfiguredPaths: options.ConfiguredPaths,
 				ManagedPaths:    options.ManagedPaths,
 				BundledPaths:    options.BundledPaths,
 				Environment:     diagnosticEnv,
 			})
-		canonical := ""
-		if err == nil {
-			canonical, err = canonicalExecutable(entry)
-		}
-		if err != nil {
+		if len(candidates) == 0 {
 			// A removed executable turns a Runtime that was too old into one
 			// that is not installed.
 			if diagnostic.Status == "incompatible" {
@@ -461,19 +457,52 @@ func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, 
 			}
 			continue
 		}
-		if diagnostic.Status == "not_installed" || canonical != diagnostic.ExecutablePath {
+		if diagnostic.Status == "not_installed" {
+			changed = append(changed, diagnostic.Type)
+			continue
+		}
+		if len(diagnostic.candidatePaths) > 0 {
+			if candidateSetChanged(candidates, diagnostic.candidatePaths, diagnostic.candidateInfos) {
+				changed = append(changed, diagnostic.Type)
+			}
+			continue
+		}
+		canonical := candidates[0].canonical
+		if canonical != diagnostic.ExecutablePath {
 			changed = append(changed, diagnostic.Type)
 			continue
 		}
 		// An upgrade in place (npm replaces the package, an installer rewrites
 		// the binary) keeps the path but not the file.
 		info, err := os.Stat(canonical)
-		if previous := diagnostic.executable; err == nil && previous != nil &&
-			(!os.SameFile(info, previous) || !info.ModTime().Equal(previous.ModTime()) || info.Size() != previous.Size()) {
+		if previous := diagnostic.executable; err == nil && previous != nil && fileInfoChanged(info, previous) {
 			changed = append(changed, diagnostic.Type)
 		}
 	}
 	return changed
+}
+
+func candidateSetChanged(candidates []executableCandidate, previousPaths []string, previousInfos []os.FileInfo) bool {
+	if len(candidates) != len(previousPaths) {
+		return true
+	}
+	for i, candidate := range candidates {
+		if candidate.canonical != previousPaths[i] {
+			return true
+		}
+		info, err := os.Stat(candidate.canonical)
+		if err != nil {
+			return true
+		}
+		if i < len(previousInfos) && previousInfos[i] != nil && fileInfoChanged(info, previousInfos[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func fileInfoChanged(current, previous os.FileInfo) bool {
+	return !os.SameFile(current, previous) || !current.ModTime().Equal(previous.ModTime()) || current.Size() != previous.Size()
 }
 
 // withRuntimeDiagnostics replaces the diagnostics of types with those found.

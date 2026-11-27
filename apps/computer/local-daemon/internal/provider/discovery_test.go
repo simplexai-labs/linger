@@ -1,12 +1,15 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -72,25 +75,25 @@ func TestDiscoverFindsCLIsInsideMacApplicationBundles(t *testing.T) {
 	t.Run("Codex.app and ChatGPT.app", func(t *testing.T) {
 		sysRoot := t.TempDir()
 		home := t.TempDir()
-		if got := resolveMacApplicationBundleIn("codex", sysRoot, home); got != "" {
+		if got := resolveMacApplicationBundleCandidatesIn("codex", sysRoot, home); len(got) != 0 {
 			t.Fatalf("unexpected codex without bundle: %q", got)
 		}
 		chatgptCodex := filepath.Join(sysRoot, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
 		writeExe(chatgptCodex)
-		if got := resolveMacApplicationBundleIn("codex", sysRoot, home); got != chatgptCodex {
-			t.Fatalf("chatgpt codex = %q; want %q", got, chatgptCodex)
+		if got, want := resolveMacApplicationBundleCandidatesIn("codex", sysRoot, home), []string{chatgptCodex}; !slices.Equal(got, want) {
+			t.Fatalf("chatgpt codex = %q; want %q", got, want)
 		}
 		codexApp := filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex")
 		writeExe(codexApp)
-		if got := resolveMacApplicationBundleIn("codex", sysRoot, home); got != codexApp {
-			t.Fatalf("Codex.app should take precedence over ChatGPT.app: got %q; want %q", got, codexApp)
+		if got, want := resolveMacApplicationBundleCandidatesIn("codex", sysRoot, home), []string{codexApp, chatgptCodex}; !slices.Equal(got, want) {
+			t.Fatalf("Codex.app should take precedence over ChatGPT.app: got %q; want %q", got, want)
 		}
 	})
 
 	t.Run("Claude.app and Claude Desktop managed claude-code", func(t *testing.T) {
 		sysRoot := t.TempDir()
 		home := t.TempDir()
-		if got := resolveMacApplicationBundleIn("claude", sysRoot, home); got != "" {
+		if got := resolveMacApplicationBundleCandidatesIn("claude", sysRoot, home); len(got) != 0 {
 			t.Fatalf("unexpected claude without bundle: %q", got)
 		}
 		older := filepath.Join(home, "Library", "Application Support", "Claude", "claude-code", "2.1.99", "aaa", "claude.app", "Contents", "MacOS", "claude")
@@ -100,13 +103,13 @@ func TestDiscoverFindsCLIsInsideMacApplicationBundles(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(newer)))), ".verified"), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if got := resolveMacApplicationBundleIn("claude", sysRoot, home); got != newer {
-			t.Fatalf("claude desktop managed = %q; want %q", got, newer)
+		if got, want := resolveMacApplicationBundleCandidatesIn("claude", sysRoot, home), []string{newer, older}; !slices.Equal(got, want) {
+			t.Fatalf("claude desktop managed = %q; want %q", got, want)
 		}
 		claudeApp := filepath.Join(home, "Applications", "Claude.app", "Contents", "Resources", "claude")
 		writeExe(claudeApp)
-		if got := resolveMacApplicationBundleIn("claude", sysRoot, home); got != claudeApp {
-			t.Fatalf("Claude.app = %q; want %q", got, claudeApp)
+		if got, want := resolveMacApplicationBundleCandidatesIn("claude", sysRoot, home), []string{claudeApp, newer, older}; !slices.Equal(got, want) {
+			t.Fatalf("Claude.app = %q; want %q", got, want)
 		}
 	})
 }
@@ -126,10 +129,10 @@ func TestResolveWindowsDesktopCLIFindsNewestClaudeCode(t *testing.T) {
 	newer := filepath.Join(appData, "Claude", "claude-code", "2.1.309", "claude.exe")
 	writeExe(older)
 	writeExe(newer)
-	if got := resolveWindowsDesktopCLI("claude", appData); got != newer {
-		t.Fatalf("windows claude desktop = %q; want %q", got, newer)
+	if got, want := resolveWindowsDesktopCLICandidates("claude", appData), []string{newer, older}; !slices.Equal(got, want) {
+		t.Fatalf("windows claude desktop = %q; want %q", got, want)
 	}
-	if got := resolveWindowsDesktopCLI("codex", appData); got != "" {
+	if got := resolveWindowsDesktopCLICandidates("codex", appData); len(got) != 0 {
 		t.Fatalf("unexpected codex match: %q", got)
 	}
 }
@@ -661,7 +664,17 @@ esac
 	}
 }
 
-func TestResolveExecutableEntryBundledPathsPrecedenceAndFallback(t *testing.T) {
+// firstCandidateEntry is the entry discovery probes first, or "" when none.
+func firstCandidateEntry(t *testing.T, kind, name string, options DiscoveryOptions) string {
+	t.Helper()
+	candidates := resolveExecutableCandidates(t.Context(), kind, name, options)
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0].entry
+}
+
+func TestResolveExecutableCandidatesBundledPathsPrecedenceAndFallback(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses POSIX executable permissions")
 	}
@@ -685,50 +698,58 @@ func TestResolveExecutableEntryBundledPathsPrecedenceAndFallback(t *testing.T) {
 	}
 
 	// User PATH beats BundledPaths.
-	got, err := resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got := firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		BundledPaths: map[string]string{"pi": bundledPi},
 		Environment:  map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != userPi {
-		t.Fatalf("user PATH vs bundled: got %q, %v; want %q", got, err, userPi)
+	if got != userPi {
+		t.Fatalf("user PATH vs bundled: got %q; want %q", got, userPi)
 	}
 
 	// BundledPaths is used when PATH has no pi.
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		BundledPaths: map[string]string{"pi": bundledPi},
 		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != bundledPi {
-		t.Fatalf("empty PATH fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	if got != bundledPi {
+		t.Fatalf("empty PATH fallback to bundled: got %q; want %q", got, bundledPi)
+	}
+
+	// Valid ConfiguredPaths without managed or bundled paths is exclusive.
+	if all := resolveExecutableCandidates(t.Context(), "pi", "pi", DiscoveryOptions{
+		ConfiguredPaths: map[string]string{"pi": configuredPi},
+		Environment:     map[string]string{"PATH": userBin, "HOME": home},
+	}); len(all) != 1 || all[0].entry != configuredPi || all[0].source != "configured" {
+		t.Fatalf("exclusive configured path: got %+v; want only %q", all, configuredPi)
 	}
 
 	// Valid ConfiguredPaths beats both PATH and BundledPaths.
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": configuredPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != configuredPi {
-		t.Fatalf("valid configured vs PATH/bundled: got %q, %v; want %q", got, err, configuredPi)
+	if got != configuredPi {
+		t.Fatalf("valid configured vs PATH/bundled: got %q; want %q", got, configuredPi)
 	}
 
 	// Stale ConfiguredPaths["pi"] falls back to PATH first, then BundledPaths.
 	stalePi := filepath.Join(root, "moved-app", "pi")
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": stalePi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != userPi {
-		t.Fatalf("stale configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	if got != userPi {
+		t.Fatalf("stale configured fallback to PATH: got %q; want %q", got, userPi)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": stalePi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != bundledPi {
-		t.Fatalf("stale configured fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	if got != bundledPi {
+		t.Fatalf("stale configured fallback to bundled: got %q; want %q", got, bundledPi)
 	}
 
 	// Dangling symlink in ConfiguredPaths["pi"] also falls back to PATH first, then BundledPaths.
@@ -736,44 +757,41 @@ func TestResolveExecutableEntryBundledPathsPrecedenceAndFallback(t *testing.T) {
 	if err := os.Symlink(stalePi, danglingPi); err != nil {
 		t.Fatal(err)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": danglingPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != userPi {
-		t.Fatalf("dangling symlink configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	if got != userPi {
+		t.Fatalf("dangling symlink configured fallback to PATH: got %q; want %q", got, userPi)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": danglingPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != bundledPi {
-		t.Fatalf("dangling symlink configured fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	if got != bundledPi {
+		t.Fatalf("dangling symlink configured fallback to bundled: got %q; want %q", got, bundledPi)
 	}
 
-	// Missing ConfiguredPaths for a non-bundled runtime keeps its explicit configured path
-	// (so diagnose reports not_installed instead of silently falling back to PATH).
+	// Missing ConfiguredPaths for a non-bundled runtime stays exclusive: no
+	// candidate, so diagnose reports not_installed instead of silently using PATH.
 	staleCodex := filepath.Join(root, "missing-codex")
 	userCodex := filepath.Join(userBin, "codex")
 	if err := os.WriteFile(userCodex, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "codex", "codex", DiscoveryOptions{
+	got = firstCandidateEntry(t, "codex", "codex", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"codex": staleCodex},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != staleCodex {
-		t.Fatalf("non-bundled configured path: got %q, %v; want %q", got, err, staleCodex)
-	}
-	if _, err := canonicalExecutable(got); err == nil {
-		t.Fatalf("missing configured non-bundled path %q unexpectedly canonicalized", got)
+	if got != "" {
+		t.Fatalf("missing non-bundled configured path fell back to %q", got)
 	}
 }
 
-func TestResolveExecutableEntryManagedPathsPrecedenceAndFallback(t *testing.T) {
+func TestResolveExecutableCandidatesManagedPathsPrecedenceAndFallback(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses POSIX executable permissions")
 	}
@@ -798,84 +816,108 @@ func TestResolveExecutableEntryManagedPathsPrecedenceAndFallback(t *testing.T) {
 		}
 	}
 
-	// Valid ConfiguredPaths beats PATH, ManagedPaths, and BundledPaths.
-	got, err := resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	// Valid ConfiguredPaths leads PATH, ManagedPaths, and BundledPaths, which
+	// stay behind it as fallbacks.
+	all := resolveExecutableCandidates(t.Context(), "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": configuredPi},
 		ManagedPaths:    map[string]string{"pi": managedPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != configuredPi {
-		t.Fatalf("configured vs PATH/managed/bundled: got %q, %v; want %q", got, err, configuredPi)
+	var entries, sources []string
+	for _, candidate := range all {
+		entries = append(entries, candidate.entry)
+		sources = append(sources, candidate.source)
+	}
+	if want := []string{configuredPi, userPi, managedPi, bundledPi}; !slices.Equal(entries, want) {
+		t.Fatalf("configured vs PATH/managed/bundled: got %q; want %q", entries, want)
+	}
+	if want := []string{"configured", "path", "managed", "bundled"}; !slices.Equal(sources, want) {
+		t.Fatalf("candidate sources = %q; want %q", sources, want)
+	}
+
+	// The same file reached twice is probed once, at its higher priority.
+	if err := os.Symlink(managedPi, filepath.Join(emptyBin, "pi")); err != nil {
+		t.Fatal(err)
+	}
+	all = resolveExecutableCandidates(t.Context(), "pi", "pi", DiscoveryOptions{
+		ManagedPaths: map[string]string{"pi": managedPi},
+		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
+	})
+	if len(all) != 1 || all[0].entry != filepath.Join(emptyBin, "pi") || all[0].source != "path" {
+		t.Fatalf("duplicate canonical candidates = %+v; want one PATH entry", all)
+	}
+	if err := os.Remove(filepath.Join(emptyBin, "pi")); err != nil {
+		t.Fatal(err)
 	}
 
 	// User PATH beats ManagedPaths and BundledPaths.
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got := firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ManagedPaths: map[string]string{"pi": managedPi},
 		BundledPaths: map[string]string{"pi": bundledPi},
 		Environment:  map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != userPi {
-		t.Fatalf("user PATH vs managed/bundled: got %q, %v; want %q", got, err, userPi)
+	if got != userPi {
+		t.Fatalf("user PATH vs managed/bundled: got %q; want %q", got, userPi)
 	}
 
 	// ManagedPaths beats BundledPaths when user PATH has no pi.
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ManagedPaths: map[string]string{"pi": managedPi},
 		BundledPaths: map[string]string{"pi": bundledPi},
 		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != managedPi {
-		t.Fatalf("managed vs bundled on empty PATH: got %q, %v; want %q", got, err, managedPi)
+	if got != managedPi {
+		t.Fatalf("managed vs bundled on empty PATH: got %q; want %q", got, managedPi)
 	}
 
 	// Stale ManagedPaths falls through to BundledPaths.
 	staleManagedPi := filepath.Join(root, "missing-managed", "pi")
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ManagedPaths: map[string]string{"pi": staleManagedPi},
 		BundledPaths: map[string]string{"pi": bundledPi},
 		Environment:  map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != bundledPi {
-		t.Fatalf("stale managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	if got != bundledPi {
+		t.Fatalf("stale managed fallback to bundled: got %q; want %q", got, bundledPi)
 	}
 
 	// Stale ConfiguredPaths falls back through PATH -> ManagedPaths -> BundledPaths.
 	staleConfiguredPi := filepath.Join(root, "missing-configured", "pi")
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
 		ManagedPaths:    map[string]string{"pi": managedPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": userBin, "HOME": home},
 	})
-	if err != nil || got != userPi {
-		t.Fatalf("stale configured fallback to PATH: got %q, %v; want %q", got, err, userPi)
+	if got != userPi {
+		t.Fatalf("stale configured fallback to PATH: got %q; want %q", got, userPi)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
 		ManagedPaths:    map[string]string{"pi": managedPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != managedPi {
-		t.Fatalf("stale configured fallback to managed: got %q, %v; want %q", got, err, managedPi)
+	if got != managedPi {
+		t.Fatalf("stale configured fallback to managed: got %q; want %q", got, managedPi)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
 		ManagedPaths:    map[string]string{"pi": managedPi},
 		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != managedPi {
-		t.Fatalf("stale configured fallback to managed without bundled: got %q, %v; want %q", got, err, managedPi)
+	if got != managedPi {
+		t.Fatalf("stale configured fallback to managed without bundled: got %q; want %q", got, managedPi)
 	}
-	got, err = resolveExecutableEntry(context.Background(), "pi", "pi", DiscoveryOptions{
+	got = firstCandidateEntry(t, "pi", "pi", DiscoveryOptions{
 		ConfiguredPaths: map[string]string{"pi": staleConfiguredPi},
 		ManagedPaths:    map[string]string{"pi": staleManagedPi},
 		BundledPaths:    map[string]string{"pi": bundledPi},
 		Environment:     map[string]string{"PATH": emptyBin, "HOME": home},
 	})
-	if err != nil || got != bundledPi {
-		t.Fatalf("stale configured and managed fallback to bundled: got %q, %v; want %q", got, err, bundledPi)
+	if got != bundledPi {
+		t.Fatalf("stale configured and managed fallback to bundled: got %q; want %q", got, bundledPi)
 	}
 }
 
@@ -960,4 +1002,258 @@ func TestNormalizeRuntimeModelsCapsReasoningEffortsAt32(t *testing.T) {
 	if ValidRuntimeModel(overLimit) {
 		t.Fatal("ValidRuntimeModel accepted 33 allowed reasoning efforts")
 	}
+}
+
+func writeFakePiScript(t *testing.T, target, version string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "--version" ]; then echo '%s'; exit 0; fi
+if [ "$1" = "auth" ]; then
+  echo '{"status":"ready"}'
+  exit 0
+fi
+if [ "$1" = "--mode" ] && [ "$2" = "rpc" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+    *linger-probe*)
+      echo '{"type":"response","id":"linger-probe","command":"get_state","success":true,"data":{"isStreaming":false,"model":{"provider":"fixture","id":"model"},"thinkingLevel":"high"}}' ;;
+    *linger-models*)
+      echo '{"type":"response","id":"linger-models","command":"get_available_models","success":true,"data":{"models":[{"provider":"fixture","id":"model","name":"Fixture Model","reasoning":true,"contextWindow":128000}]}}' ;;
+    esac
+  done
+  exit 0
+fi
+exit 2
+`, version)
+	if err := os.WriteFile(target, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMiseShimPi(t *testing.T, shimPath, targetPath string) {
+	t.Helper()
+	for _, dir := range []string{filepath.Dir(shimPath), filepath.Dir(targetPath)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "2026.1.0 macos-arm64 (2026-01-01)"
+  exit 0
+fi
+echo "Usage: mise [OPTIONS] [COMMAND]" >&2
+echo "error: unexpected argument '--mode' found" >&2
+exit 2
+`
+	if err := os.WriteFile(targetPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, shimPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDiscoverSkipsIncompatiblePathShimAndFallsBackToBundledPi(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX scripts and symlinks")
+	}
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	root := t.TempDir()
+	home := filepath.Join(root, "users", "person")
+	shimDir := filepath.Join(home, ".local", "share", "mise", "shims")
+	shimPi := filepath.Join(shimDir, "pi")
+	miseTarget := filepath.Join(root, "homebrew", "Cellar", "mise", "2026.1.0", "bin", "mise")
+	writeMiseShimPi(t, shimPi, miseTarget)
+
+	bundledPi := filepath.Join(root, "app", "bundled-pi", "pi")
+	writeFakePiScript(t, bundledPi, "1.5.2")
+
+	result, err := Discover(context.Background(), DiscoveryOptions{
+		Runtimes:     []string{"pi"},
+		BundledPaths: map[string]string{"pi": bundledPi},
+		Environment:  map[string]string{"PATH": shimDir, "HOME": home},
+		Timeout:      5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Diagnostics) != 1 {
+		t.Fatalf("diagnostics len = %d, want 1", len(result.Diagnostics))
+	}
+	got := result.Diagnostics[0]
+	canonicalBundled, err := filepath.EvalSymlinks(bundledPi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "ready" || got.Version != "1.5.2" || got.ExecutablePath != canonicalBundled || got.EntryPath != bundledPi {
+		t.Fatalf("pi diagnostic = %+v, want ready 1.5.2 at %s", got, canonicalBundled)
+	}
+	if inst, ok := result.Installations["pi"]; !ok || inst.ExecutablePath != canonicalBundled {
+		t.Fatalf("Installations[pi] = %+v (ok=%v), want %s", inst, ok, canonicalBundled)
+	}
+	logText := logs.String()
+	for _, want := range []string{
+		`"msg":"runner.runtime_discovery.candidate_skipped"`,
+		`"runtime_type":"pi"`,
+		`"source":"path"`,
+		`"entry":"~/.local/share/mise/shims/pi"`,
+		`"code":"RUNTIME_INCOMPATIBLE"`,
+		`"remaining_candidates":1`,
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("logs missing %s:\n%s", want, logText)
+		}
+	}
+	if strings.Contains(logText, home) {
+		t.Fatalf("candidate_skipped log leaked user home path %q:\n%s", home, logText)
+	}
+}
+
+func TestDiscoverFallsBackAcrossPathAndManagedCandidatesAndPreservesFirstFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX scripts and symlinks")
+	}
+
+	t.Run("broken first PATH entry falls back to second PATH candidate before bundled", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		badDir := filepath.Join(root, "bad-bin")
+		goodDir := filepath.Join(root, "good-bin")
+		for _, dir := range []string{home, badDir} {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(badDir, "pi"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		secondPathPi := filepath.Join(goodDir, "pi")
+		writeFakePiScript(t, secondPathPi, "1.3.0")
+		bundledPi := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, bundledPi, "1.5.2")
+
+		result, err := Discover(context.Background(), DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			BundledPaths: map[string]string{"pi": bundledPi},
+			Environment:  map[string]string{"PATH": badDir + string(os.PathListSeparator) + goodDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalSecond, err := filepath.EvalSymlinks(secondPathPi)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := result.Diagnostics[0]
+		if got.Status != "ready" || got.Version != "1.3.0" || got.ExecutablePath != canonicalSecond {
+			t.Fatalf("pi diagnostic = %+v, want second PATH candidate %s (1.3.0)", got, canonicalSecond)
+		}
+	})
+
+	t.Run("valid PATH candidate still takes precedence over managed and bundled", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		userDir := filepath.Join(root, "user-bin")
+		userPi := filepath.Join(userDir, "pi")
+		writeFakePiScript(t, userPi, "1.3.0")
+		managedPi := filepath.Join(root, "managed", "pi")
+		writeFakePiScript(t, managedPi, "1.6.0")
+		bundledPi := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, bundledPi, "1.5.2")
+
+		result, err := Discover(context.Background(), DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			ManagedPaths: map[string]string{"pi": managedPi},
+			BundledPaths: map[string]string{"pi": bundledPi},
+			Environment:  map[string]string{"PATH": userDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalUser, err := filepath.EvalSymlinks(userPi)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := result.Diagnostics[0]
+		if got.Status != "ready" || got.Version != "1.3.0" || got.ExecutablePath != canonicalUser {
+			t.Fatalf("pi diagnostic = %+v, want user PATH candidate %s", got, canonicalUser)
+		}
+	})
+
+	t.Run("incompatible PATH shim falls back to managed Pi before bundled Pi", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		shimDir := filepath.Join(root, "shims")
+		writeMiseShimPi(t, filepath.Join(shimDir, "pi"), filepath.Join(root, "mise", "bin", "mise"))
+		managedPi := filepath.Join(root, "managed", "pi")
+		writeFakePiScript(t, managedPi, "1.6.0")
+		bundledPi := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, bundledPi, "1.5.2")
+
+		result, err := Discover(context.Background(), DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			ManagedPaths: map[string]string{"pi": managedPi},
+			BundledPaths: map[string]string{"pi": bundledPi},
+			Environment:  map[string]string{"PATH": shimDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalManaged, err := filepath.EvalSymlinks(managedPi)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := result.Diagnostics[0]
+		if got.Status != "ready" || got.Version != "1.6.0" || got.ExecutablePath != canonicalManaged {
+			t.Fatalf("pi diagnostic = %+v, want managed candidate %s", got, canonicalManaged)
+		}
+	})
+
+	t.Run("all incompatible candidates preserve highest-priority failure diagnostic", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		shimDir := filepath.Join(root, "shims")
+		miseTarget := filepath.Join(root, "mise", "bin", "mise")
+		writeMiseShimPi(t, filepath.Join(shimDir, "pi"), miseTarget)
+		oldBundled := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, oldBundled, "0.5.0")
+
+		result, err := Discover(context.Background(), DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			BundledPaths: map[string]string{"pi": oldBundled},
+			Environment:  map[string]string{"PATH": shimDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalMise, err := filepath.EvalSymlinks(miseTarget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := result.Diagnostics[0]
+		if got.Status != "incompatible" || got.Error == nil || got.Error.Code != "RUNTIME_INCOMPATIBLE" || got.ExecutablePath != canonicalMise {
+			t.Fatalf("pi diagnostic = %+v, want highest-priority incompatible %s", got, canonicalMise)
+		}
+	})
 }

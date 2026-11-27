@@ -474,10 +474,11 @@ func run(args []string) (resultErr error) {
 		)
 	}
 	modelSource := localmodels.NewModelSource(localmodels.ModelSourceOptions{
-		Tool:         localModelsTool,
-		Environment:  baseProviderEnvironment,
-		JobDirectory: jobDir,
-		NodePath:     nodePath,
+		Tool:            localModelsTool,
+		Environment:     baseProviderEnvironment,
+		JobDirectory:    jobDir,
+		NodePath:        nodePath,
+		LibrarySnapshot: localModels.Snapshot,
 		OnApplied: func(applyCtx context.Context) map[string][]localmodels.RuntimeModelOption {
 			localModels.Refresh(applyCtx)
 			var catalogs map[string][]localmodels.RuntimeModelOption

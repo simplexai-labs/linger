@@ -41,6 +41,11 @@ type RuntimeDiagnostic struct {
 	// without a full discovery (changedInstallations).
 	searchPath string
 	executable os.FileInfo
+	// candidatePaths and candidateInfos record every canonical candidate
+	// considered during discovery so changedInstallations notices when a new
+	// fallback appears behind an incompatible higher-priority executable.
+	candidatePaths []string
+	candidateInfos []os.FileInfo
 }
 
 type RuntimeModel struct {
@@ -208,41 +213,118 @@ func discoverResolved(ctx context.Context, options DiscoveryOptions) DiscoveryRe
 	return DiscoveryResult{Diagnostics: observations, Installations: InstallationsFromDiagnostics(observations)}
 }
 
+type executableCandidate struct {
+	entry     string
+	canonical string
+	source    string
+}
+
 func diagnose(ctx context.Context, kind, executable, protocol string, options DiscoveryOptions, budget time.Duration) RuntimeDiagnostic {
-	observation := RuntimeDiagnostic{Type: kind, Protocol: protocol, CheckedAt: time.Now().UTC(), Models: []RuntimeModel{}}
+	base := RuntimeDiagnostic{
+		Type:       kind,
+		Protocol:   protocol,
+		CheckedAt:  time.Now().UTC(),
+		Models:     []RuntimeModel{},
+		searchPath: options.Environment["PATH"],
+	}
+	candidates := resolveExecutableCandidates(ctx, kind, executable, options)
+	if len(candidates) == 0 {
+		base.Status = "not_installed"
+		base.Error = &DiagnosticError{Code: "RUNTIME_NOT_INSTALLED", Message: "Runtime executable not found"}
+		return base
+	}
+	candidatePaths := make([]string, len(candidates))
+	candidateInfos := make([]os.FileInfo, len(candidates))
+	for i, candidate := range candidates {
+		candidatePaths[i] = candidate.canonical
+		candidateInfos[i], _ = os.Stat(candidate.canonical)
+	}
+	// One deadline bounds the whole walk at a single candidate's worst case, so
+	// a host with several slow candidates cannot multiply startup discovery;
+	// lower-priority fallbacks spend only what earlier candidates left.
+	walk, cancel := context.WithTimeout(ctx, candidateWalkStages*budget)
+	defer cancel()
+	var firstFailure *RuntimeDiagnostic
+	for index, candidate := range candidates {
+		attempt, definitive := diagnoseCandidate(walk, kind, protocol, candidate, options, budget)
+		attempt.searchPath = base.searchPath
+		attempt.candidatePaths = candidatePaths
+		attempt.candidateInfos = candidateInfos
+		if attempt.Status == "ready" || attempt.Status == "authentication_required" {
+			return attempt
+		}
+		if firstFailure == nil {
+			copyFailure := attempt
+			firstFailure = &copyFailure
+		}
+		// A timeout says nothing about the candidate itself; moving on would
+		// pin a lower-priority copy until a candidate file changes. A walk
+		// cut short reports the highest-priority failure instead.
+		if !definitive && walk.Err() == nil {
+			return attempt
+		}
+		if walk.Err() != nil || index+1 >= len(candidates) {
+			break
+		}
+		code, reason := "", ""
+		if attempt.Error != nil {
+			code = attempt.Error.Code
+			reason = redact.Text(attempt.Error.Message)
+		}
+		slog.Warn("runner.runtime_discovery.candidate_skipped",
+			"runtime_type", kind,
+			"source", candidate.source,
+			"entry", redactCandidatePath(candidate.entry, options.Environment),
+			"executable", redactCandidatePath(candidate.canonical, options.Environment),
+			"status", attempt.Status,
+			"code", code,
+			"reason", reason,
+			"remaining_candidates", len(candidates)-index-1,
+		)
+	}
+	return *firstFailure
+}
+
+// candidateWalkStages is one candidate's worst case in stage budgets: two
+// version attempts, the protocol phase, and the catalog phase.
+const candidateWalkStages = 4
+
+// diagnoseCandidate probes one executable. definitive reports a failure that
+// rules this candidate out (execution error, unusable or too-old version,
+// failed handshake), the only failures that let discovery try the next one.
+func diagnoseCandidate(ctx context.Context, kind, protocol string, candidate executableCandidate, options DiscoveryOptions, budget time.Duration) (_ RuntimeDiagnostic, definitive bool) {
+	observation := RuntimeDiagnostic{
+		Type:           kind,
+		Protocol:       protocol,
+		CheckedAt:      time.Now().UTC(),
+		Models:         []RuntimeModel{},
+		EntryPath:      candidate.entry,
+		ExecutablePath: candidate.canonical,
+		ExecutionPath:  options.Environment["PATH"],
+	}
+	observation.executable, _ = os.Stat(candidate.canonical)
 	reject := func(status, code, message string) RuntimeDiagnostic {
 		observation.Status = status
 		observation.Error = &DiagnosticError{Code: code, Message: message}
 		return observation
 	}
-	observation.searchPath = options.Environment["PATH"]
-	entry, err := resolveExecutableEntry(ctx, kind, executable, options)
-	if err != nil {
-		return reject("not_installed", "RUNTIME_NOT_INSTALLED", "Runtime executable not found")
-	}
-	canonical, err := canonicalExecutable(entry)
-	if err != nil {
-		return reject("not_installed", "RUNTIME_NOT_INSTALLED", "Runtime executable not found")
-	}
-	observation.EntryPath, observation.ExecutablePath = entry, canonical
-	observation.executable, _ = os.Stat(canonical)
-	observation.ExecutionPath = options.Environment["PATH"]
 	versionEnv := options.Environment
 	if kind == "claude" {
 		versionEnv = native.ClaudeEnvironment(options.Environment)
 	}
-	command := native.NewInvocation(canonical, nil).WithEnvironment(versionEnv)
+	command := native.NewInvocation(candidate.canonical, nil).WithEnvironment(versionEnv)
 	version, err := discoverRuntimeVersion(ctx, command, budget)
 	if err != nil {
-		return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Runtime version probe failed")
+		interrupted := ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+		return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Runtime version probe failed"), !interrupted
 	}
 	observation.Version = version
 	if err := native.RequireVersion(kind, version); err != nil {
 		var old *native.VersionTooOldError
 		if errors.As(err, &old) {
-			return reject("incompatible", "RUNTIME_INCOMPATIBLE", err.Error())
+			return reject("incompatible", "RUNTIME_INCOMPATIBLE", err.Error()), true
 		}
-		return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Runtime version could not be verified")
+		return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Runtime version could not be verified"), true
 	}
 	// A cold --version process may exhaust its attempt under startup load.
 	// Protocol/authentication still receive their own bounded phase afterward.
@@ -254,12 +336,12 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 		// instead of fetching it on every refresh.
 		prepared, release, err := localworkspace.CodexProbeEnvironment(probe, environment, version, codexProbeModelsCache(options.RuntimeHomeRoot), options.TempBase)
 		if err != nil {
-			return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Codex diagnostic home could not be prepared")
+			return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Codex diagnostic home could not be prepared"), false
 		}
 		defer release()
 		environment = prepared
 	}
-	outcome := probeRuntime(probe, kind, canonical, environment, budget, probeOptions{
+	outcome := probeRuntime(probe, kind, candidate.canonical, environment, budget, probeOptions{
 		runtimeHomeRoot: options.RuntimeHomeRoot,
 		tempBase:        options.TempBase,
 	})
@@ -274,7 +356,7 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 	catalogAllowed := !options.SkipModelCatalog && (outcome.Status == "ready" || ((kind == "codex" || kind == "pi") && outcome.Status == "authentication_required"))
 	if catalogAllowed {
 		catalogCtx, stop := context.WithTimeout(ctx, budget)
-		observation.Models, observation.ModelCatalogError = probedRuntimeModels(catalogCtx, kind, canonical, environment, outcome, options.TempBase)
+		observation.Models, observation.ModelCatalogError = probedRuntimeModels(catalogCtx, kind, candidate.canonical, environment, outcome, options.TempBase)
 		if observation.ModelCatalogError == "" {
 			getModelLink := newGetModelLink(catalogCtx, kind, environment)
 			for i := range observation.Models {
@@ -286,11 +368,39 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 		if observation.ModelCatalogError != "" {
 			observation.Models = []RuntimeModel{}
 			observation.authProbeFailed = false
-			return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", observation.ModelCatalogError)
+			return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", observation.ModelCatalogError), false
 		}
 	}
 
-	return observation
+	return observation, !outcome.protocolVerified && outcome.Status == "incompatible"
+}
+
+func redactCandidatePath(path string, environment map[string]string) string {
+	cleaned := redact.Text(strings.TrimSpace(path))
+	if cleaned == "" {
+		return ""
+	}
+	env := platformEnvironment(environment)
+	home := strings.TrimRight(env["HOME"], `/\`)
+	if home == "" {
+		if userHome, err := os.UserHomeDir(); err == nil {
+			home = strings.TrimRight(userHome, `/\`)
+		}
+	}
+	if home != "" && len(strings.FieldsFunc(home, func(r rune) bool { return r == '/' || r == '\\' })) >= 2 {
+		matched := false
+		if runtime.GOOS == "windows" {
+			if len(cleaned) >= len(home) && strings.EqualFold(cleaned[:len(home)], home) {
+				matched = len(cleaned) == len(home) || cleaned[len(home)] == '\\' || cleaned[len(home)] == '/'
+			}
+		} else if strings.HasPrefix(cleaned, home) {
+			matched = len(cleaned) == len(home) || cleaned[len(home)] == '/'
+		}
+		if matched {
+			cleaned = "~" + cleaned[len(home):]
+		}
+	}
+	return cleaned
 }
 
 // discoverRuntimeVersion retries a timed-out cold start once, after ProbeVersion
@@ -511,55 +621,74 @@ func boundedModelCatalogError(err error) string {
 	return truncateRunes(redact.Text(strings.TrimSpace(err.Error())), 240)
 }
 
-func resolveExecutableEntry(ctx context.Context, kind, name string, options DiscoveryOptions) (string, error) {
-	if selected := options.ConfiguredPaths[kind]; selected != "" {
-		if options.ManagedPaths[kind] == "" && options.BundledPaths[kind] == "" {
-			return selected, nil
+func candidateKey(canonical string) string {
+	cleaned := filepath.Clean(canonical)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(cleaned)
+	}
+	return cleaned
+}
+
+func resolveExecutableCandidates(_ context.Context, kind, name string, options DiscoveryOptions) []executableCandidate {
+	seen := make(map[string]struct{})
+	var candidates []executableCandidate
+	add := func(entry, source string) {
+		if entry == "" {
+			return
 		}
-		if _, err := canonicalExecutable(selected); err == nil {
-			return selected, nil
+		canonical, err := canonicalExecutable(entry)
+		if err != nil {
+			return
+		}
+		key := candidateKey(canonical)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		candidates = append(candidates, executableCandidate{
+			entry:     entry,
+			canonical: canonical,
+			source:    source,
+		})
+	}
+	if selected := options.ConfiguredPaths[kind]; selected != "" {
+		add(selected, "configured")
+		if options.ManagedPaths[kind] == "" && options.BundledPaths[kind] == "" {
+			// An explicit configured path without managed or bundled fallbacks
+			// stays exclusive so discovery does not silently switch to PATH.
+			return candidates
 		}
 	}
 	env := platformEnvironment(options.Environment)
-	path := env["PATH"]
-	if path == "" {
-		path = os.Getenv("PATH")
+	pathValue := env["PATH"]
+	if pathValue == "" {
+		pathValue = os.Getenv("PATH")
 	}
-	for _, candidate := range executableCandidates(name, path, env) {
-		if _, err := canonicalExecutable(candidate); err == nil {
-			return candidate, nil
-		}
+	for _, candidate := range executableCandidates(name, pathValue, env) {
+		add(candidate, "path")
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		if candidate := resolveMacApplicationBundle(kind, env["HOME"]); candidate != "" {
-			return candidate, nil
+		for _, candidate := range resolveMacApplicationBundleCandidates(kind, env["HOME"]) {
+			add(candidate, "app_bundle")
 		}
 	case "windows":
-		if candidate := resolveWindowsDesktopCLI(kind, env["APPDATA"]); candidate != "" {
-			return candidate, nil
+		for _, candidate := range resolveWindowsDesktopCLICandidates(kind, env["APPDATA"]) {
+			add(candidate, "app_bundle")
 		}
 	}
-	if managed := options.ManagedPaths[kind]; managed != "" {
-		if _, err := canonicalExecutable(managed); err == nil {
-			return managed, nil
-		}
-	}
-	if bundled := options.BundledPaths[kind]; bundled != "" {
-		if _, err := canonicalExecutable(bundled); err == nil {
-			return bundled, nil
-		}
-	}
-	return "", os.ErrNotExist
+	add(options.ManagedPaths[kind], "managed")
+	add(options.BundledPaths[kind], "bundled")
+	return candidates
 }
 
 // Windows Claude Desktop stores versioned Claude Code binaries under
 // %APPDATA%\Claude\claude-code\<version>\claude.exe (or nested under a hash dir).
-func resolveWindowsDesktopCLI(kind, appData string) string {
+func resolveWindowsDesktopCLICandidates(kind, appData string) []string {
 	if kind != "claude" || strings.TrimSpace(appData) == "" {
-		return ""
+		return nil
 	}
-	return resolveClaudeDesktopManagedCLIAt(filepath.Join(appData, "Claude", "claude-code"), "claude.exe")
+	return resolveClaudeDesktopManagedCLICandidatesAt(filepath.Join(appData, "Claude", "claude-code"), "claude.exe")
 }
 
 // macOS desktop apps ship their CLI inside the app bundle or Application Support,
@@ -577,11 +706,12 @@ var macApplicationRelativePaths = map[string][][]string{
 
 var macApplicationSystemRoot = "/"
 
-func resolveMacApplicationBundle(kind, home string) string {
-	return resolveMacApplicationBundleIn(kind, macApplicationSystemRoot, home)
+func resolveMacApplicationBundleCandidates(kind, home string) []string {
+	return resolveMacApplicationBundleCandidatesIn(kind, macApplicationSystemRoot, home)
 }
 
-func resolveMacApplicationBundleIn(kind, systemRoot, home string) string {
+func resolveMacApplicationBundleCandidatesIn(kind, systemRoot, home string) []string {
+	var found []string
 	if paths := macApplicationRelativePaths[kind]; len(paths) > 0 {
 		parents := []string{systemRoot}
 		if strings.TrimSpace(home) != "" {
@@ -591,34 +721,28 @@ func resolveMacApplicationBundleIn(kind, systemRoot, home string) string {
 			for _, parent := range parents {
 				candidate := filepath.Join(append([]string{parent}, parts...)...)
 				if _, err := canonicalExecutable(candidate); err == nil {
-					return candidate
+					found = append(found, candidate)
 				}
 			}
 		}
 	}
 	if kind == "claude" && strings.TrimSpace(home) != "" {
-		if candidate := resolveClaudeDesktopManagedCLI(home); candidate != "" {
-			return candidate
-		}
+		found = append(found, resolveClaudeDesktopManagedCLICandidatesAt(
+			filepath.Join(home, "Library", "Application Support", "Claude", "claude-code"),
+			"claude",
+		)...)
 	}
-	return ""
+	return found
 }
 
 // Claude Desktop downloads versioned Claude Code bundles into
 // ~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app/Contents/MacOS/claude
 // (or <version>/claude on earlier releases, and %APPDATA%\Claude\claude-code\<version>\claude.exe
 // on Windows). Pick the highest semver first.
-func resolveClaudeDesktopManagedCLI(home string) string {
-	return resolveClaudeDesktopManagedCLIAt(
-		filepath.Join(home, "Library", "Application Support", "Claude", "claude-code"),
-		"claude",
-	)
-}
-
-func resolveClaudeDesktopManagedCLIAt(root, binaryName string) string {
+func resolveClaudeDesktopManagedCLICandidatesAt(root, binaryName string) []string {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return ""
+		return nil
 	}
 	versions := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -629,18 +753,19 @@ func resolveClaudeDesktopManagedCLIAt(root, binaryName string) string {
 	slices.SortFunc(versions, func(a, b string) int {
 		return compareNumericVersions(b, a)
 	})
+	var found []string
 	for _, version := range versions {
 		versionDir := filepath.Join(root, version)
 		direct := filepath.Join(versionDir, binaryName)
 		if _, err := canonicalExecutable(direct); err == nil {
-			return direct
+			found = append(found, direct)
 		}
 		children, err := os.ReadDir(versionDir)
 		if err != nil {
 			continue
 		}
 		// Prefer verified sub-bundles when more than one hash folder exists.
-		var fallback string
+		var verified, unverified []string
 		for _, child := range children {
 			if !child.IsDir() {
 				continue
@@ -655,18 +780,16 @@ func resolveClaudeDesktopManagedCLIAt(root, binaryName string) string {
 					continue
 				}
 				if _, err := os.Stat(filepath.Join(hashDir, ".verified")); err == nil {
-					return candidate
-				}
-				if fallback == "" {
-					fallback = candidate
+					verified = append(verified, candidate)
+				} else {
+					unverified = append(unverified, candidate)
 				}
 			}
 		}
-		if fallback != "" {
-			return fallback
-		}
+		found = append(found, verified...)
+		found = append(found, unverified...)
 	}
-	return ""
+	return found
 }
 
 func compareNumericVersions(a, b string) int {

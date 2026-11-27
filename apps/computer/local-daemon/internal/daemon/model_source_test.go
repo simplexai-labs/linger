@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 type fakeModelSourceManager struct {
 	deadline    time.Time
 	lastApply   localmodels.ModelSourceApply
+	applyStatus *wire.ModelSourceStatus
 	applyErr    error
 	calls       int
 	gatewayMode string
@@ -53,6 +57,9 @@ func (f *fakeModelSourceManager) Apply(ctx context.Context, apply localmodels.Mo
 	f.lastApply = apply
 	if f.applyErr != nil {
 		return wire.ModelSourceStatus{}, f.applyErr
+	}
+	if f.applyStatus != nil {
+		return *f.applyStatus, nil
 	}
 	return wire.ModelSourceStatus{
 		Mode:         apply.Mode,
@@ -323,5 +330,84 @@ func TestHandleModelSourceCommandForwardsByokGatewayFailure(t *testing.T) {
 	}
 	if failed.Error.Code != "BYOK_GATEWAY_FAILED" || failed.Error.Message != gatewayDetail || failed.Error.Retryable {
 		t.Fatalf("unexpected failed payload: %+v", failed.Error)
+	}
+}
+
+func TestHandleModelSourceCommandLogsApplySuccessAndForwardsTargetMismatch(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	manager := &fakeModelSourceManager{
+		applyStatus: &wire.ModelSourceStatus{
+			Mode:         "local",
+			Runtime:      "pi",
+			RuntimeModel: "localmodels-library/zeta-27b",
+		},
+	}
+	d := &Daemon{
+		computerID:      "comp-1",
+		protocolVersion: protocol.Version,
+		modelSource:     manager,
+		owners:          []ComputerOwner{{TenantID: "tenant-1", OwnerActorID: "owner-1"}},
+	}
+	stream := &browserEventStream{}
+	expires := time.Now().Add(time.Minute).UTC().Truncate(time.Millisecond)
+	applyCmd, _ := json.Marshal(wire.CapabilityModelSource{
+		ProtocolVersion: protocol.Version,
+		CommandID:       "cmd-apply-local",
+		RunnerID:        "comp-1",
+		TenantID:        "tenant-1",
+		OwnerActorID:    "owner-1",
+		ConnectionEpoch: 1,
+		ExpiresAt:       expires.Format(time.RFC3339Nano),
+		Type:            wire.TypeExecute,
+		Kind:            wire.KindModelSource,
+		Action:          "apply",
+		Mode:            "local",
+		LocalModelID:    "zeta-27b:IQ3_S",
+	})
+	if err := d.handleModelSourceCommand(t.Context(), stream, protocol.Command{
+		Type: protocol.CommandCapabilityModelSource, CommandID: "cmd-apply-local", RunnerID: "comp-1", ConnectionEpoch: 1, Payload: applyCmd,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.events) != 1 || stream.events[0].Type != protocol.EventCapabilityModelSourceSucceeded {
+		t.Fatalf("expected succeeded event, got %+v", stream.events)
+	}
+	logText := logs.String()
+	for _, want := range []string{
+		`"msg":"model_source.command_succeeded"`,
+		`"action":"apply"`,
+		`"mode":"local"`,
+		`"runtime":"pi"`,
+		`"requested_model":"zeta-27b:IQ3_S"`,
+		`"resolved_model":"localmodels-library/zeta-27b"`,
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("apply log missing %s:\n%s", want, logText)
+		}
+	}
+
+	manager.applyErr = &localmodels.ModelSourceError{
+		Code:      "MODEL_SOURCE_FAILED",
+		Message:   "The Computer could not switch to the requested local model.",
+		Retryable: true,
+	}
+	if err := d.handleModelSourceCommand(t.Context(), stream, protocol.Command{
+		Type: protocol.CommandCapabilityModelSource, CommandID: "cmd-apply-mismatch", RunnerID: "comp-1", ConnectionEpoch: 1, Payload: applyCmd,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.events) != 2 || stream.events[1].Type != protocol.EventCapabilityModelSourceFailed {
+		t.Fatalf("expected failed event on mismatch, got %+v", stream.events)
+	}
+	var failed wire.CapabilityModelSourceFailed
+	if err := json.Unmarshal(stream.events[1].Payload, &failed); err != nil {
+		t.Fatal(err)
+	}
+	if failed.Error.Code != "MODEL_SOURCE_FAILED" || !failed.Error.Retryable {
+		t.Fatalf("unexpected mismatch failed payload: %+v", failed.Error)
 	}
 }

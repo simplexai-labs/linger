@@ -202,6 +202,12 @@ const localmodelsFiles = async (
   prefix: string,
 ): Promise<DiagnosticsFile[]> => {
   const root = path.join(home, "runtime", "localmodels");
+  const modelSource = path.join(root, "state", "model-source.json");
+  const libraryModels = await listFiles(
+    path.join(root, "state", "library", "models"),
+    0,
+    (file) => /\.json$/.test(file),
+  );
   const stackRuns = await listFiles(
     path.join(root, "state", "stacks"),
     0,
@@ -218,6 +224,8 @@ const localmodelsFiles = async (
     (file) => path.basename(file) === "server.log",
   );
   const selected = [
+    ...(await newestRegularFiles([modelSource], 1)),
+    ...(await newestRegularFiles(libraryModels, MAX_LOCALMODELS_FILES)),
     ...(await newestRegularFiles(stackRuns, MAX_LOCALMODELS_FILES)),
     ...(await newestRegularFiles(deployments, MAX_LOCALMODELS_FILES)),
     ...(await newestRegularFiles(serverLogs, MAX_LOCALMODELS_FILES)),

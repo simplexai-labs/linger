@@ -166,8 +166,8 @@ func TestTerminalEnvironmentFindsNodeManagerGlobalInstalls(t *testing.T) {
 	if newerAt, olderAt, pnpmAt := slices.Index(entries, newer), slices.Index(entries, older), slices.Index(entries, pnpm); newerAt < 0 || olderAt < newerAt || pnpmAt < 0 || pnpmAt > slices.Index(entries, "/usr/bin") {
 		t.Fatalf("PATH=%q", environment["PATH"])
 	}
-	if path, err := resolveExecutableEntry(t.Context(), "codex", "codex", DiscoveryOptions{Environment: environment}); err != nil || path != codex {
-		t.Fatalf("resolved %q, %v; want %q", path, err, codex)
+	if path := firstCandidateEntry(t, "codex", "codex", DiscoveryOptions{Environment: environment}); path != codex {
+		t.Fatalf("resolved %q; want %q", path, codex)
 	}
 }
 
@@ -215,8 +215,8 @@ func TestTerminalEnvironmentAppendsCommonRuntimeDirectories(t *testing.T) {
 	if err := os.WriteFile(claude, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if path, err := resolveExecutableEntry(t.Context(), "fixture", "linger-runtime-fixture", DiscoveryOptions{Environment: environment}); err != nil || path != claude {
-		t.Fatalf("resolved %q, %v; want %q", path, err, claude)
+	if path := firstCandidateEntry(t, "fixture", "linger-runtime-fixture", DiscoveryOptions{Environment: environment}); path != claude {
+		t.Fatalf("resolved %q; want %q", path, claude)
 	}
 }
 
