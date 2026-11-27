@@ -330,29 +330,14 @@ wait_for_unacknowledged_terminal() {
   local operation_id=$1
   local output_file=$2
   for _ in {1..400}; do
-    if node - "$TMP_ROOT/computer-state/operations.sqlite" "$operation_id" >"$output_file" <<'NODE'
-import { DatabaseSync } from "node:sqlite";
-const [filename, operationId] = process.argv.slice(2);
-const database = new DatabaseSync(filename, { readOnly: true });
-let row;
-try {
-  row = database.prepare(`SELECT status, last_emitted_seq, last_acked_seq,
-    CAST(terminal_event_json AS TEXT) AS terminal_event_json
-    FROM operations WHERE operation_id = ?`).get(operationId);
-} finally {
-  database.close();
-}
-if (!row || row.status !== "terminal" || row.last_acked_seq >= row.last_emitted_seq) process.exit(1);
-const terminal = JSON.parse(row.terminal_event_json);
-if (terminal.type !== "operation.cancelled" || terminal.operation_id !== operationId || terminal.seq !== row.last_emitted_seq) process.exit(1);
-process.stdout.write(JSON.stringify({ operation_id: operationId, through_seq: terminal.seq }));
-NODE
+    if node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+      wait-unacknowledged-cancel "$PROXY_EVENTS" "$operation_id" "$output_file"
     then
       return 0
     fi
     sleep 0.05
   done
-  printf 'Canceled Operation terminal was not persisted before its ACK\n' >&2
+  printf 'Canceled Operation terminal was not observed before its ACK\n' >&2
   return 1
 }
 
@@ -488,58 +473,15 @@ wait_for_operation_receipt() {
   local state_file="$TMP_ROOT/runtime-state.json"
   for _ in {1..3600}; do
     runtime_state_to_file "$state_file"
-    if node - \
+    if node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+      wait-live-receipt \
       "$state_file" \
-      "$TMP_ROOT/computer-state/operations.sqlite" \
-      "$kind" "$AGENT_ID" "$run_ordinal" "$terminal" "$output_file" <<'NODE'
-import { readFileSync, writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const [
-  statePath,
-  ledgerPath,
-  kind,
-  agentId,
-  runOrdinalText,
-  terminalText,
-  outputPath,
-] = process.argv.slice(2);
-const state = JSON.parse(readFileSync(statePath, "utf8"));
-const run = state.runs
-  .filter((candidate) => candidate.context_kind === kind)[Number(runOrdinalText) - 1];
-if (!run) process.exit(1);
-const runId = run.run_id;
-const expectedTerminal = Number(terminalText);
-const receipts = expectedTerminal === 1 ? state.operation_receipts :
-  [...new Map(state.execution_receipts.map(receipt => [receipt.operation_id, receipt])).values()];
-const starts = receipts.filter(
-  (receipt) => receipt.agent_id === agentId && receipt.run_id === runId,
-);
-if (starts.length !== 1) process.exit(1);
-const ledger = new DatabaseSync(ledgerPath, { readOnly: true });
-const operation = ledger.prepare(`
-  SELECT operation_id, status, last_acked_seq, terminal_event_json
-  FROM operations WHERE operation_id = ?
-`).get(starts[0].operation_id);
-ledger.close();
-if (!operation) process.exit(1);
-if (expectedTerminal === 1) {
-  if (operation.status !== "terminal" || !operation.terminal_event_json) process.exit(1);
-  const terminalJson =
-    typeof operation.terminal_event_json === "string"
-      ? operation.terminal_event_json
-      : Buffer.from(operation.terminal_event_json).toString("utf8");
-  const terminal = JSON.parse(terminalJson);
-  if (terminal.seq !== operation.last_acked_seq) process.exit(1);
-} else if (operation.status !== "running" || operation.terminal_event_json !== null) {
-  process.exit(1);
-}
-writeFileSync(outputPath, JSON.stringify({
-  operation_id: operation.operation_id,
-  run_id: runId,
-  connection_epoch: starts[0].connection_epoch,
-}));
-NODE
+      "$PROXY_EVENTS" \
+      "$kind" \
+      "$AGENT_ID" \
+      "$run_ordinal" \
+      "$terminal" \
+      "$output_file"
     then
       return 0
     fi
@@ -550,7 +492,7 @@ NODE
 }
 
 # A running Operation has no terminal receipt yet: read its run.start
-# execution receipt, then the daemon ledger row, whose identity keeps the
+# execution receipt, then the wire-frame proxy ledger, which records the
 # connection epoch the Operation started on.
 wait_for_active_operation() {
   local kind=$1
@@ -559,36 +501,14 @@ wait_for_active_operation() {
   local state_file="$TMP_ROOT/runtime-state.json"
   for _ in {1..1200}; do
     runtime_state_to_file "$state_file"
-    if node - \
+    if node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+      wait-active-operation \
       "$state_file" \
-      "$TMP_ROOT/computer-state/operations.sqlite" \
-      "$kind" "$AGENT_ID" "$run_ordinal" "$output_file" <<'NODE'
-import { readFileSync, writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const [statePath, ledgerPath, kind, agentId, runOrdinalText, outputPath] =
-  process.argv.slice(2);
-const state = JSON.parse(readFileSync(statePath, "utf8"));
-const run = state.runs
-  .filter((candidate) => candidate.context_kind === kind)[Number(runOrdinalText) - 1];
-if (!run) process.exit(1);
-const operationIds = [...new Set(state.execution_receipts
-  .filter((receipt) => receipt.agent_id === agentId && receipt.run_id === run.run_id)
-  .map((receipt) => receipt.operation_id))];
-if (operationIds.length !== 1) process.exit(1);
-const ledger = new DatabaseSync(ledgerPath, { readOnly: true });
-const operation = ledger.prepare(`
-  SELECT operation_id, CAST(identity_json AS TEXT) AS identity_json, status
-  FROM operations WHERE operation_id = ?
-`).get(operationIds[0]);
-ledger.close();
-if (!operation || operation.status !== "running") process.exit(1);
-writeFileSync(outputPath, JSON.stringify({
-  operation_id: operation.operation_id,
-  run_id: run.run_id,
-  connection_epoch: JSON.parse(operation.identity_json).connection_epoch,
-}));
-NODE
+      "$PROXY_EVENTS" \
+      "$kind" \
+      "$AGENT_ID" \
+      "$run_ordinal" \
+      "$output_file"
     then
       return 0
     fi
@@ -785,14 +705,20 @@ ln -sfn "$(command -v node)" "$ROOT/apps/computer/dist/runtime/bin/node"
 )
 
 publish_inbox_state "$REVISION"
+FIXTURE_ARGS=(
+  --port "$FIXTURE_PORT"
+  --ready-file "$TMP_ROOT/fixture.ready"
+  --report-file "$FIXTURE_REPORT"
+  --artifact-directory "$TMP_ROOT/artifact-publications"
+  --service-token "$SERVICE_TOKEN"
+  --tenant-id "$TENANT_ID"
+  --inbox-state-file "$TMP_ROOT/inbox-state.json"
+)
+if [[ "$SOAK_ONLY" == "1" ]]; then
+  FIXTURE_ARGS+=(--soak)
+fi
 node "$ROOT/apps/node-services/tests/agent/fixtures/local-runner-stage-c-teamhub-fixture.mjs" \
-  --port "$FIXTURE_PORT" \
-  --ready-file "$TMP_ROOT/fixture.ready" \
-  --report-file "$FIXTURE_REPORT" \
-  --artifact-directory "$TMP_ROOT/artifact-publications" \
-  --service-token "$SERVICE_TOKEN" \
-  --tenant-id "$TENANT_ID" \
-  --inbox-state-file "$TMP_ROOT/inbox-state.json" \
+  "${FIXTURE_ARGS[@]}" \
   >"$TMP_ROOT/fixture.log" 2>&1 &
 FIXTURE_PID=$!
 wait_for_file "$TMP_ROOT/fixture.ready"
@@ -837,7 +763,7 @@ jq -n \
       mode: "workspace-write",
       scope: "owner"
     }]
-  } + if $auth == "" then {} else {codex: {auth_file: $auth}} end' >"$CONFIG"
+  } + (if $soak == "1" then {enabled_runtimes: ["codex"]} else {} end) + (if $auth == "" then {} else {codex: {auth_file: $auth}} end)' >"$CONFIG"
 
 # Explicit account auth should not inherit API-key overrides. Config-only
 # providers keep their required environment; actual Runtime discovery validates it.
@@ -1036,69 +962,12 @@ if [[ "$SOAK_ONLY" == "1" ]]; then
   cmp "$TMP_ROOT/assignment-before.json" "$TMP_ROOT/assignment-after.json"
 
   runtime_state_to_file "$TMP_ROOT/soak-runtime-state.json"
-  node - \
+  node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+    verify-soak-ledger \
     "$TMP_ROOT/soak-runtime-state.json" \
-    "$TMP_ROOT/computer-state/operations.sqlite" \
-    "$AGENT_ID" <<'NODE'
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const [statePath, ledgerPath, agentId] = process.argv.slice(2);
-const state = JSON.parse(readFileSync(statePath, "utf8"));
-const runs = state.runs.filter(
-  (run) => run.agent_id === agentId && run.context_kind === "meta",
-);
-if (
-  runs.length !== 20 ||
-  new Set(runs.map((run) => run.run_id)).size !== 20 ||
-  runs.some(
-    (run) => run.status !== "succeeded" || run.terminal_type !== "succeeded",
-  )
-) {
-  throw new Error(`Unexpected soak Local Runs: ${JSON.stringify(runs)}`);
-}
-const runIds = new Set(runs.map((run) => run.run_id));
-const receipts = state.operation_receipts.filter(
-  (receipt) => receipt.agent_id === agentId && runIds.has(receipt.run_id),
-);
-if (
-  receipts.length !== 20 ||
-  new Set(receipts.map((receipt) => receipt.operation_id)).size !== 20 ||
-  runs.some(
-    (run) => receipts.filter((receipt) => receipt.run_id === run.run_id).length !== 1,
-  )
-) {
-  throw new Error(`Unexpected soak Operation receipts: ${JSON.stringify(receipts)}`);
-}
-
-const ledger = new DatabaseSync(ledgerPath, { readOnly: true });
-const operation = ledger.prepare(`
-	  SELECT status,last_acked_seq,last_emitted_seq,terminal_event_json
-  FROM operations WHERE operation_id=?
-`);
-for (const receipt of receipts) {
-  const row = operation.get(receipt.operation_id);
-  if (
-    !row ||
-    row.status !== "terminal" ||
-    !row.terminal_event_json ||
-    row.last_acked_seq !== row.last_emitted_seq
-  ) {
-    throw new Error(
-      `Operation ${receipt.operation_id} is not terminal and fully acknowledged`,
-    );
-  }
-}
-const unsettled = ledger.prepare(`
-	  SELECT operation_id,status,last_acked_seq,last_emitted_seq
-	  FROM operations
-	  WHERE status<>'terminal' OR last_acked_seq<>last_emitted_seq
-`).all();
-ledger.close();
-if (unsettled.length !== 0) {
-  throw new Error(`Unsettled daemon ledger rows: ${JSON.stringify(unsettled)}`);
-}
-NODE
+    "$PROXY_EVENTS" \
+    "$AGENT_ID" \
+    20
 
   computer daemon runners --json | jq -e \
     --arg agent "$AGENT_ID" \
