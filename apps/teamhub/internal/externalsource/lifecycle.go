@@ -19,7 +19,7 @@ var ErrStaleRevision = errors.New("external source revision is stale")
 const disconnectTransactionMaxAttempts = 3
 
 func (s *Service) ListConnections(ctx context.Context, accountID string) ([]Connection, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM external_connections WHERE account_id=$1 AND status<>'revoked' ORDER BY created_at DESC,id`, accountID)
+	rows, err := s.pool.Query(ctx, `SELECT id FROM external_connections WHERE account_id=$1 AND status<>'revoked' AND provider<>$2 ORDER BY created_at DESC,id`, accountID, CustomMCPAppKey)
 	if err != nil {
 		return nil, err
 	}

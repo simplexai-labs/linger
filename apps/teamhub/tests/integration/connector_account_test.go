@@ -10,8 +10,8 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
 )
 
-// Without a Composio key every connected app command asks the Human for the
-// key with one card, reused while pending, and tells the Agent so through
+// Without a Composio key, commands that need the provider ask the Human for
+// the key with one card, reused while pending, and tell the Agent through
 // provider_key_required. Saving a key resolves the card and wakes the Agent,
 // whose next request asks for the app itself.
 func TestConnectedAppCommandsWithoutComposioAskForTheKey(t *testing.T) {
@@ -44,9 +44,11 @@ func TestConnectedAppCommandsWithoutComposioAskForTheKey(t *testing.T) {
 	needsKey("/api/agent/v1/apps/account", map[string]any{"app_key": "higgsfield"})
 	needsKey("/api/agent/v1/apps/account", map[string]any{"app_key": "fal_ai"})
 	needsKey("/api/agent/v1/apps/tools/search", map[string]any{"query": "create an issue in Linear"})
-	needsKey("/api/agent/v1/apps/tools/execute", map[string]any{
+	if status, response := postAgentInRoom(t, env, issued.AccessToken, roomID, "/api/agent/v1/apps/tools/execute", map[string]any{
 		"connection_id": "external_connection_none", "tool_slug": "LINEAR_CREATE_ISSUE", "tool_version": "20261015_00", "arguments": map[string]any{},
-	})
+	}); status != http.StatusNotFound || !bytes.Contains(response, []byte(`"connection_not_found"`)) {
+		t.Fatalf("execute without a connection grant: %d %s", status, response)
+	}
 	needsKey("/api/agent/v1/apps/auto-reminders/list", map[string]any{})
 	var keyCard, keyMessage string
 	if err := env.pool.QueryRow(t.Context(), `SELECT id, message_id FROM decisions WHERE room_id=$1 AND status='pending'

@@ -34,6 +34,7 @@ import {
   externalConnectionAgentAccessQueryOptions,
 } from "./connected-apps-queries";
 import { connectorMessages as m } from "./connectors.messages";
+import { customMCPQueryOptions } from "./custom-mcp-connectors";
 
 export function AgentConnectors({
   agentActorId,
@@ -46,6 +47,7 @@ export function AgentConnectors({
   const t = useT();
   const apps = useQuery(externalAppsQueryOptions(client));
   const connections = useQuery(externalConnectionsQueryOptions(client));
+  const customMCP = useQuery(customMCPQueryOptions(client));
   const groupLabel = t(m.agentAccounts);
   if (apps.isPending || connections.isPending)
     return (
@@ -90,9 +92,25 @@ export function AgentConnectors({
     return accounts.length ? [{ app, accounts }] : [];
   });
   const appsPath = `/t/${tenantId}/apps`;
+  const customConnections = customMCP.data?.connections ?? [];
   return (
     <div className="flex flex-col gap-5">
       <SettingsGroup ariaLabel={groupLabel}>
+        {customConnections.map((connection) => (
+          <AgentConnectionAccess
+            key={connection.id}
+            agentActorId={agentActorId}
+            app={{ display_name: connection.name }}
+            connection={{
+              id: connection.id,
+              provider: "custom_mcp",
+              status: "active",
+              identity_label: connection.endpoint,
+            }}
+            managePath={appsPath}
+            tenantId={tenantId}
+          />
+        ))}
         {connected.length ? (
           connected.map(({ app, accounts }) => (
             <section key={app.key} aria-label={app.display_name}>
@@ -108,11 +126,11 @@ export function AgentConnectors({
               ))}
             </section>
           ))
-        ) : (
+        ) : customConnections.length === 0 ? (
           <SettingsRow icon={<Icon icon={PlugSocketIcon} size={16} />}>
             <SettingsRowText muted title={t(m.noConnectedAccounts)} />
           </SettingsRow>
-        )}
+        ) : null}
       </SettingsGroup>
       <SettingsGroup>
         <Link
@@ -143,8 +161,11 @@ function AgentConnectionAccess({
   tenantId,
 }: {
   agentActorId: string;
-  app: TeamHubExternalApp;
-  connection: TeamHubExternalConnection;
+  app: Pick<TeamHubExternalApp, "display_name" | "logo_url">;
+  connection: Pick<
+    TeamHubExternalConnection,
+    "id" | "provider" | "status" | "identity_label"
+  >;
   managePath: string;
   tenantId: string;
 }) {

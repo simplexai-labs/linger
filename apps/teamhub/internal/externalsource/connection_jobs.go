@@ -128,7 +128,7 @@ func connectionReconcileWorkResult(err error) error {
 // whose status check is due and has no unfinished or retryable reconcile job,
 // and the revoke of each disconnecting Connection whose revoke is overdue.
 func (s *Service) EnqueueDueConnectionReconciles(ctx context.Context) error {
-	rows, err := s.pool.Query(ctx, `SELECT id,status,upstream_connection_id FROM external_connections WHERE status IN ('pending','active','expired','failed','disconnecting') AND next_status_check_at<=now() ORDER BY next_status_check_at,id LIMIT $1`, connectionReconcileSweepLimit)
+	rows, err := s.pool.Query(ctx, `SELECT id,status,upstream_connection_id FROM external_connections WHERE status IN ('pending','active','expired','failed','disconnecting') AND provider<>$2 AND next_status_check_at<=now() ORDER BY next_status_check_at,id LIMIT $1`, connectionReconcileSweepLimit, CustomMCPAppKey)
 	if err != nil {
 		return err
 	}

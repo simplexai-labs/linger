@@ -5724,6 +5724,23 @@ type CurrentIdentityServerCapabilities string
 // Cursor Opaque pagination cursor. Clients must not parse or modify it.
 type Cursor = string
 
+// CustomMcpConnection defines model for CustomMcpConnection.
+type CustomMcpConnection struct {
+	Endpoint string          `json:"endpoint"`
+	HasToken bool            `json:"has_token"`
+	Id       string          `json:"id"`
+	Name     string          `json:"name"`
+	Revision int64           `json:"revision"`
+	Tools    []CustomMcpTool `json:"tools"`
+}
+
+// CustomMcpTool defines model for CustomMcpTool.
+type CustomMcpTool struct {
+	Description *string                `json:"description,omitempty"`
+	InputSchema map[string]interface{} `json:"inputSchema"`
+	Name        string                 `json:"name"`
+}
+
 // DecisionAnswer defines model for DecisionAnswer.
 type DecisionAnswer struct {
 	// Answers Map of question id to the Human's answer; only with submit.
@@ -10538,6 +10555,23 @@ type VoiceProviderKeyRefused = VoiceProviderKeyErrorResponse
 // sessionCookieContextKey is the context key for sessionCookie security scheme
 type sessionCookieContextKey string
 
+// SaveCustomMcpConnectionJSONBody defines parameters for SaveCustomMcpConnection.
+type SaveCustomMcpConnectionJSONBody struct {
+	Endpoint string  `json:"endpoint"`
+	Id       *string `json:"id,omitempty"`
+	Name     string  `json:"name"`
+	Revision *int64  `json:"revision,omitempty"`
+
+	// Token Omit on edit to retain the token for the same endpoint. Send an empty value to remove it.
+	Token *string `json:"token,omitempty"`
+}
+
+// TestCustomMcpConnectionJSONBody defines parameters for TestCustomMcpConnection.
+type TestCustomMcpConnectionJSONBody struct {
+	Endpoint string  `json:"endpoint"`
+	Token    *string `json:"token,omitempty"`
+}
+
 // DownloadDocumentVersionParams defines parameters for DownloadDocumentVersion.
 type DownloadDocumentVersionParams struct {
 	// Range A single RFC 9110 byte range. Multipart ranges are not supported.
@@ -10975,6 +11009,12 @@ type ChangePasswordJSONRequestBody = PasswordChangeRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// SaveCustomMcpConnectionJSONRequestBody defines body for SaveCustomMcpConnection for application/json ContentType.
+type SaveCustomMcpConnectionJSONRequestBody SaveCustomMcpConnectionJSONBody
+
+// TestCustomMcpConnectionJSONRequestBody defines body for TestCustomMcpConnection for application/json ContentType.
+type TestCustomMcpConnectionJSONRequestBody TestCustomMcpConnectionJSONBody
 
 // DecideDecisionJSONRequestBody defines body for DecideDecision for application/json ContentType.
 type DecideDecisionJSONRequestBody = DecisionRequest

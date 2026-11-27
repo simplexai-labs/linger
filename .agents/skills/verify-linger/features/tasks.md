@@ -148,6 +148,26 @@ When retry/deduplication is in scope, verify resulting object counts as well as 
 Redact credentials and private account data from shareable reports.
 Report app availability, OAuth, tool execution and external write as distinct outcomes.
 
+### Custom MCP connector
+
+Build Web assets, then run the focused TeamHub integration test with a disposable
+PostgreSQL. Set `LINGER_CUSTOM_MCP_BROWSER_EVIDENCE` to an absolute output path
+to have Chromium create and reopen the connector through the Web UI. Use
+`CHROME_BIN` when running against an installed Chrome binary.
+
+```sh
+pnpm --filter @linger/web run build:assets
+cd apps/teamhub
+TEAMHUB_TEST_DATABASE=isolated ./scripts/with-test-database.sh \
+  go test ./tests/integration -run '^TestCustomMCPConnectorFromSetupThroughAgentApproval$' -count=1 -v
+```
+
+The test uses real TeamHub HTTP, PostgreSQL, and the decision worker. A disposable
+MCP adapter counts calls. TeamHub makes zero calls before approval, one after
+approval, and zero additional calls after the grant or connection is revoked.
+The Agent submits through the Agent API with a fixture credential. The test does
+not run a model or contact a public MCP endpoint.
+
 ## Routines
 
 **Reuse:** `room-routines.spec.ts` covers persisted Routine selection, reopening, editing and one firing through real services.

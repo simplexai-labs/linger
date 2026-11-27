@@ -98,6 +98,9 @@ func connectorWriteNoticeText(decisionID, title, status, comment string, result 
 		}
 		return text
 	case "failed":
+		if len(result.Data) > 0 && string(result.Data) != "null" {
+			return prefix + "the sponsor approved it and the tool reported an error: " + result.Outcome + "\nResult: " + truncateText(string(result.Data), 3000)
+		}
 		return prefix + "the sponsor approved it, but it did not run: " + result.Outcome + "\nNothing was changed by this call."
 	case "unknown":
 		return prefix + "the sponsor approved it, but its result is unknown: " + result.Outcome + "\nCheck the target before submitting it again."

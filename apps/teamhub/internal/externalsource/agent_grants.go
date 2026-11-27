@@ -50,6 +50,8 @@ func (s *Service) ListAgentConnectionAccess(ctx context.Context, accountID, conn
 		LEFT JOIN external_connection_agent_grants delegation
 		  ON delegation.connection_id=$2 AND delegation.agent_actor_id=registration.actor_id
 		WHERE grantor.account_id=$1
+		  AND ($3<>$4 OR EXISTS(SELECT 1 FROM custom_mcp_connections m
+		      WHERE m.connection_id=$2 AND m.tenant_id=registration.tenant_id AND m.owner_actor_id=grantor.id))
 		  AND registration.agent_type IN ('anotherme','general')
 		  AND (registration.represented_human_actor_id=grantor.id OR delegation.id IS NOT NULL OR EXISTS (
 		      SELECT 1 FROM active_room_members human_room JOIN active_room_members agent_room
@@ -58,7 +60,7 @@ func (s *Service) ListAgentConnectionAccess(ctx context.Context, accountID, conn
 		  AND registration.status='active'
 		  AND registration.agent_management_id IS NOT NULL
 		ORDER BY agent.display_name COLLATE "C",registration.actor_id`,
-		accountID, connectionID,
+		accountID, connectionID, provider, CustomMCPAppKey,
 	)
 	if err != nil {
 		return nil, err
@@ -235,6 +237,8 @@ func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, a
 		 AND agent.kind='agent'
 		WHERE registration.actor_id=$1
 		  AND grantor.account_id=$2
+		  AND ($5<>$6 OR EXISTS(SELECT 1 FROM custom_mcp_connections m
+		      WHERE m.connection_id=$4 AND m.tenant_id=registration.tenant_id AND m.owner_actor_id=grantor.id))
 		  AND registration.agent_type IN ('anotherme','general')
 		  AND (registration.represented_human_actor_id=grantor.id OR EXISTS (
 		      SELECT 1 FROM active_room_members human_room JOIN active_room_members agent_room
@@ -243,7 +247,7 @@ func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, a
 		      OR (NOT $3 AND EXISTS(SELECT 1 FROM external_connection_agent_grants g WHERE g.connection_id=$4 AND g.agent_actor_id=registration.actor_id)))
 		  AND registration.status='active'
 		  AND registration.agent_management_id IS NOT NULL
-		FOR SHARE OF registration,grantor,agent`, agentActorID, accountID, granted, connectionID).Scan(
+		FOR SHARE OF registration,grantor,agent`, agentActorID, accountID, granted, connectionID, provider, CustomMCPAppKey).Scan(
 		&access.AgentActorID, &access.AgentManagementID, &access.TenantID,
 		&access.AgentDisplayName, &grantingHumanActorID,
 	); errors.Is(err, pgx.ErrNoRows) {

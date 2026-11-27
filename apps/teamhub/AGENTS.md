@@ -2,6 +2,12 @@
 
 Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 
+TeamHub connects to public custom MCP endpoints using Streamable HTTP. An
+endpoint can be anonymous or use an encrypted Bearer token over HTTPS. Saving
+or editing a connector verifies its catalog. An explicit Agent grant allows
+discovery, and each tool call waits for the sponsor's confirmation. Approval
+rechecks the grant and the catalog revision before dispatch.
+
 ## Common Commands
 
 - `go test ./internal/<feature> -run <TestName>`: run one focused Go test from `apps/teamhub`.

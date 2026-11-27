@@ -1,0 +1,99 @@
+paths:
+  /v0/custom-mcp-connections:
+    get:
+      operationId: listCustomMcpConnections
+      responses:
+        "200":
+          description: The signed-in owner's custom connectors.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { $ref: "#/components/schemas/CustomMcpConnection" }
+    post:
+      operationId: saveCustomMcpConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, endpoint]
+              properties:
+                id: { type: string }
+                revision: { type: integer, format: int64 }
+                name: { type: string, minLength: 1, maxLength: 160 }
+                endpoint: { type: string, format: uri }
+                token:
+                  type: string
+                  writeOnly: true
+                  description: Omit on edit to retain the token for the same endpoint. Send an empty value to remove it.
+      responses:
+        "200":
+          description: The saved connection and its verified tool catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomMcpConnection" }
+  /v0/custom-mcp-connections/test:
+    post:
+      operationId: testCustomMcpConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: { type: string, format: uri }
+                token: { type: string, writeOnly: true }
+      responses:
+        "200":
+          description: Tools discovered without saving the connection or calling a tool.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tools]
+                properties:
+                  tools:
+                    type: array
+                    items: { $ref: "#/components/schemas/CustomMcpTool" }
+  /v0/custom-mcp-connections/{connectionId}:
+    delete:
+      operationId: deleteCustomMcpConnection
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: The connection was revoked and its credentials removed.
+components:
+  schemas:
+    CustomMcpConnection:
+      type: object
+      required: [id, name, endpoint, has_token, revision, tools]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        endpoint: { type: string, format: uri }
+        has_token: { type: boolean }
+        revision: { type: integer, format: int64 }
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/CustomMcpTool" }
+    CustomMcpTool:
+      type: object
+      required: [name, inputSchema]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        inputSchema:
+          type: object
+          additionalProperties: true

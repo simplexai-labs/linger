@@ -21,6 +21,58 @@ describe("Connected apps", () => {
     vi.restoreAllMocks();
   });
 
+  it("tests and saves a custom MCP connector from the catalog", async () => {
+    const runtime = await testRuntime();
+    const connector = {
+      id: "connection_custom",
+      name: "Example MCP",
+      endpoint: "https://mcp.example.test/echo",
+      has_token: true,
+      revision: 1,
+      tools: [{ name: "echo", inputSchema: { type: "object" } }],
+    };
+    const list = vi.spyOn(runtime.client, "listCustomMCP");
+    list.mockResolvedValue({ connections: [] });
+    const testConnection = vi
+      .spyOn(runtime.client, "testCustomMCP")
+      .mockResolvedValue({ tools: connector.tools });
+    const save = vi
+      .spyOn(runtime.client, "saveCustomMCP")
+      .mockImplementation(async () => {
+        list.mockResolvedValue({ connections: [connector] });
+        return connector;
+      });
+    renderPage(runtime);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add custom connector" }),
+    );
+    const dialog = within(
+      screen.getByRole("dialog", { name: "Add custom connector" }),
+    );
+    fireEvent.change(dialog.getByLabelText("Name"), {
+      target: { value: connector.name },
+    });
+    fireEvent.change(dialog.getByLabelText("MCP URL"), {
+      target: { value: connector.endpoint },
+    });
+    fireEvent.change(dialog.getByLabelText("Bearer token"), {
+      target: { value: "unit" + "-token" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "Test connection" }));
+    expect(await dialog.findByText("echo")).toBeVisible();
+    expect(testConnection).toHaveBeenCalledWith(
+      connector.endpoint,
+      "unit" + "-token",
+    );
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(connector.name)).toBeVisible();
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: connector.endpoint }),
+    );
+  });
+
   it("lists curated apps without a key and explains that an admin must set one", async () => {
     const runtime = await testRuntime();
     vi.spyOn(runtime.client, "listExternalApps").mockResolvedValue(

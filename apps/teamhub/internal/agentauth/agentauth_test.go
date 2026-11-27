@@ -121,10 +121,12 @@ func TestConnectedAppActionsNeedAComposioKey(t *testing.T) {
 	configured := false
 	service := New(nil)
 	service.SetConnectedApps(func() bool { return configured })
-	if !service.actionConfigured("list_connected_apps") {
-		t.Fatal("listing grants must not need a Composio key")
+	for _, action := range []string{"list_connected_apps", "search_app_tools", "execute_app_tool"} {
+		if !service.actionConfigured(action) {
+			t.Fatalf("%s must defer provider checks to the connector service", action)
+		}
 	}
-	appActions := []string{"search_app_tools", "execute_app_tool", "manage_auto_reminders"}
+	appActions := []string{"manage_auto_reminders"}
 	for _, action := range appActions {
 		if !businessAction(action) {
 			t.Fatalf("%s is not in the allowlist", action)

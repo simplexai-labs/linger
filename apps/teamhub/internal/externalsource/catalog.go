@@ -313,6 +313,9 @@ func (s *Service) connectionAdapter(appKey string) (connectionAdapter, error) {
 }
 
 func (s *Service) agentToolsApp(appKey string) (ExternalApp, bool) {
+	if appKey == CustomMCPAppKey && s.customMCP != nil {
+		return ExternalApp{Key: appKey, Availability: AppAvailabilityAvailable}, true
+	}
 	app, ok := s.catalogApp(appKey)
 	if !ok || app.Availability != AppAvailabilityAvailable || !slices.Contains(app.Capabilities, "agent_tools") {
 		return ExternalApp{}, false

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/publicnet"
 )
 
 func allowAll(netip.Addr) bool { return true }
@@ -107,7 +109,7 @@ func TestProbeNeverConnectsToANonPublicAddress(t *testing.T) {
 		w.Header().Set("X-Frame-Options", "DENY")
 	}))
 	defer server.Close()
-	prober := newProber(settings{proxy: noProxy, allowed: publicAddress, names: names{}, anyPort: true})
+	prober := newProber(settings{proxy: noProxy, allowed: publicnet.IsPublic, names: names{}, anyPort: true})
 	framing, err := prober.Probe(context.Background(), server.URL, "")
 	if err != nil || framing != Unknown || requested.Load() {
 		t.Fatalf("framing = %v, %v, requested = %v", framing, err, requested.Load())
@@ -160,7 +162,7 @@ func TestProbeChecksNamesBeforeAProxyRequest(t *testing.T) {
 		"intranet.example": {netip.MustParseAddr("10.1.2.3")},
 		"public.example":   {netip.MustParseAddr("93.184.215.14")},
 	}
-	prober := newProber(settings{proxy: viaProxy, allowed: publicAddress, names: resolved})
+	prober := newProber(settings{proxy: viaProxy, allowed: publicnet.IsPublic, names: resolved})
 
 	for _, page := range []string{"http://intranet.example/", "http://127.0.0.1/", "http://unresolved.example/"} {
 		framing, err := prober.Probe(context.Background(), page, "")
@@ -185,7 +187,7 @@ func TestProbeRejectsInvalidURLs(t *testing.T) {
 
 func TestPublicAddress(t *testing.T) {
 	for _, address := range []string{"93.184.215.14", "2606:4700::1111"} {
-		if !publicAddress(netip.MustParseAddr(address)) {
+		if !publicnet.IsPublic(netip.MustParseAddr(address)) {
 			t.Errorf("%s should be public", address)
 		}
 	}
@@ -194,7 +196,7 @@ func TestPublicAddress(t *testing.T) {
 		"100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "224.0.0.1", "198.18.0.1",
 		"64:ff9b::a00:1", "64:ff9b:1::1", "fec0::1",
 	} {
-		if publicAddress(netip.MustParseAddr(address)) {
+		if publicnet.IsPublic(netip.MustParseAddr(address)) {
 			t.Errorf("%s should not be public", address)
 		}
 	}

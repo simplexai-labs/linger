@@ -96,6 +96,9 @@ func (s *Service) ExecuteConfirmed(ctx context.Context, decisionID, tenantID, ag
 	defer func() {
 		s.logCall(ctx, "confirmation", connection, action.ToolSlug, action.ToolVersion, status, "decision_id", decisionID)
 	}()
+	if connection.AppKey == externalsource.CustomMCPAppKey {
+		return s.invokeConfirmedCustomMCP(ctx, connection, action)
+	}
 	if err := s.checkConnectionActive(ctx, connection); err != nil {
 		return "failed", "The connected account is not active.", nil
 	}

@@ -61,6 +61,7 @@ type Provider interface {
 }
 
 type Service struct {
+	customMCP           *customMCPCatalog
 	managed             *managedCatalog
 	feishu              *feishuCatalog
 	pool                *pgxpool.Pool

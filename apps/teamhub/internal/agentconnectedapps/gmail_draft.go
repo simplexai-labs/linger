@@ -332,6 +332,9 @@ func (s *Service) AgentPrincipal(ctx context.Context, token string) (agentauth.A
 	if s == nil || s.contexts == nil {
 		return agentauth.Authorization{}, unavailableError(nil)
 	}
+	if !s.contexts.ConnectedAppsConfigured() {
+		return agentauth.Authorization{}, agentauth.ErrProviderKeyRequired
+	}
 	return s.contexts.Authorize(ctx, token, "execute_app_tool")
 }
 

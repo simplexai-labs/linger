@@ -22,7 +22,7 @@ import (
 // provider a test injects. The Composio API key can be saved on the Apps page
 // after start, so connected apps are built either way; each job and each Agent
 // request checks connectionProvidersConfigured when it runs.
-func (a *App) registerExternalApps(ctx context.Context, cfg config.ExternalAppsConfig, injected externalsource.Provider, agentAuthorization *agentauth.Service) error {
+func (a *App) registerExternalApps(ctx context.Context, cfg config.ExternalAppsConfig, injected externalsource.Provider, mcpClient externalsource.CustomMCPClient, agentAuthorization *agentauth.Service) error {
 	client, err := composio.New(composio.Config{
 		BaseURL: cfg.ComposioBaseURL, APIKey: cfg.ComposioAPIKey, EnvironmentKey: cfg.ComposioEnvironmentKey,
 		CallbackURL:      composio.OAuthCallbackURL(a.cfg.PublicWebURL),
@@ -54,6 +54,7 @@ func (a *App) registerExternalApps(ctx context.Context, cfg config.ExternalAppsC
 	if err = sources.ConfigureManagedApps(ctx, client, keyBox); err != nil {
 		return fmt.Errorf("configure managed connected apps: %w", err)
 	}
+	sources.ConfigureCustomMCP(keyBox, mcpClient)
 	// Feishu Mail runs through each owner's lark-cli on their Computer.
 	if computer, ok := a.localComputers.(externalsource.FeishuComputer); ok {
 		sources.ConfigureFeishu(computer, client, &http.Client{Timeout: config.ExternalSourceRequestTimeout})

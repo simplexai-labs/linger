@@ -1,4 +1,5 @@
 import { desktopConnectorOAuth } from "@/features/apps/desktop-connector-oauth";
+import type { paths } from "@linger/wire-contracts/teamhub-public/types";
 
 import type {
   TeamHubDisconnectExternalConnectionInput,
@@ -22,7 +23,21 @@ import {
   type TeamHubApi,
 } from "./teamhub-api";
 
+type CustomMCPPaths = paths["/v0/custom-mcp-connections"];
+export type CustomMCPInput =
+  CustomMCPPaths["post"]["requestBody"]["content"]["application/json"];
+export type CustomMCPConnection =
+  CustomMCPPaths["post"]["responses"][200]["content"]["application/json"];
+export type CustomMCPTool = CustomMCPConnection["tools"][number];
+
 export interface TeamHubExternalSourceClient {
+  listCustomMCP(): Promise<{ connections: CustomMCPConnection[] }>;
+  saveCustomMCP(input: CustomMCPInput): Promise<CustomMCPConnection>;
+  testCustomMCP(
+    endpoint: string,
+    token: string,
+  ): Promise<{ tools: CustomMCPTool[] }>;
+  deleteCustomMCP(connectionId: string): Promise<void>;
   /** Tells TeamHub an OAuth popup returned, so it checks the authorization at once. */
   completeExternalConnectionAuthorization(
     connectedAccountId?: string,
@@ -93,6 +108,21 @@ export function createHttpTeamHubExternalSourceClient(
     return url ? { desktop_callback_url: url } : {};
   };
   return {
+    listCustomMCP: () => data(api.GET("/v0/custom-mcp-connections")),
+    saveCustomMCP: (body) =>
+      data(api.POST("/v0/custom-mcp-connections", { body })),
+    testCustomMCP: (endpoint, token) =>
+      data(
+        api.POST("/v0/custom-mcp-connections/test", {
+          body: { endpoint, token },
+        }),
+      ),
+    deleteCustomMCP: (connectionId) =>
+      done(
+        api.DELETE("/v0/custom-mcp-connections/{connectionId}", {
+          params: { path: { connectionId } },
+        }),
+      ),
     completeExternalConnectionAuthorization: (connectedAccountId) =>
       done(
         api.POST("/v0/external-connection-completions", {

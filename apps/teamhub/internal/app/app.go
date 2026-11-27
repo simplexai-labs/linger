@@ -219,6 +219,7 @@ type Deps struct {
 	LocalComputers  roomagent.LocalComputerManagement
 	// Composio serves every connected app; nil uses the Composio API.
 	Composio               externalsource.Provider
+	CustomMCP              externalsource.CustomMCPClient
 	WikiCandidates         document.WikiCandidateGenerator
 	DocumentTextNormalizer documenttext.Normalizer
 	VoiceMedia             voicemedia.Plane
@@ -540,7 +541,7 @@ func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps
 	a.urlPreview = urlpreview.New()
 	a.reminders = reminder.New(a.pool)
 	agentAuthorization := a.registerAgentAuthorization()
-	if err := a.registerExternalApps(ctx, cfg.ExternalApps, deps.Composio, agentAuthorization); err != nil {
+	if err := a.registerExternalApps(ctx, cfg.ExternalApps, deps.Composio, deps.CustomMCP, agentAuthorization); err != nil {
 		return err
 	}
 	// Feishu Mail listeners read their inbox through the connection service.

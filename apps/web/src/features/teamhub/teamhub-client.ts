@@ -165,6 +165,10 @@ export function createHttpTeamHubClient(
 }
 
 const externalSourceClientMethods = [
+  "listCustomMCP",
+  "saveCustomMCP",
+  "testCustomMCP",
+  "deleteCustomMCP",
   "completeExternalConnectionAuthorization",
   "createExternalConnection",
   "createExternalConnectionReauthorization",

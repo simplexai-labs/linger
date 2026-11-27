@@ -16,6 +16,18 @@ export const connectorMessages = defineMessages("connectors", {
   connectedOnly: "Connected only",
   applicationConnections: "Application connections",
   noConnectedApps: "No connected apps yet.",
+  customGroup: "Custom",
+  addCustomConnector: "Add custom connector",
+  editCustomConnector: "Edit custom connector",
+  customConnectorName: "Name",
+  customConnectorEndpoint: "MCP URL",
+  customConnectorToken: "Bearer token",
+  customConnectorKeepToken: "Keep saved token",
+  customConnectorToolList: "Discovered tools",
+  customConnectorNoTools: "The MCP server returned no tools.",
+  customConnectorTest: "Test connection",
+  customConnectorTestedOnSave: "Saving also tests the connection.",
+  customConnectorDisconnect: "Disconnect custom connector",
 
   // Groups of the catalog
   groupMailCalendar: "Mail & Calendar",

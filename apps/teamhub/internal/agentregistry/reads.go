@@ -272,7 +272,7 @@ func (s *Service) EffectiveResources(ctx context.Context, agentID string, connec
 		return teamhubinternal.AgentEffectiveResources{}, internal("resolve Agent Skill configuration", err)
 	}
 	keys := []string{}
-	if connectedApps && appKeys != nil {
+	if appKeys != nil {
 		listed, err := appKeys(ctx, tx, registration.ActorID, registration.TenantID)
 		if err != nil {
 			return teamhubinternal.AgentEffectiveResources{}, internal("list Agent connected apps", err)
@@ -280,6 +280,7 @@ func (s *Service) EffectiveResources(ctx context.Context, agentID string, connec
 		slices.Sort(listed)
 		keys = slices.Compact(listed)
 	}
+	connectedApps = connectedApps || len(keys) != 0
 	result := teamhubinternal.AgentEffectiveResources{
 		EffectiveSha256: EffectiveResourcesDigest(digest, connectedApps, keys), ConnectedApps: connectedApps,
 		ConnectedAppKeys: keys,

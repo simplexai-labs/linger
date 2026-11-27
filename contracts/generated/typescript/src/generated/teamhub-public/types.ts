@@ -1950,6 +1950,54 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/custom-mcp-connections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listCustomMcpConnections"];
+    put?: never;
+    post: operations["saveCustomMcpConnection"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/custom-mcp-connections/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["testCustomMcpConnection"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/custom-mcp-connections/{connectionId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: operations["deleteCustomMcpConnection"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/external-connections": {
     parameters: {
       query?: never;
@@ -7132,6 +7180,23 @@ export interface components {
       items: components["schemas"]["MemoryEntryListItem"][];
       next_cursor?: components["schemas"]["Cursor"];
     };
+    CustomMcpTool: {
+      name: string;
+      description?: string;
+      inputSchema: {
+        [key: string]: unknown;
+      };
+    };
+    CustomMcpConnection: {
+      id: string;
+      name: string;
+      /** Format: uri */
+      endpoint: string;
+      has_token: boolean;
+      /** Format: int64 */
+      revision: number;
+      tools: components["schemas"]["CustomMcpTool"][];
+    };
     /** @enum {string} */
     ExternalConnectionStatus:
       | "pending"
@@ -12003,6 +12068,111 @@ export interface operations {
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
       503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  listCustomMcpConnections: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The signed-in owner's custom connectors. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            connections: components["schemas"]["CustomMcpConnection"][];
+          };
+        };
+      };
+    };
+  };
+  saveCustomMcpConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          id?: string;
+          /** Format: int64 */
+          revision?: number;
+          name: string;
+          /** Format: uri */
+          endpoint: string;
+          /** @description Omit on edit to retain the token for the same endpoint. Send an empty value to remove it. */
+          token?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description The saved connection and its verified tool catalog. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CustomMcpConnection"];
+        };
+      };
+    };
+  };
+  testCustomMcpConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** Format: uri */
+          endpoint: string;
+          token?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Tools discovered without saving the connection or calling a tool. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            tools: components["schemas"]["CustomMcpTool"][];
+          };
+        };
+      };
+    };
+  };
+  deleteCustomMcpConnection: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        connectionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The connection was revoked and its credentials removed. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   listExternalConnections: {

@@ -80,9 +80,15 @@ type Service struct {
 
 func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
-// SetConnectedApps makes the connected app actions depend on configured: while
-// it reports false they are outside the allowlist. Without it they are allowed.
+// SetConnectedApps supplies the managed-provider availability check. Agent
+// authorization uses it for auto-reminders. Tool search and execution check
+// provider availability after resolving the Agent's grants.
 func (s *Service) SetConnectedApps(configured func() bool) { s.connectedApps = configured }
+
+// ConnectedAppsConfigured reports whether managed connector operations are available.
+func (s *Service) ConnectedAppsConfigured() bool {
+	return s.connectedApps == nil || s.connectedApps()
+}
 
 func (s *Service) Authorize(ctx context.Context, token, action string) (Authorization, error) {
 	if s == nil || s.pool == nil {
@@ -116,13 +122,12 @@ func (s *Service) AuthorizeInTx(ctx context.Context, tx pgx.Tx, token, action st
 }
 
 // actionConfigured reports whether the deployment currently runs the feature
-// behind action. The connected app actions that reach Composio need a
-// Composio API key; listing the Agent's grants and asking for a connection do
-// not, so an Agent can ask the user for the key.
+// behind action. Tool search and execution check provider availability after
+// resolving the Agent's grants.
 func (s *Service) actionConfigured(action string) bool {
 	switch action {
-	case "search_app_tools", "execute_app_tool", "manage_auto_reminders":
-		return s.connectedApps == nil || s.connectedApps()
+	case "manage_auto_reminders":
+		return s.ConnectedAppsConfigured()
 	}
 	return true
 }

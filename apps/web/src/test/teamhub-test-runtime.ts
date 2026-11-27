@@ -1247,6 +1247,7 @@ function installSeedRoutes(server: TeamHubTestServer, seed: TeamHubTestSeed) {
       provider_configured: true,
       provider_key: { can_save: true, source: "stored" },
     }))
+    .on("GET", "/v0/custom-mcp-connections", () => ({ connections: [] }))
     .on("GET", "/v0/external-connections", () => ({
       connections: seed.externalSources.connections,
     }))
