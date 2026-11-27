@@ -159,6 +159,7 @@ This journey proves the updater mechanics. The [upgrade from the previous releas
 
 1. Install the previous release the way users do and run **Quick Install** with **Local model** where the hardware supports it (otherwise BYOK; record which). Sign in, confirm the default gateway serves the model (Bifrost on every platform for new installs; on Windows also repeat with an install that an earlier release set up on Magpie, when one is available), send a unique marker to Another Me and to one other Agent, and get replies. Create a Document and change a few settings (Room model, a Computer setting, a saved BYOK key when used).
 2. Record the baseline: app version, `local-server.json` source folder, service and model PIDs with their executable paths, gateway process and port, `GET .../local-models` and `GET .../model-source` JSON, and Pi's default model.
+   On macOS, confirm Computer use works with Screen Recording and Accessibility grants before upgrading, and record the signing identities of the installed Linger build and the upgrade candidate.
 3. Upgrade with services and the local model still running, by each path users take:
    - **macOS:** in-app **Restart to Update** (`app-bundle`), and separately drag the new `Linger.app` from the `.dmg` over the old one.
    - **Windows:** in-app **Restart to Update** (`/update /relaunch`), and separately run the new `-setup.exe` over the running install.
@@ -173,7 +174,9 @@ This journey proves the updater mechanics. The [upgrade from the previous releas
 - Account, Rooms, messages, the Document, Agents, Computer enrollment and the changed settings are kept; the Computer is **Online** without pairing again.
 - The local model is `loaded` and answering through its gateway. A fresh Windows install serves it only through Bifrost (`bifrost-http.exe`), with no `magpie.exe` and no `magpie/...` Pi default. A Windows install that 0.1.7 set up on Magpie may stay on Magpie after the upgrade (a known issue until such installs move to Bifrost), but it must start and its Agents must reply. A BYOK source is remounted without entering the key again.
 - Another Me and the other Agent each deliver a reply to a new marker, with no `ECONNREFUSED` and no Runtime `Update needed`.
-- On macOS, computer use still works without granting permissions again.
+- On macOS, verify Computer use on the first launch after upgrading and after both restarts:
+  - **Same Developer ID signing identity:** Computer use works with the existing Screen Recording and Accessibility grants throughout.
+  - **Ad-hoc to Developer ID:** Record whether either grant needs to be renewed on the first launch. If needed, use the [one-time permission recovery steps](local-computer.md#desktop-and-browser-tools) and confirm Computer use works after relaunch. Both grants must then remain effective through Quit → Reopen and the cold restart.
 
 **Evidence:** for each target and upgrade path, the from and to versions and digests, the baseline and after records from step 2, `daemon status --json`, the process list with executable paths, persisted message and Run IDs of the replies, a **Save Diagnostics** archive, and screenshots of `Updating Linger`, the account menu version and Settings › Models. Record a failure on the first launch even when Try Again or a reboot later recovers it.
 
