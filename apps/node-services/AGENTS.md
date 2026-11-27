@@ -86,6 +86,9 @@ MIME document normalization prefers extractable HTML, then the recorded
 plain-text alternative when HTML has no extractable body. Headers alone do
 not make an empty message indexable.
 
+PDF.js loads CMaps, standard fonts, and WASM from its installed package. Its
+resource prefixes are filesystem paths ending in `/`, including on Windows.
+
 ## Structure
 
 - `tests/<role>/` mirrors `src/<role>/`; host-level tests such as

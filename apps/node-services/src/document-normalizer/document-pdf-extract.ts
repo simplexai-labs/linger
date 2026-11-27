@@ -9,6 +9,12 @@ import {
 
 const PDFJS_MODULE_URL = import.meta.resolve("pdfjs-dist/legacy/build/pdf.mjs");
 
+function pdfResourceDirectory(name: string): string {
+  const directory = fileURLToPath(new URL(`../../${name}`, PDFJS_MODULE_URL));
+  // PDF.js requires a forward slash at the end of Node filesystem prefixes.
+  return `${directory}/`;
+}
+
 export async function extractPdfMarkdown(source: Uint8Array): Promise<string> {
   if (!Buffer.from(source.subarray(0, 1024)).includes(Buffer.from("%PDF-"))) {
     throw new DocumentNormalizationError("DOCUMENT_SOURCE_INVALID");
@@ -16,11 +22,9 @@ export async function extractPdfMarkdown(source: Uint8Array): Promise<string> {
   const loading = getDocument({
     data: Uint8Array.from(source),
     cMapPacked: true,
-    cMapUrl: fileURLToPath(new URL("../../cmaps/", PDFJS_MODULE_URL)),
-    standardFontDataUrl: fileURLToPath(
-      new URL("../../standard_fonts/", PDFJS_MODULE_URL),
-    ),
-    wasmUrl: fileURLToPath(new URL("../../wasm/", PDFJS_MODULE_URL)),
+    cMapUrl: pdfResourceDirectory("cmaps"),
+    standardFontDataUrl: pdfResourceDirectory("standard_fonts"),
+    wasmUrl: pdfResourceDirectory("wasm"),
     disableFontFace: true,
     useSystemFonts: false,
     stopAtErrors: true,
