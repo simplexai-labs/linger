@@ -14,6 +14,9 @@ export interface ExtractZipOptions {
   strip?: number;
 }
 function strippedZipPath(name: string, strip: number): string[] | undefined {
+  // Windows joins "\" as a path separator, so an entry carrying it could
+  // escape the destination even though zip entry names use "/".
+  if (name.includes("\\")) throw new Error("Unsafe zip entry.");
   const normalized = name.replace(/\/+$/, "");
   if (!normalized) return undefined;
   const parts = normalized.split("/");
@@ -26,7 +29,8 @@ function strippedZipPath(name: string, strip: number): string[] | undefined {
 /**
  * Minimal reader for verified release zips (Go and Node for Windows): stored
  * and deflated entries only, no ZIP64 and no encryption. The caller has already
- * checked the archive digest, so entry CRCs add nothing here.
+ * checked the archive digest, so entry CRCs add nothing here. Entry names are
+ * validated against path traversal for every strip value.
  */
 export async function extractZip(
   file: string,
@@ -69,10 +73,7 @@ export async function extractZip(
       })
     )
       return;
-    const parts =
-      strip > 0
-        ? strippedZipPath(name, strip)
-        : name.split("/").filter(Boolean);
+    const parts = strippedZipPath(name, strip);
     if (!parts) continue;
     const target = path.join(directory, ...parts);
     if (directoryEntry) {
