@@ -1817,3 +1817,303 @@ it("injects strata_pin and Bifrost passthrough headers during prefix warm-up", a
   );
   expect(result.stdout).toContain("strata pin hooks passed");
 }, 30_000);
+
+it("waits for cold-start MCP initialize and tools/list before sending a prefix warm-up prompt", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "linger-pi-warmup-mcp-"));
+  const mcpMethods: string[] = [];
+  const llmRequests: Array<{
+    headers: Record<string, string | string[] | undefined>;
+    body: {
+      strata_pin?: Record<string, unknown>;
+      tools?: Array<{ function?: { name?: string } }>;
+    };
+  }> = [];
+  let mcpServer: Server | undefined;
+  let llmServer: Server | undefined;
+  try {
+    mcpServer = createServer((request, response) => {
+      void (async () => {
+        if (request.method !== "POST") {
+          response.writeHead(405);
+          response.end();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          id?: number | string;
+          method?: string;
+        };
+        if (message.method) mcpMethods.push(message.method);
+        if (message.method === "notifications/initialized") {
+          response.writeHead(202);
+          response.end();
+          return;
+        }
+        const reply = (result: Record<string, unknown>) => {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({ jsonrpc: "2.0", id: message.id, result }),
+          );
+        };
+        if (message.method === "initialize") {
+          reply({
+            protocolVersion: "2025-03-26",
+            capabilities: { tools: { listChanged: false } },
+            serverInfo: { name: "linger-local-tools", version: "0.0.0-test" },
+          });
+          return;
+        }
+        if (message.method === "tools/list") {
+          // Delay tools/list briefly so cold-start session_start has returned
+          // before MCP registration finishes, proving prompt waits for it.
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          reply({
+            tools: [
+              {
+                name: "ui_exec",
+                description: "Execute UI script",
+                inputSchema: {
+                  type: "object",
+                  properties: { code: { type: "string" } },
+                  required: ["code"],
+                },
+              },
+              {
+                name: "ui_reset",
+                description: "Reset UI state",
+                inputSchema: { type: "object", properties: {} },
+              },
+            ],
+          });
+          return;
+        }
+        reply({
+          isError: true,
+          content: [{ type: "text", text: "unexpected call" }],
+        });
+      })();
+    });
+    await new Promise<void>((resolve) =>
+      mcpServer!.listen(0, "127.0.0.1", resolve),
+    );
+    const mcpAddr = mcpServer.address();
+    if (!mcpAddr || typeof mcpAddr === "string")
+      throw new Error("MCP server did not bind TCP port");
+
+    llmServer = createServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          strata_pin?: Record<string, unknown>;
+          tools?: Array<{ function?: { name?: string } }>;
+        };
+        llmRequests.push({ headers: request.headers, body });
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+        });
+        response.end(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-warmup",
+            object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: { role: "assistant", content: "" } }],
+          })}\n\ndata: ${JSON.stringify({
+            id: "chatcmpl-warmup",
+            object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 0,
+              total_tokens: 12,
+            },
+          })}\n\ndata: [DONE]\n\n`,
+        );
+      })();
+    });
+    await new Promise<void>((resolve) =>
+      llmServer!.listen(0, "127.0.0.1", resolve),
+    );
+    const llmAddr = llmServer.address();
+    if (!llmAddr || typeof llmAddr === "string")
+      throw new Error("LLM server did not bind TCP port");
+
+    const agentDir = path.join(root, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(
+      path.join(agentDir, "models.json"),
+      JSON.stringify({
+        providers: {
+          localmodels: {
+            baseUrl: `http://127.0.0.1:${llmAddr.port}/v1`,
+            api: "openai-completions",
+            apiKey: "warmup-test-key",
+            models: [{ id: "test-qwen" }],
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+
+    const mcpConfigPath = path.join(root, "linger-mcp.json");
+    await writeFile(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          computer: {
+            type: "http",
+            url: `http://127.0.0.1:${mcpAddr.port}/mcp/warmup`,
+            tool_timeout_sec: 600,
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const systemPromptPath = path.join(root, "meta.md");
+    await writeFile(
+      systemPromptPath,
+      "Static prefix\n\n<!-- LINGER_STATIC_PREFIX_END -->",
+      { mode: 0o600 },
+    );
+
+    const piCliPath = new URL(
+      "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+      import.meta.url,
+    ).pathname;
+    const piMcpPath = new URL("../tools/pi-mcp.mjs", import.meta.url).pathname;
+    const shellTool = process.platform === "win32" ? "powershell" : "bash";
+
+    const { spawn } = await import("node:child_process");
+    const child = spawn(
+      process.execPath,
+      [
+        piCliPath,
+        "--mode",
+        "rpc",
+        "--no-session",
+        "--system-prompt",
+        systemPromptPath,
+        "--model",
+        "localmodels/test-qwen",
+        "--extension",
+        piMcpPath,
+        "--tools",
+        `read,${shellTool},edit,write,grep,find,ls,mcp__*`,
+      ],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          PI_CODING_AGENT_DIR: agentDir,
+          LINGER_PI_MANAGED_MCP_CONFIG: mcpConfigPath,
+          LINGER_PI_STRATA_PIN: JSON.stringify({
+            name: "linger-meta",
+            prefill_only: true,
+            resident: "ram",
+            anchor: "<!-- LINGER_STATIC_PREFIX_END -->",
+          }),
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    const waitForLine = (
+      predicate: (line: Record<string, unknown>) => boolean,
+    ) =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Timed out waiting for RPC frame. stdout=${stdout} stderr=${stderr}`,
+              ),
+            ),
+          15_000,
+        );
+        const check = () => {
+          for (const raw of stdout.split("\n")) {
+            if (!raw.trim()) continue;
+            try {
+              const parsed = JSON.parse(raw) as Record<string, unknown>;
+              if (predicate(parsed)) {
+                clearTimeout(timer);
+                child.stdout.off("data", check);
+                resolve(parsed);
+                return;
+              }
+            } catch {
+              // ignore partial line
+            }
+          }
+        };
+        child.stdout.on("data", check);
+        check();
+      });
+
+    child.stdin.write(JSON.stringify({ id: "1", type: "get_state" }) + "\n");
+    const stateResp = await waitForLine(
+      (frame) => frame.type === "response" && frame.id === "1",
+    );
+    expect(stateResp.success).toBe(true);
+
+    child.stdin.write(
+      JSON.stringify({ id: "2", type: "prompt", message: "." }) + "\n",
+    );
+    const settled = await waitForLine(
+      (frame) => frame.type === "agent_settled",
+    );
+    expect(settled.aborted).toBe(false);
+    child.stdin.end();
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+
+    expect(mcpMethods).toEqual([
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+    ]);
+    expect(llmRequests).toHaveLength(1);
+    const [llmRequest] = llmRequests;
+    if (!llmRequest) {
+      throw new Error("Expected one LLM warm-up request");
+    }
+    expect(llmRequest.headers["x-bf-passthrough-extra-params"]).toBe("true");
+    expect(llmRequest.body.strata_pin).toEqual({
+      name: "linger-meta",
+      prefill_only: true,
+      resident: "ram",
+      anchor: "<!-- LINGER_STATIC_PREFIX_END -->",
+    });
+    const toolNames = (llmRequest.body.tools ?? []).map(
+      (tool) => tool.function?.name,
+    );
+    expect(toolNames).toEqual([
+      "read",
+      shellTool,
+      "edit",
+      "write",
+      "grep",
+      "find",
+      "ls",
+      "mcp__computer__ui_exec",
+      "mcp__computer__ui_reset",
+    ]);
+  } finally {
+    if (mcpServer) {
+      await new Promise<void>((resolve) => mcpServer!.close(() => resolve()));
+    }
+    if (llmServer) {
+      await new Promise<void>((resolve) => llmServer!.close(() => resolve()));
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);

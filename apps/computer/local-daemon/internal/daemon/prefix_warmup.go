@@ -66,7 +66,8 @@ type PrefixWarmupRunner struct {
 	TempBase             string
 	HTTPClient           *http.Client
 	Timeout              time.Duration
-	RunWarmup            func(ctx context.Context, profile native.Profile, dir, instructionsFile, model string, pin native.StrataPinSpec) error
+	WarmupMCPServers     func(ctx context.Context) (json.RawMessage, func(), error)
+	RunWarmup            func(ctx context.Context, profile native.Profile, dir, instructionsFile, model string, pin native.StrataPinSpec, mcpConfig json.RawMessage) error
 
 	mu      sync.Mutex
 	bundles map[string]cachedPrefixBundle
@@ -134,6 +135,18 @@ func (r *PrefixWarmupRunner) Warmup(ctx context.Context, target localmodels.Pref
 	warmupCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	var mcpConfig json.RawMessage
+	if r.WarmupMCPServers != nil {
+		var closeMCP func()
+		mcpConfig, closeMCP, err = r.WarmupMCPServers(warmupCtx)
+		if err != nil {
+			return false, err
+		}
+		if closeMCP != nil {
+			defer closeMCP()
+		}
+	}
+
 	profile := native.Profile{
 		Program:             install.ExecutablePath,
 		Env:                 install.Environment,
@@ -166,7 +179,7 @@ func (r *PrefixWarmupRunner) Warmup(ctx context.Context, target localmodels.Pref
 			Resident:    "ram",
 			Anchor:      marker,
 		}
-		if err := run(warmupCtx, profile, workDir, instructionsPath, target.PiModel, pin); err != nil {
+		if err := run(warmupCtx, profile, workDir, instructionsPath, target.PiModel, pin, mcpConfig); err != nil {
 			return false, err
 		}
 	}

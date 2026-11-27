@@ -744,24 +744,6 @@ export default async function managedExtension(pi) {
     }
     return cachedPowerShell51;
   };
-  pi.on("before_agent_start", () => {
-    failureLoop.reset();
-    if (
-      typeof pi.getActiveTools !== "function" ||
-      typeof pi.setActiveTools !== "function"
-    ) {
-      return undefined;
-    }
-    const current = pi.getActiveTools();
-    const sorted = sortActiveToolNames(current);
-    if (
-      sorted.length !== current.length ||
-      sorted.some((name, index) => name !== current[index])
-    ) {
-      pi.setActiveTools(sorted);
-    }
-    return undefined;
-  });
   pi.on("tool_call", async (event, ctx) => {
     if (strataPinConfig) {
       return { block: true, reason: "prefix warmup does not execute tools" };
@@ -780,4 +762,39 @@ export default async function managedExtension(pi) {
   if (process.env.LINGER_PI_MANAGED_MCP_CONFIG) {
     await mountManagedMcp(pi, process.env.LINGER_PI_MANAGED_MCP_CONFIG);
   }
+  // Register after mountManagedMcp so createMcpExtension's before_agent_start
+  // (waitForDirectServers) finishes initialize + tools/list + registerTool
+  // before we sort active tool names or validate warm-up readiness.
+  pi.on("before_agent_start", (_event, ctx) => {
+    failureLoop.reset();
+    if (
+      typeof pi.getActiveTools !== "function" ||
+      typeof pi.setActiveTools !== "function"
+    ) {
+      return undefined;
+    }
+    const current = pi.getActiveTools();
+    if (
+      strataPinConfig &&
+      process.env.LINGER_PI_MANAGED_MCP_CONFIG &&
+      typeof pi.getMcpServers === "function" &&
+      pi.getMcpServers().length > 0 &&
+      !current.some((name) => name.startsWith("mcp__"))
+    ) {
+      ctx?.ui?.notify?.(
+        "Managed MCP tools did not register before prefix warm-up",
+        "error",
+      );
+      ctx?.abort?.();
+      return undefined;
+    }
+    const sorted = sortActiveToolNames(current);
+    if (
+      sorted.length !== current.length ||
+      sorted.some((name, index) => name !== current[index])
+    ) {
+      pi.setActiveTools(sorted);
+    }
+    return undefined;
+  });
 }

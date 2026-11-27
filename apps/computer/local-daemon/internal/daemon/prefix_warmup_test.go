@@ -40,7 +40,7 @@ func TestPrefixWarmupRunnerPrerequisitesAndCaching(t *testing.T) {
 		},
 		ManagedMCPExtension: "/opt/tools/pi-mcp.mjs",
 		HTTPClient:          server.Client(),
-		RunWarmup: func(context.Context, native.Profile, string, string, string, native.StrataPinSpec) error {
+		RunWarmup: func(context.Context, native.Profile, string, string, string, native.StrataPinSpec, json.RawMessage) error {
 			invoked.Add(1)
 			return nil
 		},
@@ -122,6 +122,7 @@ func TestPrefixWarmupRunnerSelectsVariantAndCleansTempDir(t *testing.T) {
 		instructions string
 		model        string
 		pin          native.StrataPinSpec
+		mcpConfig    json.RawMessage
 	}
 	var calls []recordedCall
 	tempBase := filepath.Join(t.TempDir(), "op-tmp")
@@ -145,7 +146,7 @@ func TestPrefixWarmupRunnerSelectsVariantAndCleansTempDir(t *testing.T) {
 		TeamHubCLI:           true,
 		TempBase:             tempBase,
 		HTTPClient:           server.Client(),
-		RunWarmup: func(_ context.Context, profile native.Profile, dir, instructionsFile, model string, pin native.StrataPinSpec) error {
+		RunWarmup: func(_ context.Context, profile native.Profile, dir, instructionsFile, model string, pin native.StrataPinSpec, mcpConfig json.RawMessage) error {
 			content, err := os.ReadFile(instructionsFile)
 			if err != nil {
 				t.Fatal(err)
@@ -156,6 +157,7 @@ func TestPrefixWarmupRunnerSelectsVariantAndCleansTempDir(t *testing.T) {
 				instructions: string(content),
 				model:        model,
 				pin:          pin,
+				mcpConfig:    append(json.RawMessage(nil), mcpConfig...),
 			})
 			return nil
 		},
@@ -229,5 +231,70 @@ func TestPrefixWarmupRunnerSelectsVariantAndCleansTempDir(t *testing.T) {
 	}
 	if !strings.HasPrefix(calls[0].instructions, "META-FULL-B") {
 		t.Fatalf("expected conn-b bundle after URL change, got %q", calls[0].instructions)
+	}
+}
+
+func TestPrefixWarmupRunnerOpensAndClosesMCPServersOnce(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/conn/static-prefixes/v1" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":                    1,
+			"marker":                     lingercontext.StaticPrefixEndMarker,
+			"compact_max_context_tokens": 128 * 1024,
+			"prefixes": map[string]any{
+				"meta":      map[string]any{"full": "META", "compact": "META"},
+				"alter_ego": map[string]any{"full": "ALTER", "compact": "ALTER"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var opens atomic.Int32
+	var closes atomic.Int32
+	wantMCP := json.RawMessage(`{"mcpServers":{"computer":{"type":"http","url":"http://127.0.0.1:4321/mcp/warmup","tool_timeout_sec":600}}}`)
+	var seenPins []string
+	var seenConfigs []string
+
+	runner := &PrefixWarmupRunner{
+		ContentURL: func() string { return server.URL + "/conn" },
+		PiInstallation: func() (lingercontext.ProviderInstallation, bool) {
+			return lingercontext.ProviderInstallation{ExecutablePath: "/usr/local/bin/pi"}, true
+		},
+		ManagedMCPExtension: "/opt/tools/pi-mcp.mjs",
+		HTTPClient:          server.Client(),
+		WarmupMCPServers: func(context.Context) (json.RawMessage, func(), error) {
+			opens.Add(1)
+			return wantMCP, func() { closes.Add(1) }, nil
+		},
+		RunWarmup: func(_ context.Context, _ native.Profile, _ string, _ string, _ string, pin native.StrataPinSpec, mcpConfig json.RawMessage) error {
+			if closes.Load() != 0 {
+				t.Fatalf("MCP server closed before warm-up pin %s completed", pin.Name)
+			}
+			seenPins = append(seenPins, pin.Name)
+			seenConfigs = append(seenConfigs, string(mcpConfig))
+			return nil
+		},
+	}
+
+	done, err := runner.Warmup(t.Context(), localmodels.PrefixWarmupTarget{
+		ModelID: "qwen3-4b",
+		PiModel: "localmodels/qwen3-4b",
+		Engine:  "polystrata",
+	})
+	if err != nil || !done {
+		t.Fatalf("Warmup = (%t, %v), want (true, nil)", done, err)
+	}
+	if opens.Load() != 1 || closes.Load() != 1 {
+		t.Fatalf("WarmupMCPServers opens=%d closes=%d, want 1/1", opens.Load(), closes.Load())
+	}
+	if strings.Join(seenPins, ",") != "linger-meta,linger-alter-ego" {
+		t.Fatalf("pins = %v", seenPins)
+	}
+	if len(seenConfigs) != 2 || seenConfigs[0] != string(wantMCP) || seenConfigs[1] != string(wantMCP) {
+		t.Fatalf("mcpConfigs = %q, want %s for both pins", seenConfigs, wantMCP)
 	}
 }

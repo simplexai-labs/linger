@@ -1,6 +1,7 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,8 +25,9 @@ type StrataPinSpec struct {
 
 // WarmupPiPrefix runs one tool-0-matching Pi RPC turn with prefill-only KV
 // pinning enabled through the managed Pi extension, without writing a session
-// file on disk.
-func WarmupPiPrefix(ctx context.Context, profile Profile, dir, instructionsFile, model string, pin StrataPinSpec) error {
+// file on disk. When mcpConfig configures managed MCP servers, Pi loads them
+// and exposes mcp__* tools in the warm-up turn's tool declarations.
+func WarmupPiPrefix(ctx context.Context, profile Profile, dir, instructionsFile, model string, pin StrataPinSpec, mcpConfig json.RawMessage) error {
 	if err := piCheckExtension(profile.ManagedMCPExtension); err != nil {
 		return err
 	}
@@ -45,6 +47,13 @@ func WarmupPiPrefix(ctx context.Context, profile Profile, dir, instructionsFile,
 	if err != nil {
 		return fmt.Errorf("encode Pi strata_pin payload: %w", err)
 	}
+	var mcp piMCPWiring
+	if len(bytes.TrimSpace(mcpConfig)) > 0 {
+		if mcp, err = piPrepareMCP(mcpConfig, profile.ManagedMCPExtension, dir); err != nil {
+			return err
+		}
+		defer mcp.remove()
+	}
 	program, err := piResolveProgram(profile.Program)
 	if err != nil {
 		return err
@@ -53,15 +62,20 @@ func WarmupPiPrefix(ctx context.Context, profile Profile, dir, instructionsFile,
 		profile.Logger = slog.Default()
 	}
 
-	env := make(map[string]string, len(profile.Env)+3)
+	env := make(map[string]string, len(profile.Env)+4)
 	for key, value := range profile.Env {
 		env[key] = value
 	}
 	env[piStrataPinEnvKey] = string(pinJSON)
 	piExtensionNodePath(env, profile.ManagedMCPExtension)
+	tools := piBaseToolsFor(runtime.GOOS)
+	if mcp.wired() {
+		env[piMCPConfigEnvKey] = mcp.configPath
+		tools += ",mcp__*"
+	}
 
 	args := append([]string{"--mode", "rpc", "--no-session"}, PiRPCResourceArgs(instructionsFile)...)
-	args = append(args, "--model", model, "--extension", profile.ManagedMCPExtension, "--tools", piBaseToolsFor(runtime.GOOS))
+	args = append(args, "--model", model, "--extension", profile.ManagedMCPExtension, "--tools", tools)
 
 	procCtx, stop := context.WithCancel(context.Background())
 	defer stop()

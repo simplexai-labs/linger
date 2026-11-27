@@ -483,11 +483,25 @@ func piFakePrefixWarmup(mode string, args []string) int {
 		if path == "" {
 			return
 		}
-		encoded, _ := json.Marshal(map[string]string{
+		mcpConfigPath := os.Getenv(piMCPConfigEnvKey)
+		var mcpConfig string
+		var mcpConfigMode uint32
+		if mcpConfigPath != "" {
+			if data, err := os.ReadFile(mcpConfigPath); err == nil {
+				mcpConfig = string(data)
+			}
+			if info, err := os.Lstat(mcpConfigPath); err == nil {
+				mcpConfigMode = uint32(info.Mode().Perm())
+			}
+		}
+		encoded, _ := json.Marshal(map[string]any{
 			"prompt":              prompt,
 			"strata_pin":          os.Getenv(piStrataPinEnvKey),
 			"node_path":           os.Getenv(piNodePathKey),
 			"inherited_node_path": os.Getenv(piInheritedNodePathKey),
+			"mcp_config_path":     mcpConfigPath,
+			"mcp_config":          mcpConfig,
+			"mcp_config_mode":     mcpConfigMode,
 		})
 		_ = os.WriteFile(path, encoded, 0o600)
 	}

@@ -397,6 +397,10 @@ func run(args []string) (resultErr error) {
 	if piEnabled && !hasPi && !piDeferred {
 		libraryHarnessDir = localmodels.HarnessRoot(localModelsStateDir)
 	}
+	var warmupMCPServers func(context.Context) (json.RawMessage, func(), error)
+	if toolManager != nil && resolver.ToolGuide != "" {
+		warmupMCPServers = localtools.OpenWarmupComputerMCP
+	}
 	localModels = localmodels.New(localmodels.Options{
 		Tool: localModelsTool, Environment: baseProviderEnvironment,
 		JobDirectory:        jobDir,
@@ -449,6 +453,7 @@ func run(args []string) (resultErr error) {
 			HostEnvironmentGuide: resolver.HostEnvironmentGuide,
 			TeamHubCLI:           teamhubBin != "",
 			TempBase:             operationTempBase,
+			WarmupMCPServers:     warmupMCPServers,
 		}).Warmup,
 	})
 	defer localModels.Close()
