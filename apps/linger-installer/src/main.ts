@@ -546,15 +546,21 @@ export async function loadPublishedSources(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const [
-    { readPublishedTool },
+    localmodelsTool,
     { readPublishedNativeSources, readPublishedVoiceTools },
   ] = await Promise.all([
     import("@linger/local-installation/localmodels-tool"),
     import("@linger/local-installation/native-dependencies"),
   ]);
-  const tool = await readPublishedTool(file);
-  if (tool && !environment.LINGER_LOCALMODELS_TOOL_JSON)
+  const tool = await localmodelsTool.readPublishedTool(file);
+  if (tool && !environment.LINGER_LOCALMODELS_TOOL_JSON) {
     environment.LINGER_LOCALMODELS_TOOL_JSON = JSON.stringify(tool);
+    if (!environment.LINGER_LOCALMODELS_TOOL_ARCHIVE) {
+      const bundledArchive = localmodelsTool.bundledToolArchivePath(file);
+      if (bundledArchive)
+        environment.LINGER_LOCALMODELS_TOOL_ARCHIVE = bundledArchive;
+    }
+  }
   const native = await readPublishedNativeSources(file);
   if (native && !environment.LINGER_NATIVE_DEPENDENCIES_JSON)
     environment.LINGER_NATIVE_DEPENDENCIES_JSON = JSON.stringify(native);

@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { buildTeamhubLauncher } from "./build-daemon.mjs";
 import { hostedDiagnosticsUploadUrl } from "./diagnostics-upload-url.mjs";
+import { stageBundledLocalmodelsKit } from "./stage-bundled-localmodels-kit.mjs";
 
 // Some bundled dependencies still call require().
 const REQUIRE_SHIM = {
@@ -151,7 +152,18 @@ export async function buildInstallerBundle({
   }
 
   const distribution = resolveDistributionFile(desktopDir, daemonTargets, env);
-  if (!distribution) return { distribution: null, missingNative: [] };
+  if (!distribution) {
+    await stageBundledLocalmodelsKit({
+      kitDir: env.LINGER_BUNDLED_LOCALMODELS_KIT_DIR,
+      distribution: undefined,
+      installerDir: targetDir,
+    });
+    return {
+      distribution: null,
+      missingNative: [],
+      bundledLocalmodelsKit: null,
+    };
+  }
 
   const value = JSON.parse(await readFile(distribution, "utf8"));
   if (
@@ -218,17 +230,28 @@ export async function buildInstallerBundle({
     );
   }
 
+  const resolvedDistribution = {
+    platform: value.platform,
+    arch: value.arch,
+    localmodelsTool: value.localmodelsTool,
+    nativeSources: value.nativeSources,
+    voiceTools,
+  };
   await writeFile(
     path.join(targetDir, "distribution.json"),
-    JSON.stringify({
-      platform: value.platform,
-      arch: value.arch,
-      localmodelsTool: value.localmodelsTool,
-      nativeSources: value.nativeSources,
-      voiceTools,
-    }),
+    JSON.stringify(resolvedDistribution),
   );
-  return { distribution, missingNative };
+  const bundledLocalmodelsKit = await stageBundledLocalmodelsKit({
+    kitDir: env.LINGER_BUNDLED_LOCALMODELS_KIT_DIR,
+    distribution: resolvedDistribution,
+    installerDir: targetDir,
+  });
+  if (bundledLocalmodelsKit) {
+    log(
+      `Bundled localmodels kit for ${bundledLocalmodelsKit.target}: ${bundledLocalmodelsKit.bytes} bytes (${bundledLocalmodelsKit.sha256.slice(0, 12)})`,
+    );
+  }
+  return { distribution, missingNative, bundledLocalmodelsKit };
 }
 
 export async function buildTeamhubCli({ desktopDir, daemonTargets = [] }) {

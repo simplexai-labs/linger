@@ -328,8 +328,60 @@ async function installedKit(directory: string, source: LocalmodelsToolSource) {
   if (tool.hashed > 0) await writeStamps(directory, source, tool.stamps);
   return location(tool);
 }
-interface ToolPrepareDependencies {
+/** Filename of an optional pre-bundled kit archive staged beside distribution.json. */
+export const BUNDLED_LOCALMODELS_KIT_FILENAME = "bundled-localmodels-kit.tgz";
+
+/**
+ * Resolves the optional pre-bundled localmodels kit archive path beside the
+ * given distribution.json, or from LINGER_LOCALMODELS_TOOL_ARCHIVE when omitted.
+ */
+export function bundledToolArchivePath(
+  distributionFile?: string,
+): string | undefined {
+  if (distributionFile !== undefined) {
+    return path.join(
+      path.dirname(path.resolve(distributionFile)),
+      BUNDLED_LOCALMODELS_KIT_FILENAME,
+    );
+  }
+  const configured = process.env.LINGER_LOCALMODELS_TOOL_ARCHIVE?.trim();
+  return configured ? path.resolve(configured) : undefined;
+}
+
+async function verifyBundledToolArchive(
+  archivePath: string,
+  source: LocalmodelsToolSource,
+): Promise<boolean> {
+  let info;
+  try {
+    info = await lstat(archivePath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw error;
+  }
+  if (info.isSymbolicLink() || !info.isFile()) {
+    throw new Error(
+      "Bundled localmodels kit archive must be a regular non-symlink file.",
+    );
+  }
+  if (info.size !== source.bytes) {
+    throw new Error(
+      `Bundled localmodels kit archive size mismatch: expected ${source.bytes} bytes, got ${info.size}.`,
+    );
+  }
+  const actualSha256 = await sha256File(archivePath);
+  if (actualSha256 !== source.sha256) {
+    throw new Error(
+      `Bundled localmodels kit archive checksum mismatch: expected ${source.sha256}, got ${actualSha256}.`,
+    );
+  }
+  return true;
+}
+
+export interface ToolPrepareDependencies {
   source?: LocalmodelsToolSource;
+  bundledArchivePath?: string | null;
   fetcher?: typeof fetch;
   lockPollMs?: number;
   lockWaitMs?: number;
@@ -400,7 +452,9 @@ async function prepareLocalmodelsTool(
         }
         const stage = path.join(base, `pending-${randomUUID()}`);
         await privateDirectory(stage);
-        const archive = path.join(base, `${randomUUID()}.tgz`);
+        const downloadedArchive = path.join(base, `${randomUUID()}.tgz`);
+        let usedBundledArchive = false;
+        let archive = downloadedArchive;
         try {
           options.onEvent?.({
             kind: "stage",
@@ -411,34 +465,62 @@ async function prepareLocalmodelsTool(
               : "Preparing the model and Harness installation tool…",
           });
           const downloadStartedAt = Date.now();
-          await downloadInRegion(
-            home,
-            {
-              url: source.url,
-              mirrors: source.mirrors,
-              output: archive,
-              algorithm: "sha256",
-              digest: source.sha256,
-              maxBytes: source.bytes,
-              signal,
-              onEvent: (event) =>
-                options.onEvent?.({
-                  kind: "log",
-                  stage: "preflight",
-                  message: `${formatRegionDownloadEvent(event)}\n`,
-                }),
-              onProgress: (completed, total) =>
-                options.onEvent?.({
-                  kind: "stage",
-                  stage: "preflight",
-                  state: "running",
-                  message:
-                    "Downloading the model and Harness installation tool…",
-                  progress: { completed, total, unit: "bytes" },
-                }),
-            },
-            dependencies.fetcher,
-          );
+          const bundledArchive =
+            dependencies.bundledArchivePath !== undefined
+              ? (dependencies.bundledArchivePath ?? undefined)
+              : dependencies.source === undefined
+                ? bundledToolArchivePath()
+                : undefined;
+          if (
+            bundledArchive &&
+            (await verifyBundledToolArchive(bundledArchive, source))
+          ) {
+            usedBundledArchive = true;
+            archive = bundledArchive;
+            options.onEvent?.({
+              kind: "stage",
+              stage: "preflight",
+              state: "running",
+              message:
+                "Using verified bundled model and Harness installation tool…",
+            });
+            options.onEvent?.({
+              kind: "log",
+              stage: "preflight",
+              message:
+                "Using verified bundled localmodels kit archive; skipping network download.\n",
+            });
+          } else {
+            await downloadInRegion(
+              home,
+              {
+                url: source.url,
+                mirrors: source.mirrors,
+                output: downloadedArchive,
+                algorithm: "sha256",
+                digest: source.sha256,
+                maxBytes: source.bytes,
+                signal,
+                onEvent: (event) =>
+                  options.onEvent?.({
+                    kind: "log",
+                    stage: "preflight",
+                    message: `${formatRegionDownloadEvent(event)}\n`,
+                  }),
+                onProgress: (completed, total) =>
+                  options.onEvent?.({
+                    kind: "stage",
+                    stage: "preflight",
+                    state: "running",
+                    message:
+                      "Downloading the model and Harness installation tool…",
+                    progress: { completed, total, unit: "bytes" },
+                  }),
+              },
+              dependencies.fetcher,
+            );
+          }
+          signal.throwIfAborted();
           const unpackStartedAt = Date.now();
           await unpack(archive, stage);
           // The kit is an npm tarball: its files sit under package/.
@@ -475,7 +557,9 @@ async function prepareLocalmodelsTool(
           options.onEvent?.({
             kind: "log",
             stage: "preflight",
-            message: `localmodels kit prepared (s): download ${seconds(unpackStartedAt - downloadStartedAt)}, unpack ${seconds(verifyStartedAt - unpackStartedAt)}, verify ${seconds(verifiedAt - verifyStartedAt)}.\n`,
+            message: usedBundledArchive
+              ? `localmodels kit prepared from bundled archive (s): verify-archive ${seconds(unpackStartedAt - downloadStartedAt)}, unpack ${seconds(verifyStartedAt - unpackStartedAt)}, verify ${seconds(verifiedAt - verifyStartedAt)}.\n`
+              : `localmodels kit prepared (s): download ${seconds(unpackStartedAt - downloadStartedAt)}, unpack ${seconds(verifyStartedAt - unpackStartedAt)}, verify ${seconds(verifiedAt - verifyStartedAt)}.\n`,
           });
           return {
             python: publishedPython,
@@ -484,7 +568,9 @@ async function prepareLocalmodelsTool(
           };
         } finally {
           await rm(stage, { recursive: true, force: true });
-          await rm(archive, { force: true });
+          if (!usedBundledArchive) {
+            await rm(downloadedArchive, { force: true });
+          }
         }
       });
     } catch (error) {

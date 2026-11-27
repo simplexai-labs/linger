@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -417,6 +418,219 @@ describe("desktop-release.sh build", () => {
       JSON.parse(readFileSync(join(root, "apps/desktop/package.json"), "utf8"))
         .version,
     ).toBe("0.0.0");
+  });
+
+  function setupCompileFixture(options: {
+    target?: string;
+    kitBytes?: Buffer;
+    writeStaleBundledKit?: boolean;
+  }) {
+    const target = options.target ?? "linux-x64";
+    const [platform, arch] = target.split("-");
+    const kitBytes = options.kitBytes ?? Buffer.from("bundled-localmodels-kit");
+    const kitSha = createHash("sha256").update(kitBytes).digest("hex");
+    const root = folder();
+    const out = folder();
+    const kitDir = folder();
+    const record = join(root, "build-env.json");
+    mkdirSync(join(root, "scripts/ci"), { recursive: true });
+    mkdirSync(join(root, "apps/desktop/distribution"), { recursive: true });
+    copyFileSync(script, join(root, "scripts/ci/desktop-release.sh"));
+    copyFileSync(
+      join(process.cwd(), "scripts/prepare-source-archive.mjs"),
+      join(root, "scripts/prepare-source-archive.mjs"),
+    );
+    for (const relativePath of SOURCE_SKELETON_FILES) {
+      const targetFile = join(root, relativePath);
+      mkdirSync(dirname(targetFile), { recursive: true });
+      writeFileSync(
+        targetFile,
+        relativePath === "package.json"
+          ? '{"name":"linger"}\n'
+          : `${relativePath}\n`,
+      );
+    }
+    writeFileSync(
+      join(root, "apps/desktop/package.json"),
+      `${JSON.stringify({ name: "@linger/desktop", version: "0.0.0" }, null, 2)}\n`,
+    );
+    writeFileSync(
+      join(root, `apps/desktop/distribution/${target}.json`),
+      `${JSON.stringify(
+        {
+          platform,
+          arch,
+          localmodelsTool: {
+            url: `https://example.com/${target}.tgz`,
+            sha256: kitSha,
+            bytes: kitBytes.length,
+            sourceCommit: "a".repeat(40),
+            manifestSha256: "b".repeat(64),
+          },
+          nativeSources: [],
+          voiceTools: [],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFileSync(
+      join(root, "apps/desktop/build.mjs"),
+      [
+        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'mkdirSync("dist/installer", { recursive: true });',
+        'writeFileSync("dist/installer/distribution.json", "{}");',
+        ...(options.writeStaleBundledKit
+          ? [
+              'writeFileSync("dist/installer/bundled-localmodels-kit.tgz", "stale");',
+            ]
+          : []),
+        "writeFileSync(process.env.RECORD_FILE, JSON.stringify({",
+        "  kitDir: process.env.LINGER_BUNDLED_LOCALMODELS_KIT_DIR ?? '',",
+        "}));",
+        "",
+      ].join("\n"),
+    );
+    const git = (...args: string[]) =>
+      execFileSync(
+        "git",
+        ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", ...args],
+        { encoding: "utf8" },
+      ).trim();
+    git("init", "-q");
+    git("add", ".");
+    git("commit", "-q", "-m", "init");
+    return {
+      root,
+      out,
+      kitDir,
+      record,
+      kitBytes,
+      script: join(root, "scripts/ci/desktop-release.sh"),
+    };
+  }
+
+  it("stages matching <target>.tgz as bundled-localmodels-kit.tgz when LINGER_BUNDLED_LOCALMODELS_KIT_DIR is set", () => {
+    const fixture = setupCompileFixture({});
+    writeFileSync(join(fixture.kitDir, "linux-x64.tgz"), fixture.kitBytes);
+
+    const result = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: fixture.out,
+        RECORD_FILE: fixture.record,
+        LINGER_BUNDLED_LOCALMODELS_KIT_DIR: fixture.kitDir,
+      },
+      fixture.script,
+    );
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(readFileSync(fixture.record, "utf8"))).toEqual({
+      kitDir: fixture.kitDir,
+    });
+    const staged = join(
+      fixture.root,
+      "apps/desktop/dist/installer/bundled-localmodels-kit.tgz",
+    );
+    expect(existsSync(staged)).toBe(true);
+    expect(readFileSync(staged)).toEqual(fixture.kitBytes);
+  });
+
+  it("fails closed when LINGER_BUNDLED_LOCALMODELS_KIT_DIR has a missing, symlink, or mismatched archive", () => {
+    const fixture = setupCompileFixture({});
+
+    // Missing file.
+    const missing = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: fixture.out,
+        RECORD_FILE: fixture.record,
+        LINGER_BUNDLED_LOCALMODELS_KIT_DIR: fixture.kitDir,
+      },
+      fixture.script,
+    );
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain("regular non-symlink file");
+    expect(existsSync(fixture.record)).toBe(false);
+
+    // Wrong size.
+    writeFileSync(join(fixture.kitDir, "linux-x64.tgz"), "wrong");
+    const wrongSize = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: fixture.out,
+        RECORD_FILE: fixture.record,
+        LINGER_BUNDLED_LOCALMODELS_KIT_DIR: fixture.kitDir,
+      },
+      fixture.script,
+    );
+    expect(wrongSize.status).toBe(1);
+    expect(wrongSize.stderr).toContain("size mismatch");
+    expect(existsSync(fixture.record)).toBe(false);
+
+    // Same size, wrong sha256.
+    const tampered = Buffer.from(fixture.kitBytes);
+    tampered[0] = (tampered[0] ?? 0) ^ 0xff;
+    writeFileSync(join(fixture.kitDir, "linux-x64.tgz"), tampered);
+    const wrongSha = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: fixture.out,
+        RECORD_FILE: fixture.record,
+        LINGER_BUNDLED_LOCALMODELS_KIT_DIR: fixture.kitDir,
+      },
+      fixture.script,
+    );
+    expect(wrongSha.status).toBe(1);
+    expect(wrongSha.stderr).toContain("sha256 mismatch");
+    expect(existsSync(fixture.record)).toBe(false);
+
+    // Symlink to valid file.
+    const realFile = join(folder(), "real.tgz");
+    writeFileSync(realFile, fixture.kitBytes);
+    rmSync(join(fixture.kitDir, "linux-x64.tgz"));
+    symlinkSync(realFile, join(fixture.kitDir, "linux-x64.tgz"));
+    const linked = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: fixture.out,
+        RECORD_FILE: fixture.record,
+        LINGER_BUNDLED_LOCALMODELS_KIT_DIR: fixture.kitDir,
+      },
+      fixture.script,
+    );
+    expect(linked.status).toBe(1);
+    expect(linked.stderr).toContain("regular non-symlink file");
+    expect(existsSync(fixture.record)).toBe(false);
+  });
+
+  it("removes any stale bundled-localmodels-kit.tgz when LINGER_BUNDLED_LOCALMODELS_KIT_DIR is unset", () => {
+    const fixture = setupCompileFixture({ writeStaleBundledKit: true });
+
+    const result = run(
+      ["compile", "linux-x64"],
+      {
+        DESKTOP_VERSION: "1.2.3",
+        RELEASE_OUT: fixture.out,
+        RECORD_FILE: fixture.record,
+      },
+      fixture.script,
+    );
+
+    expect(result.status).toBe(0);
+    expect(
+      existsSync(
+        join(
+          fixture.root,
+          "apps/desktop/dist/installer/bundled-localmodels-kit.tgz",
+        ),
+      ),
+    ).toBe(false);
   });
 });
 

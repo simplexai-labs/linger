@@ -38,6 +38,33 @@ it("exports the published native sources unless already set", async () => {
   expect(preset.LINGER_NATIVE_DEPENDENCIES_JSON).toBe("preset");
 });
 
+it("exports the published localmodels tool and sibling bundled archive path unless already set", async () => {
+  const tool = {
+    url: "https://example.com/localmodels.tgz",
+    sha256: "a".repeat(64),
+    bytes: 123,
+    sourceCommit: "b".repeat(40),
+    manifestSha256: "c".repeat(64),
+  };
+  const file = distribution({
+    platform: process.platform,
+    arch: process.arch,
+    localmodelsTool: tool,
+  });
+  const environment: NodeJS.ProcessEnv = {};
+  await loadPublishedSources(file, environment);
+  expect(JSON.parse(environment.LINGER_LOCALMODELS_TOOL_JSON!)).toEqual(tool);
+  expect(environment.LINGER_LOCALMODELS_TOOL_ARCHIVE).toBe(
+    path.join(path.dirname(file), "bundled-localmodels-kit.tgz"),
+  );
+
+  const preset: NodeJS.ProcessEnv = {
+    LINGER_LOCALMODELS_TOOL_JSON: "preset-json",
+  };
+  await loadPublishedSources(file, preset);
+  expect(preset).toEqual({ LINGER_LOCALMODELS_TOOL_JSON: "preset-json" });
+});
+
 it("exports the published voice tools beside the native sources", async () => {
   const voice = {
     target: "linux-x64",
@@ -706,6 +733,7 @@ it("runs --prefetch-bifrost without legacy migration and aborts cleanly on SIGTE
   }));
   vi.doMock("@linger/local-installation/localmodels-tool", () => ({
     readPublishedTool: vi.fn().mockResolvedValue(undefined),
+    bundledToolArchivePath: vi.fn(),
     prefetchLocalmodelsBifrost: prefetch,
   }));
   const argv = process.argv;
@@ -793,6 +821,7 @@ it("aborts --prefetch-bifrost --abort-on-stdin-close on stdin EOF and cleans up 
   );
   vi.doMock("@linger/local-installation/localmodels-tool", () => ({
     readPublishedTool: vi.fn().mockResolvedValue(undefined),
+    bundledToolArchivePath: vi.fn(),
     prefetchLocalmodelsBifrost: prefetch,
   }));
   const argv = process.argv;

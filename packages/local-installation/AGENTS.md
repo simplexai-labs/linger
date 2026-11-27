@@ -590,7 +590,13 @@ endpoint probe of up to about 35 s followed by Bifrost's health wait of up to
 keeps its 90 s wall clock. `prepareByokRuntime` logs elapsed time every 10 s while mounting
 the BYOK gateway (a log line, since the job appends and persists every stage
 event) and logs separate `runtime` and `gateway` elapsed seconds when done.
-`prepareLocalmodelsTool` waits for and reuses an in-progress cross-process kit
+`prepareLocalmodelsTool` checks for an optional sibling
+`bundled-localmodels-kit.tgz` beside `distribution.json` (via
+`bundledToolArchivePath` / `LINGER_LOCALMODELS_TOOL_ARCHIVE`) before
+downloading; if present, it fails closed on symlinks, non-regular files, byte
+size mismatch, or SHA-256 mismatch and unpacks and verifies it through the same
+`tool.json` manifest path without deleting the bundled archive. It waits for
+and reuses an in-progress cross-process kit
 download when the publication lock reports `INSTANCE_BUSY` (bounded by
 `lockWaitMs` and cancellable via `signal`), logs region/mirror events and kit
 preparation timings (`download`, `unpack`, `verify`); `runLocalmodels` logs sub-phase

@@ -28,6 +28,8 @@ import { REGION_SCHEMA, regionFile } from "./region.js";
 import { requestUrlText } from "@linger/service-kit";
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  BUNDLED_LOCALMODELS_KIT_FILENAME,
+  bundledToolArchivePath,
   clearResumeLocalModels,
   configuredDevTool,
   ensureLocalmodelsTool,
@@ -3060,4 +3062,166 @@ test("readOnDiskLoadedLibraryModels returns regular owned loaded model records a
     "alpha:Q4_K_M",
     "gamma:UD-Q4_K_XL",
   ]);
+});
+
+test("installs from a verified bundled kit archive offline without calling fetcher or deleting the archive", async () => {
+  const f = await fixture();
+  const bytes = await packed(f);
+  const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+  const distDir = path.join(f.home, "app-installer");
+  await mkdir(distDir, { recursive: true });
+  const distFile = path.join(distDir, "distribution.json");
+  const bundledPath = bundledToolArchivePath(distFile)!;
+  expect(bundledPath).toBe(
+    path.join(distDir, BUNDLED_LOCALMODELS_KIT_FILENAME),
+  );
+  await writeFile(bundledPath, bytes);
+
+  const fetcher = vi.fn(async () => {
+    throw new Error("network should not be called");
+  });
+  const events: Array<{ kind: string; stage?: string; message: string }> = [];
+  const tool = await ensureLocalmodelsTool(
+    f.home,
+    { onEvent: (event) => events.push(event) },
+    { source, bundledArchivePath: bundledPath, fetcher },
+  );
+
+  expect(fetcher).not.toHaveBeenCalled();
+  const directory = path.join(f.home, "tools", "localmodels", source.sha256);
+  expect(tool.python).toBe(path.join(directory, "python", "python"));
+  expect(tool.moduleDir).toBe(path.join(directory, "modules"));
+  expect(tool.sourceCommit).toBe(source.sourceCommit);
+  // The app's bundled archive must remain intact after unpacking.
+  expect(existsSync(bundledPath)).toBe(true);
+  expect(await readFile(bundledPath)).toEqual(bytes);
+  expect(
+    events.some(
+      (event) =>
+        event.kind === "log" &&
+        event.stage === "preflight" &&
+        event.message.includes("bundled localmodels kit archive"),
+    ),
+  ).toBe(true);
+  if (process.platform !== "win32") {
+    expect((await stat(directory)).mode & 0o777).toBe(0o500);
+  }
+});
+
+test("resolves the bundled kit archive via LINGER_LOCALMODELS_TOOL_ARCHIVE when source comes from env", async () => {
+  const f = await fixture();
+  const bytes = await packed(f);
+  const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+  const distDir = path.join(f.home, "env-installer");
+  await mkdir(distDir, { recursive: true });
+  const bundledPath = path.join(distDir, BUNDLED_LOCALMODELS_KIT_FILENAME);
+  await writeFile(bundledPath, bytes);
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(source));
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_ARCHIVE", bundledPath);
+
+  const fetcher = vi.fn(async () => {
+    throw new Error("network should not be called");
+  });
+  const tool = await ensureLocalmodelsTool(f.home, {}, { fetcher });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(tool.moduleDir).toBe(
+    path.join(f.home, "tools", "localmodels", source.sha256, "modules"),
+  );
+  expect(existsSync(bundledPath)).toBe(true);
+});
+
+test("fails closed when a bundled kit archive has a sha256 or byte size mismatch and never calls fetcher", async () => {
+  const f = await fixture();
+  const bytes = await packed(f);
+  const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+  const directory = path.join(f.home, "tools", "localmodels", source.sha256);
+  const fetcher = vi.fn(async () => new Response(bytes));
+
+  // Same byte length, corrupted content -> checksum mismatch.
+  const wrongHashPath = path.join(f.home, "wrong-hash.tgz");
+  const corrupted = Buffer.from(bytes);
+  corrupted[corrupted.length - 1] = (corrupted.at(-1) ?? 0) ^ 0xff;
+  await writeFile(wrongHashPath, corrupted);
+  await expect(
+    ensureLocalmodelsTool(
+      f.home,
+      {},
+      { source, bundledArchivePath: wrongHashPath, fetcher },
+    ),
+  ).rejects.toThrow(/checksum mismatch/i);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(existsSync(directory)).toBe(false);
+  expect(existsSync(wrongHashPath)).toBe(true);
+
+  // Wrong byte length -> size mismatch.
+  const wrongSizePath = path.join(f.home, "wrong-size.tgz");
+  await writeFile(wrongSizePath, Buffer.concat([bytes, Buffer.from([0])]));
+  await expect(
+    ensureLocalmodelsTool(
+      f.home,
+      {},
+      { source, bundledArchivePath: wrongSizePath, fetcher },
+    ),
+  ).rejects.toThrow(/size mismatch/i);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(existsSync(directory)).toBe(false);
+});
+
+test.skipIf(process.platform === "win32")(
+  "fails closed when a bundled kit archive is a symlink or directory",
+  async () => {
+    const f = await fixture();
+    const bytes = await packed(f);
+    const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+    const directory = path.join(f.home, "tools", "localmodels", source.sha256);
+    const fetcher = vi.fn(async () => new Response(bytes));
+
+    const realArchive = path.join(f.home, "real.tgz");
+    await writeFile(realArchive, bytes);
+    const linkedArchive = path.join(f.home, BUNDLED_LOCALMODELS_KIT_FILENAME);
+    await symlink(realArchive, linkedArchive);
+    await expect(
+      ensureLocalmodelsTool(
+        f.home,
+        {},
+        { source, bundledArchivePath: linkedArchive, fetcher },
+      ),
+    ).rejects.toThrow(/regular non-symlink/i);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(existsSync(directory)).toBe(false);
+
+    const dirArchive = path.join(f.home, "dir-archive.tgz");
+    await mkdir(dirArchive);
+    await expect(
+      ensureLocalmodelsTool(
+        f.home,
+        {},
+        { source, bundledArchivePath: dirArchive, fetcher },
+      ),
+    ).rejects.toThrow(/regular non-symlink/i);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(existsSync(directory)).toBe(false);
+  },
+);
+
+test("falls through to the normal download path when the bundled kit archive is absent", async () => {
+  const f = await fixture();
+  const bytes = await packed(f);
+  const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+  const missingBundledPath = path.join(
+    f.home,
+    "missing-installer",
+    BUNDLED_LOCALMODELS_KIT_FILENAME,
+  );
+  const fetcher = vi.fn(async () => new Response(bytes));
+
+  const tool = await ensureLocalmodelsTool(
+    f.home,
+    {},
+    { source, bundledArchivePath: missingBundledPath, fetcher },
+  );
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(tool.moduleDir).toBe(
+    path.join(f.home, "tools", "localmodels", source.sha256, "modules"),
+  );
 });

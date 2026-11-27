@@ -857,6 +857,13 @@ building a package.
   `runtimeEnvironment`, the desktop logs `local_server.local_models_restored`
   and emits `computer.runtime` once so an already-running daemon refreshes its
   library snapshot and Pi model catalog.
+- `LINGER_BUNDLED_LOCALMODELS_KIT_DIR`: optional packaging-time directory
+  holding `<target>.tgz` matching `distribution/<target>.json`'s
+  `localmodelsTool` byte size and SHA-256; when set, `build.mjs` and
+  `scripts/ci/desktop-release.sh` fail closed on missing, linked, or mismatched
+  archives and stage it as `dist/installer/bundled-localmodels-kit.tgz` beside
+  `distribution.json`. When unset, any stale copy is removed so official
+  releases never embed a kit archive.
 - `LINGER_LOCALMODELS_DEV_PYTHON`, `LINGER_LOCALMODELS_DEV_MODULE_DIR`:
   absolute Python and module directory for running a local `localmodels`
   checkout in Quick Install and the Desktop Computer without fetching the
