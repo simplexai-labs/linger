@@ -1120,6 +1120,325 @@ describe("ModelQueue limit", () => {
     r2.value!.release(done);
     r3.value!.release(done);
   });
+
+  it("never false-promotes a two-slot local model past two when fast slots finish before a queued third background call", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 8 }),
+      () => now,
+    );
+    const sample = (latencyMs: number, workTokens: number) => ({
+      type: "latency" as const,
+      source: "call" as const,
+      latencyMs,
+      endedMsAgo: 0,
+      workTokens,
+    });
+
+    // Establish lone-unit baseline of 1,000 ms per 1k tokens.
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(
+        codex,
+        call("memory", `base-${i}`),
+        signal,
+      );
+      now += 10_000;
+      queue.observe(codex, sample(10_000, 10_000));
+      bg.release(done);
+    }
+
+    // Two real slots pass the concurrency-2 probe cleanly.
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("wiki", "p2"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    now += 10_000;
+    queue.observe(codex, sample(10_500, 10_000));
+    p1.release(done);
+    queue.observe(codex, sample(10_500, 10_000));
+    p2.value!.release(done);
+    await flush();
+
+    // Confirmed limit is 2. A burst of four background Memory/Wiki calls starts
+    // probing 3 on the two-slot server: m1 and m2 take the two real slots (10s),
+    // while w1 queues behind them (waits 10s, then runs 18s alone = 28s = 1.56x).
+    const m1 = await queue.acquire(codex, call("memory", "m1"), signal);
+    const m2 = track(queue.acquire(codex, call("memory", "m2"), signal));
+    const w1 = track(queue.acquire(codex, call("wiki", "w1"), signal));
+    const w2 = track(queue.acquire(codex, call("wiki", "w2"), signal));
+    await flush();
+    expect(m2.value).toBeDefined();
+    expect(w1.value).toBeDefined();
+    expect(w2.value).toBeUndefined();
+
+    // Fast slots finish at t=10s. The fourth queued call must NOT refill the
+    // probe wave before w1 settles, so fast slots cannot promote past w1.
+    now += 10_000;
+    queue.observe(codex, sample(10_000, 10_000));
+    m1.release(done);
+    queue.observe(codex, sample(10_000, 10_000));
+    m2.value!.release(done);
+    await flush();
+    expect(w2.value).toBeUndefined();
+
+    // w1 finishes at t=28s after queueing 10s behind m1/m2 (1.56x, mean 1.71, peak 3).
+    // Probe 3 must fail and record ceiling 3 instead of promoting to 3.
+    now += 18_000;
+    queue.observe(codex, sample(28_000, 18_000));
+    w1.value!.release(done);
+    await flush();
+    expect(w2.value).toBeDefined();
+
+    // Confirmed limit remains 2: only one background call runs in steady state,
+    // leaving the second slot free for an interactive Room Run with zero wait.
+    const wikiLong = track(queue.acquire(codex, call("wiki", "long"), signal));
+    const chat = track(queue.acquire(codex, run("room-chat"), signal));
+    await flush();
+    expect(wikiLong.value).toBeUndefined();
+    expect(chat.value).toBeDefined();
+
+    w2.value!.release(done);
+    chat.value!.release(done);
+    await flush();
+    expect(wikiLong.value).toBeDefined();
+    wikiLong.value!.release(done);
+  });
+
+  it("fails a concurrency-3 probe when one of three colliding calls slows past 1.3x instead of hiding it behind the median", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 8 }),
+      () => now,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    // Promote confirmed limit to 2.
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    await flush();
+    now += 10_000;
+    queue.observe(codex, callLatency(500));
+    p1.release(done);
+    queue.observe(codex, callLatency(500));
+    p2.value!.release(done);
+    await flush();
+
+    // Probe 3: two calls finish fast (1.0x), third slows to 1.56x (below 1.8x).
+    const q1 = await queue.acquire(codex, call("wiki", "q1"), signal);
+    const q2 = track(queue.acquire(codex, call("wiki", "q2"), signal));
+    const q3 = track(queue.acquire(codex, call("wiki", "q3"), signal));
+    await flush();
+    expect(q2.value).toBeDefined();
+    expect(q3.value).toBeDefined();
+    now += 10_000;
+    queue.observe(codex, callLatency(500));
+    q1.release(done);
+    queue.observe(codex, callLatency(500));
+    q2.value!.release(done);
+    queue.observe(codex, callLatency(780));
+    q3.value!.release(done);
+    await flush();
+
+    // Confirmed limit must stay at 2: two background calls serialize and leave
+    // the second slot free for interactive work.
+    const bg1 = await queue.acquire(codex, call("memory", "s1"), signal);
+    const bg2 = track(queue.acquire(codex, call("wiki", "s2"), signal));
+    const chat = track(queue.acquire(codex, run("chat"), signal));
+    await flush();
+    expect(bg2.value).toBeUndefined();
+    expect(chat.value).toBeDefined();
+    bg1.release(done);
+    chat.value!.release(done);
+    await flush();
+    expect(bg2.value).toBeDefined();
+    bg2.value!.release(done);
+  });
+
+  it("aborts an inconclusive probe wave cleanly when its last call completes without a valid concurrent sample", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 8 }),
+      () => now,
+    );
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(codex, call("memory", `b${i}`), signal);
+      now += 10_000;
+      queue.observe(codex, callLatency(500));
+      bg.release(done);
+    }
+
+    // Promote to 2.
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("memory", "p2"), signal));
+    await flush();
+    now += 10_000;
+    queue.observe(codex, callLatency(500));
+    p1.release(done);
+    queue.observe(codex, callLatency(500));
+    p2.value!.release(done);
+    await flush();
+
+    // Start probe 3: first two finish fast, third fails without reporting usage.
+    const q1 = await queue.acquire(codex, call("wiki", "q1"), signal);
+    const q2 = track(queue.acquire(codex, call("wiki", "q2"), signal));
+    const q3 = track(queue.acquire(codex, call("wiki", "q3"), signal));
+    await flush();
+    now += 10_000;
+    queue.observe(codex, callLatency(500));
+    q1.release(done);
+    queue.observe(codex, callLatency(500));
+    q2.value!.release(done);
+    q3.value!.release({ outcome: "failed" });
+    await flush();
+
+    // Confirmed limit stays 2 (did not promote on two samples).
+    const bg1 = await queue.acquire(codex, call("memory", "after1"), signal);
+    const bg2 = track(queue.acquire(codex, call("wiki", "after2"), signal));
+    await flush();
+    expect(bg2.value).toBeUndefined();
+    bg1.release(done);
+    await flush();
+    expect(bg2.value).toBeDefined();
+    bg2.value!.release(done);
+  });
+
+  it("promotes a fixed probe wave with uneven call lengths when every colliding call stays at baseline speed", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 4 }),
+      () => now,
+    );
+    const sample = (latencyMs: number, workTokens: number) => ({
+      type: "latency" as const,
+      source: "call" as const,
+      latencyMs,
+      endedMsAgo: 0,
+      workTokens,
+    });
+
+    // Establish lone-unit baseline of 1,000 ms per 1k tokens.
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(
+        codex,
+        call("memory", `base-${i}`),
+        signal,
+      );
+      now += 10_000;
+      queue.observe(codex, sample(10_000, 10_000));
+      bg.release(done);
+    }
+
+    // Fixed wave of two uneven calls starts together while a third queues.
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("wiki", "p2"), signal));
+    const p3 = track(queue.acquire(codex, call("wiki", "p3"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    expect(p3.value).toBeUndefined();
+
+    // p1 finishes at 10s (1.0x); p3 does not refill the fixed wave.
+    now += 10_000;
+    queue.observe(codex, sample(10_000, 10_000));
+    p1.release(done);
+    await flush();
+    expect(p3.value).toBeUndefined();
+
+    // p2 drains alone for 20s and finishes at 30s at 1.0x (mean 1.33, peak 2).
+    // Even though mean concurrency dropped below 1.5, the wave collided cleanly
+    // at 2 and must promote the confirmed limit to 2.
+    now += 20_000;
+    queue.observe(codex, sample(30_000, 30_000));
+    p2.value!.release(done);
+    await flush();
+    expect(p3.value).toBeDefined();
+
+    // Confirmed limit is now 2: chat runs immediately alongside p3 while a
+    // second background call waits for the soft limit of 1.
+    const bgExtra = track(
+      queue.acquire(codex, call("memory", "extra"), signal),
+    );
+    const chat = track(queue.acquire(codex, run("chat"), signal));
+    await flush();
+    expect(bgExtra.value).toBeUndefined();
+    expect(chat.value).toBeDefined();
+    p3.value!.release(done);
+    chat.value!.release(done);
+    await flush();
+    expect(bgExtra.value).toBeDefined();
+    bgExtra.value!.release(done);
+  });
+
+  it("fails a fixed probe wave with uneven call lengths when the longer tail call slows past 1.3x", async () => {
+    let now = 0;
+    const queue = new ModelQueue(
+      () => ({ initial: 1, max: 4 }),
+      () => now,
+    );
+    const sample = (latencyMs: number, workTokens: number) => ({
+      type: "latency" as const,
+      source: "call" as const,
+      latencyMs,
+      endedMsAgo: 0,
+      workTokens,
+    });
+
+    // Establish lone-unit baseline of 1,000 ms per 1k tokens.
+    for (let i = 0; i < 3; i++) {
+      const bg = await queue.acquire(
+        codex,
+        call("memory", `base-${i}`),
+        signal,
+      );
+      now += 10_000;
+      queue.observe(codex, sample(10_000, 10_000));
+      bg.release(done);
+    }
+
+    // Two uneven calls collide on a single-slot server while a third waits.
+    const p1 = await queue.acquire(codex, call("memory", "p1"), signal);
+    const p2 = track(queue.acquire(codex, call("wiki", "p2"), signal));
+    const p3 = track(queue.acquire(codex, call("wiki", "p3"), signal));
+    await flush();
+    expect(p2.value).toBeDefined();
+    expect(p3.value).toBeUndefined();
+
+    // p1 finishes at 10s (1.0x).
+    now += 10_000;
+    queue.observe(codex, sample(10_000, 10_000));
+    p1.release(done);
+    await flush();
+    expect(p3.value).toBeUndefined();
+
+    // p2 waited 10s behind p1, then ran 18s alone (28s for 18k tokens = 1.56x,
+    // mean 1.36, peak 2): probe fails and records ceiling 2.
+    now += 18_000;
+    queue.observe(codex, sample(28_000, 18_000));
+    p2.value!.release(done);
+    await flush();
+    expect(p3.value).toBeDefined();
+
+    // Ceiling 2 is recorded: a second queued background call does not re-probe,
+    // and confirmed limit remains 1 (two chats serialize).
+    const p4 = track(queue.acquire(codex, call("memory", "p4"), signal));
+    await flush();
+    expect(p4.value).toBeUndefined();
+    p3.value!.release(done);
+    await flush();
+    expect(p4.value).toBeDefined();
+    p4.value!.release(done);
+    await flush();
+
+    const c1 = await queue.acquire(codex, run("c1"), signal);
+    const c2 = track(queue.acquire(codex, run("c2"), signal));
+    await flush();
+    expect(c2.value).toBeUndefined();
+    c1.release(done);
+  });
 });
 
 const localModelsSnapshot = (

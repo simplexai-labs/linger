@@ -1156,4 +1156,214 @@ describe("RunnerGateway model invocation", () => {
       connection.disconnect();
     }
   });
+
+  it("keeps a two-slot local Pi model at confirmed limit two and clamps background medium effort to low so interactive Room Runs are not starved", async () => {
+    const piDiagnostics = runtimeDiagnostics({
+      ready: ["pi"],
+      link: "api",
+    }).map((diag) =>
+      diag.type === "pi"
+        ? {
+            ...diag,
+            models: [
+              {
+                id: "local/qwen-27b",
+                label: "Qwen 27B",
+                allowed_reasoning_effort: ["none", "low", "high"] as (
+                  | "none"
+                  | "low"
+                  | "high"
+                )[],
+                is_default: true,
+                link: "api" as const,
+              },
+            ],
+          }
+        : diag,
+    ) as RunnerHello["runtime_diagnostics"];
+    const { gateway, peer, connection } = await connect(
+      {
+        ...invokingHello(),
+        runtimes: ["pi"],
+        runtime_diagnostics: piDiagnostics,
+      },
+      defaultAgentPlacement({
+        agentId: "agent-another-me",
+        runtime: { type: "pi", model: "local/qwen-27b" },
+      }),
+    );
+    const model = createRuntimeModelCall({
+      gateway: runtimeModelGateway(gateway),
+      placements: async () => [],
+    });
+    const placement = {
+      tenantId: "tenant-acme",
+      ownerActorId: "human-alice",
+      agentId: "agent-another-me",
+      computerId: "runner-local",
+      runtimeType: "pi" as const,
+    };
+    const usage = {
+      input_tokens: 4_000,
+      cached_input_tokens: 0,
+      output_tokens: 100,
+    };
+    const replyWithDuration = (
+      command: Pick<ModelInvoke, "command_id" | "invoke_id">,
+      durationMs: number,
+    ) =>
+      connection.receive({
+        type: "executed",
+        kind: "model_invoke",
+        command_id: command.command_id,
+        runner_id: "runner-local",
+        invoke_id: command.invoke_id,
+        outcome: "completed",
+        text: '{"summary":"ok"}',
+        duration_ms: durationMs,
+        usage,
+      });
+    try {
+      // Three lone background calls establish the baseline.
+      for (let i = 0; i < 3; i++) {
+        const base = model.text({
+          kind: "memory",
+          key: `base:${i}`,
+          placement,
+          effort: "medium",
+          input: `base ${i}`,
+        });
+        await vi.waitFor(() =>
+          expect(sentInvocations(peer)).toHaveLength(i + 1),
+        );
+        expect(sentInvocations(peer)[i]!.reasoning_effort).toBe("low");
+        await replyWithDuration(sentInvocations(peer)[i]!, 900);
+        await base;
+      }
+
+      // Two concurrent background calls pass the two-slot probe -> confirmed = 2.
+      const p1 = model.text({
+        kind: "memory",
+        key: "probe2:1",
+        placement,
+        effort: "medium",
+        input: "p1",
+      });
+      const p2 = model.text({
+        kind: "wiki",
+        key: "probe2:2",
+        placement,
+        effort: "medium",
+        input: "p2",
+      });
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(5));
+      await replyWithDuration(sentInvocations(peer)[3]!, 950);
+      await replyWithDuration(sentInvocations(peer)[4]!, 950);
+      await Promise.all([p1, p2]);
+
+      // Four concurrent background calls trigger a fixed wave of 3 for probe 3.
+      const b1 = model.text({
+        kind: "memory",
+        key: "burst:1",
+        placement,
+        effort: "medium",
+        input: "b1",
+      });
+      const b2 = model.text({
+        kind: "memory",
+        key: "burst:2",
+        placement,
+        effort: "medium",
+        input: "b2",
+      });
+      const b3 = model.text({
+        kind: "wiki",
+        key: "burst:3",
+        placement,
+        effort: "medium",
+        input: "b3",
+      });
+      const b4 = model.text({
+        kind: "wiki",
+        key: "burst:4",
+        placement,
+        effort: "medium",
+        input: "b4",
+      });
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(8));
+      const [cmd1, cmd2, cmd3] = sentInvocations(peer).slice(5);
+      expect([cmd1, cmd2, cmd3].map((c) => c!.reasoning_effort)).toEqual([
+        "low",
+        "low",
+        "low",
+      ]);
+
+      // Two fast slots finish; b4 stays queued until b3 settles.
+      await replyWithDuration(cmd1!, 900);
+      await replyWithDuration(cmd2!, 900);
+      expect(sentInvocations(peer)).toHaveLength(8);
+
+      // b3 queued on the 2-slot server (1.56x slowdown): probe 3 fails and
+      // confirmed limit stays at 2.
+      await replyWithDuration(cmd3!, 1_400);
+      await Promise.all([b1, b2, b3]);
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(9));
+      const cmd4 = sentInvocations(peer)[8]!;
+
+      // With b4 occupying slot 1, a second background Wiki call waits instead
+      // of saturating slot 2, while an interactive Room chat Run starts at once.
+      const b5 = model.text({
+        kind: "wiki",
+        key: "burst:5",
+        placement,
+        effort: "medium",
+        input: "b5",
+      });
+      const baseTarget = sessionTarget();
+      const chat = gateway.startOperation({
+        ...baseTarget,
+        agentId: "agent-another-me",
+        runKind: "chat",
+        request: {
+          ...baseTarget.request,
+          runtime: { type: "pi", model: "local/qwen-27b" },
+        },
+      });
+      await expect(settlesWithin(chat, 100)).resolves.toBe(true);
+      expect(sentInvocations(peer)).toHaveLength(9);
+
+      const chatOp = await chat;
+      const start = peer.sent.find(
+        (envelope): envelope is OperationStart =>
+          envelope.type === "operation.start" &&
+          envelope.operation_id === chatOp.operationId,
+      )!;
+      await connection.receive(
+        event(start, 1, {
+          type: "operation.accepted",
+          command_id: start.command_id,
+          runner_pid: 200,
+        }),
+      );
+      await connection.receive(
+        event(start, 2, {
+          type: "operation.completed",
+          result: {
+            type: "run",
+            final_response: "hi",
+            session: { thread_id: "thread-chat" },
+          },
+        }),
+      );
+      await chatOp.result;
+      await replyWithDuration(cmd4, 900);
+      await b4;
+      await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(10));
+      await replyWithDuration(sentInvocations(peer)[9]!, 900);
+      await b5;
+    } finally {
+      model.close();
+      connection.disconnect();
+    }
+  });
 });

@@ -63,14 +63,10 @@ const WINDOW = 4;
 /** Samples that ran alone, which set the baseline. */
 const BASELINE_SAMPLES = 10;
 const BASELINE_MIN_SAMPLES = 3;
-/** Window median over baseline at or below which a probe promotes the limit. */
+/** Sample and probe-wave max ratio over baseline at or below which a probe promotes the limit. */
 const RAISE_AT_MOST = 1.3;
-/** Ratio above which a steady limit drops or a probe fails at once. */
+/** Ratio above which a steady limit drops. */
 const LOWER_ABOVE = 1.8;
-/** Minimum mean concurrency below a probe target to count as a probe sample.
- * On a strict single-slot FIFO endpoint, the second of two equal probing
- * calls waits half its time at concurrency 2 and drains alone (mean 1.5). */
-const PROBE_CONCURRENCY_TOLERANCE = 0.5;
 /** No probe for this long after the endpoint refused work. */
 const OVERLOAD_COOLDOWN_MS = 60_000;
 /** First wait before a limit found too slow or refused is tried again; each
@@ -89,11 +85,12 @@ interface Latencies {
 /**
  * An endpoint's confirmed concurrency, grown only by silent background probes
  * and backed off fast. While idle of foreground work, the queue may probe
- * one unit above the confirmed limit using yieldable background calls: the
- * limit promotes only when probe samples stay within RAISE_AT_MOST of the
- * lone-unit baseline, and fails fast when a sample exceeds LOWER_ABOVE or the
- * endpoint refuses work. Steady-state work shrinks by one when clearly slower
- * and halves on overload. Running units are never interrupted by a limit drop.
+ * one unit above the confirmed limit using a fixed wave of yieldable
+ * background calls: the limit promotes only when every call in the probe wave
+ * stays within RAISE_AT_MOST of the lone-unit baseline, and fails fast when
+ * any colliding sample exceeds RAISE_AT_MOST or the endpoint refuses work.
+ * Steady-state work shrinks by one when clearly slower and halves on overload.
+ * Running units are never interrupted by a limit drop.
  *
  * A limit it had to come down from or failed to probe is the ceiling: it is
  * not tried again until the retry time. A retry that promotes clears the
@@ -197,7 +194,10 @@ export class AdaptiveLimit {
         : undefined;
 
     // A background probe evaluates samples that collided at the probed
-    // concurrency against the lone-unit baseline.
+    // concurrency against the lone-unit baseline. On a K-slot server probing
+    // K + 1, K calls finish fast while only the queued tail call slows down,
+    // so any colliding sample past RAISE_AT_MOST fails the probe at once and
+    // promotion requires all probing calls to stay within RAISE_AT_MOST.
     if (
       this.#probing !== undefined &&
       signal.source === "call" &&
@@ -205,7 +205,7 @@ export class AdaptiveLimit {
       peak >= this.#probing
     ) {
       const sampleRatio = perThousand / baseline;
-      if (sampleRatio > LOWER_ABOVE) {
+      if (sampleRatio > RAISE_AT_MOST) {
         const latency: LatencySample = {
           source: signal.source,
           perThousand,
@@ -216,41 +216,36 @@ export class AdaptiveLimit {
           probeFailure: this.#failProbe("slower", endpoint.now, sampleRatio),
         };
       }
-      if (
-        mean >= this.#probing - PROBE_CONCURRENCY_TOLERANCE &&
-        mean <= this.#probing + 0.5
-      ) {
-        const needed = Math.min(WINDOW, this.#probing);
-        keepLast(latencies.probeWindow, perThousand, needed);
-        const probeWindow =
-          latencies.probeWindow.length >= needed
-            ? median(latencies.probeWindow)
-            : undefined;
-        const latency: LatencySample = {
-          source: signal.source,
-          perThousand,
-          baseline,
-          ...(probeWindow === undefined ? {} : { window: probeWindow }),
-        };
-        if (probeWindow !== undefined) {
-          const ratio = probeWindow / baseline;
-          if (ratio <= RAISE_AT_MOST) {
-            const target = this.#probing;
-            this.#probing = undefined;
-            this.#clearProbeWindows();
-            if (this.#ceiling !== undefined && target >= this.#ceiling) {
-              this.#ceiling = undefined;
-              this.#retryAfterMs = RETRY_CEILING_MS;
-            }
-            return { latency, change: this.#set(target, "faster", ratio) };
+      const needed = this.#probing;
+      keepLast(latencies.probeWindow, perThousand, needed);
+      const probeWindow =
+        latencies.probeWindow.length >= needed
+          ? Math.max(...latencies.probeWindow)
+          : undefined;
+      const latency: LatencySample = {
+        source: signal.source,
+        perThousand,
+        baseline,
+        ...(probeWindow === undefined ? {} : { window: probeWindow }),
+      };
+      if (probeWindow !== undefined) {
+        const ratio = probeWindow / baseline;
+        if (ratio <= RAISE_AT_MOST) {
+          const target = this.#probing;
+          this.#probing = undefined;
+          this.#clearProbeWindows();
+          if (this.#ceiling !== undefined && target >= this.#ceiling) {
+            this.#ceiling = undefined;
+            this.#retryAfterMs = RETRY_CEILING_MS;
           }
-          return {
-            latency,
-            probeFailure: this.#failProbe("slower", endpoint.now, ratio),
-          };
+          return { latency, change: this.#set(target, "faster", ratio) };
         }
-        return { latency };
+        return {
+          latency,
+          probeFailure: this.#failProbe("slower", endpoint.now, ratio),
+        };
       }
+      return { latency };
     }
 
     // Background work leaves the last place free, so a confirmed limit's

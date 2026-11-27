@@ -106,9 +106,18 @@ interface Waiter {
   readonly priority: () => number;
   readonly seq: number;
   readonly signal: AbortSignal;
-  readonly admit: () => void;
+  readonly admit: (leaseId: symbol) => void;
   readonly reject: (error: unknown) => void;
   readonly onAbort: () => void;
+}
+
+interface ProbeWave {
+  readonly target: number;
+  /** Timestamp when the wave reached `target` concurrent units; further
+   * admissions stay at steady-state admissionLimit until the wave finishes. */
+  filledAt?: number;
+  /** Active leases belonging to this probe wave. */
+  readonly leases: Set<symbol>;
 }
 
 interface EndpointState {
@@ -119,6 +128,8 @@ interface EndpointState {
   suspended: number;
   /** Active units that are not yieldable background calls. */
   activeNonBackground: number;
+  readonly activeLeases: Set<symbol>;
+  probeWave?: ProbeWave;
   /** A timed request lies within its unit's place, so the history never
    * needs to outlive an idle endpoint. */
   readonly occupancy: Occupancy;
@@ -169,15 +180,28 @@ export class ModelQueue {
     const now = this.now();
     const ended = now - (signal.type === "latency" ? signal.endedMsAgo : 0);
     const started = ended - (signal.type === "latency" ? signal.latencyMs : 0);
-    const concurrency = state?.occupancy.over(started, ended) ?? {
+    const rawConcurrency = state?.occupancy.over(started, ended) ?? {
       mean: 0,
       peak: 0,
     };
+    const wave = state?.probeWave;
+    const concurrency =
+      signal.type === "latency" &&
+      signal.source === "call" &&
+      wave?.filledAt !== undefined &&
+      started <= wave.filledAt &&
+      wave.filledAt <= ended
+        ? {
+            mean: rawConcurrency.mean,
+            peak: Math.max(rawConcurrency.peak, wave.target),
+          }
+        : rawConcurrency;
     const { change, probeFailure, latency } = limit.observe(signal, {
       concurrency,
       saturated,
       now,
     });
+    if (state && limit.probing === undefined) state.probeWave = undefined;
     if (latency)
       logAgentEvent("debug", "model_queue.latency_sampled", {
         computer_id: endpoint.computerId,
@@ -267,8 +291,9 @@ export class ModelQueue {
     };
     if (priority instanceof RunPriority || priority <= INTERACTIVE_PRIORITY)
       watchStall();
+    let leaseId: symbol;
     try {
-      await new Promise<void>((resolve, reject) => {
+      leaseId = await new Promise<symbol>((resolve, reject) => {
         const onAbort = () => {
           const index = state.waiting.indexOf(waiter);
           if (index >= 0) state.waiting.splice(index, 1);
@@ -280,9 +305,9 @@ export class ModelQueue {
           priority: value,
           seq: this.#seq++,
           signal,
-          admit: () => {
+          admit: (id) => {
             signal.removeEventListener("abort", onAbort);
-            resolve();
+            resolve(id);
           },
           reject,
           onAbort,
@@ -295,7 +320,7 @@ export class ModelQueue {
       clearTimeout(stall);
       unsubscribe?.();
     }
-    return this.#lease(state, work, queuedAt);
+    return this.#lease(state, work, queuedAt, leaseId);
   }
 
   /** Waiting work first in line and blocked asks lower work holding places to
@@ -358,6 +383,7 @@ export class ModelQueue {
         active: 0,
         suspended: 0,
         activeNonBackground: 0,
+        activeLeases: new Set(),
         occupancy: new Occupancy(this.now()),
         waiting: [],
       };
@@ -382,7 +408,12 @@ export class ModelQueue {
   }
 
   /** Admission already counted the unit as active. */
-  #lease(state: EndpointState, work: ModelWork, queuedAt: number): ModelLease {
+  #lease(
+    state: EndpointState,
+    work: ModelWork,
+    queuedAt: number,
+    leaseId: symbol,
+  ): ModelLease {
     const startedAt = Date.now();
     const nonBackground = !isBackgroundModelCall(work.kind);
     let result: ModelLeaseResult | undefined;
@@ -394,7 +425,9 @@ export class ModelQueue {
         state.suspended -= 1;
       } else {
         state.active -= 1;
+        state.activeLeases.delete(leaseId);
         if (nonBackground) state.activeNonBackground -= 1;
+        this.#releaseProbeWaveLease(state, leaseId);
         state.occupancy.record(this.now(), state.active);
       }
       logAgentEvent("info", "model_queue.finished", {
@@ -428,8 +461,10 @@ export class ModelQueue {
         if (result || suspended) return;
         suspended = true;
         state.active -= 1;
+        state.activeLeases.delete(leaseId);
         state.suspended += 1;
         if (nonBackground) state.activeNonBackground -= 1;
+        this.#releaseProbeWaveLease(state, leaseId);
         state.occupancy.record(this.now(), state.active);
         this.#drain(state);
       },
@@ -438,7 +473,12 @@ export class ModelQueue {
         suspended = false;
         state.suspended -= 1;
         state.active += 1;
-        if (nonBackground) state.activeNonBackground += 1;
+        state.activeLeases.add(leaseId);
+        if (nonBackground) {
+          state.activeNonBackground += 1;
+          const limit = this.#limits.get(state.key);
+          if (limit?.probing !== undefined) this.#abortProbe(state, limit);
+        }
         state.occupancy.record(this.now(), state.active);
       },
       release(outcome) {
@@ -447,6 +487,32 @@ export class ModelQueue {
         finish();
       },
     };
+  }
+
+  #abortProbe(state: EndpointState, limit: AdaptiveLimit): void {
+    state.probeWave = undefined;
+    const aborted = limit.abortProbe();
+    if (aborted !== undefined)
+      logAgentEvent("info", "model_queue.probe_stopped", {
+        computer_id: state.endpoint.computerId,
+        runtime_type: state.endpoint.runtimeType,
+        limit: limit.value,
+        probing: aborted,
+        outcome: "aborted",
+      });
+  }
+
+  #releaseProbeWaveLease(state: EndpointState, leaseId: symbol): void {
+    if (!state.probeWave) return;
+    state.probeWave.leases.delete(leaseId);
+    if (
+      state.probeWave.filledAt !== undefined &&
+      state.probeWave.leases.size === 0
+    ) {
+      const limit = this.#limits.get(state.key);
+      if (limit) this.#abortProbe(state, limit);
+      else state.probeWave = undefined;
+    }
   }
 
   #drain(state: EndpointState): void {
@@ -458,16 +524,9 @@ export class ModelQueue {
       !state.waiting.some((waiter) => !isBackgroundModelCall(waiter.kind)) &&
       this.canYieldBackground(state.endpoint);
     if (!backgroundOnly && limit.probing !== undefined) {
-      const aborted = limit.abortProbe();
-      if (aborted !== undefined)
-        logAgentEvent("info", "model_queue.probe_stopped", {
-          computer_id: state.endpoint.computerId,
-          runtime_type: state.endpoint.runtimeType,
-          limit: limit.value,
-          probing: aborted,
-          outcome: "aborted",
-        });
+      this.#abortProbe(state, limit);
     }
+    if (limit.probing === undefined) state.probeWave = undefined;
     if (
       backgroundOnly &&
       limit.probing === undefined &&
@@ -475,28 +534,45 @@ export class ModelQueue {
       limit.canStartProbe(now)
     ) {
       const probing = limit.startProbe();
-      if (probing !== undefined)
+      if (probing !== undefined) {
+        state.probeWave = {
+          target: probing,
+          ...(state.active >= probing ? { filledAt: now } : {}),
+          leases: new Set(state.activeLeases),
+        };
         logAgentEvent("info", "model_queue.probe_started", {
           computer_id: state.endpoint.computerId,
           runtime_type: state.endpoint.runtimeType,
           limit: limit.value,
           probing,
         });
+      }
     }
     const confirmed = limit.value;
     const probing = limit.probing;
     while (state.waiting.length > 0) {
       const next = state.waiting[0]!;
-      const cap =
-        probing !== undefined && isBackgroundModelCall(next.kind)
-          ? probing
-          : admissionLimit(confirmed, next.priority());
+      const probeAdmitting =
+        probing !== undefined &&
+        state.probeWave !== undefined &&
+        state.probeWave.filledAt === undefined &&
+        isBackgroundModelCall(next.kind);
+      const cap = probeAdmitting
+        ? probing
+        : admissionLimit(confirmed, next.priority());
       if (state.active >= cap) break;
+      const leaseId = Symbol();
       state.active += 1;
+      state.activeLeases.add(leaseId);
+      if (state.probeWave && state.probeWave.filledAt === undefined) {
+        state.probeWave.leases.add(leaseId);
+        if (state.active >= state.probeWave.target)
+          state.probeWave.filledAt = now;
+      }
       if (!isBackgroundModelCall(next.kind)) state.activeNonBackground += 1;
       state.occupancy.record(now, state.active);
       state.waiting.shift();
-      next.admit();
+      next.admit(leaseId);
     }
     this.recheckInteractiveWait(state.endpoint);
     this.#prune(state);
@@ -510,15 +586,8 @@ export class ModelQueue {
       this.#endpoints.get(state.key) === state
     ) {
       const limit = this.#limits.get(state.key);
-      const aborted = limit?.abortProbe();
-      if (aborted !== undefined)
-        logAgentEvent("info", "model_queue.probe_stopped", {
-          computer_id: state.endpoint.computerId,
-          runtime_type: state.endpoint.runtimeType,
-          limit: limit!.value,
-          probing: aborted,
-          outcome: "aborted",
-        });
+      if (limit) this.#abortProbe(state, limit);
+      else state.probeWave = undefined;
       this.#endpoints.delete(state.key);
     }
   }
