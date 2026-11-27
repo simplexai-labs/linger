@@ -2088,7 +2088,8 @@ func (c *cuaSession) launchApp(ctx context.Context, arguments map[string]any) (j
 		}
 		if output, err := exec.CommandContext(ctx, "/usr/bin/open", append([]string{"-g", "-a", path}, addresses...)...).CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
-		} // lsappinfo may not know the name as given, such as one in another
+		}
+		// lsappinfo may not know the name as given, such as one in another
 		// case, so the running app is found by the path that opened it.
 		app = path
 	}
