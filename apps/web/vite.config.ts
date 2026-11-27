@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from "vite";
 
 import { panelUrlPreviewPlugin } from "./panel-url-preview.mjs";
+import { probeTeamHubHealth } from "./static-host.mjs";
 
 const appRoot = fileURLToPath(new URL(".", import.meta.url));
 const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -242,57 +243,11 @@ export function developmentHealthPlugin(teamHubBaseUrl?: string): Plugin {
           return;
         }
 
-        let targetUrl: URL;
-        try {
-          targetUrl = new URL("/healthz", teamHubBaseUrl);
-        } catch {
-          reply(502, {
-            ok: false,
-            service: "linger-web-dev",
-            upstream: "teamhub",
-          });
-          return;
-        }
-
-        const controller = new AbortController();
-        const onClose = () => {
-          if (!response.writableEnded) controller.abort();
-        };
-        if (typeof response.once === "function") {
-          response.once("close", onClose);
-        }
-        void fetch(targetUrl, {
-          method: "GET",
-          redirect: "manual",
-          signal: AbortSignal.any([
-            controller.signal,
-            AbortSignal.timeout(2_000),
-          ]),
-        })
-          .then(async (upstream) => {
-            await upstream.body?.cancel();
-            if (upstream.status >= 200 && upstream.status < 300) {
-              reply(200, { ok: true, service: "linger-web-dev" });
-              return;
-            }
-            reply(503, {
-              ok: false,
-              service: "linger-web-dev",
-              upstream: "teamhub",
-            });
-          })
-          .catch(() => {
-            reply(502, {
-              ok: false,
-              service: "linger-web-dev",
-              upstream: "teamhub",
-            });
-          })
-          .finally(() => {
-            if (typeof response.off === "function") {
-              response.off("close", onClose);
-            }
-          });
+        void probeTeamHubHealth(teamHubBaseUrl, response, {
+          service: "linger-web-dev",
+        }).then((result) => {
+          reply(result.statusCode, result.body);
+        });
       });
     },
     name: "linger-development-health",

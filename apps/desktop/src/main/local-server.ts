@@ -4395,6 +4395,7 @@ export class LocalServerModule implements Module {
       this.#options.fetch ?? fetch,
       config.serverUrl,
       ORPHANED_SERVER_PROBE_MS,
+      { ready: false },
     ));
   }
 
@@ -4510,8 +4511,8 @@ export class LocalServerModule implements Module {
   }
 
   // Resolves with the source folder the installer reports the services
-  // serving from, the origin they serve at, and whether resume revived stopped
-  // services or local models.
+  // serving from, the origin they serve at, and whether resume cold-started
+  // stopped services.
   async #runResume(
     record: LocalRecord,
     repo: string,
@@ -4719,7 +4720,7 @@ export class LocalServerModule implements Module {
       ...(typeof origin === "string" && parseServerUrl(origin) === origin
         ? { origin }
         : {}),
-      revived: resumeTimings?.path === "cold" || localModelsRestored,
+      revived: resumeTimings?.path === "cold",
     };
   }
 
@@ -5281,14 +5282,30 @@ const STAGES: Record<string, readonly [LocalServerStep, number, number]> = {
   computer: ["workspace", 1, 1],
 };
 
-// Whether a server is ready to serve at an origin. Probes /readyz first so a
-// web host whose TeamHub or database upstream is down is not mistaken for
-// ready; falls back to HEAD / when an older server returns 404 for /readyz.
+// Whether a server is ready to serve at an origin. When `ready` is true
+// (default), probes /readyz first so a web host whose TeamHub or database
+// upstream is down is not mistaken for ready, falling back to HEAD / when an
+// older server returns 404. When `ready` is false, checks plain liveness at
+// HEAD / so transient backend blips do not look like a removed installation.
 async function answers(
   fetcher: typeof fetch,
   origin: string,
   timeoutMs = 1_000,
+  options: { ready?: boolean } = {},
 ): Promise<boolean> {
+  if (options.ready === false) {
+    try {
+      const response = await fetcher(origin, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      await response.body?.cancel().catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const startedAt = Date.now();
   try {
     const response = await fetcher(new URL("/readyz", origin).toString(), {

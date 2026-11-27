@@ -505,8 +505,8 @@ Gateway and runs Agents. The daemon exits with the app.
   `server_changed`, `port_moved`, `retry`, `prewarm`) pass through one decision
   helper so duplicate `loadURL` calls on hot start are skipped when the target
   origin is already loaded or pending without a shell page or load failure,
-  while `resume_revived` (emitted when `--resume` reports a cold start or
-  restored local models) reloads the same origin without hijacking a window
+  while `resume_revived` (emitted when `--resume` reports a cold start)
+  reloads the same origin without hijacking a window
   viewing another server. `BaseWindow`
   is created with `show: false` and revealed on the first `did-finish-load` or
   `did-fail-load` after `show()`, with a short 1500 ms timeout fallback so a

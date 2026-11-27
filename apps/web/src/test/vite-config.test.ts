@@ -175,13 +175,14 @@ describe("Vite config", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
-  it("answers 502 without throwing when teamHubBaseUrl is malformed", () => {
+  it("answers 502 without throwing when teamHubBaseUrl is malformed", async () => {
     const middleware = captureDevelopmentHealthMiddleware("://not-a-valid-url");
     const response = createResponseFake();
     const next = vi.fn();
 
     middleware({ method: "GET", url: "/readyz" }, response, next);
 
+    await vi.waitFor(() => expect(response.end).toHaveBeenCalledOnce());
     expect(next).not.toHaveBeenCalled();
     expect(response.statusCode).toBe(502);
     expect(response.end).toHaveBeenCalledWith(

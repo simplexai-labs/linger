@@ -101,14 +101,27 @@ export function createStaticHost({ root, teamHubBaseUrl } = {}) {
   };
 }
 
-async function probeTeamHubHealth(teamHubBaseUrl, response) {
+export async function probeTeamHubHealth(
+  teamHubBaseUrl,
+  response,
+  { service = "linger-web" } = {},
+) {
+  let targetUrl;
+  try {
+    targetUrl = new URL("/healthz", teamHubBaseUrl);
+  } catch {
+    return {
+      statusCode: 502,
+      body: { ok: false, service, upstream: "teamhub" },
+    };
+  }
   const controller = new AbortController();
   const onClose = () => {
-    if (!response.writableEnded) controller.abort();
+    if (!response?.writableEnded) controller.abort();
   };
-  response.once("close", onClose);
+  if (typeof response?.once === "function") response.once("close", onClose);
   try {
-    const upstream = await fetch(new URL("/healthz", teamHubBaseUrl), {
+    const upstream = await fetch(targetUrl, {
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.any([
@@ -118,19 +131,19 @@ async function probeTeamHubHealth(teamHubBaseUrl, response) {
     });
     await upstream.body?.cancel();
     if (upstream.status >= 200 && upstream.status < 300) {
-      return { statusCode: 200, body: { ok: true, service: "linger-web" } };
+      return { statusCode: 200, body: { ok: true, service } };
     }
     return {
       statusCode: 503,
-      body: { ok: false, service: "linger-web", upstream: "teamhub" },
+      body: { ok: false, service, upstream: "teamhub" },
     };
   } catch {
     return {
       statusCode: 502,
-      body: { ok: false, service: "linger-web", upstream: "teamhub" },
+      body: { ok: false, service, upstream: "teamhub" },
     };
   } finally {
-    response.off("close", onClose);
+    if (typeof response?.off === "function") response.off("close", onClose);
   }
 }
 

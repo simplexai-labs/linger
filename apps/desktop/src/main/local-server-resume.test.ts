@@ -1063,6 +1063,41 @@ describe("LocalServerModule resume coordination", () => {
       );
       await f.host.stop("quit");
     });
+
+    it("keeps resume_ready on warm resume even when localModelsRestored is true", async () => {
+      const probe = vi.fn(
+        async () => new Response(null, { status: 200 }),
+      ) as typeof fetch;
+      const f = setupResumeFixture(
+        `
+          process.stdout.write(JSON.stringify({
+            code: 0,
+            details: {
+              origin: "http://localhost:3000",
+              localModelsRestored: true,
+              restoredLocalModels: ["model-a"],
+            },
+            resumeTimings: {
+              path: "warm",
+              probeMs: 10,
+              totalMs: 40,
+            },
+          }) + "\\n");
+        `,
+        { fetch: probe },
+      );
+      await f.host.start();
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      expect(f.showStarting).not.toHaveBeenCalled();
+      expect(f.setServer).toHaveBeenCalledWith(
+        "http://localhost:3000",
+        "http://localhost:3000",
+        { reason: "resume_ready" },
+      );
+      await f.host.stop("quit");
+    });
   });
 
   describe("localServer config flag lifecycle", () => {
@@ -1603,6 +1638,10 @@ describe("orphaned local server recovery during LocalServerModule.start()", () =
     await f.host.start();
 
     expect(f.probe).toHaveBeenCalledOnce();
+    expect(f.probe).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      expect.objectContaining({ method: "HEAD" }),
+    );
     expect(f.setupOpened).not.toHaveBeenCalled();
     expect(f.config.get().computerId).toBe("cmp_alive");
     expect(f.credentials.read()?.computerId).toBe("cmp_alive");
