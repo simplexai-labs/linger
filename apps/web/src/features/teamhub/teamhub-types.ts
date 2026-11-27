@@ -416,9 +416,6 @@ export interface TeamHubArtifactContentLocation {
 
 export type TeamHubVoiceEventPage = components["schemas"]["VoiceEventPage"];
 
-export type TeamHubAgentSkillBinding =
-  components["schemas"]["AgentSkillBinding"];
-
 export type TeamHubVoiceLiveTurnMarker =
   components["schemas"]["VoiceLiveTurnMarker"];
 export type TeamHubVoiceLiveClientEvent =

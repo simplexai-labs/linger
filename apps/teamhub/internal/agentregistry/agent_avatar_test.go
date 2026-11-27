@@ -46,3 +46,16 @@ func TestAgentAvatarImageURLEscapesAndVersions(t *testing.T) {
 		t.Fatalf("url=%q", got)
 	}
 }
+
+func TestValidAgentAvatarKeyAcceptsProductSelections(t *testing.T) {
+	for _, key := range []string{"orb-indigo", "portrait:3:FF63A0", "orb_sky", "figure:owl:E3C3D8"} {
+		if !ValidAgentAvatarKey(key) {
+			t.Fatalf("want %q accepted", key)
+		}
+	}
+	for _, key := range []string{"", "-leading", "has space", "way-too-long-" + strings.Repeat("x", 80)} {
+		if ValidAgentAvatarKey(key) {
+			t.Fatalf("want %q rejected", key)
+		}
+	}
+}

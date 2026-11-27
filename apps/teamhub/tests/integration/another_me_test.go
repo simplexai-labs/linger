@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentregistry"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
 )
 
@@ -212,6 +213,65 @@ func TestAnotherMeWaitsForAReadyRuntimeWithoutAJob(t *testing.T) {
 	status, _, body = env.request(alice, http.MethodGet, anotherMePath, nil, "")
 	if status != http.StatusOK || containsJSONText(body, `"placement_blocker"`) || !containsJSONText(body, `"agent_actor_id"`) {
 		t.Fatalf("Another Me after runtime ready status=%d body=%s", status, body)
+	}
+}
+
+// A starter Agent past the Sponsor's Agent limit is skipped: the Another Me,
+// the other starter Agent and the Getting Started Room are still created.
+func TestAnotherMeSkipsAStarterAgentPastTheAgentLimit(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, _, _ := newAnotherMeEnv(t)
+	var sourceID string
+	if err := env.pool.QueryRow(t.Context(), `
+		SELECT actor_id FROM agent_registrations
+		WHERE tenant_id=$1 AND created_by_actor_id='actor_acme_alice' AND agent_type='general' AND status='active'
+		ORDER BY created_at LIMIT 1
+	`, acmeTenant).Scan(&sourceID); err != nil {
+		t.Fatal(err)
+	}
+	existing := countRows(t, env, `
+		SELECT count(*) FROM agent_registrations
+		WHERE tenant_id=$1 AND created_by_actor_id='actor_acme_alice' AND agent_type='general' AND status='active'
+	`, acmeTenant)
+	// Leave room for exactly one starter Agent: Research Analyst fits, Code Reviewer does not.
+	missing := agentregistry.MaxSponsorGeneralAgents - 1 - existing
+	if _, err := env.pool.Exec(t.Context(), `
+		INSERT INTO actors
+		SELECT (jsonb_populate_record(actor, jsonb_build_object(
+			'id', 'actor_limit_' || n, 'handle', '@limit-' || n, 'display_name', 'Limit ' || n))).*
+		FROM actors actor, generate_series(1, $2::int) n WHERE actor.id=$1;
+	`, sourceID, missing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), `
+		INSERT INTO agent_registrations
+		SELECT (jsonb_populate_record(registration, jsonb_build_object(
+			'actor_id', 'actor_limit_' || n, 'agent_management_id', 'agent-management-limit-' || n))).*
+		FROM agent_registrations registration, generate_series(1, $2::int) n WHERE registration.actor_id=$1;
+	`, sourceID, missing); err != nil {
+		t.Fatal(err)
+	}
+
+	anotherMeID := connectAnotherMeComputer(t, env, acmeTenant, "actor_acme_alice")
+	if anotherMeID == "" {
+		t.Fatal("the Agent limit blocked the Another Me")
+	}
+	if got := countRows(t, env, `
+		SELECT count(*) FROM agent_registrations registration
+		JOIN actors actor ON actor.id=registration.actor_id
+		WHERE registration.tenant_id=$1 AND registration.created_by_actor_id='actor_acme_alice'
+		  AND actor.display_name IN ('Research Analyst','Code Reviewer')
+	`, acmeTenant); got != 1 {
+		t.Fatalf("starter Agents=%d want=1", got)
+	}
+	if got := countRows(t, env, `
+		SELECT count(*) FROM room_members member
+		JOIN rooms room ON room.id=member.room_id
+		JOIN actors actor ON actor.id=member.actor_id
+		WHERE room.tenant_id=$1 AND room.name='Getting Started' AND room.deleted_at IS NULL
+		  AND (member.actor_id='actor_acme_alice' OR member.actor_id=$2 OR actor.display_name='Research Analyst')
+	`, acmeTenant, anotherMeID); got != 3 {
+		t.Fatalf("starter Room members=%d want=3", got)
 	}
 }
 
