@@ -118,10 +118,11 @@ export function AccountProfileHero({
           </Button>
         </div>
       </div>
-      {/* The avatar overlaps the cover's lower edge; an opaque backing keeps
-          the photo from showing through a Human's translucent tile. */}
+      {/* The avatar overlaps the cover's lower edge; a ring in the page's
+          colour sets it apart from the photo and keeps the photo from showing
+          through a Human's translucent tile. */}
       <div className="-mt-6 flex items-end gap-3 px-5">
-        <div className="relative shrink-0 rounded-[20%] bg-background">
+        <div className="relative shrink-0 rounded-2xl bg-background p-1">
           <AvatarEditButton
             disabled={busy}
             label={t(accountSettingsMessages.uploadProfilePhoto)}
