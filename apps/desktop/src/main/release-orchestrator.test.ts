@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -14,6 +14,7 @@ import {
   diffReleaseModules,
   type ReleaseProgressUpdate,
 } from "./release-orchestrator.js";
+import { createV2DatabaseBackupHooks } from "./v2-db-backup.js";
 
 const tempDirs: string[] = [];
 
@@ -684,6 +685,247 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
       expect(orch.state()).toEqual({ kind: "idle" });
       expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
       expect(await orch.applyStaged()).toBe(false);
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("invokes dynamic pg_dump and pg_restore via local instance config during rollbackSafe:false rollback when TEAMHUB_DATABASE_URL is unset", async () => {
+    const home = await makeTempDir("linger-orch-dynamic-db-");
+    const instanceDir = path.join(home, "instances", "desktop");
+    await mkdir(instanceDir, { recursive: true, mode: 0o700 });
+    await writeFile(
+      path.join(instanceDir, "instance.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        name: "desktop",
+        mode: "source-native",
+        root: instanceDir,
+        port: 3000,
+        source: {
+          repo: path.join(home, "source"),
+          ports: {
+            web: 3000,
+            teamhub: 8080,
+            nodeServices: 8081,
+            document: 8082,
+            postgres: 54777,
+          },
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(instanceDir, "services.env"),
+      "LINGER_POSTGRES_PASSWORD=orch-local-db-secret\n",
+      "utf8",
+    );
+
+    const pgRoot = path.join(
+      home,
+      "tools",
+      "native",
+      "components",
+      "c".repeat(64),
+    );
+    await mkdir(path.join(pgRoot, "bin"), { recursive: true });
+    await mkdir(path.join(pgRoot, "lib"), { recursive: true });
+    const exe = process.platform === "win32" ? ".exe" : "";
+    await writeFile(path.join(pgRoot, "bin", `pg_dump${exe}`), "", "utf8");
+    await writeFile(path.join(pgRoot, "bin", `pg_restore${exe}`), "", "utf8");
+
+    const invokedTools: Array<{
+      file: string;
+      args: readonly string[];
+      password: string | undefined;
+    }> = [];
+    const dbHooks = createV2DatabaseBackupHooks({
+      getHome: () => home,
+      log: noopLog,
+      env: {},
+      exec: async (file, args, opts) => {
+        invokedTools.push({
+          file,
+          args,
+          password: opts.env.PGPASSWORD,
+        });
+        const fileIdx = args.indexOf("--file");
+        if (fileIdx >= 0 && args[fileIdx + 1]) {
+          await writeFile(args[fileIdx + 1]!, "PGDMP", "utf8");
+        }
+        return { stdout: "", stderr: "" };
+      },
+    });
+
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const watchdog = new HealthWatchdogModule();
+    const config = new ConfigStore(path.join(home, "config.json"));
+    const bus = new EventBus();
+    const restarted: string[] = [];
+
+    const orch = new ReleaseOrchestratorModule({
+      activeOperations: () => 0,
+      backupDatabase: dbHooks.backupDatabase,
+      restoreDatabase: dbHooks.restoreDatabase,
+      restartServices: async (rel) => {
+        restarted.push(rel.appVersion);
+      },
+      buildHealthProbes: (rel) => [
+        {
+          name: "teamhub-healthz",
+          check: async () => rel?.appVersion === "0.1.11-v2test.2",
+        },
+      ],
+      completePauseMs: 0,
+      rollbackPauseMs: 0,
+      healthGateTimeoutMs: 60,
+      healthGateIntervalMs: 15,
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        watchdog,
+        orch,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+    try {
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.2", { backend: "2" }),
+      );
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.2",
+        releaseFile: "releases/0.1.11-v2test.2/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.3", { backend: "3" }, false),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.3");
+      expect(await orch.applyStaged()).toBe(false);
+
+      expect(invokedTools).toHaveLength(2);
+      expect(invokedTools[0]?.file).toBe(
+        path.join(pgRoot, "bin", `pg_dump${exe}`),
+      );
+      expect(invokedTools[0]?.password).toBe("orch-local-db-secret");
+      expect(invokedTools[0]?.args.join(" ")).not.toContain(
+        "orch-local-db-secret",
+      );
+      expect(invokedTools[1]?.file).toBe(
+        path.join(pgRoot, "bin", `pg_restore${exe}`),
+      );
+      expect(invokedTools[1]?.password).toBe("orch-local-db-secret");
+      expect(invokedTools[1]?.args.join(" ")).toContain(
+        "pre-0.1.11-v2test.3.dump",
+      );
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
+      expect(await store.isDenylisted("0.1.11-v2test.3")).toBe(true);
+      expect(restarted).toEqual(["0.1.11-v2test.3", "0.1.11-v2test.2"]);
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("aborts cleanly without rolling back or restarting services when pre-flight backupDatabase fails, and skips restore when backupDatabase returns undefined", async () => {
+    const home = await makeTempDir("linger-orch-preflight-");
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const watchdog = new HealthWatchdogModule();
+    const config = new ConfigStore(path.join(home, "config.json"));
+    const bus = new EventBus();
+
+    let backupMode: "throw" | "undefined" = "throw";
+    const restarted: string[] = [];
+    const restored: string[] = [];
+    const aborts: Array<{ version: string; reason: string }> = [];
+
+    const orch = new ReleaseOrchestratorModule({
+      activeOperations: () => 0,
+      backupDatabase: async () => {
+        if (backupMode === "throw") {
+          throw new Error("pg_dump exited 1");
+        }
+        return undefined;
+      },
+      restoreDatabase: async (file) => {
+        restored.push(file);
+      },
+      restartServices: async (rel) => {
+        restarted.push(rel.appVersion);
+      },
+      buildHealthProbes: () => [
+        { name: "teamhub-healthz", check: async () => false },
+      ],
+      onAbort: (version, reason) => {
+        aborts.push({ version, reason });
+      },
+      completePauseMs: 0,
+      rollbackPauseMs: 0,
+      healthGateTimeoutMs: 60,
+      healthGateIntervalMs: 15,
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        watchdog,
+        orch,
+      ],
+      { config, log: noopLog, bus },
+    );
+    await host.start();
+    try {
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.2", { backend: "2" }),
+      );
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.2",
+        releaseFile: "releases/0.1.11-v2test.2/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.3", { backend: "3" }, false),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.3");
+
+      // Pre-flight pg_dump failure aborts before beginPending: no restart, no restore, no denylist, state returns to ready.
+      expect(await orch.applyStaged()).toBe(false);
+      expect(restarted).toEqual([]);
+      expect(restored).toEqual([]);
+      expect(await store.readPending()).toBeUndefined();
+      expect(await store.isDenylisted("0.1.11-v2test.3")).toBe(false);
+      expect(orch.state()).toMatchObject({
+        kind: "ready",
+        version: "0.1.11-v2test.3",
+      });
+      expect(aborts).toEqual([
+        { version: "0.1.11-v2test.3", reason: "pg_dump exited 1" },
+      ]);
+
+      // Thin Client skip (backupDatabase returns undefined) proceeds without setting dbBackupFile or calling restoreDatabase.
+      backupMode = "undefined";
+      expect(await orch.applyStaged()).toBe(false);
+      expect(restarted).toEqual(["0.1.11-v2test.3", "0.1.11-v2test.2"]);
+      expect(restored).toEqual([]);
+      expect(await store.isDenylisted("0.1.11-v2test.3")).toBe(true);
     } finally {
       await host.stop("quit");
     }

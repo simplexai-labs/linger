@@ -46,7 +46,7 @@ export interface ReleaseProgressUpdate {
 export interface ReleaseOrchestratorHooks {
   readonly activeOperations: () => number;
   readonly isVoiceIdle?: () => Promise<boolean>;
-  readonly backupDatabase?: (appVersion: string) => Promise<string>;
+  readonly backupDatabase?: (appVersion: string) => Promise<string | undefined>;
   readonly restoreDatabase?: (backupFile: string) => Promise<void>;
   readonly restartServices: (
     release: LocalReleaseDescriptor,
@@ -66,6 +66,7 @@ export interface ReleaseOrchestratorHooks {
   readonly onRollbackComplete?: (
     notice: RollbackNotice,
   ) => Promise<void> | void;
+  readonly onAbort?: (version: string, reason: string) => Promise<void> | void;
   readonly completePauseMs?: number;
   readonly rollbackPauseMs?: number;
   readonly healthGateTimeoutMs?: number;
@@ -256,6 +257,7 @@ export class ReleaseOrchestratorModule implements Module {
     });
 
     let dbBackupFile: string | undefined;
+    let switchStarted = false;
     try {
       if (
         !next.compat.rollbackSafe &&
@@ -265,6 +267,7 @@ export class ReleaseOrchestratorModule implements Module {
         dbBackupFile = await this.#hooks.backupDatabase(version);
       }
 
+      switchStarted = true;
       await store.beginPending({
         appVersion: version,
         releaseFile: `releases/${version}/release.json`,
@@ -350,6 +353,15 @@ export class ReleaseOrchestratorModule implements Module {
       return true;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      if (!switchStarted) {
+        ctx.log.warn("release_orchestrator.preflight_aborted", {
+          appVersion: version,
+          reason,
+        });
+        this.#setState({ kind: "ready", version, diff });
+        await this.#hooks.onAbort?.(version, reason);
+        return false;
+      }
       await this.#performRollback(
         version,
         current,

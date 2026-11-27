@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import {
   Notification,
@@ -47,6 +45,7 @@ import {
   resolveColdStartDaemonLaunch,
   resolveToolsNodePath,
 } from "./v2-runtime-helpers.js";
+import { createV2DatabaseBackupHooks } from "./v2-db-backup.js";
 import {
   LocalServerModule,
   signInWithPassword,
@@ -448,7 +447,12 @@ async function main(): Promise<void> {
       ? { checkIntervalMs: bundleCheckIntervalMs }
       : {}),
   });
-  const runExec = promisify(execFile);
+  const dbBackupHooks = createV2DatabaseBackupHooks({
+    getHome: () => bundleStore.home,
+    installerDirectory: path.join(here, "../installer"),
+    resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    log,
+  });
 
   const healthWatchdog = new HealthWatchdogModule();
   const healthGateTimeoutMs =
@@ -475,46 +479,8 @@ async function main(): Promise<void> {
     Number.isFinite(healthGateIntervalMs)
       ? { healthGateIntervalMs }
       : {}),
-    backupDatabase: process.env.TEAMHUB_DATABASE_URL
-      ? async (appVersion) => {
-          const relFile = `instances/desktop/backups/pre-${appVersion}.dump`;
-          const absFile = path.join(bundleStore.home, relFile);
-          mkdirSync(path.dirname(absFile), { recursive: true });
-          const pgDumpBin = process.env.LINGER_PG_DUMP_BIN || "pg_dump";
-          await runExec(pgDumpBin, [
-            "--format=custom",
-            "--file",
-            absFile,
-            process.env.TEAMHUB_DATABASE_URL!,
-          ]);
-          log.info("release_orchestrator.db_backed_up", {
-            appVersion,
-            file: relFile,
-          });
-          return relFile;
-        }
-      : undefined,
-    restoreDatabase: process.env.TEAMHUB_DATABASE_URL
-      ? async (relFile) => {
-          const absFile = path.join(bundleStore.home, relFile);
-          const pgRestoreBin =
-            process.env.LINGER_PG_RESTORE_BIN || "pg_restore";
-          await runExec(pgRestoreBin, [
-            "--clean",
-            "--if-exists",
-            "--no-owner",
-            "--dbname",
-            process.env.TEAMHUB_DATABASE_URL!,
-            absFile,
-          ]).catch((err: unknown) => {
-            // pg_restore returns non-zero on benign pre-existing schema notices; log and continue
-            log.warn("release_orchestrator.pg_restore_notice", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
-          log.info("release_orchestrator.db_restored", { file: relFile });
-        }
-      : undefined,
+    backupDatabase: dbBackupHooks.backupDatabase,
+    restoreDatabase: dbBackupHooks.restoreDatabase,
     onProgress: (progress) => {
       const detailByStage = {
         preparing: offlineMessages.updatingPrepare,
@@ -536,6 +502,9 @@ async function main(): Promise<void> {
       windows.loadServer("retry");
     },
     onRollbackComplete: () => {
+      windows.loadServer("retry");
+    },
+    onAbort: () => {
       windows.loadServer("retry");
     },
     restartServices: async (release, changed) => {
