@@ -2750,9 +2750,9 @@ describe("Model source", () => {
     );
     await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
     fixture.refreshes.length = 0;
-    fireEvent.click(
-      within(guidance).getByRole("button", { name: "Recheck memory" }),
-    );
+    // The card's refresh button rechecks; the guidance row repeats no action.
+    expect(within(guidance).queryByRole("button")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Recheck memory" }));
     await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
 
     // After closing external GPU apps, the snapshot clears the warning and unlocks the 27B model.

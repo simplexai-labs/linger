@@ -355,7 +355,6 @@ function MemorySummaryCard({
   guidanceCopy,
   onDetails,
   onRecheck,
-  readOnly,
   rechecking,
   summary,
   view,
@@ -364,7 +363,6 @@ function MemorySummaryCard({
   guidanceCopy?: { body: string; title: string };
   onDetails: () => void;
   onRecheck: () => void;
-  readOnly: boolean;
   rechecking: boolean;
   summary: ReturnType<typeof memorySummary>;
   view: LocalModelsView;
@@ -486,17 +484,6 @@ function MemorySummaryCard({
               </p>
             </div>
           </div>
-          {readOnly ? null : (
-            <Button
-              className="shrink-0"
-              loading={rechecking}
-              onClick={onRecheck}
-              size="compact"
-              tone="subtle"
-            >
-              {t(m.recheckMemory)}
-            </Button>
-          )}
         </aside>
       ) : null}
     </div>
@@ -908,7 +895,6 @@ function ComputerModels({
               guidanceCopy={summaryGuidanceCopy}
               onDetails={() => setDialog({ kind: "advanced" })}
               onRecheck={recheckMemory}
-              readOnly={!view.viewer_is_owner}
               rechecking={refresh.isPending}
               summary={summary}
               view={view}
