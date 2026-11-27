@@ -239,7 +239,7 @@ if (args.includes("--prefetch-bifrost")) {
       ? fs.readFileSync(modelFile, "utf8").trim()
       : "qwen3-8b";
   const estimate = eligible
-    ? { model: modelName, downloadBytes: 6 * 1024 ** 3, diskBytes: 8 * 1024 ** 3, memoryBytes: 12 * 1024 ** 3 }
+    ? { model: modelName, downloadBytes: 6 * 1024 ** 3, diskBytes: 1024 ** 2, memoryBytes: 12 * 1024 ** 3 }
     : { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null };
   if (fs.existsSync(path.join(home, "tool-download"))) {
     // The first check downloads the localmodels tool, counted before the report.
@@ -2450,7 +2450,7 @@ describe("LocalServerModule", () => {
         model: {
           name: "qwen3-8b",
           downloadBytes: 6 * 1024 ** 3,
-          diskBytes: 8 * 1024 ** 3,
+          diskBytes: 1024 ** 2,
           memoryBytes: 12 * 1024 ** 3,
         },
         recommendation: "local-models",
