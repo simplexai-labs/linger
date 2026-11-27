@@ -1145,6 +1145,59 @@ describe("setup page subscription runtimes", () => {
     );
   });
 
+  it("maps sign-in failure reasons through localized copy and falls back to message", async () => {
+    const { push } = await openPage(
+      welcome(small, {
+        runtimes: rows(
+          {
+            installed: true,
+            failed: "signin",
+            reason: "timed_out",
+            message: "The operation was aborted due to timeout",
+          },
+          {
+            installed: true,
+            failed: "signin",
+            message: "Custom failure detail",
+          },
+        ),
+      }),
+      "welcome",
+    );
+    open("subscription");
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      setupMessages.signInTimedOut.source,
+    );
+    expect(inRow("claude", "[data-runtime-sub]").dataset.warn).toBe("true");
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(
+      "Custom failure detail",
+    );
+    push(
+      welcome(small, {
+        runtimes: rows(
+          {
+            installed: true,
+            failed: "signin",
+            reason: "ended",
+            message: "Raw ended text",
+          },
+          {
+            installed: true,
+            failed: "signin",
+            reason: "unavailable",
+            message: "Raw unavailable text",
+          },
+        ),
+      }),
+    );
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      setupMessages.signInEnded.source,
+    );
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(
+      setupMessages.signInUnavailable.source,
+    );
+  });
+
   it("sets up both when both are signed in, Codex first", async () => {
     const { run } = await openPage(
       welcome(small, {

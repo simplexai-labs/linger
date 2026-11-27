@@ -39,6 +39,24 @@ export interface ServerOptions {
     run?: RunInstallation;
   };
 }
+const isTimeoutError = (cause: unknown): boolean => {
+  let current: unknown = cause;
+  for (
+    let depth = 0;
+    depth < 4 && current && typeof current === "object";
+    depth++
+  ) {
+    const value = current as {
+      name?: unknown;
+      code?: unknown;
+      cause?: unknown;
+    };
+    if (value.name === "TimeoutError" || value.code === "COMMAND_TIMEOUT")
+      return true;
+    current = value.cause;
+  }
+  return false;
+};
 async function body(request: http.IncomingMessage): Promise<unknown> {
   if (
     request.headers["content-type"] &&
@@ -569,31 +587,44 @@ export async function startInstallerServer(options: ServerOptions) {
             throw new Error(
               "Model fields require an OpenAI-compatible Pi provider",
             );
-          json(
-            res,
-            200,
-            await dependencies.runtimeLogin(
-              name,
-              method === "POST",
-              data.code as string | undefined,
-              data.apiKey
-                ? {
-                    apiKey: data.apiKey as string,
-                    provider: data.provider as
-                      | "openai"
-                      | "anthropic"
-                      | "openai-compatible",
-                    ...(data.provider === "openai-compatible"
-                      ? {
-                          baseUrl: data.baseUrl as string,
-                          model: data.model as string,
-                        }
-                      : {}),
-                  }
-                : undefined,
-              data.method as "browser" | "device" | undefined,
-            ),
-          );
+          try {
+            json(
+              res,
+              200,
+              await dependencies.runtimeLogin(
+                name,
+                method === "POST",
+                data.code as string | undefined,
+                data.apiKey
+                  ? {
+                      apiKey: data.apiKey as string,
+                      provider: data.provider as
+                        | "openai"
+                        | "anthropic"
+                        | "openai-compatible",
+                      ...(data.provider === "openai-compatible"
+                        ? {
+                            baseUrl: data.baseUrl as string,
+                            model: data.model as string,
+                          }
+                        : {}),
+                    }
+                  : undefined,
+                data.method as "browser" | "device" | undefined,
+              ),
+            );
+          } catch (cause) {
+            if (isTimeoutError(cause)) {
+              error(
+                res,
+                504,
+                "RUNTIME_LOGIN_TIMEOUT",
+                "Checking the AI runtime sign-in status timed out. Retry shortly.",
+              );
+              return;
+            }
+            throw cause;
+          }
           return;
         }
         if (

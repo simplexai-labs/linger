@@ -145,20 +145,35 @@ export async function setupRuntimeLogin(
     method?: LoginMethod;
     pollMs?: number;
     manager?: RuntimeLoginManager;
+    inspect?: typeof inspectRuntime;
+    inspectDescriptors?: typeof inspectRuntimeDescriptors;
   },
 ): Promise<void> {
+  // Resolve the runtime's environment once per login invocation rather than
+  // re-probing descriptors on every status poll.
+  let environmentPromise: Promise<NodeJS.ProcessEnv> | undefined;
+  const environment = () => {
+    environmentPromise ??= (
+      options.inspectDescriptors ?? inspectRuntimeDescriptors
+    )(home, { runtime })
+      .then((rows) =>
+        runtimeEnvironmentFromDescriptors(
+          rows.filter((row) => row.runtime === runtime),
+        ),
+      )
+      .catch((error: unknown) => {
+        environmentPromise = undefined;
+        throw error;
+      });
+    return environmentPromise;
+  };
   const manager =
     options.manager ??
     new RuntimeLoginManager(
-      inspectRuntime,
+      options.inspect ?? inspectRuntime,
       process.platform,
       15 * 60_000,
-      async () =>
-        runtimeEnvironmentFromDescriptors(
-          (await inspectRuntimeDescriptors(home, { runtime })).filter(
-            (row) => row.runtime === runtime,
-          ),
-        ),
+      environment,
     );
   const input: RuntimeLoginInput = {
     instance: "setup",
@@ -174,12 +189,37 @@ export async function setupRuntimeLogin(
     last = text;
     if (snapshot.state === "ready" || snapshot.state === "failed") ended = true;
   };
-  const failed = (error: unknown): Line => ({
-    state: "failed",
-    reason: "ended",
-    message:
-      error instanceof Error ? error.message : "Sign-in could not start.",
-  });
+  const isTimeout = (error: unknown): boolean => {
+    let current: unknown = error;
+    for (
+      let depth = 0;
+      depth < 4 && current && typeof current === "object";
+      depth++
+    ) {
+      const value = current as {
+        name?: unknown;
+        code?: unknown;
+        cause?: unknown;
+      };
+      if (value.name === "TimeoutError" || value.code === "COMMAND_TIMEOUT")
+        return true;
+      current = value.cause;
+    }
+    return false;
+  };
+  const failed = (error: unknown): Line =>
+    isTimeout(error)
+      ? {
+          state: "failed",
+          reason: "timed_out",
+          message: "Sign-in timed out. Retry or sign in later.",
+        }
+      : {
+          state: "failed",
+          reason: "ended",
+          message:
+            error instanceof Error ? error.message : "Sign-in could not start.",
+        };
   const stopped = new Promise<void>((resolve) => {
     if (options.signal.aborted) resolve();
     options.signal.addEventListener("abort", () => resolve(), { once: true });

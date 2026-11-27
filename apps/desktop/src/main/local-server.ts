@@ -2785,7 +2785,32 @@ export class LocalServerModule implements Module {
         signal.throwIfAborted();
         if (this.#switchByok) return { byok: this.#switchByok };
         if (this.#switchTo) return this.#switchTo;
-        const login = await installer.runtimeLogin();
+        let login: RuntimeLogin;
+        try {
+          login = await installer.runtimeLogin();
+        } catch (error) {
+          if (signal.aborted || !isTransientRuntimeLoginPollError(error))
+            throw error;
+          const details = error as { status?: unknown; code?: unknown };
+          this.#ctx?.log.warn("local_server.runtime_login_poll_failed", {
+            runtime,
+            ...(typeof details.status === "number"
+              ? { status: details.status }
+              : {}),
+            ...(typeof details.code === "string" ? { code: details.code } : {}),
+            error: error instanceof Error ? error.message : String(error),
+          });
+          const woken = new Promise<void>((resolve) => {
+            this.#signInWake = resolve;
+          });
+          await Promise.race([
+            woken,
+            delay(this.#options.signInPollMs ?? SIGN_IN_POLL_MS, undefined, {
+              signal,
+            }),
+          ]);
+          continue;
+        }
         if (login.state === "ready") {
           if (this.#signIn) {
             this.#ctx?.log.info("local_server.runtime_signed_in", { runtime });
@@ -6313,15 +6338,50 @@ export class InstallerApi {
     const response = await this.#call(pathname, body, method, signal);
     if (!response.ok) {
       const error = (await response.json().catch(() => null)) as {
+        code?: string;
         message?: string;
       } | null;
-      throw new Error(
-        error?.message || `The installer request failed (${response.status})`,
+      throw Object.assign(
+        new Error(
+          error?.message || `The installer request failed (${response.status})`,
+        ),
+        {
+          status: response.status,
+          ...(typeof error?.code === "string" && error.code
+            ? { code: error.code }
+            : {}),
+        },
       );
     }
     return (await response.json()) as T;
   }
 }
+
+const isTransientRuntimeLoginPollError = (error: unknown): boolean => {
+  let current: unknown = error;
+  for (
+    let depth = 0;
+    depth < 4 && current && typeof current === "object";
+    depth++
+  ) {
+    const value = current as {
+      name?: unknown;
+      code?: unknown;
+      status?: unknown;
+      cause?: unknown;
+    };
+    if (
+      value.name === "TimeoutError" ||
+      value.code === "COMMAND_TIMEOUT" ||
+      value.code === "RUNTIME_LOGIN_TIMEOUT" ||
+      value.status === 503 ||
+      value.status === 504
+    )
+      return true;
+    current = value.cause;
+  }
+  return false;
+};
 
 interface InstanceRuntime {
   readonly setupChoice?: string;

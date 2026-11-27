@@ -167,6 +167,8 @@ export type SetupLocalStep =
   | "connect"
   | "agents";
 
+export type SetupSignInReason = "unavailable" | "timed_out" | "ended";
+
 // The runtime the installer set up has no sign-in on this computer. The
 // person signs in on the vendor's page (url, entering deviceCode there) or
 // in a terminal; Claude Code's page shows a code to paste back
@@ -184,7 +186,7 @@ export interface SetupRuntimeSignIn {
   readonly acceptsCode?: boolean;
   // Why it failed, worded by the page: unavailable, timed_out or ended.
   // message is the installer's English, for anything else.
-  readonly reason?: "unavailable" | "timed_out" | "ended";
+  readonly reason?: SetupSignInReason;
   readonly message?: string;
   // No browser opened on url; the page offers it to copy.
   readonly browserFailed?: boolean;
@@ -236,6 +238,7 @@ export interface SetupRuntimeRow {
   };
   // The last install or sign-in that failed, and the installer's words.
   readonly failed?: "install" | "signin";
+  readonly reason?: SetupSignInReason;
   readonly message?: string;
 }
 

@@ -10,6 +10,7 @@ import type {
   SetupBackgroundModel,
   SetupRuntimeName,
   SetupRuntimeRow,
+  SetupSignInReason,
 } from "../shared/setup.js";
 
 export const SETUP_RUNTIME_NAMES: readonly SetupRuntimeName[] = [
@@ -46,6 +47,10 @@ const count = (value: unknown): number | undefined =>
     : undefined;
 const text = (value: unknown, max = 600): string | undefined =>
   typeof value === "string" && value ? value.slice(0, max) : undefined;
+const signInReason = (value: unknown): SetupSignInReason | undefined =>
+  value === "timed_out" || value === "ended" || value === "unavailable"
+    ? value
+    : undefined;
 
 export class SetupRuntimes {
   readonly #run: SetupCommandRunner;
@@ -58,6 +63,8 @@ export class SetupRuntimes {
   #processes = new Map<SetupRuntimeName, SetupCommandProcess>();
   #opened = new Map<SetupRuntimeName, string>();
   #cancelled = new Set<SetupRuntimeName>();
+  #signInMode = new Map<SetupRuntimeName, "browser" | "device">();
+  #signInGeneration = new Map<SetupRuntimeName, number>();
 
   constructor(options: {
     run: SetupCommandRunner;
@@ -142,7 +149,11 @@ export class SetupRuntimes {
         ...(version ? { version } : {}),
         state: "idle",
         ...(current?.failed
-          ? { failed: current.failed, message: current.message ?? "" }
+          ? {
+              failed: current.failed,
+              ...(current.reason ? { reason: current.reason } : {}),
+              message: current.message ?? "",
+            }
           : {}),
       });
     }
@@ -165,6 +176,7 @@ export class SetupRuntimes {
     if (this.#working(runtime)) return;
     const {
       failed: _f,
+      reason: _r,
       message: _m,
       ...current
     } = this.#rows.get(runtime) ??
@@ -223,12 +235,30 @@ export class SetupRuntimes {
   // browser (the CLI opens it on macOS and Windows; a device login and
   // Linux open it from here). Snapshots follow until signed in or ended.
   async signIn(runtime: "codex" | "claude", device = false): Promise<void> {
-    if (this.#working(runtime)) return;
+    const mode: "browser" | "device" =
+      runtime === "codex" && device ? "device" : "browser";
+    const existing = this.#rows.get(runtime);
+    const switching =
+      existing?.state === "signing_in" &&
+      runtime === "codex" &&
+      this.#signInMode.get(runtime) !== mode;
+    if (this.#working(runtime) && !switching) return;
+    const generation = (this.#signInGeneration.get(runtime) ?? 0) + 1;
+    this.#signInGeneration.set(runtime, generation);
+    this.#signInMode.set(runtime, mode);
+    this.#cancelled.delete(runtime);
+    if (switching) {
+      const previous = this.#processes.get(runtime);
+      this.#processes.delete(runtime);
+      previous?.stop();
+    }
     const {
       failed: _f,
+      reason: _r,
       message: _m,
+      signIn: _s,
       ...current
-    } = this.#rows.get(runtime) ?? {
+    } = existing ?? {
       runtime,
       installed: true,
       signedIn: false,
@@ -238,23 +268,32 @@ export class SetupRuntimes {
     this.#opened.delete(runtime);
     this.#changed();
     let failed: string | undefined;
+    let reason: SetupSignInReason | undefined;
     let ready = false;
+    let child: SetupCommandProcess | undefined;
     const browser =
       runtime === "codex" && !device && this.#platform === "linux";
+    const stale = () => this.#signInGeneration.get(runtime) !== generation;
     try {
-      const child = await this.#run(
+      child = await this.#run(
         [
           "--runtime-login",
           runtime,
-          ...(device && runtime === "codex" ? ["--device-login"] : []),
+          ...(device && runtime === "codex"
+            ? ["--device-login"]
+            : browser
+              ? ["--browser-login"]
+              : []),
         ],
         {
           onLine: (line) => {
+            if (stale()) return;
             if (line.state === "ready") {
               ready = true;
               return;
             }
             if (line.state === "failed") {
+              reason = signInReason(line.reason);
               failed = text(line.message) ?? text(line.reason) ?? "";
               return;
             }
@@ -290,6 +329,10 @@ export class SetupRuntimes {
           },
         },
       );
+      if (stale()) {
+        child.stop();
+        return;
+      }
       this.#processes.set(runtime, child);
       // Cancelled while it was starting.
       if (this.#cancelled.has(runtime)) child.stop();
@@ -297,17 +340,27 @@ export class SetupRuntimes {
     } catch (error) {
       failed = error instanceof Error ? error.message : String(error);
     } finally {
-      this.#processes.delete(runtime);
+      if (child && this.#processes.get(runtime) === child)
+        this.#processes.delete(runtime);
     }
-    if (this.#cancelled.delete(runtime)) failed = undefined;
-    const { signIn: _s, ...rest } = this.#rows.get(runtime)!;
+    if (stale()) return;
+    this.#signInMode.delete(runtime);
+    if (this.#cancelled.delete(runtime)) {
+      failed = undefined;
+      reason = undefined;
+    }
+    const { signIn: _signIn, ...rest } = this.#rows.get(runtime)!;
     this.#rows.set(runtime, {
       ...rest,
       state: "idle",
       signedIn: ready || rest.signedIn,
       ...(ready || failed === undefined
         ? {}
-        : { failed: "signin" as const, message: failed }),
+        : {
+            failed: "signin" as const,
+            ...(reason ? { reason } : {}),
+            message: failed,
+          }),
     });
     this.#changed();
   }

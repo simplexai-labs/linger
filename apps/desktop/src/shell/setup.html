@@ -6869,7 +6869,9 @@
                   : row.failed === "install"
                     ? row.message || t("rtInstallFailed")
                     : row.failed === "signin"
-                      ? row.message || t("signInFailed")
+                      ? SIGN_IN_REASONS[row.reason]
+                        ? t(SIGN_IN_REASONS[row.reason])
+                        : row.message || t("signInFailed")
                       : done
                         ? t("signedIn")
                         : row.installed

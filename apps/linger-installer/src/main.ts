@@ -36,6 +36,7 @@ export function parseInstallerArguments(args: string[]) {
     prepareRuntime?: string;
     runtimeLogin?: string;
     deviceLogin?: boolean;
+    browserLogin?: boolean;
     downloadModel?: string;
     checkModel?: string;
   } = {
@@ -97,6 +98,10 @@ export function parseInstallerArguments(args: string[]) {
     }
     if (flag === "--device-login") {
       options.deviceLogin = true;
+      continue;
+    }
+    if (flag === "--browser-login") {
+      options.browserLogin = true;
       continue;
     }
     if (
@@ -162,6 +167,10 @@ export function parseInstallerArguments(args: string[]) {
     throw new Error("The installer needs a source checkout (--source-repo).");
   if (options.deviceLogin && options.runtimeLogin !== "codex")
     throw new Error("A device login needs --runtime-login codex.");
+  if (options.browserLogin && options.runtimeLogin !== "codex")
+    throw new Error("A browser login needs --runtime-login codex.");
+  if (options.deviceLogin && options.browserLogin)
+    throw new Error("Choose either --device-login or --browser-login.");
   if (options.inspectTarget && !options.inspect)
     throw new Error("An inspection target requires --inspect.");
   if (options.abortOnStdinClose && !options.prefetchBifrost)
@@ -597,6 +606,11 @@ async function runSetupCommand(
       finish({ outcome }, outcome.installed ? 0 : 1);
     } else if (options.runtimeLogin) {
       const { createInterface } = await import("node:readline");
+      const method = options.deviceLogin
+        ? ("device" as const)
+        : options.browserLogin
+          ? ("browser" as const)
+          : undefined;
       await commands.setupRuntimeLogin(
         options.home,
         commands.setupRuntime(options.runtimeLogin),
@@ -604,7 +618,7 @@ async function runSetupCommand(
           signal: controller.signal,
           write,
           codes: createInterface({ input: process.stdin }),
-          ...(options.deviceLogin ? { method: "device" as const } : {}),
+          ...(method ? { method } : {}),
         },
       );
       finish({ ended: true }, 0);

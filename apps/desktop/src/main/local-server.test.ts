@@ -1225,6 +1225,66 @@ describe("LocalServerModule", () => {
     await f.host.stop("quit");
   });
 
+  it("retries sign-in polling on transient 504 and TimeoutError responses without aborting installation", async () => {
+    const api = installerApi();
+    api.runtime.setupChoice = "codex";
+    api.runtime.login = { state: "idle" };
+    let pollCount = 0;
+    const baseHandle = api.handle;
+    const flakyApi: typeof api = {
+      ...api,
+      handle: async (url, init) => {
+        if (url.pathname === "/api/runtime-login" && init?.method === "GET") {
+          pollCount += 1;
+          if (pollCount === 1) {
+            return Response.json(
+              {
+                code: "RUNTIME_LOGIN_TIMEOUT",
+                message:
+                  "Checking the AI runtime sign-in status timed out. Retry shortly.",
+              },
+              { status: 504 },
+            );
+          }
+          if (pollCount === 2) {
+            throw new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            );
+          }
+          api.runtime.login = { state: "ready" };
+        }
+        return baseHandle(url, init);
+      },
+    };
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), signInPollMs: 5 }),
+      {},
+      checkout,
+      flakyApi,
+    );
+    const warn = vi.spyOn(f.host.ctx.log, "warn");
+    await f.host.start();
+    await f.module.begin();
+    expect(pollCount).toBeGreaterThanOrEqual(3);
+    expect(f.module.status().phase).toBe("ready");
+    expect(warn).toHaveBeenCalledWith(
+      "local_server.runtime_login_poll_failed",
+      expect.objectContaining({
+        runtime: "codex",
+        status: 504,
+        code: "RUNTIME_LOGIN_TIMEOUT",
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "local_server.runtime_login_poll_failed",
+      expect.objectContaining({
+        runtime: "codex",
+      }),
+    );
+    await f.host.stop("quit");
+  });
+
   it("names the runtime Auto chose, and installs another one instead", async () => {
     // Auto resolves to the local model, which runs on Pi.
     const api = installerApi();

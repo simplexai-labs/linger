@@ -263,7 +263,118 @@ describe("SetupRuntimes", () => {
       state: "idle",
       signedIn: false,
       failed: "signin",
+      reason: "timed_out",
       message: "Timed out",
+    });
+  });
+
+  it("passes --browser-login for Codex browser sign-in on Linux and opens the URL", async () => {
+    const { run, find } = commands();
+    const openExternal = vi.fn(async () => undefined);
+    const runtimes = new SetupRuntimes({
+      run,
+      changed: () => undefined,
+      openExternal,
+      platform: "linux",
+    });
+    const signing = runtimes.signIn("codex");
+    const command = await find("--runtime-login");
+    expect(command.args).toEqual([
+      "--runtime-login",
+      "codex",
+      "--browser-login",
+    ]);
+    command.line({
+      state: "waiting_user",
+      url: "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+    });
+    await vi.waitFor(() =>
+      expect(openExternal).toHaveBeenCalledWith(
+        "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+      ),
+    );
+    command.line({ state: "ready" });
+    command.end();
+    await signing;
+    expect(runtimes.rows()?.[1]).toMatchObject({
+      runtime: "codex",
+      signedIn: true,
+      state: "idle",
+    });
+  });
+
+  it("switches a live Codex sign-in to device code without letting the replaced process clobber state", async () => {
+    const { run, started } = commands();
+    const openExternal = vi.fn(async () => undefined);
+    const runtimes = new SetupRuntimes({
+      run,
+      changed: () => undefined,
+      openExternal,
+      platform: "linux",
+    });
+    const first = runtimes.signIn("codex", false);
+    await vi.waitFor(() => expect(started).toHaveLength(1));
+    const browserCmd = started[0]!;
+    expect(browserCmd.args).toEqual([
+      "--runtime-login",
+      "codex",
+      "--browser-login",
+    ]);
+    browserCmd.line({
+      state: "waiting_user",
+      url: "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+    });
+    // Switch to device code while browser sign-in is active.
+    const second = runtimes.signIn("codex", true);
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    expect(browserCmd.stopped).toBe(true);
+    // Repeated click in the same mode is still ignored.
+    void runtimes.signIn("codex", true);
+    expect(started).toHaveLength(2);
+    // Late output from the replaced process cannot overwrite the active device sign-in.
+    browserCmd.line({
+      state: "failed",
+      reason: "ended",
+      message: "old process ended",
+    });
+    await first;
+    expect(runtimes.rows()?.[1]).toMatchObject({
+      runtime: "codex",
+      state: "signing_in",
+      signIn: {},
+    });
+    expect(runtimes.rows()?.[1]).not.toHaveProperty("failed");
+    const deviceCmd = started[1]!;
+    expect(deviceCmd.args).toEqual([
+      "--runtime-login",
+      "codex",
+      "--device-login",
+    ]);
+    deviceCmd.line({
+      state: "waiting_user",
+      url: "https://auth.openai.com/codex/device",
+      deviceCode: "ABCD-5678",
+    });
+    await vi.waitFor(() =>
+      expect(openExternal).toHaveBeenCalledWith(
+        "https://auth.openai.com/codex/device",
+      ),
+    );
+    expect(runtimes.rows()?.[1]).toMatchObject({
+      state: "signing_in",
+      signIn: {
+        url: "https://auth.openai.com/codex/device",
+        deviceCode: "ABCD-5678",
+      },
+    });
+    deviceCmd.line({ state: "ready" });
+    deviceCmd.end();
+    await second;
+    expect(runtimes.rows()?.[1]).toEqual({
+      runtime: "codex",
+      installed: true,
+      signedIn: true,
+      state: "idle",
     });
   });
 

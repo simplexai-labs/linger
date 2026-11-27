@@ -25,6 +25,9 @@ it("parses the setup commands without a source checkout and refuses bad values",
     parseInstallerArguments(["--runtime-login", "codex", "--device-login"]),
   ).toMatchObject({ runtimeLogin: "codex", deviceLogin: true });
   expect(
+    parseInstallerArguments(["--runtime-login", "codex", "--browser-login"]),
+  ).toMatchObject({ runtimeLogin: "codex", browserLogin: true });
+  expect(
     parseInstallerArguments(["--download-local-model", "qwen3-8b:Q4_K_M"]),
   ).toMatchObject({ downloadModel: "qwen3-8b:Q4_K_M" });
   expect(
@@ -33,6 +36,9 @@ it("parses the setup commands without a source checkout and refuses bad values",
   for (const args of [
     ["--prepare-runtime", "bash"],
     ["--runtime-login", "pi", "--device-login"],
+    ["--runtime-login", "claude", "--browser-login"],
+    ["--runtime-login", "pi", "--browser-login"],
+    ["--runtime-login", "codex", "--device-login", "--browser-login"],
     ["--owner-account"],
     ["--download-local-model", "--base-dir"],
     ["--download-local-model", "../x:Q4"],
@@ -277,6 +283,96 @@ it("cancels the vendor sign-in when stopped", async () => {
   await done;
   expect(manager.cancel).toHaveBeenCalledWith("setup");
   expect(manager.close).toHaveBeenCalled();
+});
+
+it("caches runtime descriptor inspection across start and status polls", async () => {
+  let inspectCalls = 0;
+  const inspectDescriptors = vi.fn(async () => [
+    {
+      runtime: "codex" as const,
+      executable: process.execPath,
+      argvPrefix: [],
+      installed: true,
+      authenticated: false,
+      authMode: null,
+    },
+  ]);
+  const inspect = vi.fn(async () => {
+    inspectCalls += 1;
+    const ready = inspectCalls >= 3;
+    return {
+      runtime: "codex" as const,
+      executable: process.execPath,
+      installed: true,
+      ready,
+      loginCommand: "unused",
+      descriptor: {
+        runtime: "codex" as const,
+        executable: process.execPath,
+        argvPrefix: [],
+        installed: true,
+        authenticated: ready,
+        authMode: ready ? "authenticated" : null,
+        loginCommand: {
+          executable: process.execPath,
+          args: ["-e", "setTimeout(() => {}, 5000)"],
+          env: {},
+        },
+        deviceLoginCommand: {
+          executable: process.execPath,
+          args: ["-e", "setTimeout(() => {}, 5000)"],
+          env: {},
+        },
+      },
+    };
+  }) as unknown as typeof inspectRuntime;
+  const lines: Record<string, unknown>[] = [];
+  await setupRuntimeLogin("/home", "codex", {
+    signal: new AbortController().signal,
+    write: (line) => lines.push(line),
+    method: "device",
+    pollMs: 5,
+    inspect,
+    inspectDescriptors: inspectDescriptors as never,
+  });
+  expect(inspectDescriptors).toHaveBeenCalledTimes(1);
+  expect(inspect).toHaveBeenCalledTimes(3);
+  expect(lines.at(-1)).toEqual({ state: "ready" });
+});
+
+it("maps TimeoutError and COMMAND_TIMEOUT failures to reason timed_out with clean copy", async () => {
+  const timeoutCases: unknown[] = [
+    new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError",
+    ),
+    Object.assign(new Error("probe exceeded deadline"), {
+      code: "COMMAND_TIMEOUT",
+    }),
+  ];
+  for (const error of timeoutCases) {
+    const lines: Record<string, unknown>[] = [];
+    const manager = {
+      start: vi.fn(async () => {
+        throw error;
+      }),
+      status: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
+    };
+    await setupRuntimeLogin("/home", "codex", {
+      signal: new AbortController().signal,
+      write: (line) => lines.push(line),
+      manager: manager as unknown as RuntimeLoginManager,
+    });
+    expect(lines).toEqual([
+      {
+        state: "failed",
+        reason: "timed_out",
+        message: "Sign-in timed out. Retry or sign in later.",
+      },
+    ]);
+  }
 });
 
 it("downloads the planned model into the library with throttled progress", async () => {
