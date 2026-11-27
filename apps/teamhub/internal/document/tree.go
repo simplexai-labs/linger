@@ -127,7 +127,7 @@ func (s *Service) GetMyTree(ctx context.Context, accountID, tenantID string) ([]
 
 func (s *Service) CreateFolder(ctx context.Context, input CreateFolderInput) (Placement, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.AccountID == "" || input.Name == "" || len(input.Name) > 255 {
+	if input.AccountID == "" || !validFolderName(input.Name) {
 		return Placement{}, ErrInvalidInput
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -168,7 +168,7 @@ func (s *Service) UpdatePlacement(ctx context.Context, input UpdatePlacementInpu
 	input.Name = strings.TrimSpace(input.Name)
 	if input.AccountID == "" || input.PlacementID == "" ||
 		(input.Name == "" && input.ParentID == nil && !input.MoveToRoot) ||
-		(input.ParentID != nil && input.MoveToRoot) || len(input.Name) > 255 {
+		(input.ParentID != nil && input.MoveToRoot) || !folderUpdateNameValid(input.Name) {
 		return Placement{}, ErrInvalidInput
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})

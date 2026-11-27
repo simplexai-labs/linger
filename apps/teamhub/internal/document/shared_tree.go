@@ -122,7 +122,7 @@ func (s *Service) GetSharedTree(ctx context.Context, accountID, tenantID string)
 
 func (s *Service) CreateSharedFolder(ctx context.Context, input SharedFolderInput) (Placement, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.AccountID == "" || input.TenantID == "" || input.Name == "" || len(input.Name) > 255 {
+	if input.AccountID == "" || input.TenantID == "" || !validFolderName(input.Name) {
 		return Placement{}, ErrInvalidInput
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -153,7 +153,7 @@ func (s *Service) CreateSharedFolder(ctx context.Context, input SharedFolderInpu
 
 func (s *Service) UpdateSharedFolder(ctx context.Context, input UpdateSharedFolderInput) (Placement, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.AccountID == "" || input.TenantID == "" || input.FolderID == "" || len(input.Name) > 255 || (input.Name == "" && input.ParentID == nil && !input.MoveToRoot) || (input.ParentID != nil && input.MoveToRoot) {
+	if input.AccountID == "" || input.TenantID == "" || input.FolderID == "" || !folderUpdateNameValid(input.Name) || (input.Name == "" && input.ParentID == nil && !input.MoveToRoot) || (input.ParentID != nil && input.MoveToRoot) {
 		return Placement{}, ErrInvalidInput
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})

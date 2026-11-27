@@ -558,9 +558,32 @@ const MaxDocumentTitleCharacters = 255
 // MaxDocumentTitleCharacters characters of valid UTF-8, the unit its maxLength
 // states. A CJK title of 255 characters is 765 bytes and still fits.
 func ValidDocumentTitle(title string) bool {
-	if !utf8.ValidString(title) {
+	return validCharacterLength(title, MaxDocumentTitleCharacters)
+}
+
+// validCharacterLength reports whether text is one to max characters of valid
+// UTF-8, the unit a contract's maxLength states.
+func validCharacterLength(text string, limit int) bool {
+	if !utf8.ValidString(text) {
 		return false
 	}
-	count := utf8.RuneCountInString(title)
-	return count >= 1 && count <= MaxDocumentTitleCharacters
+	count := utf8.RuneCountInString(text)
+	return count >= 1 && count <= limit
+}
+
+// maxFolderNameCharacters is the folder name bound the contract states as
+// maxLength and the placements check enforces with length(), which counts
+// characters: a CJK folder name of 255 characters is 765 bytes and still fits.
+const maxFolderNameCharacters = 255
+
+// validFolderName reports whether a folder name is one to
+// maxFolderNameCharacters characters of valid UTF-8.
+func validFolderName(name string) bool {
+	return validCharacterLength(name, maxFolderNameCharacters)
+}
+
+// folderUpdateNameValid reports whether an update's optional name is one to
+// write: an empty name is a move without a rename, which must stay allowed.
+func folderUpdateNameValid(name string) bool {
+	return name == "" || validFolderName(name)
 }
