@@ -29,6 +29,7 @@ import {
   findCommand,
   helpText,
   parseDomainCommand,
+  searchHelp,
   unknownCommand,
 } from "./domain-commands.js";
 
@@ -147,7 +148,9 @@ export async function runCli(
       (["--help", "-h"].includes(args[0]!) && args.length === 1)
     ) {
       const prefix = args[0] === "help" ? args.slice(1) : [];
-      const help = await helpText(prefix);
+      const search =
+        prefix[0] === "--search" || prefix[0]?.startsWith("--search=");
+      const help = search ? searchHelp(prefix) : await helpText(prefix);
       if (!help) throw unknownCommand(prefix);
       await dependencies.stdout(help);
       return 0;

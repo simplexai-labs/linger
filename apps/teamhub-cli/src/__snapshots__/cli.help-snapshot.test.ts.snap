@@ -3994,6 +3994,7 @@ Commands:
   web
   help
 
+Run teamhub help --search <keyword> to find commands by name or description.
 Run teamhub <command> --help for command options. Help and schema are offline; TeamHub checks current resource access.
 ",
   "account-profile": "exit 0

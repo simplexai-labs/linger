@@ -41,3 +41,37 @@ describe("offline help and schema snapshot", () => {
     expect(pages).toMatchSnapshot();
   });
 });
+
+describe("offline command search", () => {
+  it("matches command names without regard to case and lists them in order", async () => {
+    const result = await run(["help", "--search", "  CoMpUtEr PeRmIsSiOnS  "]);
+    expect(result.split("\n").slice(0, 3)).toEqual([
+      "exit 0",
+      expect.stringMatching(/^ {2}computer permissions request {2}/u),
+      expect.stringMatching(/^ {2}computer permissions status {2}/u),
+    ]);
+    expect(result).not.toContain("profile skill publish");
+  });
+
+  it("also searches descriptions", async () => {
+    expect(await run(["help", "--search=coordinate privately"])).toContain(
+      "  message send  Send one message and optional resources, or coordinate privately.",
+    );
+  });
+
+  it("reports no matches successfully", async () => {
+    expect(await run(["help", "--search", "nonexistent-command-keyword"])).toBe(
+      "exit 0\nNo matching commands.\n",
+    );
+  });
+
+  it.each([
+    [["--search"], "--search needs a value"],
+    [["--search", " "], "--search needs a non-empty keyword"],
+    [["--search", "message", "extra"], "takes 0 positional arguments"],
+  ])("rejects malformed search arguments %j", async (args, message) => {
+    const result = await run(["help", ...args]);
+    expect(result).toMatch(/^exit 2\nteamhub: usage:/u);
+    expect(result).toContain(message);
+  });
+});

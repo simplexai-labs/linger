@@ -6,9 +6,12 @@ The caller Context comes only from `.teamhub/cli/config.json`, which the Compute
 
 ```bash
 teamhub --help
+teamhub help --search "coordinate privately"
 teamhub message send --help
 teamhub docs update --schema
 ```
+
+`teamhub help --search <keyword>` searches command names and descriptions offline, ignoring case.
 
 ## Common operations
 

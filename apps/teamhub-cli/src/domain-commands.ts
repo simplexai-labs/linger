@@ -11,9 +11,11 @@ import type {
   CommandTarget,
 } from "./command-definition.js";
 import {
+  assertPositionals,
   createInputReader,
   option,
   parseArguments,
+  requiredOption,
   targetFromFlags,
 } from "./command-input.js";
 import { messageCommandDefinitions } from "./message-commands.js";
@@ -27,6 +29,7 @@ import { outlookCalendarCommandDefinitions } from "./connector-outlook-calendar.
 import { webCommandDefinitions } from "./web-commands.js";
 import { publicBusinessSchemas } from "./business-schemas.js";
 import { CliError } from "./errors.js";
+import { inputIssue, usageError } from "./input-issues.js";
 
 export const commandDefinitions: readonly CommandDefinition[] = [
   ...messageCommandDefinitions,
@@ -137,7 +140,8 @@ export function domainHelp(prefix: readonly string[] = []): string {
         .map((name) => `  ${name}`)
         .concat("  help")
         .join("\n") +
-      "\n\nRun teamhub <command> --help for command options. Help and schema are offline; TeamHub checks current resource access.\n"
+      "\n\nRun teamhub help --search <keyword> to find commands by name or description.\n" +
+      "Run teamhub <command> --help for command options. Help and schema are offline; TeamHub checks current resource access.\n"
     );
   if (
     matches.length > 1 &&
@@ -246,6 +250,31 @@ export function domainHelp(prefix: readonly string[] = []): string {
       .join("\n\n") + "\n"
   );
 }
+export function searchHelp(args: readonly string[]): string {
+  const parsed = parseArguments(args, {
+    "--search": { description: "Search command names and descriptions." },
+  });
+  assertPositionals(parsed, 0);
+  const query = requiredOption(parsed, "--search").trim().toLowerCase();
+  if (!query)
+    throw usageError("--search needs a non-empty keyword.", [
+      inputIssue("--search", "missing", "required; give a keyword to search."),
+    ]);
+
+  const matches = commandDefinitions.flatMap(({ command, description }) => {
+    const name = command.join(" ");
+    return name.toLowerCase().includes(query) ||
+      description.toLowerCase().includes(query)
+      ? [`  ${name}  ${description}`]
+      : [];
+  });
+  if (!matches.length) return "No matching commands.\n";
+  return (
+    matches.sort().join("\n") +
+    "\n\nRun teamhub <command> --help for command options.\n"
+  );
+}
+
 /** Help for a prefix. One command's help also lists its JSON flags' fields. */
 export async function helpText(prefix: readonly string[]): Promise<string> {
   const help = domainHelp(prefix);
