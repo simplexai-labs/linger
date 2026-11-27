@@ -17,10 +17,10 @@ on:
   workflow_dispatch:
     inputs:
       base_version:
-        description: Baseline test version (e.g. 0.1.10-v2test.0; steps 01-03 derive 0.1.10-v2test.1..0.1.10-v2test.3)
+        description: Baseline test version (e.g. 0.1.11-v2test.0; steps 01-03 derive 0.1.11-v2test.1..0.1.11-v2test.3)
         type: string
         required: true
-        default: "0.1.10-v2test.0"
+        default: "0.1.11-v2test.0"
       feed_base_url:
         description: Optional fixed HTTPS feed URL; leave empty (recommended) for portable feed-relative signed manifests that work on any localhost/LAN/tunnel URL
         type: string
@@ -37,10 +37,10 @@ on:
   workflow_call:
     inputs:
       base_version:
-        description: Baseline test version (e.g. 0.1.10-v2test.0)
+        description: Baseline test version (e.g. 0.1.11-v2test.0)
         type: string
         required: false
-        default: "0.1.10-v2test.0"
+        default: "0.1.11-v2test.0"
       feed_base_url:
         description: Optional fixed HTTPS feed URL; leave empty for portable feed-relative signed manifests
         type: string

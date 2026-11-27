@@ -1,8 +1,8 @@
 // Builds the Linger V2 2+1 signed upgrade test kit (web + unified backend + cached node-native-deps):
-//   - step-00-baseline        (0.1.10-v2test.0) : baseline 2+1 bundles (web + backend + node-native-deps)
-//   - step-01-web             (0.1.10-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload, 2/3 skipped)
-//   - step-02-backend         (0.1.10-v2test.2) : ONLY unified backend changed (3-platform signed teamhub + daemon + node-services/skills/installer, 2/3 skipped)
-//   - step-03-rollback-faulty (0.1.10-v2test.3) : ONLY faulty signed backend (rollbackSafe:false -> pg_dump/pg_restore + atomic rollback to .2 + denylist)
+//   - step-00-baseline        (0.1.11-v2test.0) : baseline 2+1 bundles (web + backend + node-native-deps)
+//   - step-01-web             (0.1.11-v2test.1) : ONLY web changed (visible V2 badge, 0-downtime hot reload, 2/3 skipped)
+//   - step-02-backend         (0.1.11-v2test.2) : ONLY unified backend changed (3-platform signed teamhub + daemon + node-services/skills/installer, 2/3 skipped)
+//   - step-03-rollback-faulty (0.1.11-v2test.3) : ONLY faulty signed backend (rollbackSafe:false -> pg_dump/pg_restore + atomic rollback to .2 + denylist)
 //
 // Every step's Schema 3 `app-manifest.json` strictly inherits unchanged
 // bundles' exact `artifactId`, `sha256`, `inputHash`, `originAppVersion`, and
@@ -44,7 +44,7 @@ const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptsDir, "..");
 const defaultRepoRoot = path.resolve(desktopDir, "../..");
 
-export function deriveStepVersions(baseVersion = "0.1.10-v2test.0") {
+export function deriveStepVersions(baseVersion = "0.1.11-v2test.0") {
   const match = /^(\d+\.\d+\.\d+)(?:-([A-Za-z0-9-]+)(?:\.(\d+))?)?$/.exec(
     baseVersion,
   );
@@ -476,7 +476,7 @@ LINGER_BUNDLE_CHECK_INTERVAL_MS=10000 \\
 export async function buildV2TestUpgradePacks({
   repoRoot = defaultRepoRoot,
   outDir,
-  baseVersion = "0.1.10-v2test.0",
+  baseVersion = "0.1.11-v2test.0",
   channel = "stable",
   baseUrl = "relative",
   targets = [...PLATFORM_TARGETS],
@@ -540,7 +540,7 @@ export async function buildV2TestUpgradePacks({
     nodeMajor: "26",
   });
   // Keep minShellVersion <= baseVersion (never strip prerelease suffix, since in
-  // SemVer 0.1.10-v2test.0 < 0.1.10 which would wrongly trigger shell-upgrade-required).
+  // SemVer 0.1.11-v2test.0 < 0.1.11 which would wrongly trigger shell-upgrade-required).
   const effectiveMinShell = minShellVersion ?? baseVersion;
   const staticHostSrc = path.join(repoRoot, "apps/web/static-host.mjs");
 
@@ -1000,7 +1000,7 @@ if (
     flag("--out") ??
       path.join(repoRoot, ".linger-runtime/v2-test-service-upgrade-packs"),
   );
-  const baseVersion = flag("--base-version") ?? "0.1.10-v2test.0";
+  const baseVersion = flag("--base-version") ?? "0.1.11-v2test.0";
   const channel = flag("--channel") ?? "stable";
   const baseUrl = flag("--base-url") || "relative";
   const targets = (flag("--targets") ?? PLATFORM_TARGETS.join(","))

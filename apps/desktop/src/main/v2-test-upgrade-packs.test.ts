@@ -41,14 +41,19 @@ afterEach(async () => {
 const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
 
 describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
-  it("derives deterministic SemVer-monotonic 4-step versions within 0.1.10-v2test.0..3", () => {
-    const v2test = deriveStepVersions("0.1.10-v2test.0");
+  it("derives deterministic SemVer-monotonic 4-step versions within 0.1.11-v2test.0..3 above 0.1.10 and 0.1.11-mobile.1", () => {
+    const v2test = deriveStepVersions("0.1.11-v2test.0");
     expect(v2test).toEqual({
-      "step-00-baseline": "0.1.10-v2test.0",
-      "step-01-web": "0.1.10-v2test.1",
-      "step-02-backend": "0.1.10-v2test.2",
-      "step-03-rollback-faulty": "0.1.10-v2test.3",
+      "step-00-baseline": "0.1.11-v2test.0",
+      "step-01-web": "0.1.11-v2test.1",
+      "step-02-backend": "0.1.11-v2test.2",
+      "step-03-rollback-faulty": "0.1.11-v2test.3",
     });
+
+    expect(compareVersions("0.1.11-v2test.0", "0.1.10")).toBeGreaterThan(0);
+    expect(
+      compareVersions("0.1.11-v2test.0", "0.1.11-mobile.1"),
+    ).toBeGreaterThan(0);
 
     const ordered = Object.values(v2test);
     for (let i = 1; i < ordered.length; i += 1) {
@@ -117,7 +122,7 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
 
     const built = await buildV2TestUpgradePacks({
       outDir: kitDir,
-      baseVersion: "0.1.10-v2test.0",
+      baseVersion: "0.1.11-v2test.0",
       baseUrl: "relative",
       ephemeralTestKey: true,
       macosSigned: true,
@@ -133,7 +138,7 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       true,
     );
 
-    // Every step's minShellVersion MUST be satisfied by the 0.1.10-v2test.0 test shell!
+    // Every step's minShellVersion MUST be satisfied by the 0.1.11-v2test.0 test shell!
     for (const step of built.index.steps) {
       const manifest = JSON.parse(
         await readFile(
@@ -141,8 +146,8 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
           "utf8",
         ),
       ) as AppManifestV3;
-      expect(manifest.compat.minShellVersion).toBe("0.1.10-v2test.0");
-      expect(evaluateShellCompatibility(manifest, "0.1.10-v2test.0")).toEqual({
+      expect(manifest.compat.minShellVersion).toBe("0.1.11-v2test.0");
+      expect(evaluateShellCompatibility(manifest, "0.1.11-v2test.0")).toEqual({
         status: "compatible",
       });
     }
@@ -172,7 +177,7 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       });
       const bus = new EventBus();
       const updater = new BundleUpdaterModule({
-        shellVersion: "0.1.10-v2test.0",
+        shellVersion: "0.1.11-v2test.0",
         target: "darwin-arm64",
         enabled: true,
         checkDelayMs: 60 * 60_000,
@@ -204,12 +209,12 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       await updater.check();
       expect(updater.state()).toEqual({
         kind: "staged",
-        version: "0.1.10-v2test.0",
+        version: "0.1.11-v2test.0",
         changedModules: ["node-native-deps", "web", "backend"],
       });
       await store.beginPending({
-        appVersion: "0.1.10-v2test.0",
-        releaseFile: "releases/0.1.10-v2test.0/release.json",
+        appVersion: "0.1.11-v2test.0",
+        releaseFile: "releases/0.1.11-v2test.0/release.json",
         updatedAt: new Date().toISOString(),
       });
       await store.commitPending();
@@ -217,9 +222,9 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       // 3. Switch live through step-01 (web), step-02 (backend), step-03 (faulty backend):
       //    each step MUST download strictly 1/3 bundle (0B for the other 2)!
       for (const [stepNum, expectedVersion, expectedMod] of [
-        ["01", "0.1.10-v2test.1", "web"],
-        ["02", "0.1.10-v2test.2", "backend"],
-        ["03", "0.1.10-v2test.3", "backend"],
+        ["01", "0.1.11-v2test.1", "web"],
+        ["02", "0.1.11-v2test.2", "backend"],
+        ["03", "0.1.11-v2test.3", "backend"],
       ] as const) {
         const sw = await fetch(
           `${server.feedUrl}/__test/switch?step=${stepNum}`,
@@ -248,7 +253,7 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       }
 
       // Confirm step-03 descriptor carries rollbackSafe: false
-      const step3Desc = await store.readRelease("0.1.10-v2test.3");
+      const step3Desc = await store.readRelease("0.1.11-v2test.3");
       expect(step3Desc?.compat.rollbackSafe).toBe(false);
 
       await host.stop("quit");
