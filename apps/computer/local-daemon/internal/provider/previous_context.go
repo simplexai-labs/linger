@@ -48,42 +48,39 @@ func exportPreviousContext(ctx context.Context, runtimeHomeRoot string, spec Ope
 	if prev.ProviderType != "antigravity" && runtimeHomeRoot == "" {
 		return "", false
 	}
-	var inspect func(context.Context, runtimehistory.Request) runtimehistory.Page
-	switch prev.ProviderType {
-	case "codex":
-		inspect = runtimehistory.Inspect
-	case "claude":
-		inspect = runtimehistory.InspectClaude
-	case "pi":
-		inspect = runtimehistory.InspectPi
-	case "antigravity":
-		inspect = runtimehistory.InspectAntigravity
-	default:
-		removeStalePreviousContext(spec.WorkingDirectory)
-		return "", false
-	}
-	var home string
-	var err error
+	var page runtimehistory.Page
 	if prev.ProviderType == "antigravity" {
-		home, err = localworkspace.AntigravitySourceHome(spec.Environment)
+		page = inspectAntigravityPreviousContext(ctx, runtimeHomeRoot, spec, prev.SessionID)
 	} else {
-		home, err = localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+		var inspect func(context.Context, runtimehistory.Request) runtimehistory.Page
+		switch prev.ProviderType {
+		case "codex":
+			inspect = runtimehistory.Inspect
+		case "claude":
+			inspect = runtimehistory.InspectClaude
+		case "pi":
+			inspect = runtimehistory.InspectPi
+		default:
+			removeStalePreviousContext(spec.WorkingDirectory)
+			return "", false
+		}
+		home, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
 			TenantID:     spec.TenantID,
 			OwnerActorID: spec.OwnerActorID,
 			AgentID:      spec.AgentID,
 			ScopeID:      spec.ScopeID,
 			ProviderType: prev.ProviderType,
 		})
+		if err != nil {
+			removeStalePreviousContext(spec.WorkingDirectory)
+			return "", false
+		}
+		page = inspect(ctx, runtimehistory.Request{
+			CodexHome: home,
+			ThreadID:  prev.SessionID,
+			Limit:     previousContextHistoryLimit,
+		})
 	}
-	if err != nil {
-		removeStalePreviousContext(spec.WorkingDirectory)
-		return "", false
-	}
-	page := inspect(ctx, runtimehistory.Request{
-		CodexHome: home,
-		ThreadID:  prev.SessionID,
-		Limit:     previousContextHistoryLimit,
-	})
 	if page.Status != "available" || len(page.Records) == 0 {
 		removeStalePreviousContext(spec.WorkingDirectory)
 		return "", false
@@ -97,6 +94,43 @@ func exportPreviousContext(ctx context.Context, runtimeHomeRoot string, spec Ope
 		return "", false
 	}
 	return previousContextRelPath, true
+}
+
+func inspectAntigravityPreviousContext(
+	ctx context.Context,
+	runtimeHomeRoot string,
+	spec OperationSpec,
+	sessionID string,
+) runtimehistory.Page {
+	if runtimeHomeRoot != "" {
+		isolatedHome, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+			TenantID:     spec.TenantID,
+			OwnerActorID: spec.OwnerActorID,
+			AgentID:      spec.AgentID,
+			ScopeID:      spec.ScopeID,
+			ProviderType: "antigravity",
+		})
+		if err != nil {
+			return runtimehistory.Page{Status: "unavailable"}
+		}
+		page := runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+			CodexHome: localworkspace.AntigravityAppDataDir(isolatedHome),
+			ThreadID:  sessionID,
+			Limit:     previousContextHistoryLimit,
+		})
+		if page.Status != "unavailable" || page.Reason != "transcript_unavailable" {
+			return page
+		}
+	}
+	legacyHome, err := localworkspace.AntigravitySourceHome(spec.Environment)
+	if err != nil {
+		return runtimehistory.Page{Status: "unavailable"}
+	}
+	return runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+		CodexHome: legacyHome,
+		ThreadID:  sessionID,
+		Limit:     previousContextHistoryLimit,
+	})
 }
 
 // injectPreviousContextHint tells the Agent where the exported transcript lives,

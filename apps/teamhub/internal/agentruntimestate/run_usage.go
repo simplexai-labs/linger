@@ -77,6 +77,19 @@ type runUsageRejection struct {
 	model  string
 }
 
+func validRunUsageProvider(runtimeType, provider string) bool {
+	switch runtimeType {
+	case "codex":
+		return provider == "openai"
+	case "claude":
+		return provider == "anthropic"
+	case "antigravity":
+		return provider == "antigravity" || provider == "unknown"
+	default:
+		return provider == "unknown"
+	}
+}
+
 // filterLocalRunUsage keeps valid entries from a terminal's usage array. Structural
 // problems reject the whole array; invalid entries are skipped individually.
 // The result depends only on the reported bytes, so a replay keeps the same subset.
@@ -88,13 +101,6 @@ func filterLocalRunUsage(raw json.RawMessage, runtimeType string) ([]RunUsage, [
 	if decoder.Decode(&usages) != nil || len(usages) == 0 || len(usages) > 32 {
 		return nil, malformed
 	}
-	expectedProvider := "unknown"
-	switch runtimeType {
-	case "codex":
-		expectedProvider = "openai"
-	case "claude":
-		expectedProvider = "anthropic"
-	}
 	sort.Slice(usages, func(i, j int) bool { return usages[i].Model < usages[j].Model })
 	for index := 1; index < len(usages); index++ {
 		if usages[index-1].Model == usages[index].Model {
@@ -104,7 +110,7 @@ func filterLocalRunUsage(raw json.RawMessage, runtimeType string) ([]RunUsage, [
 	var valid []RunUsage
 	var rejected []runUsageRejection
 	for _, usage := range usages {
-		if usage.Provider != expectedProvider || !runUsageModelPattern.MatchString(usage.Model) || !validTokenCounts(usage.RunTokenCounts) ||
+		if !validRunUsageProvider(runtimeType, usage.Provider) || !runUsageModelPattern.MatchString(usage.Model) || !validTokenCounts(usage.RunTokenCounts) ||
 			(usage.Last != nil && !validTokenCounts(*usage.Last)) || (usage.CompactionCount != nil && (*usage.CompactionCount < 0 || *usage.CompactionCount > 9007199254740991)) {
 			rejected = append(rejected, runUsageRejection{reason: runUsageRejectedInvalidEntry, model: usage.Model})
 			continue

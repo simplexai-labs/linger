@@ -1124,3 +1124,452 @@ func TestAntigravityPreToolUseShellTextHook(t *testing.T) {
 		}
 	})
 }
+
+func TestAntigravityStartPassesRuntimeHomeGeminiDirAndLogFile(t *testing.T) {
+	metaFile := filepath.Join(t.TempDir(), "runtime-home-meta.json")
+	runtimeHome := filepath.Join(t.TempDir(), "isolated-home")
+	if err := os.MkdirAll(filepath.Join(runtimeHome, "gemini", "antigravity-cli"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h := newAgyHarness(t, "turn", map[string]string{agyFakeMetaEnv: metaFile})
+	run, err := h.runtime.Start(t.Context(), "hi", RunSpec{Dir: h.dir, RuntimeHome: runtimeHome})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, outcome := drainAgy(t, run); outcome.Status != statusCompleted {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+	rawMeta, err := os.ReadFile(metaFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta struct {
+		Args      []string `json:"args"`
+		GeminiDir string   `json:"geminiDir"`
+		LogFile   string   `json:"logFile"`
+		AddDir    string   `json:"addDir"`
+	}
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatal(err)
+	}
+	wantGemini := filepath.Join(runtimeHome, "gemini")
+	wantLog := filepath.Join(runtimeHome, "acp.log")
+	if meta.GeminiDir != wantGemini || meta.LogFile != wantLog {
+		t.Fatalf("meta=%+v, want geminiDir=%q logFile=%q", meta, wantGemini, wantLog)
+	}
+	if _, err := h.runtime.Start(t.Context(), "hi", RunSpec{Dir: h.dir, RuntimeHome: "relative-home"}); err == nil {
+		t.Fatal("Start accepted relative RuntimeHome")
+	}
+}
+
+func TestAntigravityProbeContextWindowsFromUsageUpdates(t *testing.T) {
+	shortenForTest(t, &antigravityProbeUsageWait, 120*time.Millisecond)
+	shortenForTest(t, &antigravityProbeUsageSettle, 25*time.Millisecond)
+
+	t.Run("distinct_deduplicated_and_failed_models", func(t *testing.T) {
+		h := newAgyHarness(t, "turn", map[string]string{
+			agyFakeExtraModelsEnv: "gemini-same,gemini-broken,gemini-small",
+			agyFakeFailModelEnv:   "gemini-broken",
+			agyFakeUsageWindowsEnv: `{
+				"gemini-pro": 1048576,
+				"gemini-flash": 200000,
+				"gemini-same": 200000,
+				"gemini-small": 128000
+			}`,
+		})
+		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if probe.AuthenticationRequired {
+			t.Fatalf("unexpected authentication required: %+v", probe)
+		}
+		got := map[string]int{}
+		for _, m := range probe.Models.Models {
+			got[m.ID] = m.ContextWindow
+		}
+		want := map[string]int{
+			"gemini-pro":    1048576,
+			"gemini-flash":  200000,
+			"gemini-same":   200000,
+			"gemini-broken": 0,
+			"gemini-small":  128000,
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("context windows = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("ignores_invalid_usage_sizes", func(t *testing.T) {
+		for name, rawSize := range map[string]string{
+			"zero":     `0`,
+			"negative": `-1024`,
+			"overflow": `100000001`,
+			"string":   `"1048576"`,
+			"float":    `1048576.5`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				h := newAgyHarness(t, "turn", map[string]string{
+					agyFakeUsageWindowsEnv: `{"gemini-pro": ` + rawSize + `}`,
+				})
+				probe, err := ProbeAntigravity(t.Context(), h.inv)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, m := range probe.Models.Models {
+					if m.ContextWindow != 0 {
+						t.Fatalf("%s: model %s got ContextWindow=%d, want 0", name, m.ID, m.ContextWindow)
+					}
+				}
+				if got := len(h.requests(t)["session/set_config_option"]); got != 0 {
+					t.Fatalf("%s: expected zero set_config_option calls when initial usage is invalid, got %d", name, got)
+				}
+			})
+		}
+	})
+
+	t.Run("no_usage_update_skips_model_switching", func(t *testing.T) {
+		h := newAgyHarness(t, "turn", nil)
+		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range probe.Models.Models {
+			if m.ContextWindow != 0 {
+				t.Fatalf("model %s got ContextWindow=%d, want 0", m.ID, m.ContextWindow)
+			}
+		}
+		if got := len(h.requests(t)["session/set_config_option"]); got != 0 {
+			t.Fatalf("expected zero set_config_option calls when session/new emits no usage_update, got %d", got)
+		}
+	})
+
+	t.Run("silent_switch_timeout_leaves_window_unknown", func(t *testing.T) {
+		h := newAgyHarness(t, "turn", map[string]string{
+			agyFakeExtraModelsEnv: "gemini-silent,gemini-small",
+			agyFakeSilentModelEnv: "gemini-silent",
+			agyFakeUsageWindowsEnv: `{
+				"gemini-pro": 1048576,
+				"gemini-flash": 200000,
+				"gemini-small": 128000
+			}`,
+		})
+		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int{}
+		for _, m := range probe.Models.Models {
+			got[m.ID] = m.ContextWindow
+		}
+		want := map[string]int{
+			"gemini-pro":    1048576,
+			"gemini-flash":  200000,
+			"gemini-silent": 0,
+			"gemini-small":  128000,
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("context windows = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("invalid_usage_size_on_switched_model_does_not_inherit_previous", func(t *testing.T) {
+		for name, rawInvalid := range map[string]string{
+			"zero":     `0`,
+			"overflow": `100000001`,
+			"string":   `"bad"`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				h := newAgyHarness(t, "turn", map[string]string{
+					agyFakeExtraModelsEnv: "gemini-invalid,gemini-after-invalid,gemini-valid",
+					agyFakeUsageWindowsEnv: `{
+						"gemini-pro": 1048576,
+						"gemini-flash": 200000,
+						"gemini-invalid": ` + rawInvalid + `,
+						"gemini-after-invalid": ` + rawInvalid + `,
+						"gemini-valid": 128000
+					}`,
+				})
+				probe, err := ProbeAntigravity(t.Context(), h.inv)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := map[string]int{}
+				for _, m := range probe.Models.Models {
+					got[m.ID] = m.ContextWindow
+				}
+				want := map[string]int{
+					"gemini-pro":           1048576,
+					"gemini-flash":         200000,
+					"gemini-invalid":       0,
+					"gemini-after-invalid": 0,
+					"gemini-valid":         128000,
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s: context windows = %v, want %v", name, got, want)
+				}
+			})
+		}
+	})
+
+	t.Run("silent_switch_timeout_invalidates_carry_forward_baseline", func(t *testing.T) {
+		h := newAgyHarness(t, "turn", map[string]string{
+			agyFakeExtraModelsEnv: "gemini-silent,gemini-after-silent,gemini-small",
+			agyFakeSilentModelEnv: "gemini-silent",
+			agyFakeUsageWindowsEnv: `{
+				"gemini-pro": 1048576,
+				"gemini-flash": 200000,
+				"gemini-silent": 300000,
+				"gemini-after-silent": 300000,
+				"gemini-small": 128000
+			}`,
+		})
+		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int{}
+		for _, m := range probe.Models.Models {
+			got[m.ID] = m.ContextWindow
+		}
+		// gemini-silent never emits usage_update so it stays unknown (0), while
+		// clean-session anchor verification recovers gemini-after-silent's real
+		// 300000 window instead of inheriting gemini-flash's 200000 baseline.
+		want := map[string]int{
+			"gemini-pro":          1048576,
+			"gemini-flash":        200000,
+			"gemini-silent":       0,
+			"gemini-after-silent": 300000,
+			"gemini-small":        128000,
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("context windows = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("initial_usage_update_after_settle_window_is_still_captured", func(t *testing.T) {
+		shortenForTest(t, &antigravityProbeUsageWait, 300*time.Millisecond)
+		shortenForTest(t, &antigravityProbeUsageSettle, 25*time.Millisecond)
+		h := newAgyHarness(t, "turn", map[string]string{
+			agyFakeInitialUsageDelayEnv: "60",
+			agyFakeUsageWindowsEnv: `{
+				"gemini-pro": 1048576,
+				"gemini-flash": 200000
+			}`,
+		})
+		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int{}
+		for _, m := range probe.Models.Models {
+			got[m.ID] = m.ContextWindow
+		}
+		want := map[string]int{
+			"gemini-pro":   1048576,
+			"gemini-flash": 200000,
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("context windows = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("delayed_usage_update_does_not_misattribute_or_poison_next_model", func(t *testing.T) {
+		t.Run("delayed_flash", func(t *testing.T) {
+			shortenForTest(t, &antigravityProbeUsageWait, 1200*time.Millisecond)
+			shortenForTest(t, &antigravityProbeUsageSettle, 25*time.Millisecond)
+			h := newAgyHarness(t, "turn", map[string]string{
+				agyFakeExtraModelsEnv:  "gemini-small,gemini-same-as-pro",
+				agyFakeDelayedUsageEnv: "gemini-flash:120",
+				agyFakeUsageWindowsEnv: `{
+					"gemini-pro": 1048576,
+					"gemini-flash": 200000,
+					"gemini-small": 128000,
+					"gemini-same-as-pro": 1048576
+				}`,
+			})
+			probe, err := ProbeAntigravity(t.Context(), h.inv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]int{}
+			for _, m := range probe.Models.Models {
+				got[m.ID] = m.ContextWindow
+			}
+			want := map[string]int{
+				"gemini-pro":         1048576,
+				"gemini-flash":       200000,
+				"gemini-small":       128000,
+				"gemini-same-as-pro": 1048576,
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("context windows = %v, want %v", got, want)
+			}
+		})
+
+		t.Run("late_frame_during_next_switch", func(t *testing.T) {
+			shortenForTest(t, &antigravityProbeUsageWait, 1200*time.Millisecond)
+			shortenForTest(t, &antigravityProbeUsageSettle, 25*time.Millisecond)
+			h := newAgyHarness(t, "turn", map[string]string{
+				agyFakeExtraModelsEnv:  "gemini-small,gemini-same-as-pro",
+				agyFakeDelayedUsageEnv: "gemini-flash:100,gemini-small:180,gemini-same-as-pro:120",
+				agyFakeUsageWindowsEnv: `{
+					"gemini-pro": 1048576,
+					"gemini-flash": 200000,
+					"gemini-small": 128000,
+					"gemini-same-as-pro": 1048576
+				}`,
+			})
+			probe, err := ProbeAntigravity(t.Context(), h.inv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]int{}
+			for _, m := range probe.Models.Models {
+				got[m.ID] = m.ContextWindow
+			}
+			want := map[string]int{
+				"gemini-pro":         1048576,
+				"gemini-flash":       200000,
+				"gemini-small":       128000,
+				"gemini-same-as-pro": 1048576,
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("context windows = %v, want %v", got, want)
+			}
+		})
+	})
+
+	t.Run("identical_windows_without_alternate_anchor_stay_unknown", func(t *testing.T) {
+		h := newAgyHarness(t, "turn", map[string]string{
+			agyFakeUsageWindowsEnv: `{
+				"gemini-pro": 1048576,
+				"gemini-flash": 1048576
+			}`,
+		})
+		probe, err := ProbeAntigravity(t.Context(), h.inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int{}
+		for _, m := range probe.Models.Models {
+			got[m.ID] = m.ContextWindow
+		}
+		want := map[string]int{
+			"gemini-pro":   1048576,
+			"gemini-flash": 0,
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("context windows = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestAntigravityOutcomeCompactionCount(t *testing.T) {
+	t.Run("zero_when_no_checkpoints", func(t *testing.T) {
+		runtimeHome := t.TempDir()
+		h := newAgyHarness(t, "turn", nil)
+		run, err := h.runtime.Start(t.Context(), "hi", RunSpec{Dir: h.dir, RuntimeHome: runtimeHome})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted || outcome.CompactionCount == nil || *outcome.CompactionCount != 0 {
+			t.Fatalf("outcome=%+v, want CompactionCount=0", outcome)
+		}
+	})
+
+	t.Run("counts_done_checkpoints_and_excludes_prior_turn_and_non_done", func(t *testing.T) {
+		runtimeHome := t.TempDir()
+		sessionID := "compact-session-1"
+		transcriptPath := filepath.Join(runtimeHome, "gemini", "antigravity-cli", "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")
+		if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// Earlier turn already recorded a CHECKPOINT that must not be double-counted.
+		prior := `{"type":"CHECKPOINT","status":"DONE"}` + "\n" +
+			`{"type":"USER_INPUT","status":"DONE"}` + "\n"
+		if err := os.WriteFile(transcriptPath, []byte(prior), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		turnLines := strings.Join([]string{
+			`{"type":"CHECKPOINT","status":"DONE"}`,
+			`{"type":"CHECKPOINT","status":"ERROR"}`,
+			`{"type":"CHECKPOINT","status":"CANCELED"}`,
+			`{"type":"CHECKPOINT","status":"CORTEX_STEP_STATUS_DONE"}`,
+			`{"type":"PLANNER_RESPONSE","status":"DONE"}`,
+			`not-json`,
+		}, "\n") + "\n"
+		h := newAgyHarness(t, "turn", map[string]string{
+			agyFakeSessionIDEnv:        sessionID,
+			agyFakeTranscriptAppendEnv: turnLines,
+		})
+		run, err := h.runtime.Start(t.Context(), "work", RunSpec{Dir: h.dir, RuntimeHome: runtimeHome})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted || outcome.CompactionCount == nil || *outcome.CompactionCount != 2 {
+			t.Fatalf("outcome=%+v CompactionCount=%v, want 2", outcome, outcome.CompactionCount)
+		}
+
+		// A subsequent turn on the same session without new checkpoints reports 0.
+		h2 := newAgyHarness(t, "turn", map[string]string{agyFakeSessionIDEnv: sessionID})
+		run2, err := h2.runtime.Start(t.Context(), "follow up", RunSpec{Dir: h2.dir, RuntimeHome: runtimeHome, ResumeID: sessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome2 := drainAgy(t, run2)
+		if outcome2.Status != statusCompleted || outcome2.CompactionCount == nil || *outcome2.CompactionCount != 0 {
+			t.Fatalf("second turn outcome=%+v CompactionCount=%v, want 0", outcome2, outcome2.CompactionCount)
+		}
+	})
+
+	t.Run("rejects_hostile_session_ids_and_symlinks", func(t *testing.T) {
+		appDataDir := filepath.Join(t.TempDir(), "antigravity-cli")
+		if err := os.MkdirAll(filepath.Join(appDataDir, "brain"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		outside := t.TempDir()
+		outsideTranscript := filepath.Join(outside, "transcript.jsonl")
+		if err := os.WriteFile(outsideTranscript, []byte(`{"type":"CHECKPOINT","status":"DONE"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, hostile := range []string{"", ".", "..", "../escape", "a/b", `a\b`, "bad space"} {
+			if got := countAntigravityTurnCheckpoints(appDataDir, hostile, 0); got != 0 {
+				t.Fatalf("hostile sessionID %q returned %d, want 0", hostile, got)
+			}
+		}
+
+		// Symlinked transcript.jsonl must return 0.
+		logsDir := filepath.Join(appDataDir, "brain", "sym-file", ".system_generated", "logs")
+		if err := os.MkdirAll(logsDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outsideTranscript, filepath.Join(logsDir, "transcript.jsonl")); err == nil {
+			if got := countAntigravityTurnCheckpoints(appDataDir, "sym-file", 0); got != 0 {
+				t.Fatalf("symlinked transcript returned %d, want 0", got)
+			}
+		}
+
+		// Symlinked parent directory must return 0.
+		outsideLogs := filepath.Join(outside, "logs")
+		if err := os.MkdirAll(outsideLogs, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(outsideLogs, "transcript.jsonl"), []byte(`{"type":"CHECKPOINT","status":"DONE"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sysDir := filepath.Join(appDataDir, "brain", "sym-dir", ".system_generated")
+		if err := os.MkdirAll(sysDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outsideLogs, filepath.Join(sysDir, "logs")); err == nil {
+			if got := countAntigravityTurnCheckpoints(appDataDir, "sym-dir", 0); got != 0 {
+				t.Fatalf("symlinked logs dir returned %d, want 0", got)
+			}
+		}
+	})
+}

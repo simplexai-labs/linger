@@ -165,6 +165,9 @@ type Daemon struct {
 	// antigravityHistory holds whether the current Agent Service declared
 	// serviceFeatureAntigravityHistory in its welcome.
 	antigravityHistory atomic.Bool
+	// antigravityUsageProvider holds whether the current Agent Service declared
+	// serviceFeatureAntigravityUsageProvider in its welcome.
+	antigravityUsageProvider atomic.Bool
 	// authorityRevision counts, under admissionMu, the commands that can change
 	// what an accepted Operation may start with: Registration snapshots, Agent
 	// Runner commands and Context commands. A start whose revision is unchanged

@@ -131,36 +131,71 @@ func (d *Daemon) inspectDebug(ctx context.Context, command protocol.Command) (js
 	if binding.Key.DaemonID != d.daemonID || binding.Key.TenantID != command.TenantID || binding.Key.ProviderType != request.Runtime.Type {
 		return nil, errors.New("Debug history Registration binding is invalid")
 	}
-	var home string
-	if request.Runtime.Type == "antigravity" {
-		home, err = d.antigravityHistoryHome()
-	} else {
-		home, err = localworkspace.RuntimeHomePath(d.runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
-			TenantID: command.TenantID, OwnerActorID: binding.Key.OwnerActorID,
-			AgentID: command.AgentID, ScopeID: command.ExecutionContextKey, ProviderType: request.Runtime.Type,
-		})
+	threadID := firstDebugSessionID(request.Session.ThreadID, request.Session.ThreadIDCamel, request.Session.SessionID, request.Session.SessionIDCamel)
+	identity := localworkspace.RuntimeHomeIdentity{
+		TenantID: command.TenantID, OwnerActorID: binding.Key.OwnerActorID,
+		AgentID: command.AgentID, ScopeID: command.ExecutionContextKey, ProviderType: request.Runtime.Type,
 	}
+	if request.Runtime.Type == "antigravity" {
+		page, err := d.inspectAntigravityHistory(ctx, identity, threadID, request.Cursor, request.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(page)
+	}
+	home, err := localworkspace.RuntimeHomePath(d.runtimeHomeRoot, identity)
 	if err != nil {
 		return nil, err
 	}
-	threadID := firstDebugSessionID(request.Session.ThreadID, request.Session.ThreadIDCamel, request.Session.SessionID, request.Session.SessionIDCamel)
 	inspect := runtimehistory.Inspect
 	switch request.Runtime.Type {
 	case "claude":
 		inspect = runtimehistory.InspectClaude
 	case "pi":
 		inspect = runtimehistory.InspectPi
-	case "antigravity":
-		inspect = runtimehistory.InspectAntigravity
 	}
 	return json.Marshal(inspect(ctx, runtimehistory.Request{CodexHome: home, ThreadID: threadID, Cursor: request.Cursor, Limit: request.Limit}))
 }
 
-func (d *Daemon) antigravityHistoryHome() (string, error) {
+func (d *Daemon) inspectAntigravityHistory(
+	ctx context.Context,
+	identity localworkspace.RuntimeHomeIdentity,
+	threadID, cursor string,
+	limit int,
+) (runtimehistory.Page, error) {
 	if d.antigravityHome != "" {
-		return d.antigravityHome, nil
+		return runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+			CodexHome: d.antigravityHome, ThreadID: threadID, Cursor: cursor, Limit: limit,
+		}), nil
 	}
-	return localworkspace.AntigravitySourceHome(nil)
+	if d.runtimeHomeRoot != "" {
+		runtimeHome, err := localworkspace.RuntimeHomePath(d.runtimeHomeRoot, identity)
+		if err != nil {
+			return runtimehistory.Page{}, err
+		}
+		isolatedAppData := localworkspace.AntigravityAppDataDir(runtimeHome)
+		page := runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+			CodexHome: isolatedAppData, ThreadID: threadID, Cursor: cursor, Limit: limit,
+		})
+		if page.Status == "unavailable" && page.Reason == "transcript_unavailable" {
+			if legacyHome, legacyErr := localworkspace.AntigravitySourceHome(nil); legacyErr == nil && legacyHome != "" {
+				fallbackPage := runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+					CodexHome: legacyHome, ThreadID: threadID, Cursor: cursor, Limit: limit,
+				})
+				if fallbackPage.Status == "available" {
+					return fallbackPage, nil
+				}
+			}
+		}
+		return page, nil
+	}
+	legacyHome, err := localworkspace.AntigravitySourceHome(nil)
+	if err != nil {
+		return runtimehistory.Page{}, err
+	}
+	return runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+		CodexHome: legacyHome, ThreadID: threadID, Cursor: cursor, Limit: limit,
+	}), nil
 }
 
 // detachedHistoryAssignment returns the ready Assignment that authorizes a

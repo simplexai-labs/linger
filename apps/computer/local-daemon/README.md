@@ -505,9 +505,11 @@ Computer user's own instruction files:
 - Pi runs with `--no-context-files`, and it always gets `--system-prompt` and
   `--append-system-prompt`, empty when there is nothing to pass, so it reads
   neither the user's `SYSTEM.md` nor their `APPEND_SYSTEM.md`.
-- Antigravity is the exception: its ACP server has no switch that turns off
-  the user's own rules, skills and `~/.gemini/config/mcp_config.json`, so an
-  Antigravity run sees them next to the Daemon's instructions and servers.
+- Antigravity runs each Context in an isolated Runtime home
+  (`--gemini-dir <RuntimeHome>/gemini`, `--log-file <RuntimeHome>/acp.log`)
+  seeded from the user's `antigravity-oauth-token` and `settings.json`, without
+  personal `~/.gemini/config/mcp_config.json`, rules, or global skills copied
+  into that home; workspace-level rules and skills still load normally.
 
 The user's own Claude Skills and the Skills of plugins they installed are still
 offered to Agents (`internal/workspace/claude_skills.go`).
@@ -573,17 +575,38 @@ mode (`agy -p`) is not used, because it signs in only with Google and waits
 for a browser sign-in when signed out.
 
 - Discovery runs `agy --version`, then an ACP `initialize`, then an empty
-  `session/new` in HOME. ACP's authentication-required error (`-32000`) on
-  `session/new` means signed out. No prompt is sent, so a probe stores no
-  conversation.
+  `session/new` in an isolated temporary directory seeded with the user's
+  `antigravity-oauth-token` and `settings.json`. ACP's authentication-required
+  error (`-32000`) on `session/new` means signed out. No prompt is sent, so a
+  probe stores no conversation.
 - When `session/new` needs authentication and the environment carries
   `GEMINI_API_KEY` or `GOOGLE_API_KEY`, the adapter selects the
   `gemini-api-key` method once and retries. A Google sign-in is never
   replaced by a key.
 - The model catalog is the session's `model` config option: one model per
   family. A family's reasoning efforts are the levels its
-  `<family>-<level>` entries in `availableModels` name. A Run selects them
+  `<family>-<level>` entries in `availableModels` name, and each model's
+  `ContextWindow` comes from explicit ACP `usage_update.size` notifications
+  (switching families via `session/set_config_option` during discovery, then
+  verifying deferred or deduplicated models on fresh sessions against an
+  alternate-size anchor without timer-based carry-forward). A Run selects them
   with `session/set_config_option` (`model`, then `thought_level`).
+- Each Antigravity Context gets an owner- and scope-isolated Runtime home under
+  `<RuntimeHomeRoot>/antigravity/<hash>` (`--gemini-dir <home>/gemini`,
+  `--log-file <home>/acp.log`), plus per-Agent redacted
+  `runner-diagnostics.log`. `PrepareAntigravityRuntimeHome` seeds
+  `antigravity-oauth-token` and `settings.json` from the user's
+  `~/.gemini/antigravity-cli`, preserves in-home OAuth token refreshes while
+  the user's source digest stays unchanged, and retires a parked resident for
+  that home before mutating any seeded file.
+- Turn outcomes report `Outcome.CompactionCount` by counting newly appended
+  completed `CHECKPOINT` entries in the session's
+  `<appDataDir>/brain/<sessionID>/.system_generated/logs/transcript.jsonl`
+  (opened via `os.OpenRoot` without following symlinks). Terminal Run usage
+  reports `reasoning` tokens and uses `provider: "antigravity"` when
+  `runner.welcome`'s `service_features` names `antigravity_usage_provider`
+  (downgrading to `"unknown"`, including on ledger replay, for older Agent
+  Services).
 - Residency-capable `agy acp` servers (those advertising both `session/list`
   and `session/resume` during `initialize`) park in `antigravityResidents`,
   keyed by Context. Room-presence `provider.prepare` runs `initialize` followed
@@ -669,9 +692,12 @@ for a browser sign-in when signed out.
   repeat blocking via `continuationActive || executionNum > 0 || stopHookBlocked`.
 - Native history reads (`runtimehistory.InspectAntigravity`, Computer 0.67.0 or
   later) read bounded, symlink-checked `transcript.jsonl` files under
-  `~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/` with
-  `thinking` redacted as `reasoning_content`, and are served over `debug_history`
-  only when `runner.welcome`'s `service_features` names `antigravity_history`.
+  `<RuntimeHome>/gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/`
+  first and fall back to `~/.gemini/antigravity-cli` for pre-upgrade sessions
+  (never falling back on symlink or invalid-session errors) for both
+  `debug_history` and `.previous-context.md` export, with `thinking` redacted as
+  `reasoning_content`, and are served over `debug_history` only when
+  `runner.welcome`'s `service_features` names `antigravity_history`.
   Because `agy`'s `transcript.jsonl` currently omits ACP `toolCallId` and
   `turn_id`, Antigravity native history serves Debug History, Agent Memory, and
   `.previous-context.md` export (TeamHub per-Message/Run activity linking

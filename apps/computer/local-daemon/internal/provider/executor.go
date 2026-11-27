@@ -427,6 +427,19 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		}
 		environment["LINGER_PI_SESSION_ROOT"] = filepath.Join(runtimeHome.Path, "sessions")
 	}
+	if e.RuntimeHomeRoot != "" && spec.Provider == "antigravity" {
+		antigravityHome, antigravityErr := localworkspace.PrepareAntigravityRuntimeHome(ctx, e.RuntimeHomeRoot, environment, localworkspace.RuntimeHomeIdentity{
+			TenantID: spec.TenantID, OwnerActorID: spec.OwnerActorID, AgentID: spec.AgentID,
+			ScopeID: spec.ScopeID, ProviderType: spec.Provider,
+		}, retireAntigravityResident)
+		if antigravityErr != nil {
+			if operationTemp != nil {
+				_ = operationTemp.Close()
+			}
+			return nil, antigravityErr
+		}
+		runtimeHome = antigravityHome
+	}
 	var codexConfigArgs []string
 	var codexConfigDigest string
 	// A resident process serves only the Skills the Daemon delivered to it.
@@ -876,6 +889,12 @@ func cloneEnvironment(input map[string]string) map[string]string {
 // like the Operation's LINGER_CLAUDE_SESSION_ROOT.
 func retireClaudeResident(home string) error {
 	return native.StopParkedClaudeResidentForCredentials(filepath.Join(home, "sessions"))
+}
+
+// retireAntigravityResident stops the parked Antigravity process of a Runtime
+// home before its seeded credentials or settings change.
+func retireAntigravityResident(home string) error {
+	return native.StopParkedAntigravityResidentForHome(home)
 }
 
 // codexDirectLocalTools gives Codex the Daemon's own computer and browser

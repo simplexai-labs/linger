@@ -508,6 +508,7 @@ export class RunnerConnections {
               "operation_background_wait",
               "dynamic_reasoning_efforts",
               "antigravity_history",
+              "antigravity_usage_provider",
             ],
           }
         : {}),

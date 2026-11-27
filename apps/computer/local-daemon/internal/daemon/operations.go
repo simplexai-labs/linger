@@ -99,9 +99,10 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 		"scheduler_yield_requested", yieldRequested, "failure_code", result.FailureCode,
 		"error", receiptReason(redact.Text(result.Error)))
 	includeDetail := d.runtimeFailureDetail.Load()
-	payload := terminalPayloadFor(spec, result, includeDetail)
+	antigravityProvider := d.antigravityUsageProvider.Load()
+	payload := terminalPayloadFor(spec, result, includeDetail, antigravityProvider)
 	if terminalType == protocol.EventOperationCancelled {
-		payload = terminalWithUsage(map[string]any{"reason": reason}, spec, result)
+		payload = terminalWithUsage(map[string]any{"reason": reason}, spec, result, antigravityProvider)
 	}
 	terminal := withOperationIdentity(protocol.Event{
 		Type:    terminalType,
@@ -114,7 +115,7 @@ func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, 
 	}
 	terminal, err := d.ledger.Complete(context.WithoutCancel(ctx), operationIdentity(command), terminal)
 	if errors.Is(err, ErrLedgerCapacity) {
-		terminal = withOperationIdentity(protocol.Event{Type: protocol.EventOperationFailed, SentAt: time.Now().UTC(), Payload: terminalPayloadFor(spec, provider.Result{Status: "failed", Error: "Operation terminal result exceeds its reserved capacity"}, includeDetail)}, command)
+		terminal = withOperationIdentity(protocol.Event{Type: protocol.EventOperationFailed, SentAt: time.Now().UTC(), Payload: terminalPayloadFor(spec, provider.Result{Status: "failed", Error: "Operation terminal result exceeds its reserved capacity"}, includeDetail, antigravityProvider)}, command)
 		terminal, err = d.ledger.Complete(context.WithoutCancel(ctx), operationIdentity(command), terminal)
 	}
 	if err != nil {
@@ -293,9 +294,9 @@ func operationIdentity(command protocol.Command) OperationIdentity {
 	return identity
 }
 
-func terminalPayloadFor(spec provider.OperationSpec, result provider.Result, includeDetail bool) json.RawMessage {
+func terminalPayloadFor(spec provider.OperationSpec, result provider.Result, includeDetail, antigravityProvider bool) json.RawMessage {
 	if result.CleanupUnconfirmed {
-		return terminalWithUsage(map[string]any{"code": cleanupUnconfirmedCode, "message": cleanupUnconfirmedMessage, "retryable": false}, spec, result)
+		return terminalWithUsage(map[string]any{"code": cleanupUnconfirmedCode, "message": cleanupUnconfirmedMessage, "retryable": false}, spec, result, antigravityProvider)
 	}
 	if result.Status != "completed" {
 		failure := provider.ClassifyExecutionFailure(spec.Provider, spec.CodexVersion, result.Status, result.FailureCode, result.Diagnostics)
@@ -309,7 +310,7 @@ func terminalPayloadFor(spec provider.OperationSpec, result provider.Result, inc
 				payload["message"] = "codex process exited"
 			}
 		}
-		return terminalWithUsage(payload, spec, result)
+		return terminalWithUsage(payload, spec, result, antigravityProvider)
 	}
 	sessionID := result.SessionID
 	if sessionID == "" {
@@ -324,5 +325,5 @@ func terminalPayloadFor(spec provider.OperationSpec, result provider.Result, inc
 	default:
 		session = map[string]any{"thread_id": sessionID}
 	}
-	return terminalWithUsage(map[string]any{"type": "run", "final_response": result.Output, "session": session}, spec, result)
+	return terminalWithUsage(map[string]any{"type": "run", "final_response": result.Output, "session": session}, spec, result, antigravityProvider)
 }

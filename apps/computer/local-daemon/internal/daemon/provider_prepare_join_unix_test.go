@@ -459,16 +459,14 @@ func TestProviderPrepareRepeatedHintsReuseTheParkedProcess(t *testing.T) {
 			if gotResolves != 1 {
 				t.Fatalf("resolver calls=%d, want one", gotResolves)
 			}
-			if runtime != "antigravity" {
-				logs, _ := filepath.Glob(filepath.Join(filepath.Dir(fixture.launchLog), "runtime-homes", "*", "*", "runner-diagnostics.log"))
-				starts := 0
-				for _, path := range logs {
-					data, _ := os.ReadFile(path)
-					starts += strings.Count(string(data), `"runtime.operation.start"`)
-				}
-				if starts != 1 {
-					t.Fatalf("Operations started=%d in %v, want one", starts, logs)
-				}
+			logs, _ := filepath.Glob(filepath.Join(filepath.Dir(fixture.launchLog), "runtime-homes", "*", "*", "runner-diagnostics.log"))
+			starts := 0
+			for _, path := range logs {
+				data, _ := os.ReadFile(path)
+				starts += strings.Count(string(data), `"runtime.operation.start"`)
+			}
+			if starts != 1 {
+				t.Fatalf("Operations started=%d in %v, want one", starts, logs)
 			}
 			d.WaitForOperations()
 		})

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 const antigravityModelInvokeMaxBuffer = (1 << 20) + 4096
@@ -165,7 +166,7 @@ func InvokeAntigravityModel(
 	if err != nil {
 		return Outcome{}, "", err
 	}
-	if antigravityProbeHome(profile.Env) == "" && !antigravityHasAPIKey(profile.Env) {
+	if localworkspace.AntigravityUserAppDataDir(profile.Env) == "" && !antigravityHasAPIKey(profile.Env) {
 		return Outcome{}, "", errors.New("Antigravity background call requires HOME or Gemini API key")
 	}
 	geminiDir, logFile, err := prepareAntigravityIsolatedDir(filepath.Join(scratchDir, "antigravity-home"), profile.Env, true)
@@ -269,7 +270,7 @@ func InvokeAntigravityModel(
 		reportedModel = model
 	}
 
-	effectiveEffort, listedInCatalog := antigravityClampModelInvokeEffort(antigravityCatalog(session), reportedModel, effort)
+	effectiveEffort, listedInCatalog := antigravityClampModelInvokeEffort(antigravityCatalog(session, nil), reportedModel, effort)
 	if effectiveEffort != "" {
 		if _, err := proc.conn.call(ctx, "session/set_config_option", map[string]any{
 			"sessionId": sessionID,
