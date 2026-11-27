@@ -75,7 +75,12 @@ type modelLink struct {
 // Subscription credentials are never read.
 func newGetModelLink(ctx context.Context, kind string, environment map[string]string) func(RuntimeModel) modelLink {
 	apiLink := func(RuntimeModel) (gatewayModel, bool) { return gatewayModel{}, false }
-	declared := func(model RuntimeModel) int { return model.ContextWindow }
+	declared := func(model RuntimeModel) int {
+		if model.ContextWindow > 0 && model.ContextWindow <= maxModelContextWindow {
+			return model.ContextWindow
+		}
+		return 0
+	}
 	switch kind {
 	case "codex":
 		if endpoint, ok := codexGatewayEndpoint(environment); ok {
@@ -103,6 +108,9 @@ func newGetModelLink(ctx context.Context, kind string, environment map[string]st
 			endpoint, configured := providers[provider]
 			return gatewayModel{endpoint: endpoint, id: id}, ok && configured
 		}
+	case "antigravity":
+		// Antigravity has no custom gateway API link; each model's
+		// ContextWindow comes from ACP usage_update.size during discovery.
 	}
 	listed := map[gatewayEndpoint]map[string]int{}
 	return func(model RuntimeModel) modelLink {

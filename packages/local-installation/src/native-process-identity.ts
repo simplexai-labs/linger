@@ -484,3 +484,52 @@ export async function nativeLeaseProcesses(
   }
   return owned;
 }
+
+/** Extracts the single-character process state from a `/proc/<pid>/stat` line. */
+export function parseLinuxProcStatState(line: string): string | undefined {
+  const closeParen = line.lastIndexOf(")");
+  if (closeParen < 0) return undefined;
+  return line.slice(closeParen + 2).split(" ")[0] || undefined;
+}
+
+/**
+ * Targeted POSIX liveness check for known PIDs, excluding zombies. Used while
+ * draining signaled processes so every poll tick avoids a full-system scan.
+ */
+export async function posixLivePids(
+  pids: readonly number[],
+): Promise<Set<number>> {
+  const unique = [
+    ...new Set(pids.filter((pid) => Number.isSafeInteger(pid) && pid > 0)),
+  ];
+  const live = new Set<number>();
+  if (!unique.length) return live;
+  if (process.platform === "linux") {
+    await Promise.all(
+      unique.map(async (pid) => {
+        try {
+          const line = await readFile(`/proc/${pid}/stat`, "utf8");
+          const state = parseLinuxProcStatState(line);
+          if (state && state !== "Z") live.add(pid);
+        } catch {
+          // Process exited or /proc entry disappeared.
+        }
+      }),
+    );
+    return live;
+  }
+  if (process.platform === "darwin") {
+    const result = await runProcess(
+      "/bin/ps",
+      ["-p", unique.join(","), "-o", "pid=,stat="],
+      { timeoutMs: 5_000 },
+    );
+    if (result.code !== 0) return live;
+    for (const line of result.stdout.split("\n")) {
+      const match = /^\s*(\d+)\s+(\S+)/.exec(line);
+      if (match && !match[2]!.startsWith("Z")) live.add(Number(match[1]));
+    }
+    return live;
+  }
+  return live;
+}

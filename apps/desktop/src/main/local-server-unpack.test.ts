@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { zstdCompressSync } from "node:zlib";
@@ -144,5 +144,27 @@ describe("unpackArchive", () => {
       }),
     ).rejects.toThrow("tar exited with code 2");
     expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("unpacks archives when the destination crosses a symlinked directory", async () => {
+    if (process.platform === "win32") return;
+    const root = tempDirectory();
+    const src = path.join(root, "src", "top");
+    await mkdir(src, { recursive: true });
+    await writeFile(path.join(src, "hello.txt"), "symlink-ok\n");
+    const tgzFile = path.join(root, "pkg.tar.gz");
+    execFileSync("tar", ["-czf", tgzFile, "-C", path.join(root, "src"), "top"]);
+
+    // Deeper real directory reached through a shallower symlink, matching macOS /tmp -> /private/tmp.
+    const deepReal = path.join(root, "a", "b", "c", "target");
+    await mkdir(deepReal, { recursive: true });
+    const link = path.join(root, "link");
+    await symlink(deepReal, link);
+
+    const out = path.join(link, "out");
+    await unpackArchive(tgzFile, out, new AbortController().signal);
+    expect(await readFile(path.join(out, "hello.txt"), "utf8")).toBe(
+      "symlink-ok\n",
+    );
   });
 });

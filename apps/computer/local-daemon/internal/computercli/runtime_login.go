@@ -82,6 +82,7 @@ func (c *cli) runtimeRequest(parsed command) (runtimeRequest, error) {
 	}
 	configuredPaths := parsed.runtimePaths
 	environment := c.deps.environment
+	var tempBase string
 	if configured {
 		config := inspectComputerConfig(parsed.configPath, c.deps.environment, c.command)
 		if configuredPaths == nil {
@@ -90,8 +91,9 @@ func (c *cli) runtimeRequest(parsed command) (runtimeRequest, error) {
 		if config.codexHome != "" {
 			environment = withVariable(environment, "CODEX_HOME", config.codexHome)
 		}
+		tempBase = validatedProbeTempBase(config.stateDirectory)
 	}
-	return runtimeRequest{configuredPaths: configuredPaths, environment: environment}, nil
+	return runtimeRequest{configuredPaths: configuredPaths, environment: environment, tempBase: tempBase}, nil
 }
 
 // environmentList renders a Runtime environment for exec.Cmd, sorted so a

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 
 	"log/slog"
 	"os"
@@ -169,5 +170,69 @@ func TestAntigravitySourceHomeCaseInsensitiveLookup(t *testing.T) {
 	got, err = AntigravitySourceHome(map[string]string{"HOME": homeDir, "Home": profileDir})
 	if err != nil || got != filepath.Join(homeDir, ".gemini", "antigravity-cli") {
 		t.Fatalf("exact HOME lookup = %q, %v", got, err)
+	}
+}
+
+func TestAntigravityRuntimeHomeIsStableIsolatedAndExclusivelyClaimed(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runtime-homes")
+	userHome := t.TempDir()
+	env := map[string]string{"HOME": userHome}
+	identity := RuntimeHomeIdentity{
+		TenantID: "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-1",
+		ScopeID: "room-1", ProviderType: "antigravity",
+	}
+
+	expectedPath, err := RuntimeHomePath(root, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(expectedPath, filepath.Join(root, "antigravity")+string(os.PathSeparator)) {
+		t.Fatalf("RuntimeHomePath = %q", expectedPath)
+	}
+
+	home, err := PrepareAntigravityRuntimeHome(context.Background(), root, env, identity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home.Path != expectedPath {
+		_ = home.Close()
+		t.Fatalf("home.Path = %q, want %q", home.Path, expectedPath)
+	}
+	if _, err := PrepareAntigravityRuntimeHome(context.Background(), root, env, identity, nil); !errors.Is(err, ErrRuntimeHomeInUse) {
+		_ = home.Close()
+		t.Fatalf("concurrent claim err = %v, want ErrRuntimeHomeInUse", err)
+	}
+	if err := home.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := PrepareAntigravityRuntimeHome(context.Background(), root, env, identity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Path != expectedPath {
+		_ = reopened.Close()
+		t.Fatalf("reopened.Path = %q, want %q", reopened.Path, expectedPath)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, other := range map[string]RuntimeHomeIdentity{
+		"owner": {TenantID: "tenant-1", OwnerActorID: "owner-2", AgentID: "agent-1", ScopeID: "room-1", ProviderType: "antigravity"},
+		"agent": {TenantID: "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-2", ScopeID: "room-1", ProviderType: "antigravity"},
+		"scope": {TenantID: "tenant-1", OwnerActorID: "owner-1", AgentID: "agent-1", ScopeID: "room-2", ProviderType: "antigravity"},
+	} {
+		otherHome, err := PrepareAntigravityRuntimeHome(context.Background(), root, env, other, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if otherHome.Path == expectedPath {
+			_ = otherHome.Close()
+			t.Fatalf("%s collided with %q", name, expectedPath)
+		}
+		if err := otherHome.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

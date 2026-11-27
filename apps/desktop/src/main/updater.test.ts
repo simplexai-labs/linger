@@ -23,6 +23,10 @@ const PACKAGE = Buffer.from("new app archive");
 
 vi.mock("node:fs/promises", { spy: true });
 
+// Capture unfaked setTimeout so deferred-cleanup helpers wait real wall-clock
+// time while tests fake setTimeout and clearTimeout.
+const realSetTimeout = globalThis.setTimeout;
+
 const release = (
   version: string,
   {
@@ -742,16 +746,17 @@ describe("UpdaterModule deferred startup cleanup", () => {
   const flushIo = async (): Promise<void> => {
     for (let i = 0; i < 6; i++)
       await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 10));
   };
 
   const waitForIo = async (condition: () => boolean): Promise<void> => {
     const deadline = Date.now() + 5_000;
-    for (let i = 0; i < 500; i++) {
-      if (condition()) return;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      if (Date.now() > deadline) break;
+    while (!condition()) {
+      if (Date.now() > deadline) {
+        throw new Error("Timed out waiting for deferred cleanup");
+      }
+      await new Promise<void>((resolve) => realSetTimeout(resolve, 10));
     }
-    throw new Error("Timed out waiting for deferred cleanup");
   };
 
   const seedLeftovers = (applications: string, downloads: string) => {

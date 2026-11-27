@@ -64,7 +64,11 @@ describe("architecture boundaries", () => {
       "context-ref.ts": ["./types.js"],
       "ghost.ts": ["./context-ref.js", "./types.js"],
       "history.ts": [],
-      "provider.ts": ["../../model-tasks.js", "./history.js"],
+      "provider.ts": [
+        "../../model-tasks.js",
+        "../../sensitive-text.js",
+        "./history.js",
+      ],
     };
     for (const [file, imports] of Object.entries(allowed)) {
       const source = await readFile(`src/agent/executor/${file}`, "utf8");

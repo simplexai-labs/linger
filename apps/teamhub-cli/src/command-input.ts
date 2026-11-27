@@ -181,7 +181,11 @@ export function parseArguments(
  * One JSON value from a flag (`--item`) or a file flag (`--item-file`).
  * Every failure names that flag, with the line and column for syntax.
  */
-export function parseJsonValue(text: string, flag = "input"): unknown {
+export function parseJsonValue(
+  text: string,
+  flag = "input",
+  fileTwin?: string,
+): unknown {
   if (Buffer.byteLength(text) > byteLimit)
     throw invalidFlag(
       flag,
@@ -190,13 +194,18 @@ export function parseJsonValue(text: string, flag = "input"): unknown {
     );
   const syntax = jsonSyntaxError(text);
   if (syntax)
-    throw invalidInput(`${flag} is not valid JSON.`, [
-      inputIssue(
-        flag,
-        "invalid_json",
-        `line ${syntax.line}, column ${syntax.column}: ${syntax.reason}.`,
-      ),
-    ]);
+    throw invalidInput(
+      fileTwin
+        ? `${flag} is not valid JSON. Pass JSON through ${fileTwin} <path|-> if your shell strips quotes.`
+        : `${flag} is not valid JSON.`,
+      [
+        inputIssue(
+          flag,
+          "invalid_json",
+          `line ${syntax.line}, column ${syntax.column}: ${syntax.reason}.`,
+        ),
+      ],
+    );
   const result: unknown = JSON.parse(text);
   // JSON.parse keeps the last of duplicate properties. Inspect the token
   // stream so an escaped alias cannot silently replace an earlier value.
@@ -365,7 +374,7 @@ export async function jsonSource(
   if (inline !== undefined && file !== undefined)
     throw conflictingFlags([inlineFlag, fileFlag]);
   return inline !== undefined
-    ? parseJsonValue(inline, inlineFlag)
+    ? parseJsonValue(inline, inlineFlag, fileFlag)
     : file !== undefined
       ? reader.json(file, fileFlag)
       : undefined;

@@ -1,12 +1,15 @@
 package native
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/runtimehistory"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/permission"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 const (
@@ -41,6 +46,23 @@ func antigravityHookConfig(logger *slog.Logger) (*AntigravityHookEndpoint, []str
 		return nil, nil
 	}
 	return ep, []string{"--add-dir", ep.Dir()}
+}
+
+func antigravityLaunchArgs(runtimeHome string, hookArgs []string) ([]string, error) {
+	clean := cleanAntigravityRuntimeHome(runtimeHome)
+	if clean == "" {
+		return hookArgs, nil
+	}
+	if !filepath.IsAbs(clean) {
+		return nil, errors.New("Antigravity Runtime home must be absolute")
+	}
+	args := make([]string, 0, 4+len(hookArgs))
+	args = append(args,
+		"--gemini-dir", localworkspace.AntigravityGeminiDir(clean),
+		"--log-file", localworkspace.AntigravityACPLogPath(clean),
+	)
+	args = append(args, hookArgs...)
+	return args, nil
 }
 
 // antigravityQuietWindow is how long a session with no open tool call must
@@ -113,6 +135,10 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	fence := captureReleaseFence(r.profile)
 	epoch := antigravityResidents.currentEpoch()
 	hookEP, hookArgs := antigravityHookConfig(r.profile.Logger)
+	launchArgs, err := antigravityLaunchArgs(spec.RuntimeHome, hookArgs)
+	if err != nil {
+		return nil, err
+	}
 	hookDir := ""
 	if hookEP != nil {
 		hookDir = hookEP.Dir()
@@ -164,7 +190,7 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 		}
 	}
 	runCtx, cancel := budgetContext(ctx, spec.Budget)
-	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil, hookArgs...)
+	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil, launchArgs...)
 	if err != nil {
 		cancel()
 		front.Close()
@@ -175,9 +201,10 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	}
 	proc.res.bind(key, r.profile)
 	proc.res.bindEpoch(epoch)
+	proc.runtimeHome = cleanAntigravityRuntimeHome(spec.RuntimeHome)
 	proc.front = front
 	proc.hookEP = hookEP
-	proc.storeRoot = antigravityStoreRoot(r.profile.Env)
+	proc.storeRoot = antigravityAppDataDir(spec.RuntimeHome, r.profile.Env)
 	proc.releaseTemp = releaseTemp
 	var parkShape *antigravityShape
 	if parkEligible {
@@ -1001,13 +1028,25 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	lastUsage := map[string]TokenCount{}
 	hasUsage := false
 	hasNonzeroUsage := false
+	appDataDir := antigravityAppDataDir(spec.RuntimeHome, t.profile.Env)
+	transcriptOffset := antigravityTranscriptOffset(appDataDir, sessionID)
+	promptFailed := func(code, message string) Outcome {
+		outcome := failed(code, message)
+		compactions := countAntigravityTurnCheckpoints(appDataDir, sessionID, transcriptOffset)
+		outcome.CompactionCount = &compactions
+		if hasUsage {
+			outcome.Usage = totalUsage
+			outcome.LastUsage = lastUsage
+		}
+		return outcome
+	}
 	results := make(chan acpPromptResult, 8)
 	var activeGen uint64 = 1
 	if err := t.launchPrompt(sessionID, prompt, activeGen, results); err != nil {
 		if errors.Is(err, errACPClosed) {
-			return failed("", "Antigravity exited before the turn finished")
+			return promptFailed("", "Antigravity exited before the turn finished")
 		}
-		return failed("", "Antigravity session/prompt failed: "+err.Error())
+		return promptFailed("", "Antigravity session/prompt failed: "+err.Error())
 	}
 
 	var stopReason string
@@ -1019,25 +1058,25 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 			_, wakeErr := t.sendWakePrompt(sessionID, &activeGen, results)
 			if wakeErr != nil {
 				if errors.Is(wakeErr, errACPClosed) {
-					return failed("", "Antigravity exited before the turn finished")
+					return promptFailed("", "Antigravity exited before the turn finished")
 				}
-				return failed("", "Antigravity session/prompt failed: "+wakeErr.Error())
+				return promptFailed("", "Antigravity session/prompt failed: "+wakeErr.Error())
 			}
 			continue
 		case <-t.runCtx.Done():
 			_, _ = t.cancelPrompt(sessionID)
-			return failed("", "Antigravity session/prompt failed: "+t.runCtx.Err().Error())
+			return promptFailed("", "Antigravity session/prompt failed: "+t.runCtx.Err().Error())
 		case <-t.proc.conn.closed:
 			select {
 			case res = <-results:
 			default:
-				return failed("", "Antigravity exited before the turn finished")
+				return promptFailed("", "Antigravity exited before the turn finished")
 			}
 		}
 		if res.err != nil {
 			if res.gen < activeGen {
 				if errors.Is(res.err, errACPClosed) {
-					return failed("", "Antigravity exited before the turn finished")
+					return promptFailed("", "Antigravity exited before the turn finished")
 				}
 				continue
 			}
@@ -1045,9 +1084,9 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 				_, _ = t.cancelPrompt(sessionID)
 			}
 			if errors.Is(res.err, errACPClosed) {
-				return failed("", "Antigravity exited before the turn finished")
+				return promptFailed("", "Antigravity exited before the turn finished")
 			}
-			return failed("", "Antigravity session/prompt failed: "+res.err.Error())
+			return promptFailed("", "Antigravity session/prompt failed: "+res.err.Error())
 		}
 		reason, gotUsage, nonzeroUsage := t.recordPromptUsage(modelName, res.raw, totalUsage, lastUsage)
 		if gotUsage {
@@ -1084,9 +1123,9 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 				sent, wakeErr := t.sendWakePrompt(sessionID, &activeGen, results)
 				if wakeErr != nil {
 					if errors.Is(wakeErr, errACPClosed) {
-						return failed("", "Antigravity exited before the turn finished")
+						return promptFailed("", "Antigravity exited before the turn finished")
 					}
-					return failed("", "Antigravity session/prompt failed: "+wakeErr.Error())
+					return promptFailed("", "Antigravity session/prompt failed: "+wakeErr.Error())
 				}
 				if sent {
 					sentWakePrompt = true
@@ -1108,9 +1147,9 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 				sent, wakeErr := t.sendWakePrompt(sessionID, &activeGen, results)
 				if wakeErr != nil {
 					if errors.Is(wakeErr, errACPClosed) {
-						return failed("", "Antigravity exited before the turn finished")
+						return promptFailed("", "Antigravity exited before the turn finished")
 					}
-					return failed("", "Antigravity session/prompt failed: "+wakeErr.Error())
+					return promptFailed("", "Antigravity session/prompt failed: "+wakeErr.Error())
 				}
 				if sent {
 					sentWakePrompt = true
@@ -1119,7 +1158,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 				continue
 			}
 			if errors.Is(bgErr, errACPClosed) {
-				return failed("", "Antigravity exited before the turn finished")
+				return promptFailed("", "Antigravity exited before the turn finished")
 			}
 			if bgErr != nil {
 				_, _ = t.cancelPrompt(sessionID)
@@ -1142,6 +1181,8 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 		}
 	}
 	outcome := Outcome{ElapsedMs: time.Since(started).Milliseconds()}
+	compactions := countAntigravityTurnCheckpoints(appDataDir, sessionID, transcriptOffset)
+	outcome.CompactionCount = &compactions
 	t.mu.Lock()
 	// Untrimmed, as the reply Agent Service reads from the stream.
 	outcome.Output = t.output.String()
@@ -1742,4 +1783,72 @@ func acpPairs(value any) []any {
 		pairs = append(pairs, map[string]any{"name": key, "value": fmt.Sprint(object[key])})
 	}
 	return pairs
+}
+
+const antigravityTranscriptMaxScanBytes = 64 << 20
+
+func antigravityAppDataDir(runtimeHome string, env map[string]string) string {
+	if clean := cleanAntigravityRuntimeHome(runtimeHome); clean != "" {
+		return localworkspace.AntigravityAppDataDir(clean)
+	}
+	return localworkspace.AntigravityUserAppDataDir(env)
+}
+
+func antigravityTranscriptOffset(appDataDir, sessionID string) int64 {
+	file, info, err := runtimehistory.OpenAntigravityTranscript(appDataDir, sessionID)
+	if err != nil {
+		return 0
+	}
+	_ = file.Close()
+	if info.Size() < 0 {
+		return 0
+	}
+	return info.Size()
+}
+
+func countAntigravityTurnCheckpoints(appDataDir, sessionID string, startOffset int64) int64 {
+	file, info, err := runtimehistory.OpenAntigravityTranscript(appDataDir, sessionID)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+	size := info.Size()
+	if size <= 0 {
+		return 0
+	}
+	if startOffset < 0 || size < startOffset {
+		startOffset = 0
+	}
+	remaining := size - startOffset
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining > antigravityTranscriptMaxScanBytes {
+		remaining = antigravityTranscriptMaxScanBytes
+	}
+	if startOffset > 0 {
+		if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
+			return 0
+		}
+	}
+	reader := bufio.NewReader(io.LimitReader(file, remaining))
+	var count int64
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) > 0 {
+			var entry struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(trimmed, &entry) == nil && entry.Type == "CHECKPOINT" &&
+				(entry.Status == "" || entry.Status == "DONE" || entry.Status == "CORTEX_STEP_STATUS_DONE") {
+				count++
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return count
 }

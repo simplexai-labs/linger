@@ -1,16 +1,12 @@
 package native
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // antigravityResidents keys each `agy acp` process by its Context key: parked,
@@ -37,8 +33,17 @@ type antigravityShape struct {
 	skills      string
 	agentID     string
 	hookDir     string
+	runtimeHome string
 	mcp         string
 	mcpEligible bool
+}
+
+func cleanAntigravityRuntimeHome(home string) string {
+	trimmed := strings.TrimSpace(home)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Clean(trimmed)
 }
 
 // antigravityShapeEnv drops the temp variables: reused turns inherit the
@@ -56,53 +61,16 @@ func antigravityShapeEnv(env []string) []string {
 	return out
 }
 
-// antigravityAuthFingerprint hashes the presence and content of Antigravity's
-// credential and settings files without logging file contents.
-func antigravityAuthFingerprint(env map[string]string) string {
-	sourceDir := antigravityStoreRoot(env)
-	if sourceDir == "" {
-		return ""
-	}
-	sum := sha256.New()
-	for _, name := range antigravityProbeSeedFiles {
-		path := filepath.Join(sourceDir, name)
-		file, err := os.Open(path)
-		if errors.Is(err, os.ErrNotExist) {
-			_, _ = fmt.Fprintf(sum, "%s\x00absent\n", name)
-			continue
-		}
-		if err != nil {
-			_, _ = fmt.Fprintf(sum, "%s\x00error\n", name)
-			continue
-		}
-		info, statErr := file.Stat()
-		if statErr != nil || !info.Mode().IsRegular() {
-			_ = file.Close()
-			_, _ = fmt.Fprintf(sum, "%s\x00error\n", name)
-			continue
-		}
-		data, readErr := io.ReadAll(io.LimitReader(file, antigravityProbeSeedLimit+1))
-		_ = file.Close()
-		if readErr != nil || len(data) > antigravityProbeSeedLimit {
-			_, _ = fmt.Fprintf(sum, "%s\x00error\n", name)
-			continue
-		}
-		_, _ = fmt.Fprintf(sum, "%s\x00present\x00%d:", name, len(data))
-		_, _ = sum.Write(data)
-		_, _ = sum.Write([]byte{'\n'})
-	}
-	return hex.EncodeToString(sum.Sum(nil))
-}
-
 func antigravityShapeFor(program string, profile Profile, spec RunSpec, hookDir, mcpShape string, mcpEligible bool) *antigravityShape {
 	return &antigravityShape{
 		execPath:    program,
 		cwd:         spec.Dir,
 		env:         strings.Join(antigravityShapeEnv(childEnvironment(profile.Env)), "\x00"),
-		auth:        antigravityAuthFingerprint(profile.Env),
+		auth:        localworkspace.AntigravityAuthFingerprint(profile.Env),
 		skills:      profile.ResidentSkillDigest,
 		agentID:     profile.AgentID,
 		hookDir:     hookDir,
+		runtimeHome: cleanAntigravityRuntimeHome(spec.RuntimeHome),
 		mcp:         mcpShape,
 		mcpEligible: mcpEligible,
 	}
@@ -124,6 +92,7 @@ func (s *antigravityShape) differsBase(want *antigravityShape) []string {
 	add(s.skills != want.skills, "skills")
 	add(s.agentID != want.agentID, "agent_id")
 	add(s.hookDir != want.hookDir, "hook_dir")
+	add(s.runtimeHome != want.runtimeHome, "runtime_home")
 	return fields
 }
 
@@ -182,5 +151,18 @@ func antigravityMismatch(want *antigravityShape, spec RunSpec) func(*acpProcess)
 // authentication or installation state changes.
 func StopParkedAntigravityResidentsForCredentials() error {
 	_, err := antigravityResidents.invalidateAll("credentials_changed", slog.Default())
+	return err
+}
+
+// StopParkedAntigravityResidentForHome stops any parked Antigravity resident
+// process bound to home before its seeded credentials or settings change.
+func StopParkedAntigravityResidentForHome(home string) error {
+	clean := cleanAntigravityRuntimeHome(home)
+	if clean == "" {
+		return nil
+	}
+	_, err := antigravityResidents.stopWhere("credentials_changed", func(p *acpProcess) bool {
+		return p.runtimeHome == clean
+	}, slog.Default())
 	return err
 }

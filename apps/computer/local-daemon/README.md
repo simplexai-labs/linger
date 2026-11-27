@@ -505,9 +505,11 @@ Computer user's own instruction files:
 - Pi runs with `--no-context-files`, and it always gets `--system-prompt` and
   `--append-system-prompt`, empty when there is nothing to pass, so it reads
   neither the user's `SYSTEM.md` nor their `APPEND_SYSTEM.md`.
-- Antigravity is the exception: its ACP server has no switch that turns off
-  the user's own rules, skills and `~/.gemini/config/mcp_config.json`, so an
-  Antigravity run sees them next to the Daemon's instructions and servers.
+- Antigravity runs each Context in an isolated Runtime home
+  (`--gemini-dir <RuntimeHome>/gemini`, `--log-file <RuntimeHome>/acp.log`)
+  seeded from the user's `antigravity-oauth-token` and `settings.json`, without
+  personal `~/.gemini/config/mcp_config.json`, rules, or global skills copied
+  into that home; workspace-level rules and skills still load normally.
 
 The user's own Claude Skills and the Skills of plugins they installed are still
 offered to Agents (`internal/workspace/claude_skills.go`).
@@ -537,9 +539,20 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
   early (such as `| head`, exit `141`) or a non-zero upstream stage (such as
   `grep` with no matches piped to `wc -l`) fails the pipeline; a command that
   wants to ignore upstream failures can run `set +o pipefail`. On Windows, Pi
-  uses the built-in `powershell` tool instead of `bash`, so it skips the POSIX
-  `shell-text-hook` and `pipefail`, and the managed extension overrides
-  `powershell` to set UTF-8 `$OutputEncoding` and console encodings.
+  uses the built-in `powershell` tool instead of `bash`, so it skips `pipefail`
+  and the managed extension overrides `powershell` to set UTF-8
+  `$OutputEncoding` and console encodings. Windows Pi also passes
+  `LINGER_PI_SHELL_TEXT_HOOK` so the extension invokes
+  `linger-computer-daemon shell-text-hook` with `tool_name: "powershell"` and
+  `powershell_51` for `teamhub` commands containing `"` or `<<`, refusing POSIX
+  heredocs (`<<'EOF'`) on all PowerShell versions and embedded double quotes in
+  native `teamhub` arguments (outside PowerShell here-strings) on Windows
+  PowerShell 5.1 (`powershell.exe`). Across both `bash` and `powershell`,
+  `pi-mcp.mjs` also runs a per-Run consecutive-failure loop guard (reset on
+  `before_agent_start`, exempting `--help`/`-h`/`--schema`, warning on the 3rd
+  consecutive failure and blocking further retries after 5 consecutive
+  failures) so repeated failing retries of the same `teamhub` subcommand or
+  shell command stop early.
 - Antigravity runs the same `permission.ShellTextRewritten` check inside its
   managed `PreToolUse` hook for `run_command` (except on Windows, where shells
   are PowerShell), returning `{"decision":"deny","reason":...}` so the model
@@ -554,9 +567,16 @@ A hook that cannot run lets the command through.
   prints it within two seconds. When that read fails or times out, the
   last `PATH` the same shell printed is used. With none, the user's own
   install folders come first. The common install folders are always
-  searched too: Homebrew, `~/.local/bin`, `~/.npm-global/bin`, Volta, Bun,
-  every nvm Node's `bin` (newest first), fnm's default Node and pnpm's
-  global bin.
+  searched too: Homebrew, `~/.local/bin`, `~/.claude/local`,
+  `~/.npm-global/bin`, Volta, Bun, every nvm Node's `bin` (newest first),
+  fnm's default Node, pnpm's global bin, and `%APPDATA%\npm` on Windows.
+- When a CLI is not on `PATH` or in those install folders, discovery also
+  checks platform desktop app bundles: on macOS, `Codex.app` and
+  `ChatGPT.app` (`Contents/Resources/codex-cli/bin/codex`), `Claude.app`
+  (`Contents/Resources/claude`), and Claude Desktop's versioned
+  `~/Library/Application Support/Claude/claude-code/<version>/…` (newest
+  semver first, preferring `.verified` bundles); on Windows, Claude Desktop's
+  `%APPDATA%\Claude\claude-code\<version>\claude.exe`.
 - Every 15 seconds the monitor rechecks sign-in. Every fourth tick it runs a
   full discovery, but not while an Operation runs.
 - On every tick it also searches again for each Runtime that was not
@@ -573,17 +593,45 @@ mode (`agy -p`) is not used, because it signs in only with Google and waits
 for a browser sign-in when signed out.
 
 - Discovery runs `agy --version`, then an ACP `initialize`, then an empty
-  `session/new` in HOME. ACP's authentication-required error (`-32000`) on
-  `session/new` means signed out. No prompt is sent, so a probe stores no
-  conversation.
+  `session/new` in an isolated temporary directory seeded with the user's
+  `antigravity-oauth-token` and `settings.json`. The resident Daemon (and the
+  control CLI when a validated private state directory exists) allocates each
+  probe directory under `<state>/operation-tmp` (falling back to the OS
+  temporary directory when no private temp base is configured), and reports
+  local probe environment preparation failures as `RUNTIME_DIAGNOSTIC_FAILED`
+  (logging `runner.runtime_probe.prepare_failed`,
+  `runner.runtime_auth.prepare_failed`, or
+  `runner.runtime_models.prepare_failed`) rather than `RUNTIME_INCOMPATIBLE`.
+  ACP's authentication-required error (`-32000`) on `session/new` means signed
+  out. No prompt is sent, so a probe stores no conversation.
 - When `session/new` needs authentication and the environment carries
   `GEMINI_API_KEY` or `GOOGLE_API_KEY`, the adapter selects the
   `gemini-api-key` method once and retries. A Google sign-in is never
   replaced by a key.
 - The model catalog is the session's `model` config option: one model per
   family. A family's reasoning efforts are the levels its
-  `<family>-<level>` entries in `availableModels` name. A Run selects them
+  `<family>-<level>` entries in `availableModels` name, and each model's
+  `ContextWindow` comes from explicit ACP `usage_update.size` notifications
+  (switching families via `session/set_config_option` during discovery, then
+  verifying deferred or deduplicated models on fresh sessions against an
+  alternate-size anchor without timer-based carry-forward). A Run selects them
   with `session/set_config_option` (`model`, then `thought_level`).
+- Each Antigravity Context gets an owner- and scope-isolated Runtime home under
+  `<RuntimeHomeRoot>/antigravity/<hash>` (`--gemini-dir <home>/gemini`,
+  `--log-file <home>/acp.log`), plus per-Agent redacted
+  `runner-diagnostics.log`. `PrepareAntigravityRuntimeHome` seeds
+  `antigravity-oauth-token` and `settings.json` from the user's
+  `~/.gemini/antigravity-cli`, preserves in-home OAuth token refreshes while
+  the user's source digest stays unchanged, and retires a parked resident for
+  that home before mutating any seeded file.
+- Turn outcomes report `Outcome.CompactionCount` by counting newly appended
+  completed `CHECKPOINT` entries in the session's
+  `<appDataDir>/brain/<sessionID>/.system_generated/logs/transcript.jsonl`
+  (opened via `os.OpenRoot` without following symlinks). Terminal Run usage
+  reports `reasoning` tokens and uses `provider: "antigravity"` when
+  `runner.welcome`'s `service_features` names `antigravity_usage_provider`
+  (downgrading to `"unknown"`, including on ledger replay, for older Agent
+  Services).
 - Residency-capable `agy acp` servers (those advertising both `session/list`
   and `session/resume` during `initialize`) park in `antigravityResidents`,
   keyed by Context. Room-presence `provider.prepare` runs `initialize` followed
@@ -669,9 +717,12 @@ for a browser sign-in when signed out.
   repeat blocking via `continuationActive || executionNum > 0 || stopHookBlocked`.
 - Native history reads (`runtimehistory.InspectAntigravity`, Computer 0.67.0 or
   later) read bounded, symlink-checked `transcript.jsonl` files under
-  `~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/` with
-  `thinking` redacted as `reasoning_content`, and are served over `debug_history`
-  only when `runner.welcome`'s `service_features` names `antigravity_history`.
+  `<RuntimeHome>/gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/`
+  first and fall back to `~/.gemini/antigravity-cli` for pre-upgrade sessions
+  (never falling back on symlink or invalid-session errors) for both
+  `debug_history` and `.previous-context.md` export, with `thinking` redacted as
+  `reasoning_content`, and are served over `debug_history` only when
+  `runner.welcome`'s `service_features` names `antigravity_history`.
   Because `agy`'s `transcript.jsonl` currently omits ACP `toolCallId` and
   `turn_id`, Antigravity native history serves Debug History, Agent Memory, and
   `.previous-context.md` export (TeamHub per-Message/Run activity linking
@@ -706,21 +757,18 @@ forward slashes, as a lowercase SHA-256 digest. Private files are checked agains
 the current SID and ACL, not POSIX permission bits. Writing a separate credential
 does not change the permissions of an existing parent directory.
 
-The installer and the Daemon refuse a private path when another account can
-replace one of its parent directories, naming the offending ancestor path and
-SID. Ancestors trust the current user, `SYSTEM`, `BUILTIN\Administrators`,
-`TrustedInstaller`, built-in Administrator/Domain/Enterprise Admin SIDs
-(`S-1-5-21-*-*-*-500|512|519`), and direct individual/domain/Entra members of
-local `BUILTIN\Administrators` (excluding broad well-known groups). One
-additional exception applies on ancestor access rules: the Codex Windows
-sandbox may hold replace rights on a parent, such as AppData. The sandbox acts
-through the `CodexSandboxUsers` group and the capability SIDs in
-`%USERPROFILE%\.codex\cap_sid` (or `%CODEX_HOME%\cap_sid`). A sandboxed Codex
-command can therefore replace such a parent; Linger accepts this so it installs
-beside Codex. Private paths themselves still grant access only to the current
-user and SYSTEM. Their owner is the current user or, when that user is an
-administrator, Administrators, which owns what an elevated process (Run as
-administrator, the built-in Administrator) creates.
+Private targets themselves remain strictly owner-only (protected DACL granting
+access only to the current user and `SYSTEM` on creation; validation accepts
+the current user, `SYSTEM`, and `BUILTIN\Administrators`), reject reparse
+points and multi-link files, and require the owner to be the current user or,
+when that user is an administrator (via active or UAC-linked token),
+`BUILTIN\Administrators`, which owns what an elevated process (Run as
+administrator, the built-in Administrator) creates. Ancestor directories are
+pinned open without `FILE_SHARE_DELETE` while opening the target to prevent
+concurrent rename races and are checked only for links/reparse points and
+directory type (plus rejecting UNC paths and NTFS alternate data streams),
+without checking ancestor ownership or ACLs, so nested folders on Windows data
+drives such as `D:\program\Linger` are accepted.
 
 Process recovery uses the creation time and a held process handle, so a reused
 process ID is never mistaken for the original. Ordinary tasks are held by a Job
@@ -851,7 +899,10 @@ minutes, because CuaDriver refuses to prompt from its tools.
 background through LaunchServices without taking the foreground. With a file or
 URL it waits for a new window or 5 seconds; without one it returns at once if the
 application already has a window. The result lists the application's pid and
-windows, marking new ones.
+windows, marking new ones. A `name` is either the bundle's file name,
+which `open -a` knows, or the name the bundle declares (`CFBundleName` or
+`CFBundleDisplayName`), which the Daemon resolves to the bundle's path; the
+running application is then found by either name or by that path.
 
 On macOS, key input means `press_key`, `hotkey` and `type_text` without an
 `element_token` or coordinates. With only `pid`, keys go to that application's
@@ -876,6 +927,17 @@ one a lower layer than theirs; a new window without a title must have a higher
 layer, because Finder briefly shows untitled windows. When activating a
 background application, the Daemon brings along the window of that application
 the Agent named last.
+
+A modal dialog, a window at `NSModalPanelWindowLevel`, is in none of those
+lists: Cua `list_windows` holds only layer-0 windows, and a screenshot of a
+window shows that window alone. The Daemon asks the window server for an
+application's on-screen modal dialogs and names any other than the addressed
+window in the result of `get_window_state`, `list_windows` with a `pid`, and
+each input. Foreground input and keys addressed to such a dialog pass the
+front-window check, and `bring_to_front` on it brings the application forward
+without a `window_id`, which Cua accepts only for ordinary windows. Each query
+takes about 150 ms: a read or a background input makes one, and a foreground
+input or key that names a window makes two.
 
 The Daemon remembers the application it raised last. When the user brings
 another application forward, key input returns `COMPUTER_USER_TOOK_OVER` and the

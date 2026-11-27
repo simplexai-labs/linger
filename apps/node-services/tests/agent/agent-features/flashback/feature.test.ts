@@ -158,6 +158,46 @@ describe("createFlashbackFeature", () => {
     );
   });
 
+  it("steers an active antigravity run without calling followUp", async () => {
+    const { client, context, accept, drain } = setup({
+      runtime: { type: "local", placement: { runtimeType: "antigravity" } },
+      activeRunId: () => "run-agy-1",
+    });
+    accept(fact("in-1"));
+    await drain();
+    expect(context.steer).toHaveBeenCalledWith(
+      "run-agy-1",
+      expect.objectContaining({
+        rawMessage: expect.stringContaining(
+          '<historical_context source="flashback">',
+        ),
+      }),
+      expect.objectContaining({ canSubmit: expect.any(Function) }),
+    );
+    expect(context.followUp).not.toHaveBeenCalled();
+    expect(client.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        episode: "sessions/2026-08-25/capture_session_a",
+        cue_id: "clients/growmax",
+      }),
+    );
+  });
+
+  it("falls back to followUp for antigravity once the reply is done", async () => {
+    const { client, context, accept, drain } = setup({
+      runtime: { type: "local", placement: { runtimeType: "antigravity" } },
+      activeRunId: () => undefined,
+    });
+    accept(fact("in-1"));
+    await drain();
+    expect(context.steer).not.toHaveBeenCalled();
+    expect(context.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceInboxIds: ["room:room-1"] }),
+      expect.objectContaining({ canSubmit: expect.any(Function) }),
+    );
+    expect(client.record).toHaveBeenCalled();
+  });
+
   it("skips recall when there is no represented Human or no owner text", async () => {
     const withoutHuman = setup({
       identity: {
@@ -189,30 +229,36 @@ describe("createFlashbackFeature", () => {
     expect(client.suggest).toHaveBeenCalledTimes(1);
   });
 
-  it("follows up without steer for a non-steer runtime once the reply is done", async () => {
-    const { context, accept, drain } = setup({
-      runtime: { type: "local", placement: { runtimeType: "claude" } },
-      activeRunId: () => undefined,
-    });
-    accept(fact("in-1"));
-    await drain();
-    expect(context.steer).not.toHaveBeenCalled();
-    expect(context.followUp).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceInboxIds: ["room:room-1"] }),
-      expect.objectContaining({ canSubmit: expect.any(Function) }),
-    );
-  });
+  it.each(["claude", "pi"] as const)(
+    "follows up without steer for non-steer runtime %s once the reply is done",
+    async (runtimeType) => {
+      const { context, accept, drain } = setup({
+        runtime: { type: "local", placement: { runtimeType } },
+        activeRunId: () => undefined,
+      });
+      accept(fact("in-1"));
+      await drain();
+      expect(context.steer).not.toHaveBeenCalled();
+      expect(context.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceInboxIds: ["room:room-1"] }),
+        expect.objectContaining({ canSubmit: expect.any(Function) }),
+      );
+    },
+  );
 
-  it("drops the recall while a non-steer runtime is still replying", async () => {
-    const { context, accept, drain } = setup({
-      runtime: { type: "local", placement: { runtimeType: "claude" } },
-      activeRunId: () => "run-9",
-    });
-    accept(fact("in-1"));
-    await drain();
-    expect(context.steer).not.toHaveBeenCalled();
-    expect(context.followUp).not.toHaveBeenCalled();
-  });
+  it.each(["claude", "pi"] as const)(
+    "drops the recall while non-steer runtime %s is still replying",
+    async (runtimeType) => {
+      const { context, accept, drain } = setup({
+        runtime: { type: "local", placement: { runtimeType } },
+        activeRunId: () => "run-9",
+      });
+      accept(fact("in-1"));
+      await drain();
+      expect(context.steer).not.toHaveBeenCalled();
+      expect(context.followUp).not.toHaveBeenCalled();
+    },
+  );
 
   it("marks the submission stale through canSubmit after newer input", async () => {
     const { context, accept, drain } = setup();

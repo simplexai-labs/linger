@@ -377,3 +377,28 @@ func TestPiConfigValueExpandsLikePi(t *testing.T) {
 		}
 	}
 }
+
+func TestAntigravityContextWindowsPreserveBoundedDeclaredValues(t *testing.T) {
+	declared := runtimeModels("gemini-pro", "gemini-flash", "unknown", "negative", "overflow")
+	declared[0].ContextWindow = 1_048_576
+	declared[1].ContextWindow = 200_000
+	declared[2].ContextWindow = 0
+	declared[3].ContextWindow = -128
+	declared[4].ContextWindow = maxModelContextWindow + 1
+
+	models := resolveContextLengths(t, "antigravity", map[string]string{"HOME": t.TempDir()}, declared)
+	assertContextWindows(t, models, map[string]int{
+		"gemini-pro":   1_048_576,
+		"gemini-flash": 200_000,
+		"unknown":      0,
+		"negative":     0,
+		"overflow":     0,
+	})
+	assertLinks(t, models, map[string]string{
+		"gemini-pro":   linkSubscription,
+		"gemini-flash": linkSubscription,
+		"unknown":      linkSubscription,
+		"negative":     linkSubscription,
+		"overflow":     linkSubscription,
+	})
+}

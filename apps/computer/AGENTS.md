@@ -113,7 +113,8 @@
 - The `feishu_mail` Computer tool (`localtools.FeishuMail`) runs the owner's
   own lark-cli for TeamHub's Feishu Mail. It finds lark-cli where Runtime
   discovery looks (`provider.ExecutableCandidates`: PATH, `~/.local/bin`,
-  and `%APPDATA%\npm` on Windows) or where its installers put it, and runs
+  `~/.claude/local`, `~/.npm-global/bin`, and `%APPDATA%\npm` on Windows) or
+  where its installers put it, and runs
   the native binary beside npm's Node launcher, so Node need not be on a
   short Daemon PATH. A request names only a
   method and an API path under `/open-apis/mail/v1/user_mailboxes/me`, never

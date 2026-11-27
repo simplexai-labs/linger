@@ -232,6 +232,17 @@ func TestBoundComputerServiceCommandCannotSelectAnotherConfig(t *testing.T) {
 	}
 }
 
+func TestHostEnvironmentGuideByOS(t *testing.T) {
+	if got := hostEnvironmentGuide("windows"); got != lingercontext.WindowsHostEnvironmentGuide {
+		t.Fatalf("hostEnvironmentGuide(windows) = %q, want %q", got, lingercontext.WindowsHostEnvironmentGuide)
+	}
+	for _, goos := range []string{"darwin", "linux"} {
+		if got := hostEnvironmentGuide(goos); got != "" {
+			t.Fatalf("hostEnvironmentGuide(%q) = %q, want empty", goos, got)
+		}
+	}
+}
+
 func TestProviderInstallationsPreserveTerminalExecutionPath(t *testing.T) {
 	environment := map[string]string{"PATH": "daemon-path", "HOME": "/home/user"}
 	discovered := provider.DiscoveryResult{Installations: map[string]provider.RuntimeDiagnostic{"pi": {Type: "pi", ExecutablePath: "/mise/pi", EntryPath: "/mise/latest/pi", ExecutionPath: "terminal-node:daemon-path"}}}

@@ -58,9 +58,11 @@ services when the instance's `user.env` no longer
 matches the configuration they started with, or when `--source-repo` names
 another checkout than the instance's. An instance follows a new checkout only
 once its services are ready on it: until then `instance.json` keeps naming the
-checkout they run from, the new checkout's migrations run only after the
-runtime (the local model, for one) is ready, and a run that stops earlier
-leaves the running services and their schema as they were. A successful
+checkout they run from, the new checkout's migrations run only after blocking
+runtime checks are ready (while degraded-tolerant local-model and BYOK recovery
+starts eagerly in the background alongside `release`, `migrate`, and service
+startup and is awaited before local-stack preparation), and a run that
+stops earlier leaves the running services and their schema as they were. A successful
 outcome's `details.source` names the checkout the services serve from, and
 `details.origin` the origin they serve at, which the run moves when another
 program took the web port. A local model stack whose saved binding is no longer ready and whose saved plan
@@ -176,10 +178,14 @@ installer, and the next start tries again. Only `--migrate` reports them: a
 warning naming each and why on stderr, and one JSON line
 `{"skipped":[{instance,reason}]}` on stdout. Other modes stay silent, so a
 warning is never taken for the reason a start failed, and refuse a skipped
-instance when they open it. Fresh native installs overlap `migrate`,
-`services`, and `account` with `runtime` while holding `services`/`account`
-completion until both branches succeed; upgrades and live re-runs keep `migrate`
-sequential after `runtime`.
+instance when they open it. Fresh native installs and same-checkout cold resumes
+overlap `migrate`, `services`, and `account` with `runtime` while holding
+`services`/`account` completion until both branches succeed; upgrades and live
+re-runs keep blocking `runtime` checks and `migrate` sequential first, then
+overlap foundation and gateway preparation with service startup after
+`bindLiveKit()`, while degraded-tolerant local-model/BYOK recovery starts
+eagerly in the background alongside `release`, `migrate`, and `services` on both
+paths and is awaited before local-stack preparation (and drained on abort).
 
 Run `make check-installer`; verify UI process behavior with an isolated
 browser context and retain masked evidence. Never stop a user's existing stack

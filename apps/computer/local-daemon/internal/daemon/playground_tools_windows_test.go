@@ -22,8 +22,8 @@ func TestWindowsRunAgentCLIAvoidsSystemTempWithNonWhitelistedSID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Grant LOCAL SERVICE (S-1-5-19, non-whitelisted ancestor SID) full access
-	// so privatefs ancestor validation rejects any path under badTemp.
+	// Grant LOCAL SERVICE (S-1-5-19) full access so badTemp is broadly
+	// accessible and fails target-level owner-only checks.
 	sd, err := windows.SecurityDescriptorFromString("O:" + sid.String() + "D:P(A;OICI;FA;;;" + sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-19)")
 	if err != nil {
 		t.Fatal(err)
@@ -35,8 +35,8 @@ func TestWindowsRunAgentCLIAvoidsSystemTempWithNonWhitelistedSID(t *testing.T) {
 	if err := windows.SetNamedSecurityInfo(badTemp, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := privatefs.EnsureDir(filepath.Join(badTemp, "probe")); err == nil || !strings.Contains(err.Error(), "S-1-5-19") {
-		t.Fatalf("expected non-whitelisted TEMP ancestor error for S-1-5-19, got %v", err)
+	if err := privatefs.CheckPath(badTemp, "directory", true); err == nil || !strings.Contains(err.Error(), "S-1-5-19") {
+		t.Fatalf("expected target-level private check to reject S-1-5-19 on badTemp, got %v", err)
 	}
 
 	privateState := filepath.Join(t.TempDir(), "daemon-state")
@@ -63,13 +63,16 @@ func TestWindowsRunAgentCLIAvoidsSystemTempWithNonWhitelistedSID(t *testing.T) {
 	if err := privatefs.CheckPath(configPath, "file", true); err != nil {
 		t.Fatalf("config.json ACL: %v", err)
 	}
+	if entries, readErr := os.ReadDir(badTemp); readErr != nil || len(entries) != 0 {
+		t.Fatalf("badTemp entries during prepareAgentCLIConfig = %v, err = %v", entries, readErr)
+	}
 	cleanup()
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
 		t.Fatalf("home survived cleanup: %v", err)
 	}
 
-	// Verify runAgentCLI itself does not fail on ancestor validation when TEMP
-	// grants access to a non-whitelisted SID.
+	// Verify runAgentCLI keeps its private temp directories under opTempBase
+	// rather than using a broadly accessible system TEMP (S-1-5-19).
 	cliDir := t.TempDir()
 	exeBytes, err := os.ReadFile(os.Args[0])
 	if err != nil {
@@ -82,9 +85,12 @@ func TestWindowsRunAgentCLIAvoidsSystemTempWithNonWhitelistedSID(t *testing.T) {
 	_, err = d.runAgentCLI(t.Context(), cardInstallation, "room-1", []string{"-invalid-flag-for-test"}, "")
 	var failure *playgroundFailure
 	if !errors.As(err, &failure) {
-		t.Fatalf("runAgentCLI returned non-CLI error (expected CLI exit failure, not privatefs ancestor error): %v", err)
+		t.Fatalf("runAgentCLI returned non-CLI error (expected CLI exit failure, not privatefs error): %v", err)
 	}
 	if entries, readErr := os.ReadDir(opTempBase); readErr != nil || len(entries) != 0 {
 		t.Fatalf("operation-tmp entries after runAgentCLI = %v, err = %v", entries, readErr)
+	}
+	if entries, readErr := os.ReadDir(badTemp); readErr != nil || len(entries) != 0 {
+		t.Fatalf("badTemp entries after runAgentCLI = %v, err = %v", entries, readErr)
 	}
 }

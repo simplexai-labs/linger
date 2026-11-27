@@ -49,6 +49,7 @@ type acpProcess struct {
 	cancel      context.CancelFunc
 	caps        acpCapabilities
 	shape       *antigravityShape
+	runtimeHome string
 	front       *mcpFront
 	hookEP      *AntigravityHookEndpoint
 	storeRoot   string

@@ -250,6 +250,12 @@ take precedence.
   seven-value set so older Agent Services accept it, and publishes the full
   model-advertised efforts in `runner.runtime_diagnostics` once welcome names
   `dynamic_reasoning_efforts`.
+- `antigravity_usage_provider` in `runner.welcome`'s `service_features` is
+  advertised to every Computer (a Daemon ignores an unknown feature); a Daemon
+  that sees it reports `provider: "antigravity"` on Antigravity terminal
+  `RunUsage` entries, and downgrades to `"unknown"` (including on retained
+  event replay) when talking to an older Agent Service. TeamHub accepts both
+  `"antigravity"` and `"unknown"` for `antigravity` runs.
 - Explicit model selection on `execute` `model_invoke` (`model`) is sent only
   to Computer 0.62.0 or later (`FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION`),
   because an older Computer rejects unknown envelope fields and closes the

@@ -70,21 +70,33 @@ export async function instanceRuntime(
   try {
     const value = await timed("config", () => loadInstance({ name, home }));
     if (!value) return undefined;
-    const setupChoice = await timed("config", () =>
-      readSetupChoice({ name, home }),
-    );
-    const byok = await timed("config", () => readByokEnvironment(home));
-    const managedEnv = await timed("runtime", () =>
-      options.runtimeDescriptors !== undefined
-        ? runtimeEnvironmentFromDescriptors(options.runtimeDescriptors)
-        : managedRuntimeEnvironment(home, value.root),
-    );
-    const modelsEnv = await timed("localModels", () =>
-      localModelsEnvironment(value),
-    );
-    const tool = await timed("tool", () =>
-      localmodelsComputerTool(home, pinnedToolSource()),
-    );
+    const [
+      setupChoiceResult,
+      byokResult,
+      managedEnvResult,
+      modelsEnvResult,
+      toolResult,
+    ] = await Promise.allSettled([
+      timed("config", () => readSetupChoice({ name, home })),
+      timed("config", () => readByokEnvironment(home)),
+      timed("runtime", () =>
+        options.runtimeDescriptors !== undefined
+          ? runtimeEnvironmentFromDescriptors(options.runtimeDescriptors)
+          : managedRuntimeEnvironment(home, value.root),
+      ),
+      timed("localModels", () => localModelsEnvironment(value)),
+      timed("tool", () => localmodelsComputerTool(home, pinnedToolSource())),
+    ]);
+    if (setupChoiceResult.status === "rejected") throw setupChoiceResult.reason;
+    if (byokResult.status === "rejected") throw byokResult.reason;
+    if (managedEnvResult.status === "rejected") throw managedEnvResult.reason;
+    if (modelsEnvResult.status === "rejected") throw modelsEnvResult.reason;
+    if (toolResult.status === "rejected") throw toolResult.reason;
+    const setupChoice = setupChoiceResult.value;
+    const byok = byokResult.value;
+    const managedEnv = managedEnvResult.value;
+    const modelsEnv = modelsEnvResult.value;
+    const tool = toolResult.value;
     const found: Record<string, string | undefined> = {
       ...managedEnv,
       ...modelsEnv,
@@ -99,7 +111,7 @@ export async function instanceRuntime(
     return { ...(setupChoice ? { setupChoice } : {}), environment };
   } finally {
     timings.total = Math.round(performance.now() - started);
-    options.onTimings?.(timings);
+    options.onTimings?.({ ...timings });
   }
 }
 

@@ -3,9 +3,6 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { runProcess } from "./process.js";
 
-const TRUSTED_INSTALLER_SID =
-  "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
-
 export const WINDOWS_PRIVATE_PREAMBLE = String.raw`$ErrorActionPreference = 'Stop'
 # This fixed Windows PowerShell script uses only its own built-in modules.
 # A caller's PowerShell 7 modules can prevent Get-Acl from loading.
@@ -13,41 +10,6 @@ $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
 [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $script:isAdministrator = $null
-function Test-Uint32Token([string]$Token) {
-  if ($Token -cnotmatch '^(0|[1-9][0-9]{0,9})$') { return $false }
-  $n = [uint32]0
-  return [uint32]::TryParse($Token, [Globalization.NumberStyles]::None, [Globalization.CultureInfo]::InvariantCulture, [ref]$n)
-}
-# Canonical built-in Administrator (RID 500), Domain Admins (RID 512), and
-# Enterprise Admins (RID 519). Ordinary accounts start at RID 1000.
-function Test-BuiltinAdminSid([string]$Value) {
-  $parts = $Value -split '-'
-  if ($parts.Count -ne 8 -or ($parts[0..3] -join '-') -cne 'S-1-5-21') { return $false }
-  foreach ($p in $parts[4..6]) { if (-not (Test-Uint32Token $p)) { return $false } }
-  return $parts[7] -in @('500', '512', '519')
-}
-# Individual/domain (RID >= 1000) or Entra ID SIDs eligible when listed as
-# direct members of BUILTIN\Administrators. Broad groups are never admitted.
-function Test-EligibleAdminMemberSid([string]$Value) {
-  $parts = $Value -split '-'
-  if ($parts.Count -ne 8) { return $false }
-  $prefix = $parts[0..3] -join '-'
-  if ($prefix -ceq 'S-1-5-21') {
-    foreach ($p in $parts[4..7]) { if (-not (Test-Uint32Token $p)) { return $false } }
-    return [uint32]$parts[7] -ge 1000
-  }
-  if ($prefix -ceq 'S-1-12-1') {
-    foreach ($p in $parts[4..7]) { if (-not (Test-Uint32Token $p)) { return $false } }
-    return $true
-  }
-  return $false
-}
-function Test-CodexCapSid([string]$Value) {
-  $parts = $Value -split '-'
-  if ($parts.Count -ne 8 -or ($parts[0..3] -join '-') -cne 'S-1-5-21') { return $false }
-  foreach ($p in $parts[4..7]) { if (-not (Test-Uint32Token $p)) { return $false } }
-  return [uint32]$parts[7] -ge 1000
-}
 # Emit Win32 P/Invoke stubs directly in memory without invoking csc.exe or
 # writing temporary assemblies that AV/WDAC/AppLocker may block.
 function Ensure-LingerWin32Native {
@@ -66,9 +28,7 @@ function Ensure-LingerWin32Native {
     @('GetTokenInformation', 'advapi32.dll', [bool], @([IntPtr], [int], [IntPtr].MakeByRefType(), [int], [int].MakeByRefType())),
     @('CheckTokenMembership', 'advapi32.dll', [bool], @([IntPtr], [byte[]], [bool].MakeByRefType())),
     @('GetCurrentProcess', 'kernel32.dll', [IntPtr], [Type]::EmptyTypes),
-    @('CloseHandle', 'kernel32.dll', [bool], @([IntPtr])),
-    @('NetLocalGroupGetMembers', 'netapi32.dll', [uint32], @([IntPtr], [string], [uint32], [IntPtr].MakeByRefType(), [uint32], [uint32].MakeByRefType(), [uint32].MakeByRefType(), [IntPtr].MakeByRefType())),
-    @('NetApiBufferFree', 'netapi32.dll', [uint32], @([IntPtr]))
+    @('CloseHandle', 'kernel32.dll', [bool], @([IntPtr]))
   )) {
     $m = $tb.DefinePInvokeMethod($def[0], $def[1], $ma, [Reflection.CallingConventions]::Standard, $def[2], [Type[]]$def[3], $cc, $cs)
     $m.SetImplementationFlags($m.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)
@@ -110,62 +70,6 @@ function Test-Administrator {
   $script:isAdministrator = Test-LinkedTokenAdministrator
   return $script:isAdministrator
 }
-function Get-LocalAdminMemberSids {
-  $sids = @{}
-  try {
-    Ensure-LingerWin32Native
-    $groupName = ([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')).Translate([Security.Principal.NTAccount]).Value
-    $slash = $groupName.IndexOf('\')
-    if ($slash -ge 0) { $groupName = $groupName.Substring($slash + 1) }
-    $resume = [IntPtr]::Zero
-    for ($page = 0; $page -lt 16; $page++) {
-      $buf = [IntPtr]::Zero
-      $read = [uint32]0
-      $total = [uint32]0
-      $status = [LingerWin32Native]::NetLocalGroupGetMembers([IntPtr]::Zero, $groupName, [uint32]0, [ref]$buf, [uint32]::MaxValue, [ref]$read, [ref]$total, [ref]$resume)
-      try {
-        if ($buf -ne [IntPtr]::Zero -and ($status -eq 0 -or $status -eq 234)) {
-          for ($i = 0; $i -lt [int]$read; $i++) {
-            $sidPtr = [Runtime.InteropServices.Marshal]::ReadIntPtr($buf, $i * [IntPtr]::Size)
-            if ($sidPtr -ne [IntPtr]::Zero) {
-              $memberSid = [Security.Principal.SecurityIdentifier]::new($sidPtr).Value
-              if (Test-EligibleAdminMemberSid $memberSid) { $sids[$memberSid] = $true }
-            }
-          }
-        }
-      } finally {
-        if ($buf -ne [IntPtr]::Zero) { $null = [LingerWin32Native]::NetApiBufferFree($buf) }
-      }
-      if ($status -ne 234) { break }
-    }
-  } catch {}
-  return $sids
-}
-function Get-CodexSandboxSids {
-  $sids = @{}
-  try {
-    $groupSid = ([Security.Principal.NTAccount]::new('CodexSandboxUsers')).Translate([Security.Principal.SecurityIdentifier]).Value
-    if ($groupSid) { $sids[$groupSid] = $true }
-  } catch {}
-  $capFiles = @()
-  $profile = [Environment]::GetFolderPath('UserProfile')
-  if ($profile) { $capFiles += [IO.Path]::Combine($profile, '.codex', 'cap_sid') }
-  if ($env:CODEX_HOME -and [IO.Path]::IsPathRooted($env:CODEX_HOME)) { $capFiles += [IO.Path]::Combine($env:CODEX_HOME, 'cap_sid') }
-  foreach ($capFile in $capFiles) {
-    try {
-      if (-not (Test-Path -LiteralPath $capFile -PathType Leaf)) { continue }
-      $caps = [IO.File]::ReadAllText($capFile) | ConvertFrom-Json
-      $values = @([string]$caps.workspace)
-      foreach ($roots in @($caps.workspace_by_cwd, $caps.writable_root_by_path)) {
-        if ($roots) { $values += @($roots.PSObject.Properties | ForEach-Object { [string]$_.Value }) }
-      }
-      foreach ($value in $values) {
-        if (Test-CodexCapSid $value) { $sids[$value] = $true }
-      }
-    } catch {}
-  }
-  return $sids
-}
 function Format-PrivateFailure([string]$Code, [string]$Stage, [string]$Ancestor, [string]$Sid, $Exception) {
   try {
     if ($Code -cmatch '^[A-Z][A-Z_]+$') {
@@ -190,8 +94,6 @@ function Format-PrivateFailure([string]$Code, [string]$Stage, [string]$Ancestor,
 const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  $stage = 'target'
   $failAncestor = ''
   $failSid = ''
-  $adminMembers = $null
-  $codexSids = $null
   if ([string]$request.path -like '\\*') { throw 'UNSAFE_TYPE' }
   if ($request.kind -eq 'location') {
     if (Test-Path -LiteralPath $request.path) {
@@ -220,9 +122,8 @@ const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  $stage = 'target'
     $acl = Get-Acl -LiteralPath $item.FullName
     # What an elevated process (Run as administrator, the built-in
     # Administrator) creates is owned by Administrators. For an administrator
-    # that owner counts as the user, as in Git for Windows: the ancestor check
-    # below already lets the group own and replace every parent folder, and an
-    # administrator can take ownership of any file, so it trusts no one new.
+    # that owner counts as the user, as in Git for Windows: an administrator
+    # can take ownership of any file, so accepting it trusts no other account.
     $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
     if ($owner -ne $sid.Value -and !($owner -eq $admins -and (Test-Administrator))) { $failSid = $owner; throw 'UNSAFE_OWNER' }
     $parent = $item.Directory
@@ -231,35 +132,6 @@ const WINDOWS_PRIVATE_CHECK_BODY = String.raw`  $stage = 'target'
   $stage = 'ancestor'
   while ($parent) {
     if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { $failAncestor = $parent.FullName; throw 'UNSAFE_PARENT_LINK' }
-    $parentAcl = Get-Acl -LiteralPath $parent.FullName
-    $owner = $parentAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-    if ($owner -notin @($sid.Value, $system, $admins, $trustedInstaller) -and -not (Test-BuiltinAdminSid $owner)) {
-      if ($null -eq $adminMembers) { $adminMembers = Get-LocalAdminMemberSids }
-      if (-not $adminMembers.ContainsKey($owner)) { $failAncestor = $parent.FullName; $failSid = $owner; throw 'UNSAFE_PARENT_OWNER' }
-    }
-    # An ancestor is unsafe when another account can put a different folder
-    # where the private one is. Delete lets its holder rename or remove the
-    # folder that grants it; a volume root can be neither, and its stock ACL
-    # grants Delete to Authenticated Users. Replacing a child of the root or
-    # rewriting the root's ACL stays refused.
-    $replace = 'DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'
-    if ($parent.Parent) { $replace = "Delete,$replace" }
-    foreach ($rule in $parentAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
-      # InheritOnly ACEs do not authorize mutation of this ancestor. They are
-      # still checked below when present on the private target itself.
-      if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
-      if ($rule.AccessControlType -ne 'Allow') { continue }
-      if (-not ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]$replace)) { continue }
-      $ruleSid = $rule.IdentityReference.Value
-      if ($ruleSid -in @($sid.Value, $system, $admins, 'S-1-3-0', 'S-1-3-4', $trustedInstaller) -or (Test-BuiltinAdminSid $ruleSid)) { continue }
-      if ($null -eq $adminMembers) { $adminMembers = Get-LocalAdminMemberSids }
-      if ($adminMembers.ContainsKey($ruleSid)) { continue }
-      if ($null -eq $codexSids) { $codexSids = Get-CodexSandboxSids }
-      if ($codexSids.ContainsKey($ruleSid)) { continue }
-      $failAncestor = $parent.FullName
-      $failSid = $ruleSid
-      throw 'UNSAFE_PARENT_ACCESS'
-    }
     $parent = $parent.Parent
   }
   if ($request.kind -ne 'location') {
@@ -316,7 +188,7 @@ $failSid = ''
 try {
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
   $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-  $system = 'S-1-5-18'; $admins = 'S-1-5-32-544'; $trustedInstaller = '${TRUSTED_INSTALLER_SID}'
+  $system = 'S-1-5-18'; $admins = 'S-1-5-32-544'
 ${WINDOWS_PRIVATE_CHECK_BODY}
   exit 0
 } catch {
@@ -339,7 +211,7 @@ if ("$($ExecutionContext.SessionState.LanguageMode)" -ne 'FullLanguage') {
 }
 ${WINDOWS_PRIVATE_PREAMBLE}
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-$system = 'S-1-5-18'; $admins = 'S-1-5-32-544'; $trustedInstaller = '${TRUSTED_INSTALLER_SID}'
+$system = 'S-1-5-18'; $admins = 'S-1-5-32-544'
 while ($true) {
   $line = [Console]::In.ReadLine()
   if ($null -eq $line) { break }
@@ -777,6 +649,8 @@ export async function windowsPrivateLocation(
 /** The code of an error from windowsPrivatePath; its reason says why. */
 export const WINDOWS_PRIVATE_PATH_UNSAFE = "WINDOWS_PRIVATE_PATH_UNSAFE";
 // The ACL program's reason codes, worded for the error message.
+// UNSAFE_PARENT_OWNER and UNSAFE_PARENT_ACCESS stay recognized for
+// backward-compatible refusal parsing from older installers.
 const WINDOWS_PRIVATE_REASONS = {
   UNSAFE_TYPE: "is a link, or not the expected file or folder",
   UNSAFE_OWNER: "is owned by another account",

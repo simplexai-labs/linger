@@ -770,7 +770,7 @@ export async function inspectRuntime(
     const observations = await probe({
       runtimes: [runtime],
       includeBundled: true,
-      env: options.env ?? process.env,
+      env: { ...process.env, ...options.env },
       daemonExecutable: dependencies.daemonExecutable,
       platform: options.platform,
       signal: options.signal,

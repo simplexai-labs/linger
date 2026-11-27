@@ -45,7 +45,8 @@ export type ServiceFeature =
   | "runtime_failure_detail"
   | "operation_background_wait"
   | "dynamic_reasoning_efforts"
-  | "antigravity_history";
+  | "antigravity_history"
+  | "antigravity_usage_provider";
 export type JsonValue =
   | null
   | boolean
@@ -804,7 +805,7 @@ export type RunUsage = [
     output: NonNegativeInteger;
     reasoning?: NonNegativeInteger;
     model: string;
-    provider: "openai" | "anthropic" | "unknown";
+    provider: "openai" | "anthropic" | "antigravity" | "unknown";
     last?: RunTokenCounts;
     compaction_count?: NonNegativeInteger;
   },
@@ -815,7 +816,7 @@ export type RunUsage = [
     output: NonNegativeInteger;
     reasoning?: NonNegativeInteger;
     model: string;
-    provider: "openai" | "anthropic" | "unknown";
+    provider: "openai" | "anthropic" | "antigravity" | "unknown";
     last?: RunTokenCounts;
     compaction_count?: NonNegativeInteger;
   }[],

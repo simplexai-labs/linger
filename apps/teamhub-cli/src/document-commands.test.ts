@@ -152,6 +152,140 @@ describe("Document command boundary", () => {
       ).input,
     ).toEqual({ thread_id: "thread_one", replace_str: "  Body \u00e9" });
   });
+  it("reads str_replace pattern from --pattern-file or stdin, stripping at most one trailing newline", async () => {
+    vi.mocked(reader.text).mockResolvedValueOnce('  He said "Draft"  \r\n');
+    expect(
+      (
+        await normalize(
+          ["docs", "update"],
+          [
+            "document_one",
+            "--command",
+            "str_replace",
+            "--pattern-file",
+            "pattern.txt",
+            "--content",
+            "Final",
+          ],
+        )
+      ).input,
+    ).toMatchObject({
+      document_id: "document_one",
+      command: "str_replace",
+      pattern: '  He said "Draft"  ',
+      content: "Final",
+    });
+
+    vi.mocked(reader.text).mockResolvedValueOnce("Exact line\n");
+    expect(
+      (
+        await normalize(
+          ["docs", "update"],
+          [
+            "document_one",
+            "--command",
+            "str_replace",
+            "--pattern-file",
+            "-",
+            "--content",
+            "Replacement",
+          ],
+        )
+      ).input,
+    ).toMatchObject({
+      pattern: "Exact line",
+      content: "Replacement",
+    });
+
+    // Two trailing line breaks leave a newline, which str_replace rejects.
+    vi.mocked(reader.text).mockResolvedValueOnce("Two lines\n\n");
+    await expect(
+      normalize(
+        ["docs", "update"],
+        [
+          "document_one",
+          "--command",
+          "str_replace",
+          "--pattern-file",
+          "multi.txt",
+          "--content",
+          "Replacement",
+        ],
+      ),
+    ).rejects.toThrow();
+
+    vi.mocked(reader.text).mockClear();
+    await expect(
+      normalize(
+        ["docs", "update"],
+        [
+          "document_one",
+          "--command",
+          "str_replace",
+          "--pattern",
+          "Draft",
+          "--pattern-file",
+          "pattern.txt",
+          "--content",
+          "Final",
+        ],
+      ),
+    ).rejects.toThrow("--pattern, --pattern-file cannot be used together.");
+    expect(reader.text).not.toHaveBeenCalled();
+
+    vi.mocked(reader.text).mockClear();
+    await expect(
+      normalize(
+        ["docs", "update"],
+        ["document_one", "--command", "str_replace", "--pattern-file", "-"],
+      ),
+    ).rejects.toThrow("One of --content, --file is required.");
+    expect(reader.text).not.toHaveBeenCalled();
+
+    expect(() =>
+      parseArguments(
+        [
+          "document_one",
+          "--command",
+          "str_replace",
+          "--pattern-file",
+          "-",
+          "--file",
+          "-",
+        ],
+        command("docs", "update").options,
+      ),
+    ).toThrow("Only one input may read stdin.");
+
+    await expect(
+      normalize(
+        ["docs", "update"],
+        [
+          "document_one",
+          "--command",
+          "append",
+          "--pattern-file",
+          "pattern.txt",
+          "--content",
+          "More",
+        ],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      normalize(
+        ["docs", "update"],
+        [
+          "document_one",
+          "--command",
+          "set_title",
+          "--title",
+          "New",
+          "--pattern-file",
+          "pattern.txt",
+        ],
+      ),
+    ).rejects.toThrow();
+  });
   it("maps duplicates only from validated replay flags and retains conflicts", () => {
     const def = command("docs", "update");
     expect(

@@ -103,6 +103,10 @@ info:
     runner.welcome whose service_features names dynamic_reasoning_efforts;
     runner.hello always filters to legacy efforts so older Agent Services can
     accept the connection.
+    Antigravity RunUsage entries report provider "antigravity" (instead of
+    "unknown") only after a runner.welcome whose service_features names
+    antigravity_usage_provider, so older Agent Services that do not accept
+    "antigravity" in RunUsage.provider never close the connection.
 x-frame-limits:
   maxBytes: 4194304
   maxDepth: 32

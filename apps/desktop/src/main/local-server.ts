@@ -116,6 +116,7 @@ import type {
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
+  SetupDetectedRuntime,
   SetupReason,
 } from "../shared/setup.js";
 
@@ -177,6 +178,8 @@ export type LocalModelsCheck =
       // The localmodels tool's pick for this computer, which Quick Install
       // installs; the page adds no rule of its own.
       readonly recommendation?: SetupChoice;
+      // Harnesses discovered on this computer during inspect.
+      readonly runtimes?: readonly SetupDetectedRuntime[];
     };
 
 // A download under way: its bytes so far and in all, and the rate when the
@@ -435,7 +438,8 @@ export interface LocalServerOptions {
   readonly freeDiskBytes?: (directory: string) => Promise<number | undefined>;
   // Where the Desktop Computer daemon stores its config and state
   // (<userData>/computer); validated on Windows during setup preflight so
-  // ancestor ACL refusals fail immediately instead of after installation.
+  // private-path validation failures (such as symlink/junction ancestors or
+  // foreign target ownership) fail immediately instead of after installation.
   readonly daemonDirectory?: string;
   // Checks Windows private-path safety for a candidate directory without
   // creating it or mutating ACLs; windowsPrivateLocation by default on Windows.
@@ -849,8 +853,8 @@ export class LocalServerModule implements Module {
   }
 
   // Pre-fetches the updated release's pinned localmodels tool and pre-stages
-  // its bundled source checkout, TeamHub binaries, and offline runtime into
-  // the enrolled home before the user restarts to apply an update.
+  // its bundled source checkout, TeamHub binaries, offline runtime, and
+  // shared Node.js binary before the user restarts to apply an update.
   async prepareUpdateTool(
     stagedBundle: string,
     signal: AbortSignal,
@@ -901,10 +905,42 @@ export class LocalServerModule implements Module {
         installerDirectory,
         effectiveSignal,
       ),
+      this.#prepareUpdateNode(installerDirectory, effectiveSignal),
     ]);
     effectiveSignal.throwIfAborted();
     const rejected = results.find((result) => result.status === "rejected");
     if (rejected) throw rejected.reason;
+  }
+
+  async #prepareUpdateNode(
+    installerDirectory: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted();
+    const bundle = await this.#bundledRuntime(installerDirectory);
+    signal.throwIfAborted();
+    const spec = this.#sharedNodeSpec(bundle, false);
+    if (!spec) return;
+    const source = this.#sharedBundledNodePath(false, installerDirectory);
+    if (!source) return;
+    const directory = this.#desktopDirectory("node", `v${spec.version}`);
+    const relativeBinary = path.join("bin", "node");
+    if (existsSync(path.join(directory, relativeBinary))) return;
+    const startedAt = Date.now();
+    const copied = await this.#copySharedNode(
+      source,
+      directory,
+      relativeBinary,
+      spec.sha256,
+      false,
+      signal,
+    );
+    if (copied) {
+      this.#ctx?.log.info("local_server.update_node_prepared", {
+        version: spec.version,
+        ms: Date.now() - startedAt,
+      });
+    }
   }
 
   async #resolveUpdateSource(
@@ -1485,6 +1521,7 @@ export class LocalServerModule implements Module {
     // A failed check prints null; its cause is in the logged stderr.
     const report = JSON.parse(output) as {
       recommendation?: unknown;
+      runtimes?: unknown;
       localModels?: {
         eligible?: unknown;
         state?: unknown;
@@ -1580,6 +1617,38 @@ export class LocalServerModule implements Module {
       (pick !== "local-models" || eligible)
         ? (pick as SetupChoice)
         : undefined;
+    const validRuntimes = new Set<SetupDetectedRuntime["runtime"]>([
+      "codex",
+      "claude",
+      "pi",
+    ]);
+    const runtimes: SetupDetectedRuntime[] = Array.isArray(report.runtimes)
+      ? report.runtimes.flatMap((entry): SetupDetectedRuntime[] => {
+          if (!entry || typeof entry !== "object") return [];
+          const row = entry as {
+            choice?: unknown;
+            installed?: unknown;
+            auth?: unknown;
+            status?: unknown;
+          };
+          if (
+            typeof row.choice !== "string" ||
+            !validRuntimes.has(row.choice as SetupDetectedRuntime["runtime"])
+          )
+            return [];
+          const installed = row.installed === true;
+          const authenticated = row.auth === "authenticated";
+          const ready = row.status === "ready" || (installed && authenticated);
+          return [
+            {
+              runtime: row.choice as SetupDetectedRuntime["runtime"],
+              installed,
+              authenticated,
+              ready,
+            },
+          ];
+        })
+      : [];
     const check: LocalModelsCheck = {
       state: "checked",
       eligible,
@@ -1606,6 +1675,7 @@ export class LocalServerModule implements Module {
         : {}),
       ...(reasons.length ? { reasons } : {}),
       ...(recommendation ? { recommendation } : {}),
+      ...(runtimes.length ? { runtimes } : {}),
     };
     return { check, reasonLog };
   }
@@ -2091,8 +2161,10 @@ export class LocalServerModule implements Module {
       );
       if (error) throw new Error(`${home}: ${error}`);
       // On Windows, pre-check both the install home and the Computer daemon
-      // directory (<userData>/computer) before unpacking so ancestor ACL
-      // refusals fail immediately instead of after installation and enrollment.
+      // directory (<userData>/computer) before unpacking so private-path
+      // validation failures (such as symlink/junction ancestors or foreign
+      // target ownership) fail immediately instead of after installation and
+      // enrollment.
       if (platform === "win32") {
         const checkPrivate =
           this.#options.checkPrivateLocation ?? windowsPrivateLocation;
@@ -2863,18 +2935,12 @@ export class LocalServerModule implements Module {
     // archive / folder copy inside runtime-<target>/.
     const bundle = await this.#bundledRuntime();
     const bundled = bundle?.node;
-    const expectedSharedBinary = isWindows
-      ? "runtime/bin/node.exe"
-      : "runtime/bin/node";
-    if (
-      bundle?.target === this.#target() &&
-      bundled?.shared === true &&
-      bundled.version === NODE_RUNTIME_VERSION &&
-      (bundled.binary === undefined ||
-        bundled.binary === expectedSharedBinary) &&
-      typeof bundled.sha256 === "string" &&
-      bundled.sha256.length > 0
-    ) {
+    const sharedNode = this.#sharedNodeSpec(
+      bundle,
+      isWindows,
+      NODE_RUNTIME_VERSION,
+    );
+    if (sharedNode) {
       const source = this.#sharedBundledNodePath(isWindows);
       if (source) {
         try {
@@ -2882,7 +2948,7 @@ export class LocalServerModule implements Module {
             source,
             directory,
             path.relative(directory, binary),
-            bundled.sha256,
+            sharedNode.sha256,
             isWindows,
             signal,
           );
@@ -2944,16 +3010,51 @@ export class LocalServerModule implements Module {
     return binary;
   }
 
-  #sharedBundledNodePath(isWindows: boolean): string | undefined {
+  #sharedNodeSpec(
+    bundle: BundledRuntime | undefined,
+    isWindows: boolean,
+    expectedVersion?: string,
+  ): { version: string; sha256: string } | undefined {
+    const bundled = bundle?.node;
+    const expectedSharedBinary = isWindows
+      ? "runtime/bin/node.exe"
+      : "runtime/bin/node";
+    if (
+      bundle?.target !== this.#target() ||
+      bundled?.shared !== true ||
+      typeof bundled.version !== "string" ||
+      !/^[0-9]+(?:\.[0-9]+){1,2}(?:-[0-9A-Za-z.-]+)?$/.test(bundled.version) ||
+      (expectedVersion !== undefined && bundled.version !== expectedVersion) ||
+      (bundled.binary !== undefined &&
+        bundled.binary !== expectedSharedBinary) ||
+      typeof bundled.sha256 !== "string" ||
+      bundled.sha256.length === 0
+    )
+      return undefined;
+    return { version: bundled.version, sha256: bundled.sha256 };
+  }
+
+  #sharedBundledNodePath(
+    isWindows: boolean,
+    installerDirectory?: string,
+  ): string | undefined {
     const candidate =
-      this.#options.bundledNodePath ??
-      path.resolve(
-        this.#options.installerDirectory,
-        "../../..",
-        "runtime",
-        "bin",
-        isWindows ? "node.exe" : "node",
-      );
+      installerDirectory !== undefined
+        ? path.resolve(
+            installerDirectory,
+            "../../..",
+            "runtime",
+            "bin",
+            isWindows ? "node.exe" : "node",
+          )
+        : (this.#options.bundledNodePath ??
+          path.resolve(
+            this.#options.installerDirectory,
+            "../../..",
+            "runtime",
+            "bin",
+            isWindows ? "node.exe" : "node",
+          ));
     return existsSync(candidate) ? candidate : undefined;
   }
 
@@ -2967,25 +3068,31 @@ export class LocalServerModule implements Module {
     sha256: string,
     isWindows: boolean,
     signal: AbortSignal,
-  ): Promise<void> {
-    if (existsSync(path.join(directory, relativeBinary))) return;
-    const copied = `${directory}.partial`;
-    const target = path.join(copied, relativeBinary);
-    try {
-      await removeRetrying(copied);
-      await mkdir(path.dirname(target), { recursive: true });
-      await copyFile(source, target, fsConstants.COPYFILE_FICLONE);
-      const hash = createHash("sha256");
-      for await (const chunk of createReadStream(target, { signal }))
-        hash.update(chunk as Buffer);
-      if (hash.digest("hex") !== sha256)
-        throw new Error(`The bundled ${relativeBinary} is damaged`);
-      if (!isWindows) await chmod(target, 0o755);
-      await this.#unquarantine(copied, signal, [target, source]);
-      await this.#publish(copied, directory, relativeBinary, signal);
-    } finally {
-      await removeRetrying(copied);
-    }
+  ): Promise<boolean> {
+    if (existsSync(path.join(directory, relativeBinary))) return false;
+    let copiedAny = false;
+    await this.#stageDirectory(directory, signal, async () => {
+      if (existsSync(path.join(directory, relativeBinary))) return;
+      const copied = `${directory}.partial`;
+      const target = path.join(copied, relativeBinary);
+      try {
+        await removeRetrying(copied);
+        await mkdir(path.dirname(target), { recursive: true });
+        await copyFile(source, target, fsConstants.COPYFILE_FICLONE);
+        const hash = createHash("sha256");
+        for await (const chunk of createReadStream(target, { signal }))
+          hash.update(chunk as Buffer);
+        if (hash.digest("hex") !== sha256)
+          throw new Error(`The bundled ${relativeBinary} is damaged`);
+        if (!isWindows) await chmod(target, 0o755);
+        await this.#unquarantine(copied, signal, [target, source]);
+        await this.#publish(copied, directory, relativeBinary, signal);
+        copiedAny = true;
+      } finally {
+        await removeRetrying(copied);
+      }
+    });
+    return copiedAny;
   }
 
   // The source package, unpacked once into the installation folder; or the
@@ -6217,10 +6324,21 @@ export async function unpackArchive(
       );
       return;
     }
+    // Windows' tar.exe reads argv in the ANSI code page, so pass a relative path
+    // from the resolved destination when both share a drive; POSIX tar is UTF-8
+    // native and takes the archive path directly without symlink depth drift.
+    let archiveArg = file;
+    let cwd = unpacked;
+    if (platform === "win32") {
+      const realUnpacked = await realpath(unpacked).catch(() => unpacked);
+      const realFile = await realpath(file).catch(() => file);
+      archiveArg = path.relative(realUnpacked, realFile);
+      cwd = realUnpacked;
+    }
     await runCommand(
       command,
-      ["-xf", path.relative(unpacked, file), "--strip-components=1"],
-      unpacked,
+      ["-xf", archiveArg, "--strip-components=1"],
+      cwd,
       signal,
     );
   } catch (error) {

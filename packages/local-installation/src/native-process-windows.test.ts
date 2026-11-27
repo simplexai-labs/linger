@@ -1,3 +1,8 @@
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   parseWindowsListeners,
@@ -266,5 +271,140 @@ describe("windowsOrphans", () => {
       { ...options, ports: [7880] },
     );
     expect(order).toEqual([]);
+  });
+});
+
+describe("native-process-worker Windows stop_requested fast exit", () => {
+  async function runSimulatedWin32Worker(options: {
+    name: string;
+    withStopFile: boolean;
+    restart?: {
+      delaysMs: number[];
+      windowMs: number;
+      limit: number;
+      armAfterMs: number;
+    };
+  }) {
+    const root = await mkdtemp(path.join(tmpdir(), "worker-win32-"));
+    try {
+      const processesDir = path.join(root, "native", "processes");
+      const logsDir = path.join(root, "native", "logs");
+      await mkdir(processesDir, { recursive: true, mode: 0o700 });
+      await mkdir(logsDir, { recursive: true, mode: 0o700 });
+      const jobFile = path.join(processesDir, `${options.name}.${lease}.job`);
+      const stopFile = path.join(processesDir, `${options.name}.${lease}.stop`);
+      const logFile = path.join(logsDir, `${options.name}.log`);
+      const probeFile = path.join(root, "lease-probe.log");
+      await writeFile(
+        jobFile,
+        JSON.stringify({
+          name: options.name,
+          executable: process.execPath,
+          args: ["-e", "setTimeout(() => process.exit(0), 25)"],
+          cwd: root,
+          env: {
+            PATH: process.env.PATH ?? "",
+            LINGER_NATIVE_PROCESS_LEASE: lease,
+          },
+          ...(options.restart ? { restart: options.restart } : {}),
+          log: logFile,
+          redactions: [],
+        }),
+        { mode: 0o600 },
+      );
+      if (options.withStopFile) {
+        await writeFile(stopFile, "", { mode: 0o600 });
+      }
+      const workerUrl = new URL("./native-process-worker.mjs", import.meta.url)
+        .href;
+      const identityUrl = new URL(
+        "./native-process-identity.ts",
+        import.meta.url,
+      ).href;
+      const harness = `
+        import { registerHooks } from "node:module";
+        Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+        const identityUrl = ${JSON.stringify(identityUrl)};
+        const probeFile = ${JSON.stringify(probeFile)};
+        registerHooks({
+          load(url, context, nextLoad) {
+            if (url === identityUrl) {
+              return {
+                format: "module",
+                shortCircuit: true,
+                source: \`
+                  import { appendFileSync } from "node:fs";
+                  export async function nativeLeaseProcesses() {
+                    appendFileSync(\${JSON.stringify(probeFile)}, "checked\\\\n");
+                    return [];
+                  }
+                  export async function nativeProcessIdentity() {
+                    return undefined;
+                  }
+                \`,
+              };
+            }
+            return nextLoad(url, context);
+          },
+        });
+        process.argv = [process.execPath, ${JSON.stringify(fileURLToPath(workerUrl))}, ${JSON.stringify(jobFile)}];
+        await import(${JSON.stringify(workerUrl)});
+      `;
+      const child = spawn(
+        process.execPath,
+        ["--input-type=module", "-e", harness],
+        {
+          env: {
+            ...process.env,
+            LINGER_NATIVE_PROCESS_LEASE: lease,
+          },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      });
+      const log = await readFile(logFile, "utf8").catch(() => "");
+      const probe = await readFile(probeFile, "utf8").catch(() => "");
+      return { code, stderr, log, leaseChecked: probe.length > 0 };
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it("skips nativeLeaseProcesses on win32 when .stop is present for supervised services", async () => {
+    const result = await runSimulatedWin32Worker({
+      name: "web",
+      withStopFile: true,
+      restart: { delaysMs: [100], windowMs: 10_000, limit: 3, armAfterMs: 0 },
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.log).toContain("restart=no reason=stop_requested");
+    expect(result.leaseChecked).toBe(false);
+  });
+
+  it("skips nativeLeaseProcesses on win32 when .stop is present for unsupervised services", async () => {
+    const result = await runSimulatedWin32Worker({
+      name: "postgres",
+      withStopFile: true,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.log).toContain("restart=no reason=not_supervised");
+    expect(result.leaseChecked).toBe(false);
+  });
+
+  it("runs nativeLeaseProcesses on win32 when exiting without a .stop file", async () => {
+    const result = await runSimulatedWin32Worker({
+      name: "postgres",
+      withStopFile: false,
+    });
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.log).toContain("restart=no reason=not_supervised");
+    expect(result.leaseChecked).toBe(true);
   });
 });

@@ -16,7 +16,9 @@ import {
 import {
   fieldValues,
   generationPrices,
+  parameterFileValues,
   prose,
+  reservedParameterNames,
   type GenerationProvider,
 } from "./connector-media.js";
 import {
@@ -49,6 +51,9 @@ export const generationCommandDefinitions: CommandDefinition[] = [
         "Provider model ID; required for generation and job lookup.",
       ),
       "--prompt": value("What to generate; required for generation."),
+      "--prompt-file": value(
+        "Read the UTF-8 generation prompt from a file or - for stdin; exclusive with --prompt.",
+      ),
       "--price": toggle(
         "Read model prices without starting a job; --model selects one model and its parameters.",
       ),
@@ -59,6 +64,9 @@ export const generationCommandDefinitions: CommandDefinition[] = [
       "--set": value(
         "Model parameter as field=value; repeatable. JSON values keep their types.",
         true,
+      ),
+      "--params-file": value(
+        "Read a JSON object of model parameters from a file or - for stdin; preserves nested JSON types.",
       ),
       "--file": value(
         "Reference input as field=local-path; repeatable. Use a fal input field or a Higgsfield media role.",
@@ -73,7 +81,7 @@ export const generationCommandDefinitions: CommandDefinition[] = [
       ),
     },
     usage: [
-      `teamhub ${type}-gen --provider <provider> --model <model-id> --prompt <text> [flags]`,
+      `teamhub ${type}-gen --provider <provider> --model <model-id> (--prompt <text> | --prompt-file <path|->) [flags]`,
       `teamhub ${type}-gen --provider <provider> --price [--model <model-id>] [flags]`,
       `teamhub ${type}-gen --provider <provider> --model <model-id> --job <job-id> [flags]`,
     ],
@@ -91,7 +99,7 @@ export const generationCommandDefinitions: CommandDefinition[] = [
     notes: [
       "Generation spends the selected connected account's balance. --price returns fal unit prices; Higgsfield reports pricingStatus=unavailable because its model catalog exposes no price table. No estimate is substituted and no job starts.",
       "Generation returns as soon as the provider accepts the job; it does not wait for the result. Run the returned nextCommand later to check the job once; it saves to --output when the job has finished. Never repeat a paid submission after an unknown outcome.",
-      "--price --model also shows model-specific parameters and reference inputs. Pass those parameters with --set and local reference files with --file.",
+      "--price --model also shows model-specific parameters and reference inputs. Pass those parameters with --set or --params-file, the prompt with --prompt or --prompt-file, and local reference files with --file.",
       "A single result is saved as delivered under the requested name. A warning reports a mismatched file extension; no conversion is performed.",
     ],
     inputSchema: schema(
@@ -143,7 +151,13 @@ export const generationCommandDefinitions: CommandDefinition[] = [
           usage("--model must be a provider model ID from --price.");
       }
       if (mode !== "generate") {
-        for (const flag of ["--prompt", "--set", "--file"])
+        for (const flag of [
+          "--prompt",
+          "--prompt-file",
+          "--set",
+          "--params-file",
+          "--file",
+        ])
           if (args.options[flag])
             usage(`${flag} is only available for generation.`);
       }
@@ -182,24 +196,32 @@ export const generationCommandDefinitions: CommandDefinition[] = [
           );
         input.jobIds = [...new Set(jobIds)];
       } else {
-        const parameters = {
-          prompt: prose(option(args, "--prompt"), "--prompt"),
-          ...fieldValues(args),
-        };
-        for (const name of [
-          "model",
-          "prompt",
-          "get_cost",
-          "__proto__",
-          "constructor",
-          "prototype",
-        ])
+        const inlinePrompt = option(args, "--prompt");
+        const promptFile = option(args, "--prompt-file");
+        if (inlinePrompt !== undefined && promptFile !== undefined)
+          throw conflictingFlags(["--prompt", "--prompt-file"]);
+        const prompt =
+          promptFile !== undefined
+            ? prose(
+                await reader.text(promptFile, "--prompt-file"),
+                "--prompt-file",
+              )
+            : prose(inlinePrompt, "--prompt");
+        const fileParams = await parameterFileValues(args, reader);
+        const setParams = fieldValues(args);
+        for (const name of reservedParameterNames)
           if (
             values(args, "--set").some(
               (item) => item.slice(0, item.indexOf("=")) === name,
             )
           )
             usage(`Use the dedicated flags instead of --set ${name}.`);
+        const parameters: Json = { prompt, ...fileParams };
+        for (const [key, value] of Object.entries(setParams)) {
+          if (Object.hasOwn(fileParams, key))
+            usage(`${key} is set by more than one flag.`);
+          parameters[key] = value;
+        }
         input.parameters = parameters;
         const files = values(args, "--file").map((item) => {
           const at = item.indexOf("=");

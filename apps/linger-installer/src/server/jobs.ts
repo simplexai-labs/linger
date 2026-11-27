@@ -251,7 +251,8 @@ export class JobManager {
       ...(value.state ? { state: value.state } : {}),
       ...(value.progress ? { progress: value.progress } : {}),
     };
-    if (value.stage) {
+    const terminal = !active(record.job);
+    if (value.stage && !terminal) {
       record.job.stage = value.stage;
       const stage = record.job.stages.find((item) => item.id === value.stage);
       if (stage && value.progress)
@@ -266,7 +267,10 @@ export class JobManager {
       }
     }
     record.job.updatedAt = event.at;
-    record.job.message = event.message;
+    // Never let a late parallel log line overwrite a terminal failure/success message.
+    if (!terminal || value.kind === "state") {
+      record.job.message = event.message;
+    }
     // A copy or download reports progress per chunk. Each update replaces the
     // previous one of the same step, so progress cannot push the log lines
     // out of the 500 retained events. Replay is by sequence, so a client that

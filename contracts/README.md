@@ -119,17 +119,23 @@ Progress and outcomes travel back only as snapshots:
    features); otherwise the Daemon strips it. `[]` means localmodels found no
    closeable app, while an absent field means not reported.
    `service_features` also declares `local_model_unavailable`,
-   `model_gateway_unavailable`, and `dynamic_reasoning_efforts` to every
-   Computer that receives the field: a Daemon ignores a feature it does not
-   know, one that knows `local_model_unavailable` reports a Pi Run whose local
-   model it could not load with that Run failure code instead of
-   `model_unavailable`, one that knows `model_gateway_unavailable` reports a
-   Run whose local model gateway it could not start or reach with
-   `model_gateway_unavailable` instead of `execution_failed`, and one that
-   knows `dynamic_reasoning_efforts` publishes model-advertised reasoning
-   efforts beyond the legacy 7-value set in `runner.runtime_diagnostics` (and
-   `ModelSourceStatus`) after filtering `runner.hello` to legacy values for
-   older Agent Services.
+   `model_gateway_unavailable`, `dynamic_reasoning_efforts`, and
+   `antigravity_usage_provider` to every Computer that receives the field: a
+   Daemon ignores a feature it does not know, one that knows
+   `local_model_unavailable` reports a Pi Run whose local model it could not
+   load with that Run failure code instead of `model_unavailable`, one that
+   knows `model_gateway_unavailable` reports a Run whose local model gateway it
+   could not start or reach with `model_gateway_unavailable` instead of
+   `execution_failed`, one that knows `dynamic_reasoning_efforts` publishes
+   model-advertised reasoning efforts beyond the legacy 7-value set in
+   `runner.runtime_diagnostics` (and `ModelSourceStatus`) after filtering
+   `runner.hello` to legacy values for older Agent Services, and one that knows
+   `antigravity_usage_provider` reports Antigravity `RunUsage` entries with
+   `provider: "antigravity"` (downgrading new and retained/replayed entries to
+   `"unknown"` when connected to an older Agent Service that does not advertise
+   it). During rolling deploys, roll out TeamHub accepting `"antigravity"`
+   before the Agent Service advertises `antigravity_usage_provider`, so older
+   TeamHub instances do not skip `"antigravity"` usage entries.
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last

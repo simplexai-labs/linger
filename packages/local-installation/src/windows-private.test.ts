@@ -176,6 +176,28 @@ it("validates structured failure payloads including language mode checks", () =>
   expect(
     parseWindowsPrivateFailure(
       JSON.stringify({
+        code: "UNSAFE_PARENT_LINK",
+        ancestor: "D:\\link",
+      }),
+    ),
+  ).toEqual({
+    reason: "UNSAFE_PARENT_LINK",
+    ancestor: "D:\\link",
+  });
+  expect(
+    parseWindowsPrivateFailure(
+      JSON.stringify({
+        code: "SHARED_ACCESS",
+        sid: "S-1-1-0",
+      }),
+    ),
+  ).toEqual({
+    reason: "SHARED_ACCESS",
+    sid: "S-1-1-0",
+  });
+  expect(
+    parseWindowsPrivateFailure(
+      JSON.stringify({
         code: "UNSAFE_PARENT_OWNER",
         ancestor: "C:\\Users\\person",
         sid: "not-a-sid",
@@ -205,7 +227,7 @@ it("gives every failure in the ACL program a fixed reason code", () => {
   for (const code of thrown) expect(code).toMatch(/^[A-Z][A-Z_]+$/);
 });
 
-it("ignores inherit-only ACEs only for effective ancestor permissions", () => {
+it("enforces strict target DACL rules while checking ancestors only for links", () => {
   const ancestors = WINDOWS_PRIVATE_SCRIPT.slice(
     WINDOWS_PRIVATE_SCRIPT.indexOf("while ($parent)"),
     WINDOWS_PRIVATE_SCRIPT.indexOf("if ($request.kind -ne 'location')"),
@@ -213,9 +235,9 @@ it("ignores inherit-only ACEs only for effective ancestor permissions", () => {
   const target = WINDOWS_PRIVATE_SCRIPT.slice(
     WINDOWS_PRIVATE_SCRIPT.indexOf("$currentAllowed = $false"),
   );
-  expect(ancestors).toContain(
-    "$rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly",
-  );
+  expect(ancestors).toContain("ReparsePoint");
+  expect(ancestors).toContain("UNSAFE_PARENT_LINK");
+  expect(ancestors).not.toContain("Get-Acl");
   expect(target).not.toContain("PropagationFlags");
   expect(target).toContain("SHARED_ACCESS");
   expect(WINDOWS_PRIVATE_SCRIPT).toContain(
@@ -231,9 +253,6 @@ it("ignores inherit-only ACEs only for effective ancestor permissions", () => {
   expect(WINDOWS_PRIVATE_WORKER_SCRIPT).toContain("Ensure-LingerWin32Native");
   expect(WINDOWS_PRIVATE_WORKER_SCRIPT).not.toContain("Add-Type");
   expect(WINDOWS_PRIVATE_WORKER_SCRIPT).toContain("$script:isAdministrator");
-  expect(WINDOWS_PRIVATE_WORKER_SCRIPT).toContain(
-    "$replace = 'DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'",
-  );
 });
 
 it("hands on the code and reason of a refusal, and nothing else", async () => {

@@ -1,9 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type {
   CommandArguments,
   CommandInputReader,
 } from "./command-definition.js";
+import { createInputReader, parseArguments } from "./command-input.js";
+import { CliError } from "./errors.js";
 import { messageCommandDefinitions } from "./message-commands.js";
+
+const tempDirs: string[] = [];
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
+});
 
 function args(
   entries: readonly [string, string][] = [],
@@ -193,6 +205,204 @@ describe("redesigned message inputs", () => {
       ).rejects.toThrow();
     }
   });
+  it("rejects structured segments JSON envelopes passed to --content", async () => {
+    const payload =
+      '{"segments":[{"type":"text","content":"Done\\nNext\\t\\u4f60\\u597d"},{"type":"fragment","title":"Bike","content-path":"./playground/room_1/bike.html"}]}';
+    const rejection = command("send").normalize(
+      args([["--content", payload]]),
+      reader,
+    );
+    await expect(rejection).rejects.toBeInstanceOf(CliError);
+    await expect(rejection).rejects.toMatchObject({
+      code: "invalid_input",
+      message:
+        '--content sends plain text, not a structured message JSON envelope. Use --message <JSON> (or --message-file <path|->) for {"segments":[...]}.',
+      details: {
+        issues: [
+          {
+            path: "--content",
+            code: "invalid_value",
+            message:
+              'received a {"segments":[...]} JSON envelope; pass it with --message or --message-file instead.',
+          },
+        ],
+      },
+    });
+    // The same payload succeeds through --message.
+    await expect(
+      command("send").normalize(args([["--message", payload]]), reader),
+    ).resolves.toMatchObject({
+      input: {
+        message_segments: [
+          { type: "text", content: "Done\nNext\t\u4f60\u597d" },
+          {
+            type: "fragment",
+            title: "Bike",
+            "content-path": "./playground/room_1/bike.html",
+          },
+        ],
+      },
+    });
+  });
+  it("rejects structured segments JSON envelopes passed to --file", async () => {
+    const payload =
+      '\n  {"segments":[{"type":"text","content":"Summary"},{"type":"document","document_id":"doc_1","content":"Spec","presentation":"card"}]}\n';
+    for (const source of ["-", "msg.json"]) {
+      const fileReader: CommandInputReader = {
+        ...reader,
+        text: async () => payload,
+        json: async () => JSON.parse(payload),
+      };
+      const rejection = command("send").normalize(
+        args([["--file", source]]),
+        fileReader,
+      );
+      await expect(rejection).rejects.toBeInstanceOf(CliError);
+      await expect(rejection).rejects.toMatchObject({
+        code: "invalid_input",
+        message:
+          '--file sends plain text, not a structured message JSON envelope. Use --message-file <path|-> (or --message <JSON>) for {"segments":[...]}.',
+        details: {
+          issues: [
+            {
+              path: "--file",
+              code: "invalid_value",
+              message:
+                'received a {"segments":[...]} JSON envelope; pass it with --message-file instead.',
+            },
+          ],
+        },
+      });
+      await expect(
+        command("send").normalize(
+          args([["--message-file", source]]),
+          fileReader,
+        ),
+      ).resolves.toMatchObject({
+        input: {
+          message_segments: [
+            { type: "text", content: "Summary" },
+            {
+              type: "document",
+              document_id: "doc_1",
+              content: "Spec",
+              presentation: "card",
+            },
+          ],
+        },
+      });
+    }
+  });
+  it("rejects structured envelopes on --content even with --attach or an incomplete fragment", async () => {
+    await expect(
+      command("send").normalize(
+        args([
+          ["--content", '{"segments":[{"type":"text","content":"Done"}]}'],
+          ["--attach", "./a.pdf"],
+        ]),
+        reader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      details: { issues: [{ path: "--content", code: "invalid_value" }] },
+    });
+    await expect(
+      command("send").normalize(
+        args([
+          [
+            "--content",
+            '{"segments":[{"type":"fragment","content-path":"./a.html"}]}',
+          ],
+        ]),
+        reader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      details: { issues: [{ path: "--content", code: "invalid_value" }] },
+    });
+  });
+  it("rejects structured envelopes with inline escape whitespace, minimal segments, or unlisted segment types", async () => {
+    for (const payload of [
+      '\\n{"segments":[{"type":"text","content":"Done"}]}\\n',
+      '{\\n\\t"segments": [{"type": "text", "content": "Done"}]\\n}',
+      '{"segments":[{"type":"text"}]}',
+      '{"segments":[{"type":"future_widget","data":"x"}]}',
+      '{"segments":[{"type":"text","content":"Done"},{"type":"file","content-path":"./bike.html"}]}',
+      '{"segments":[{"type":"html_fragment","html":"<p>Hi</p>"}]}',
+    ]) {
+      await expect(
+        command("send").normalize(args([["--content", payload]]), reader),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        details: { issues: [{ path: "--content", code: "invalid_value" }] },
+      });
+    }
+    for (const payload of [
+      '{"segments":[{"type":"text"}]}',
+      '{"segments":[{"type":"future_widget","data":"x"}]}',
+      '{"segments":[{"type":"text","content":"Done"},{"type":"file","content-path":"./bike.html"}]}',
+      '{"segments":[{"type":"html_fragment","html":"<p>Hi</p>"}]}',
+    ]) {
+      await expect(
+        command("send").normalize(args([["--file", "-"]]), {
+          ...reader,
+          text: async () => payload,
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        details: { issues: [{ path: "--file", code: "invalid_value" }] },
+      });
+    }
+  });
+  it("allows prose, fenced code blocks, and unrelated JSON on --content and --file", async () => {
+    const allowedBodies = [
+      'Example: {"segments":[{"type":"text","content":"hi"}]}',
+      '```json\n{"segments":[{"type":"text","content":"hi"}]}\n```',
+      '{"status":"ok"}',
+      '{"segments":[1,2,3]}',
+      '{"segments":[]}',
+      '{"segments":[{"id":1,"name":"q1"}]}',
+      '{"segments":[{"type":123}]}',
+      '{"segments":[{"type":"text","content":"hi"}],"extra":true}',
+    ];
+    for (const body of allowedBodies) {
+      await expect(
+        command("send").normalize(args([["--content", body]]), reader),
+      ).resolves.toMatchObject({
+        input: { message_segments: [{ type: "text", content: body }] },
+      });
+      await expect(
+        command("send").normalize(args([["--file", "-"]]), {
+          ...reader,
+          text: async () => body,
+        }),
+      ).resolves.toMatchObject({
+        input: { message_segments: [{ type: "text", content: body }] },
+      });
+    }
+    // Fenced Markdown JSON with inline \n escapes remains allowed on --content.
+    await expect(
+      command("send").normalize(
+        args([
+          [
+            "--content",
+            '```json\\n{"segments":[{"type":"text","content":"hi"}]}\\n```',
+          ],
+        ]),
+        reader,
+      ),
+    ).resolves.toMatchObject({
+      input: {
+        message_segments: [
+          {
+            type: "text",
+            content:
+              '```json\\n{"segments":[{"type":"text","content":"hi"}]}\\n```',
+          },
+        ],
+      },
+    });
+  });
   it("maps reply-to independently of the envelope and retains attachments in order", async () => {
     const result = await command("send").normalize(
       args([
@@ -301,6 +511,82 @@ describe("redesigned message inputs", () => {
       [
         ["--inbox", "room:x"],
         ["--message-ids", "a"],
+      ],
+    ] as [string, string][][]) {
+      await expect(
+        command("read").normalize(args(entries), reader),
+      ).rejects.toThrow();
+    }
+  });
+  it("reads exact messages in order via repeatable --message-id and rejects conflicts or duplicates", async () => {
+    expect(
+      (
+        await command("read").normalize(
+          args([["--message-id", "message_one"]]),
+          reader,
+        )
+      ).input,
+    ).toEqual({ message_ids: ["message_one"] });
+    expect(
+      (
+        await command("read").normalize(
+          args([
+            ["--message-id", " message_b "],
+            ["--message-id", "message_a"],
+          ]),
+          reader,
+        )
+      ).input,
+    ).toEqual({ message_ids: ["message_b", "message_a"] });
+    await expect(
+      command("read").normalize(
+        args([
+          ["--message-id", "message_a"],
+          ["--message-id", "message_a"],
+        ]),
+        reader,
+      ),
+    ).rejects.toThrow("--message-id cannot contain duplicate IDs.");
+    await expect(
+      command("read").normalize(
+        args(
+          Array.from(
+            { length: 51 },
+            (_, i) => ["--message-id", `message_${i}`] as [string, string],
+          ),
+        ),
+        reader,
+      ),
+    ).rejects.toThrow("--message-id must contain 1-50 items.");
+    await expect(
+      command("read").normalize(
+        args([
+          ["--message-id", "message_a"],
+          ["--message-ids", "message_b"],
+        ]),
+        reader,
+      ),
+    ).rejects.toThrow("--message-id, --message-ids cannot be used together.");
+    for (const entries of [
+      [
+        ["--message-id", "message_a"],
+        ["--thread", "thread_one"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--inbox", "room:room_one"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--list-inboxes", "true"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--limit", "5"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--cursor", "cursor_1"],
       ],
     ] as [string, string][][]) {
       await expect(
@@ -470,6 +756,150 @@ describe("message ask-user", () => {
     ).resolves.toEqual({
       input: { thread_id: "thread_one", title: "Venue", questions: [radio] },
     });
+  });
+  it("reads questions from --questions-file (file with UTF-8 BOM or stdin) and reports actionable errors", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "teamhub-ask-user-"));
+    tempDirs.push(dir);
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const payload = [
+      radio,
+      { question: "Sides?", options: ["Egg", "Tofu"], multiple: true },
+    ];
+    await writeFile(
+      path.join(dir, "questions.json"),
+      Buffer.concat([bom, Buffer.from(JSON.stringify(payload), "utf8")]),
+    );
+    const fsReader = createInputReader({ cwd: dir });
+    await expect(
+      command("ask-user").normalize(
+        parseArguments(
+          ["--title", "Lunch order", "--questions-file", "questions.json"],
+          command("ask-user").options,
+        ),
+        fsReader,
+      ),
+    ).resolves.toEqual({
+      input: { title: "Lunch order", questions: payload },
+    });
+
+    const stdinReader = createInputReader({
+      cwd: dir,
+      readInput: async (source) => {
+        expect(source).toBe("-");
+        return JSON.stringify([radio]);
+      },
+    });
+    await expect(
+      command("ask-user").normalize(
+        parseArguments(
+          ["--title", "Lunch order", "--questions-file", "-"],
+          command("ask-user").options,
+        ),
+        stdinReader,
+      ),
+    ).resolves.toEqual({
+      input: { title: "Lunch order", questions: [radio] },
+    });
+
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions", JSON.stringify([radio])],
+          ["--questions-file", "questions.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toThrow("--questions, --questions-file cannot be used together.");
+
+    await expect(
+      command("ask-user").normalize(args([["--title", "Lunch order"]]), reader),
+    ).rejects.toThrow("One of --questions, --questions-file is required.");
+
+    expect(() =>
+      parseArguments(
+        ["--title", "Lunch order", "--questions", "-"],
+        command("ask-user").options,
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: "invalid_input",
+        details: {
+          issues: [
+            expect.objectContaining({
+              path: "--questions",
+              message:
+                '"-" would be read as literal text; to read stdin use --questions-file -.',
+            }),
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions", "[{question:Where?}]"],
+        ]),
+        reader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message: expect.stringContaining("--questions-file <path|->"),
+    });
+
+    await writeFile(path.join(dir, "broken.json"), "[{question:1}]", "utf8");
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions-file", "broken.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message: "--questions-file is not valid JSON.",
+      details: {
+        issues: [
+          expect.objectContaining({
+            path: "--questions-file",
+            code: "invalid_json",
+          }),
+        ],
+      },
+    });
+
+    await writeFile(path.join(dir, "empty.json"), "[]", "utf8");
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions-file", "empty.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toThrow(
+      "--questions-file must be a JSON array of 1 to 20 questions.",
+    );
+
+    await writeFile(
+      path.join(dir, "double-encoded.json"),
+      JSON.stringify(JSON.stringify([radio])),
+      "utf8",
+    );
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions-file", "double-encoded.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toThrow(
+      "--questions-file must be a JSON array, not a string of encoded JSON.",
+    );
   });
 });
 

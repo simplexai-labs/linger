@@ -10,6 +10,40 @@ import { privateDirectory } from "./private-files.js";
 // rename to Linger made such a database without the baseline.
 export const TEAMHUB_BASELINE_VERSION = 852;
 
+const PUBLIC_ACCOUNTS_SQL = "to_regclass('public.accounts') IS NOT NULL";
+const PUBLIC_GOOSE_VERSION_SQL =
+  "to_regclass('public.goose_db_version') IS NOT NULL";
+const TEAMHUB_BASELINE_APPLIED_SQL = `EXISTS (SELECT 1 FROM public.goose_db_version WHERE version_id = ${TEAMHUB_BASELINE_VERSION} AND is_applied)`;
+
+// Combined readiness, database-existence, and pre-Linger schema probe for
+// an already-initialized cluster. Connecting directly to `simplexai` proves
+// server readiness and database existence in one subprocess, while `\gset`
+// and `\if` avoid touching `public.goose_db_version` when it does not exist.
+export const WARM_DATABASE_PROBE_SQL = [
+  `SELECT ${PUBLIC_ACCOUNTS_SQL} AS has_accounts, ${PUBLIC_GOOSE_VERSION_SQL} AS has_versions \\gset`,
+  "\\if :has_accounts",
+  "\\if :has_versions",
+  `SELECT CASE WHEN ${TEAMHUB_BASELINE_APPLIED_SQL} THEN 'linger' ELSE 'legacy' END;`,
+  "\\else",
+  "SELECT 'legacy';",
+  "\\endif",
+  "\\else",
+  "SELECT 'empty';",
+  "\\endif",
+  "",
+].join("\n");
+
+export type WarmDatabaseProbeResult = "linger" | "empty" | "legacy";
+
+export function parseWarmDatabaseProbe(
+  stdout: string,
+): WarmDatabaseProbeResult | undefined {
+  const state = stdout.trim();
+  return state === "linger" || state === "empty" || state === "legacy"
+    ? state
+    : undefined;
+}
+
 // Whether the database holds a TeamHub schema that the baseline never
 // created, so no migration can ever apply to it. `query` returns psql's
 // unaligned output for one statement.
@@ -17,21 +51,13 @@ export async function preLingerSchema(
   query: (sql: string) => Promise<string>,
 ): Promise<boolean> {
   const [accounts, versions] = (
-    await query(
-      "SELECT to_regclass('public.accounts') IS NOT NULL, to_regclass('public.goose_db_version') IS NOT NULL",
-    )
+    await query(`SELECT ${PUBLIC_ACCOUNTS_SQL}, ${PUBLIC_GOOSE_VERSION_SQL}`)
   )
     .trim()
     .split("|");
   if (accounts !== "t") return false;
   if (versions !== "t") return true;
-  return (
-    (
-      await query(
-        `SELECT EXISTS (SELECT 1 FROM public.goose_db_version WHERE version_id = ${TEAMHUB_BASELINE_VERSION} AND is_applied)`,
-      )
-    ).trim() !== "t"
-  );
+  return (await query(`SELECT ${TEAMHUB_BASELINE_APPLIED_SQL}`)).trim() !== "t";
 }
 
 // The instance data that belongs to a database. A database from before
