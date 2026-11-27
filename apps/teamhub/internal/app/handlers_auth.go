@@ -80,7 +80,7 @@ func (a *App) login(c *gin.Context) {
 		a.internalError(c, "generate session token", err)
 		return
 	}
-	expiresAt := time.Now().UTC().Add(a.cfg.SessionTTL)
+	expiresAt := time.Now().UTC().Add(a.cfg.EffectiveSessionTTL())
 	// The database stores only the token digest; the random raw token is returned to the client only in an HttpOnly Cookie.
 	created, err := a.sessions.Create(ctx, accountRow.ID, accountRow.PasswordHash, tokenDigest(token), expiresAt)
 	if errors.Is(err, account.ErrStaleCredentials) {
@@ -143,7 +143,7 @@ func (a *App) logout(c *gin.Context) {
 // Only explicit foreground activity renews a Session; reads and stream heartbeats do not.
 func (a *App) renewSession(c *gin.Context) {
 	principal := currentPrincipal(c)
-	session, err := a.sessions.Renew(c.Request.Context(), principal.Token, a.cfg.SessionTTL)
+	session, err := a.sessions.Renew(c.Request.Context(), principal.Token, a.cfg.EffectiveSessionTTL())
 	if errors.Is(err, pgx.ErrNoRows) {
 		a.writeError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication is invalid or expired")
 		return

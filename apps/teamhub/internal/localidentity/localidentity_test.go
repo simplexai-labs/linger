@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProofMatchesTheDesktopVector(t *testing.T) {
@@ -44,5 +45,55 @@ func TestValidNonce(t *testing.T) {
 		if ValidNonce(nonce) {
 			t.Fatalf("accepted %q", nonce)
 		}
+	}
+}
+
+func TestSessionProofAndDomainSeparation(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	nonce := strings.Repeat("A", 43)
+	const timestamp int64 = 1700000000
+	const origin = "http://localhost:3000"
+
+	proof := SessionProof(key, nonce, timestamp, origin)
+	// packages/local-installation/src/account.test.ts asserts the same vector.
+	const want = "LmNSpGCat3lst1DZM0RLuGzYzU-FzqRoVKwGq2LjGB4"
+	if proof != want {
+		t.Fatalf("sessionProof=%s want=%s", proof, want)
+	}
+	if !VerifySessionProof(key, nonce, timestamp, origin, proof) {
+		t.Fatalf("VerifySessionProof rejected valid proof %q", proof)
+	}
+	if VerifySessionProof(key, nonce, timestamp+1, origin, proof) {
+		t.Fatal("VerifySessionProof ignored timestamp")
+	}
+	if VerifySessionProof(key, nonce, timestamp, "http://localhost:3001", proof) {
+		t.Fatal("VerifySessionProof ignored origin")
+	}
+	if VerifySessionProof(key, strings.Repeat("B", 43), timestamp, origin, proof) {
+		t.Fatal("VerifySessionProof ignored nonce")
+	}
+	// Domain separation: an identity proof must never be accepted as a session proof.
+	identityProof := Proof(key, nonce, origin)
+	if identityProof == proof || VerifySessionProof(key, nonce, timestamp, origin, identityProof) {
+		t.Fatal("identity proof was accepted as a session proof")
+	}
+}
+
+func TestNonceCacheRejectsReplayAndExpires(t *testing.T) {
+	cache := NewNonceCache()
+	base := time.Unix(1700000000, 0).UTC()
+	nonce := strings.Repeat("A", 43)
+
+	if !cache.Consume(nonce, base, 2*time.Minute) {
+		t.Fatal("first consume rejected")
+	}
+	if cache.Consume(nonce, base.Add(time.Minute), 2*time.Minute) {
+		t.Fatal("replayed nonce accepted before expiry")
+	}
+	if !cache.Consume(nonce, base.Add(2*time.Minute), 2*time.Minute) {
+		t.Fatal("expired nonce was not pruned")
 	}
 }

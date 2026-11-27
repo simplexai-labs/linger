@@ -49,6 +49,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/documenttext"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/localidentity"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/mailcanvas"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/mcpcontext"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/memoryclient"
@@ -134,6 +135,7 @@ type App struct {
 	passwordHashes                 *account.HashLimiter
 	verifyPassword                 func(password, encoded string) (bool, error)
 	loginFailures                  *loginFailures
+	localSessionNonces             *localidentity.NonceCache
 	workItems                      *workitem.Service
 	reminders                      *reminder.Service
 	taskExecutions                 taskExecutionService
@@ -338,7 +340,7 @@ func validateConfig(cfg config.Config) error {
 	if cfg.DatabaseURL == "" {
 		return errors.New("database URL is required")
 	}
-	if cfg.SessionTTL > config.SessionMaxLifetime {
+	if cfg.SessionTTL > cfg.EffectiveSessionMaxLifetime() {
 		return errors.New("Session TTL must not exceed the Session maximum lifetime")
 	}
 	if cfg.RoomDocument.RuntimeURL != "" && cfg.NodeServicesInternalToken == "" {
@@ -524,6 +526,7 @@ func newApp(cfg config.Config, deps Deps, pool *pgxpool.Pool, signingKey []byte,
 		documentRuntime:        core.documentRuntime,
 		documentTextNormalizer: core.documentTextNormalizer,
 		wikiDispatch:           core.wikiDispatch,
+		localSessionNonces:     localidentity.NewNonceCache(),
 	}
 }
 
@@ -662,7 +665,7 @@ func (a *App) registerAgentTools(cfg config.Config, deps Deps, agentAuthorizatio
 // services that hang off them.
 func (a *App) registerAccounts(deps Deps) {
 	a.accounts = account.NewLifecycle(a.pool)
-	a.sessions = account.NewSessions(a.pool)
+	a.sessions = account.NewSessionsWithMaxLifetime(a.pool, a.cfg.EffectiveSessionMaxLifetime())
 	a.agentMessages = agentmessages.New(a.pool)
 	a.agentCredentials = agentcredential.New(a.pool)
 	a.tracking = reminder.NewTrackingService(a.pool)

@@ -16,7 +16,10 @@ import { translate } from "@/i18n/language";
 
 import { authMessages as m } from "./auth.messages";
 import { authenticationOperation } from "./authentication-operation";
-import type { DesktopLocalAccount } from "./desktop-local-account";
+import {
+  clearDesktopLocalAccountSignedOut,
+  type DesktopLocalAccount,
+} from "./desktop-local-account";
 
 export interface AuthenticationResult {
   kind: "login";
@@ -96,6 +99,7 @@ export function useTeamHubAuthentication(input: {
       throw error;
     }
     signal.throwIfAborted();
+    clearDesktopLocalAccountSignedOut();
     clearTeamHubQueries(queryClient);
     queryClient.setQueryData(teamHubSessionQueryKey, session);
     queryClient.setQueryData(teamHubIdentityQueryKey, session.identity);

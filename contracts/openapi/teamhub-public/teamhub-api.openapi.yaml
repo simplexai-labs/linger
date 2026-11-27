@@ -136,6 +136,42 @@ paths:
           $ref: '../components/common.yaml#/components/responses/BadRequest'
         '404':
           $ref: '../components/common.yaml#/components/responses/NotFound'
+  /v0/local/session:
+    post:
+      tags: [Authentication]
+      operationId: createLocalSession
+      summary: Create a Session for the local installation's owner account using the installation identity key.
+      description: >-
+        Answers only on a local installation that has TEAMHUB_LOCAL_IDENTITY_KEY; elsewhere 404.
+        The proof is the unpadded base64url HMAC-SHA256, keyed with that 32-byte key, of
+        "linger-local-session", the fresh nonce, the Unix timestamp in seconds UTC, and the
+        server's web origin, joined with newlines. Replayed nonces and timestamps outside the
+        allowed window are rejected with 401.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../components/domain.yaml#/components/schemas/LocalSessionRequest'
+      responses:
+        '200':
+          description: Authenticated. The HttpOnly Session cookie is set in Set-Cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Secure, HttpOnly, SameSite Session cookie; Secure may be disabled only locally.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/domain.yaml#/components/schemas/Session'
+        '400':
+          $ref: '../components/common.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
   /v0/session:
     post:
       tags: [Authentication]

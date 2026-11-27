@@ -9,7 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { ensureLocalAccount, localIdentityProof } from "./account.js";
+import {
+  ensureLocalAccount,
+  localIdentityProof,
+  localSessionProof,
+} from "./account.js";
 import type { Instance } from "./instance.js";
 import {
   expectPrivateFixtureFile,
@@ -506,4 +510,27 @@ it("sends no password to another program answering at the origin", async () => {
   expect(requests).toEqual(["/v0/local/identity", "/v0/local/identity"]);
   expect(provisionOwner).not.toHaveBeenCalled();
   expect(JSON.parse(await readFile(f.file, "utf8")).provisioned).toBe(false);
+});
+
+it("computes the localSessionProof vector matching TeamHub", () => {
+  const key = Uint8Array.from({ length: 32 }, (_, i) => i);
+  const nonce = "A".repeat(43);
+  const timestamp = 1700000000;
+  const origin = "http://localhost:3000";
+  // TeamHub's localidentity_test.go asserts the same vector.
+  const want = "LmNSpGCat3lst1DZM0RLuGzYzU-FzqRoVKwGq2LjGB4";
+  expect(
+    localSessionProof(key, nonce, timestamp, origin).toString("base64url"),
+  ).toBe(want);
+  expect(
+    localSessionProof(key, nonce, timestamp + 1, origin).toString("base64url"),
+  ).not.toBe(want);
+  expect(
+    localSessionProof(key, nonce, timestamp, "http://localhost:3001").toString(
+      "base64url",
+    ),
+  ).not.toBe(want);
+  expect(localIdentityProof(key, nonce, origin).toString("base64url")).not.toBe(
+    want,
+  );
 });

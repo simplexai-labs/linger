@@ -18,6 +18,7 @@ import {
   OAuthCompletePage,
 } from "@/features/apps/oauth-complete-page";
 import { authenticatedLoginDestination } from "@/features/auth/authentication-return-to";
+import { trySilentDesktopLocalSignIn } from "@/features/auth/desktop-local-account";
 import {
   anotherMeQueryOptions,
   clearTeamHubQueries,
@@ -74,7 +75,7 @@ export function createAppRoutes(
       ErrorBoundary: FullPageRouteErrorSurface,
       HydrateFallback: InitialAppLoading,
       loader: withAuthenticationDeadline(async ({ request }) => {
-        try {
+        const loadRoot = async () => {
           const [sessionResult, tenantsResult] = await Promise.allSettled([
             queryClient.fetchQuery(teamHubSessionQueryOptions(client)),
             queryClient.fetchQuery(teamHubTenantsQueryOptions(client)),
@@ -85,8 +86,26 @@ export function createAppRoutes(
           if (sessionResult.status === "rejected") throw sessionResult.reason;
           if (tenantsResult.status === "rejected") throw tenantsResult.reason;
 
-          const session = sessionResult.value;
-          const tenants = tenantsResult.value;
+          return {
+            session: sessionResult.value,
+            tenants: tenantsResult.value,
+          };
+        };
+
+        try {
+          let loaded: Awaited<ReturnType<typeof loadRoot>>;
+          try {
+            loaded = await loadRoot();
+          } catch (error) {
+            loaded = await recoverDesktopSessionOnAuthError(
+              error,
+              request.signal,
+              queryClient,
+              loadRoot,
+            );
+          }
+
+          const { session, tenants } = loaded;
           const targetTenant = tenants.items[0];
 
           if (!targetTenant) {
@@ -171,11 +190,22 @@ export function createAppRoutes(
           loadConnectComputerPage,
         ),
       loader: withAuthenticationDeadline(async ({ request }) => {
-        try {
-          await Promise.all([
+        const loadConnectComputer = () =>
+          Promise.all([
             queryClient.ensureQueryData(teamHubSessionQueryOptions(client)),
             queryClient.ensureQueryData(teamHubTenantsQueryOptions(client)),
           ]);
+        try {
+          try {
+            await loadConnectComputer();
+          } catch (error) {
+            await recoverDesktopSessionOnAuthError(
+              error,
+              request.signal,
+              queryClient,
+              loadConnectComputer,
+            );
+          }
           return null;
         } catch (error) {
           request.signal.throwIfAborted();
@@ -327,14 +357,31 @@ export function createAppRoutes(
           tenantRoomsQueryOptions(client, tenantId),
         );
 
-        try {
-          await Promise.all([
+        const loadShell = () =>
+          Promise.all([
             queryClient.ensureQueryData(teamHubSessionQueryOptions(client)),
             queryClient.ensureQueryData(teamHubIdentityQueryOptions(client)),
             queryClient.ensureQueryData(
               teamHubTenantQueryOptions(client, tenantId),
             ),
           ]);
+
+        try {
+          try {
+            await loadShell();
+          } catch (error) {
+            await recoverDesktopSessionOnAuthError(
+              error,
+              request.signal,
+              queryClient,
+              async () => {
+                void queryClient.prefetchQuery(
+                  tenantRoomsQueryOptions(client, tenantId),
+                );
+                return await loadShell();
+              },
+            );
+          }
         } catch (error) {
           request.signal.throwIfAborted();
           redirectAuthenticationError(error, queryClient);
@@ -789,6 +836,25 @@ export function InitialAppLoading() {
       {t(commonMessages.loadingRoom)}
     </main>
   );
+}
+
+async function recoverDesktopSessionOnAuthError<T>(
+  error: unknown,
+  signal: AbortSignal,
+  queryClient: QueryClient,
+  retry: () => Promise<T>,
+): Promise<T> {
+  signal.throwIfAborted();
+  if (!(error instanceof TeamHubError && error.status === 401)) {
+    throw error;
+  }
+  const recovered = await trySilentDesktopLocalSignIn();
+  signal.throwIfAborted();
+  if (!recovered) {
+    throw error;
+  }
+  clearTeamHubQueries(queryClient);
+  return await retry();
 }
 
 function redirectAuthenticationError(

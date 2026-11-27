@@ -26,6 +26,10 @@ import {
 import { teamHubAuthenticationSignals } from "@/features/teamhub/teamhub-authentication";
 import { registerOpenDocumentSession } from "@/features/rooms/documents/room-document-local-copies";
 import { defineGlobalProperty } from "@/test/global-properties";
+import {
+  isDesktopLocalAccountSignedOut,
+  resetDesktopLocalSignInStateForTest,
+} from "./desktop-local-account";
 import { LOGOUT_UNSAVED_DOCUMENT_MESSAGE, useLogout } from "./use-logout";
 
 // Document editors open in this tab, one per actor; logout must close exactly
@@ -71,9 +75,27 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  resetDesktopLocalSignInStateForTest();
+});
 
 describe("useLogout", () => {
+  it("marks the desktop local account signed out before revoking the Session", async () => {
+    const runtime = await testRuntime();
+    let markedBeforeLogout = false;
+    runtime.server.on("POST", "/v0/auth/logout", () => {
+      markedBeforeLogout = isDesktopLocalAccountSignedOut();
+      return new Response(null, { status: 204 });
+    });
+
+    renderLogout(runtime);
+    fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
+
+    expect(await screen.findByText("Signed out")).toBeInTheDocument();
+    expect(markedBeforeLogout).toBe(true);
+    expect(isDesktopLocalAccountSignedOut()).toBe(true);
+  });
   it("keeps the authenticated state when TeamHub cannot revoke the Session", async () => {
     const runtime = await testRuntime();
     const clearOutbox = vi
@@ -115,6 +137,7 @@ describe("useLogout", () => {
     expect(clearOutbox).toHaveBeenCalledOnce();
     expect(clearOutbox).toHaveBeenCalledWith(identity.account.id);
     expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled();
+    expect(isDesktopLocalAccountSignedOut()).toBe(false);
   });
 
   it("orders outbox, revocation, navigation, local cleanup and broadcast; ignores duplicate requests", async () => {

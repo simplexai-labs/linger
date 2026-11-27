@@ -466,3 +466,34 @@ func TestForTestStartsFromDefaults(t *testing.T) {
 		t.Fatalf("ForTest root=%q origin=%q poll=%s", cfg.ArtifactStorageRoot, cfg.DocumentPreviewPublicOrigin, cfg.Jobs.PollInterval)
 	}
 }
+
+func TestLocalInstallationSessionLifetimes(t *testing.T) {
+	remote := Default()
+	if remote.IsLocalInstallation() {
+		t.Fatal("remote config reported IsLocalInstallation() == true")
+	}
+	if remote.EffectiveSessionTTL() != DefaultSessionTTL {
+		t.Fatalf("remote EffectiveSessionTTL() = %s, want %s", remote.EffectiveSessionTTL(), DefaultSessionTTL)
+	}
+	if remote.EffectiveSessionMaxLifetime() != SessionMaxLifetime {
+		t.Fatalf("remote EffectiveSessionMaxLifetime() = %s, want %s", remote.EffectiveSessionMaxLifetime(), SessionMaxLifetime)
+	}
+
+	local := Default()
+	local.LocalIdentityKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	if !local.IsLocalInstallation() {
+		t.Fatal("local config reported IsLocalInstallation() == false")
+	}
+	if local.EffectiveSessionTTL() != LocalSessionTTL {
+		t.Fatalf("local EffectiveSessionTTL() = %s, want %s", local.EffectiveSessionTTL(), LocalSessionTTL)
+	}
+	if local.EffectiveSessionMaxLifetime() != LocalSessionMaxLifetime {
+		t.Fatalf("local EffectiveSessionMaxLifetime() = %s, want %s", local.EffectiveSessionMaxLifetime(), LocalSessionMaxLifetime)
+	}
+
+	customLocal := local
+	customLocal.SessionTTL = 15 * time.Minute
+	if customLocal.EffectiveSessionTTL() != 15*time.Minute {
+		t.Fatalf("custom local EffectiveSessionTTL() = %s, want 15m", customLocal.EffectiveSessionTTL())
+	}
+}

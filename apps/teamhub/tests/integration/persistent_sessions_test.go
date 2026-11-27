@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/localidentity"
 )
 
 func TestIndependentAccountSessions(t *testing.T) {
@@ -240,6 +242,100 @@ func TestSessionRenewalCannotRaceRevocation(t *testing.T) {
 	outcome := <-result
 	if outcome.err != nil || outcome.status != http.StatusUnauthorized {
 		t.Fatalf("revoked Session renewed: %+v", outcome)
+	}
+}
+
+func TestLocalInstallationSessionCreationAndLifetime(t *testing.T) {
+	allowParallelIntegrationTest(t)
+
+	rawKey := make([]byte, 32)
+	for i := range rawKey {
+		rawKey[i] = byte(i + 1)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(rawKey)
+	const origin = "http://localhost:3000"
+
+	localEnv := newPersistentSessionEnvWithConfig(t, config.ForTest(func(c *config.Config) {
+		c.PublicWebURL = origin
+		c.LocalIdentityKey = encodedKey
+	}))
+
+	// Create a local owner session via POST /v0/local/session.
+	client := newClient(t)
+	nonce := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("L", 32)))
+	ts := time.Now().UTC().Unix()
+	proof := localidentity.SessionProof(rawKey, nonce, ts, origin)
+	status, headers, body := localEnv.request(client, http.MethodPost, "/v0/local/session", map[string]any{
+		"nonce":     nonce,
+		"timestamp": ts,
+		"proof":     proof,
+	}, "")
+	if status != http.StatusOK {
+		t.Fatalf("POST /v0/local/session status=%d body=%s", status, body)
+	}
+	if got := headers.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control=%q want no-store", got)
+	}
+	var sessionResp struct {
+		ID        string    `json:"id"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &sessionResp); err != nil {
+		t.Fatalf("decode local session: %v body=%s", err, body)
+	}
+	nineYearsFromNow := time.Now().UTC().Add(9 * 365 * 24 * time.Hour)
+	if sessionResp.ExpiresAt.Before(nineYearsFromNow) {
+		t.Fatalf("local session expires_at=%s want > 9 years from now", sessionResp.ExpiresAt)
+	}
+	setCookie := headers.Get("Set-Cookie")
+	if !strings.Contains(setCookie, "HttpOnly") || !strings.Contains(setCookie, "SameSite=Lax") {
+		t.Fatalf("missing protected persistent cookie: %q", setCookie)
+	}
+	_ = sessionCookie(t, client, localEnv.server.URL)
+
+	// Backdate created_at past the 90-day remote cap and expires_at to 5 minutes from now;
+	// renewal must still extend expires_at to > 9 years from now on a local installation.
+	if _, err := localEnv.pool.Exec(
+		t.Context(),
+		"UPDATE auth_sessions SET created_at = now() - interval '100 days', expires_at = now() + interval '5 minutes' WHERE id = $1",
+		sessionResp.ID,
+	); err != nil {
+		t.Fatalf("backdate local session: %v", err)
+	}
+	status, _, body = localEnv.request(client, http.MethodPost, "/v0/session", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("POST /v0/session renew status=%d body=%s", status, body)
+	}
+	var renewedResp struct {
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &renewedResp); err != nil {
+		t.Fatalf("decode renewed session: %v", err)
+	}
+	if renewedResp.ExpiresAt.Before(nineYearsFromNow) {
+		t.Fatalf("renewed local session expires_at=%s want > 9 years from now", renewedResp.ExpiresAt)
+	}
+
+	// Explicit logout must still revoke the local session.
+	status, _, body = localEnv.request(client, http.MethodPost, "/v0/auth/logout", nil, "")
+	if status != http.StatusNoContent {
+		t.Fatalf("logout status=%d body=%s", status, body)
+	}
+	status, _, body = localEnv.request(client, http.MethodGet, "/v0/session", nil, "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("GET /v0/session after logout status=%d body=%s", status, body)
+	}
+
+	// Non-local deployments (no LocalIdentityKey) must return 404.
+	remoteEnv := newPersistentSessionEnv(t)
+	remoteClient := newClient(t)
+	status, _, body = remoteEnv.request(remoteClient, http.MethodPost, "/v0/local/session", map[string]any{
+		"nonce":     nonce,
+		"timestamp": ts,
+		"proof":     proof,
+	}, "")
+	if status != http.StatusNotFound {
+		t.Fatalf("remote POST /v0/local/session status=%d want 404 body=%s", status, body)
 	}
 }
 

@@ -25,6 +25,86 @@ function desktopLocalAccount(): DesktopLocalAccount | undefined {
 // the page is open.
 export const DESKTOP_LOCAL_ACCOUNT_CHECK_MS = 15_000;
 
+export const DESKTOP_LOCAL_RECOVERY_COOLDOWN_MS = 30_000;
+
+const DESKTOP_LOCAL_SIGNED_OUT_KEY = "linger:desktop-local-signed-out";
+
+let silentSignInInFlight: Promise<boolean> | null = null;
+let silentSignInCooldownUntil = 0;
+
+export function markDesktopLocalAccountSignedOut(): void {
+  try {
+    window.localStorage.setItem(DESKTOP_LOCAL_SIGNED_OUT_KEY, "1");
+  } catch {
+    // Restricted storage cannot persist the marker; explicit logout still navigates to /login.
+  }
+}
+
+export function clearDesktopLocalAccountSignedOut(): void {
+  try {
+    window.localStorage.removeItem(DESKTOP_LOCAL_SIGNED_OUT_KEY);
+  } catch {
+    // Ignore restricted storage.
+  }
+}
+
+export function isDesktopLocalAccountSignedOut(): boolean {
+  try {
+    return window.localStorage.getItem(DESKTOP_LOCAL_SIGNED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function trySilentDesktopLocalSignIn(): Promise<boolean> {
+  const api = desktopLocalAccount();
+  if (!api || isDesktopLocalAccountSignedOut()) {
+    return Promise.resolve(false);
+  }
+  if (Date.now() < silentSignInCooldownUntil) {
+    return Promise.resolve(false);
+  }
+  if (silentSignInInFlight) {
+    return silentSignInInFlight;
+  }
+  const attempt = (async () => {
+    try {
+      const available = await api.available().catch(() => false);
+      if (isDesktopLocalAccountSignedOut()) {
+        return false;
+      }
+      if (!available) {
+        silentSignInCooldownUntil =
+          Date.now() + DESKTOP_LOCAL_RECOVERY_COOLDOWN_MS;
+        return false;
+      }
+      const result = await api.signIn().catch(() => ({
+        ok: false as const,
+        message: "",
+      }));
+      if (isDesktopLocalAccountSignedOut()) {
+        return false;
+      }
+      if (result.ok) {
+        return true;
+      }
+      silentSignInCooldownUntil =
+        Date.now() + DESKTOP_LOCAL_RECOVERY_COOLDOWN_MS;
+      return false;
+    } finally {
+      silentSignInInFlight = null;
+    }
+  })();
+  silentSignInInFlight = attempt;
+  return attempt;
+}
+
+export function resetDesktopLocalSignInStateForTest(): void {
+  silentSignInInFlight = null;
+  silentSignInCooldownUntil = 0;
+  clearDesktopLocalAccountSignedOut();
+}
+
 /**
  * The account sign-in when this page runs in the desktop app and shows the
  * Linger installed on this computer, while its server answers as itself;

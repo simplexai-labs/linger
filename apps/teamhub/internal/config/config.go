@@ -20,10 +20,13 @@ import (
 )
 
 // A Session expires DefaultSessionTTL after its last renewal unless SessionTTL
-// says otherwise, and never later than SessionMaxLifetime after login.
+// says otherwise, and never later than SessionMaxLifetime after login. Local
+// desktop installations use LocalSessionTTL and LocalSessionMaxLifetime instead.
 const (
-	DefaultSessionTTL  = 30 * 24 * time.Hour
-	SessionMaxLifetime = 90 * 24 * time.Hour
+	DefaultSessionTTL       = 30 * 24 * time.Hour
+	SessionMaxLifetime      = 90 * 24 * time.Hour
+	LocalSessionTTL         = 10 * 365 * 24 * time.Hour
+	LocalSessionMaxLifetime = 100 * 365 * 24 * time.Hour
 )
 
 // Config collects the parsed runtime configuration that service components use.
@@ -81,6 +84,31 @@ type Config struct {
 	// Jobs paces background work. No environment variable sets it; tests
 	// shorten it.
 	Jobs JobsConfig
+}
+
+// IsLocalInstallation reports whether this deployment is a local desktop
+// installation identified by TEAMHUB_LOCAL_IDENTITY_KEY.
+func (c Config) IsLocalInstallation() bool {
+	return c.LocalIdentityKey != ""
+}
+
+// EffectiveSessionTTL returns the idle Session lifetime for this deployment.
+// Local installations extend the default TTL so desktop users are not signed
+// out, while preserving any custom SessionTTL configured explicitly.
+func (c Config) EffectiveSessionTTL() time.Duration {
+	if c.IsLocalInstallation() && c.SessionTTL == DefaultSessionTTL {
+		return LocalSessionTTL
+	}
+	return c.SessionTTL
+}
+
+// EffectiveSessionMaxLifetime returns the maximum Session lifetime from login
+// for this deployment.
+func (c Config) EffectiveSessionMaxLifetime() time.Duration {
+	if c.IsLocalInstallation() {
+		return LocalSessionMaxLifetime
+	}
+	return SessionMaxLifetime
 }
 
 // JobsConfig paces River and the sweeps and retries tests wait on.

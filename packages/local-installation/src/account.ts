@@ -138,6 +138,18 @@ export const localIdentityProof = (
     .update(`linger-local-identity\n${nonce}\n${origin}`)
     .digest();
 
+// What the desktop app proves to TeamHub to mint a local owner session (internal/localidentity).
+export function localSessionProof(
+  key: Uint8Array,
+  nonce: string,
+  timestamp: number,
+  origin: string,
+): Buffer {
+  return createHmac("sha256", key)
+    .update(`linger-local-session\n${nonce}\n${timestamp}\n${origin}`)
+    .digest();
+}
+
 // The server did not prove it holds the key; says what failed, never with what.
 export class LocalIdentityError extends Error {
   readonly reason: string;

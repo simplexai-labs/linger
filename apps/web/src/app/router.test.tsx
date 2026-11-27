@@ -14,10 +14,21 @@ import {
   teamHubSessionQueryKey,
   teamHubTenantQueryKey,
 } from "@/features/rooms/room-queries";
+import {
+  markDesktopLocalAccountSignedOut,
+  resetDesktopLocalSignInStateForTest,
+  type DesktopLocalAccount,
+} from "@/features/auth/desktop-local-account";
 
 import { createAppRoutes } from "./router";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  resetDesktopLocalSignInStateForTest();
+  (
+    window as { lingerDesktop?: { localAccount?: DesktopLocalAccount } }
+  ).lingerDesktop = undefined;
+});
 
 describe("Web app route contract", () => {
   it("bounds an unresponsive landing loader without letting its late failure clear a new Session", async () => {
@@ -364,6 +375,90 @@ describe("Web app route contract", () => {
       `/t/${emptyRoomRuntime.seed.tenant.id}/rooms`,
     );
     emptyRoomQueryClient.clear();
+    queryClient.clear();
+  });
+
+  it("silently recovers a desktop local session on 401 in protected route loaders", async () => {
+    const runtime = createTestTeamHubRuntime();
+    let recovered = false;
+    runtime.server.on("GET", "/v0/session", () =>
+      recovered
+        ? {
+            id: "session-recovered",
+            created_at: "2026-01-01T00:00:00Z",
+            expires_at: "2036-01-01T00:00:00Z",
+            identity: runtime.seed.identity,
+          }
+        : teamHubErrorResponse(401, "UNAUTHENTICATED", "expired"),
+    );
+    const localAccount: DesktopLocalAccount = {
+      available: vi.fn(async () => true),
+      signIn: vi.fn(async () => {
+        recovered = true;
+        return { ok: true as const };
+      }),
+    };
+    (
+      window as { lingerDesktop?: { localAccount?: DesktopLocalAccount } }
+    ).lingerDesktop = { localAccount };
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const shellLoader = createAppRoutes(queryClient, runtime).find(
+      (route) => route.path === "/t/:tenantId",
+    )!.loader as LoaderFunction;
+
+    const result = await shellLoader({
+      request: new Request(
+        `http://localhost/t/${runtime.seed.tenant.id}/rooms`,
+      ),
+      url: new URL(`http://localhost/t/${runtime.seed.tenant.id}/rooms`),
+      pattern: "/t/:tenantId",
+      params: { tenantId: runtime.seed.tenant.id },
+      context: new RouterContextProvider(),
+    });
+    expect(result).toBeNull();
+    expect(localAccount.signIn).toHaveBeenCalledOnce();
+    queryClient.clear();
+  });
+
+  it("redirects to /login on 401 when desktop local account was explicitly signed out", async () => {
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/session", () =>
+      teamHubErrorResponse(401, "UNAUTHENTICATED", "signed out"),
+    );
+    const localAccount: DesktopLocalAccount = {
+      available: vi.fn(async () => true),
+      signIn: vi.fn(async () => ({ ok: true as const })),
+    };
+    (
+      window as { lingerDesktop?: { localAccount?: DesktopLocalAccount } }
+    ).lingerDesktop = { localAccount };
+    markDesktopLocalAccountSignedOut();
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const rootLoader = createAppRoutes(queryClient, runtime).find(
+      (route) => route.path === "/",
+    )!.loader as LoaderFunction;
+
+    let thrown: unknown;
+    try {
+      await rootLoader({
+        request: new Request("http://localhost/"),
+        url: new URL("http://localhost/"),
+        pattern: "/",
+        params: {},
+        context: new RouterContextProvider(),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).headers.get("Location")).toBe("/login");
+    expect(localAccount.signIn).not.toHaveBeenCalled();
     queryClient.clear();
   });
 });
