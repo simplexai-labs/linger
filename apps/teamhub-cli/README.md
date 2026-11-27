@@ -2,6 +2,8 @@
 
 `teamhub` is the standalone Agent business client. It calls TeamHub directly; its configuration only selects the current identity and the caller Context, and TeamHub still checks live permissions on every request. Help and schemas work offline.
 
+`teamhub --version` prints the CLI package version and the SHA-256 build fingerprint from the manifest beside the bundled CLI. It works offline before configuration is read. If the manifest is missing or invalid, the fingerprint is shown as `unavailable`.
+
 The caller Context comes only from `.teamhub/cli/config.json`, which the Computer writes into the workspace: for a Meta it is its Room, for an AlterEgo its Task, for a Document Context the current Document. The CLI sends it on every request; commands have no `--room` or `--task` target flags and no environment variable override. A command that needs a Room or a Task returns `configuration_error` when the configuration lacks that Context, and so does direct mode, which sets only `TEAMHUB_URL`/`TEAMHUB_TOKEN` without a configuration file.
 
 ```bash

@@ -3963,6 +3963,7 @@ exports[`offline help and schema snapshot > keeps the root and group help 1`] = 
 {
   "": "exit 0
 Usage: teamhub <command> [flags]
+       teamhub --version
 
 Commands:
   account-profile

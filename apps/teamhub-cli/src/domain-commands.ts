@@ -131,7 +131,7 @@ export function domainHelp(prefix: readonly string[] = []): string {
   if (!matches.length) return "";
   if (!prefix.length)
     return (
-      "Usage: teamhub <command> [flags]\n\nCommands:\n" +
+      "Usage: teamhub <command> [flags]\n       teamhub --version\n\nCommands:\n" +
       [...new Set(commandDefinitions.map((item) => item.command[0]))]
         .sort()
         .map((name) => `  ${name}`)

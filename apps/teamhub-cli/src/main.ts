@@ -15,6 +15,7 @@ if (timing) process.stderr.on("error", () => undefined);
 
 const commandStarted = performance.now();
 process.exitCode = await runCli(process.argv.slice(2), {
+  assetManifest: new URL("./teamhub-assets.json", import.meta.url),
   cwd: process.cwd(),
   env: process.env,
   fetch: globalThis.fetch,

@@ -33,6 +33,7 @@ import {
 } from "./domain-commands.js";
 
 interface CliDependencies {
+  readonly assetManifest?: URL;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly fetch: typeof fetch;
@@ -141,6 +142,11 @@ export async function runCli(
   // failure this CLI cannot explain may follow a completed write.
   let dispatched: string | undefined;
   try {
+    if (args.length === 1 && args[0] === "--version") {
+      const { versionText } = await import("./version.js");
+      await dependencies.stdout(await versionText(dependencies.assetManifest));
+      return 0;
+    }
     if (
       !args.length ||
       args[0] === "help" ||
