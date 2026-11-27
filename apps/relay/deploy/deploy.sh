@@ -31,6 +31,17 @@ build() {
     go build -trimpath -ldflags="-s -w" -o "$work/relay-$arch" ./cmd/relay)
 }
 
+# one_instance NODE IDS fails unless exactly one running machine has the
+# node's name, so a deploy never reaches the wrong machine or half of two.
+one_instance() {
+  case $(echo "$2" | wc -w | tr -d ' ') in
+    1) return 0 ;;
+    0) echo "$1: no running linger-relay-$1 instance" >&2 ;;
+    *) echo "$1: several running linger-relay-$1 instances ($2); rename the old one" >&2 ;;
+  esac
+  return 1
+}
+
 sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
 # remote_script URL SHA prints the script a node runs. It keeps the previous
@@ -72,7 +83,7 @@ deploy_global() {
   instance=$(aws ec2 describe-instances --region "$AWS_REGION" \
     --filters Name=tag:Name,Values=linger-relay-global Name=instance-state-name,Values=running \
     --query 'Reservations[].Instances[].InstanceId' --output text)
-  [ -n "$instance" ] || { echo "global: no running linger-relay-global in $AWS_REGION" >&2; return 1; }
+  one_instance global "$instance" || return 1
   account=$(aws sts get-caller-identity --query Account --output text)
   bucket="linger-relay-deploy-$account"
   build arm64
@@ -96,7 +107,7 @@ deploy_mainland() {
   local instance key url invoke result
   instance=$(aliyun ecs DescribeInstances --RegionId "$ALIYUN_REGION" --InstanceName linger-relay-mainland --Status Running |
     python3 -c 'import json,sys; print(" ".join(i["InstanceId"] for i in json.load(sys.stdin)["Instances"]["Instance"]))')
-  [ -n "$instance" ] || { echo "mainland: no running linger-relay-mainland in $ALIYUN_REGION" >&2; return 1; }
+  one_instance mainland "$instance" || return 1
   build amd64
   key="relay-$revision-amd64"
   aliyun oss cp "$work/relay-amd64" "oss://$OSS_BUCKET/$key" -f --region "$ALIYUN_REGION" \

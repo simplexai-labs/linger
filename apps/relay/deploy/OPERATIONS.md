@@ -109,15 +109,25 @@ GitHub workflow runs it every five minutes. On failure it opens an issue named
 
 ## Replace a machine
 
-1. Launch the new machine with the same name and role. Pass
+1. Give the old machine another name, because the deploy script picks the
+   one running instance with the node's name and refuses when there are
+   several.
+2. Launch the new machine with the node's name and role. Pass
    `provision-global.sh` or `provision-mainland.sh` as its user data.
-2. For the global node, run `deploy.sh global` while the old machine still
+3. For the global node, run `deploy.sh global` while the old machine still
    runs. The new machine joins the tunnel once its Relay is healthy. Then stop
    the old machine's `cloudflared` and Relay at once, so computers and phones
    do not land on different machines for long.
-3. For the mainland node, run `deploy.sh mainland`, then move the
+4. For the mainland node, run `deploy.sh mainland`, then move the
    `linger-relay-mainland` EIP to the new machine.
-4. Stop the old machine.
+5. Stop the old machine.
 
-The deploy script picks the running instance by name, so give the old machine
-another name before you deploy to the new one.
+## Change a node's address
+
+Moving the EIP or the tunnel keeps the address, and nothing else changes. A
+new address is a release: change the node's URL in
+`apps/teamhub/internal/mobilerelay` and ship a desktop. Keep the old address
+serving until then. Computers on an older desktop still link to the old
+address only, and a phone that pinned the node dials only its stored copy
+until a welcome through any node brings the new list. Stop the old address
+once the desktops have upgraded and their phones have connected once.
