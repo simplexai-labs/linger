@@ -170,7 +170,7 @@ func (fixture *localBusinessProcessFixture) start(t *testing.T, teamHubURL, code
 	// Discovery is the real native version/auth/catalog path. Only its model
 	// answers and the subsequent app-server protocol are deterministic fixtures.
 	prelude := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'codex-cli 0.150.1'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'codex-cli 0.171.0'; exit 0; fi
 if [ "$1" = "debug" ]; then
   echo '{"models":[{"slug":"openai/gpt-6-astra","display_name":"GPT-6 Astra","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]},{"slug":"gpt-5","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"medium"}]}]}'
   exit 0
