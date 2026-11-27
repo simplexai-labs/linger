@@ -41,6 +41,10 @@ scripts/ci/desktop-release.sh publish desktop-v0.16.36 --notes-file notes.md
   `scripts/ci/desktop-release.sh publish` validates the uploaded assets,
   attaches the release notes, marks it as the latest release, and cleans up
   matching `desktop-v<version>-rc.*` prereleases and tags.
+- While the desktop app is in Beta, GitHub Releases carry `(Beta)` in the title
+  (`Linger Desktop <version> (Beta)`) and `notes.md` should open with a short
+  Beta notice to set expectations for new users. Keep stable releases
+  non-prerelease so `releases/latest` and auto-updates continue to work.
 - Before publishing a stable release, upgrade the previous stable release to
   the candidate on each platform following the
   [upgrade recipe](../.agents/skills/verify-linger/features/desktop-and-installer.md#upgrade-from-the-previous-release);

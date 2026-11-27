@@ -461,9 +461,9 @@ cmd_github_release() {
     die "publishing to $repo from ${GITHUB_REPOSITORY:-this repository} needs the LINGER_RELEASE_TOKEN secret: a token with contents write access to $repo (docs/desktop-release.md)"
   fi
   command -v gh >/dev/null || die "github-release needs the GitHub CLI (gh)"
-  notes="Linger desktop $version. Check downloads against SHA256SUMS.txt."
+  notes="Linger desktop $version (Beta). Check downloads against SHA256SUMS.txt."
   if [[ "$repo" == "${GITHUB_REPOSITORY:-}" && -n "${GITHUB_SHA:-}" ]]; then
-    notes="Linger desktop $version, built from $GITHUB_SHA. Check downloads against SHA256SUMS.txt."
+    notes="Linger desktop $version (Beta), built from $GITHUB_SHA. Check downloads against SHA256SUMS.txt."
     flags+=(--target "$GITHUB_SHA")
   fi
   if [[ "$version" == *-* ]]; then
@@ -478,7 +478,7 @@ cmd_github_release() {
     gh release upload "$tag" "$dir"/* --repo "$repo" --clobber
     echo "desktop-release: updated the $tag release of $repo"
   else
-    gh release create "$tag" "$dir"/* --repo "$repo" --title "Linger Desktop $version" --notes "$notes" "${flags[@]}"
+    gh release create "$tag" "$dir"/* --repo "$repo" --title "Linger Desktop $version (Beta)" --notes "$notes" "${flags[@]}"
     if [[ "$version" == *-* ]]; then
       echo "desktop-release: created the $tag prerelease of $repo"
     else
