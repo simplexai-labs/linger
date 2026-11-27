@@ -58,24 +58,5 @@ func zipBytes(t *testing.T, name, body string) []byte {
 
 func minimalDOCX(t *testing.T, text string) []byte {
 	t.Helper()
-	var buffer bytes.Buffer
-	writer := zip.NewWriter(&buffer)
-	types, err := writer.Create("[Content_Types].xml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = types.Write([]byte(`<?xml version="1.0"?><Types></Types>`)); err != nil {
-		t.Fatal(err)
-	}
-	document, err := writer.Create("word/document.xml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = document.Write([]byte(`<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>` + text + `</w:t></w:r></w:p></w:body></w:document>`)); err != nil {
-		t.Fatal(err)
-	}
-	if err = writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buffer.Bytes()
+	return profileTextDOCX(t, "<w:p><w:r><w:t>"+text+"</w:t></w:r></w:p>")
 }

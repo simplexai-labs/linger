@@ -137,22 +137,37 @@ func extractDOCX(body []byte) (string, error) {
 
 func docxText(body []byte) string {
 	decoder := xml.NewDecoder(bytes.NewReader(body))
-	var parts []string
+	var output strings.Builder
 	for {
 		token, err := decoder.Token()
 		if err != nil {
 			break
 		}
-		start, ok := token.(xml.StartElement)
-		if !ok || start.Name.Local != "t" {
-			continue
-		}
-		var text string
-		if err = decoder.DecodeElement(&text, &start); err == nil && strings.TrimSpace(text) != "" {
-			parts = append(parts, text)
+		switch element := token.(type) {
+		case xml.StartElement:
+			switch element.Name.Local {
+			case "tabs":
+				// Paragraph tab-stop definitions are formatting, not text.
+				if decoder.Skip() != nil {
+					return output.String()
+				}
+			case "t":
+				var text string
+				if decoder.DecodeElement(&text, &element) == nil {
+					output.WriteString(text)
+				}
+			case "tab":
+				output.WriteByte('\t')
+			case "br", "cr":
+				output.WriteByte('\n')
+			}
+		case xml.EndElement:
+			if element.Name.Local == "p" {
+				output.WriteByte('\n')
+			}
 		}
 	}
-	return strings.Join(parts, " ")
+	return output.String()
 }
 
 func truncateExtracted(value string) string {
@@ -160,5 +175,9 @@ func truncateExtracted(value string) string {
 	if len(value) <= MaxExtractedBytes {
 		return value
 	}
-	return value[:MaxExtractedBytes]
+	end := MaxExtractedBytes
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end]
 }
