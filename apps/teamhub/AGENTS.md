@@ -411,6 +411,9 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   error code. Any save answers every other pending card `configured` with the
   saved backend, which the Agent reruns with; saves outside a card use the
   official check (Brave has none and stays unverified until its first call).
+  Provider titles and snippets strip HTML with a tokenizer, preserving literal
+  comparisons and quoted attribute boundaries. The formatter decodes entities
+  once after tokenization and then applies the character limit.
 - Local models: `local_computer_model_snapshots` keeps each Computer's latest
   model library snapshot and the last host any snapshot carried; removing the
   Computer deletes the row in the same transaction. Recording a snapshot

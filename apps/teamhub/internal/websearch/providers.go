@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	xhtml "golang.org/x/net/html"
 )
 
 // The provider APIs. Tests point Endpoints at fakes instead.
@@ -596,14 +598,24 @@ func parseQuota(b Backend, body []byte, now time.Time) Quota {
 	return quota
 }
 
-var (
-	htmlTag    = regexp.MustCompile(`<[^>]*>`)
-	whitespace = regexp.MustCompile(`\s+`)
-)
+var whitespace = regexp.MustCompile(`\s+`)
 
 // plainText strips the markup some providers put in titles and snippets.
 func plainText(value string, limit int) string {
-	value = html.UnescapeString(htmlTag.ReplaceAllString(value, ""))
+	if strings.Contains(value, "<") {
+		var text strings.Builder
+		tokens := xhtml.NewTokenizer(strings.NewReader(value))
+		for token := tokens.Next(); token != xhtml.ErrorToken; token = tokens.Next() {
+			if token == xhtml.TextToken {
+				text.Write(tokens.Raw())
+			}
+		}
+		// Preserve an unfinished tag at EOF as literal source text. Decode
+		// entities once, after tokenization, so escaped tags remain text.
+		text.Write(tokens.Raw())
+		value = text.String()
+	}
+	value = html.UnescapeString(value)
 	return truncateRunes(strings.TrimSpace(whitespace.ReplaceAllString(value, " ")), limit)
 }
 
