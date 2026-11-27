@@ -162,7 +162,10 @@ describe("AccountMenu desktop update", () => {
 
   it("displays appVersion from update.getInfo and refreshes it after an update settles to idle", async () => {
     let appVersion = "0.1.10-v2test.0";
-    const { update, push } = installDesktop({ kind: "ready", version: "0.1.10-v2test.1" });
+    const { update, push } = installDesktop({
+      kind: "ready",
+      version: "0.1.10-v2test.1",
+    });
     (update as Record<string, unknown>).getInfo = vi.fn(async () => ({
       shellVersion: "0.1.10-v2test.0",
       appVersion,

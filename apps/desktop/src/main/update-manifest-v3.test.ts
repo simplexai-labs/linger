@@ -50,14 +50,18 @@ function makeManifestV3(overrides: Partial<AppManifestV3> = {}): AppManifestV3 {
       {
         maxShellVersion: "0.2.99",
         appVersion: "0.2.18",
-        manifestUrl: "https://cdn.example.com/linger/releases/app-v0.2.18/app-manifest.json",
-        signatureUrl: "https://cdn.example.com/linger/releases/app-v0.2.18/app-manifest.json.sig",
+        manifestUrl:
+          "https://cdn.example.com/linger/releases/app-v0.2.18/app-manifest.json",
+        signatureUrl:
+          "https://cdn.example.com/linger/releases/app-v0.2.18/app-manifest.json.sig",
       },
       {
         maxShellVersion: "0.2.99",
         appVersion: "0.2.15",
-        manifestUrl: "https://cdn.example.com/linger/releases/app-v0.2.15/app-manifest.json",
-        signatureUrl: "https://cdn.example.com/linger/releases/app-v0.2.15/app-manifest.json.sig",
+        manifestUrl:
+          "https://cdn.example.com/linger/releases/app-v0.2.15/app-manifest.json",
+        signatureUrl:
+          "https://cdn.example.com/linger/releases/app-v0.2.15/app-manifest.json.sig",
       },
     ],
     bundles: {
@@ -97,12 +101,16 @@ describe("Schema 3 update manifest & compatibility gates", () => {
     expect(verifyAnyManifest(bytes, sig, publicPem).kind).toBe("v3");
 
     const tampered = Buffer.from(bytes.toString().replace("0.3.0", "9.9.9"));
-    expect(() => verifyAppManifestV3(tampered, sig, publicPem)).toThrow(ManifestError);
+    expect(() => verifyAppManifestV3(tampered, sig, publicPem)).toThrow(
+      ManifestError,
+    );
 
     const insecure = makeManifestV3();
     insecure.bundles.web.artifact.url = "http://cdn.example.com/web.tar.zst";
     const insecureBytes = Buffer.from(JSON.stringify(insecure));
-    const insecureSig = sign(null, insecureBytes, privateKey).toString("base64");
+    const insecureSig = sign(null, insecureBytes, privateKey).toString(
+      "base64",
+    );
     expect(() =>
       verifyAppManifestV3(insecureBytes, insecureSig, publicPem),
     ).toThrow(ManifestError);

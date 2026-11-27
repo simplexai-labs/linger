@@ -50,7 +50,9 @@ describe("BundleUpdaterModule", () => {
     const webV2Bytes = await readFile(webV2Pack.filePath);
 
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+    const publicPem = publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
 
     const store = new BundleStoreModule({ home, target: "darwin-arm64" });
     const config = new ConfigStore(path.join(home, "config.json"), {
@@ -59,21 +61,32 @@ describe("BundleUpdaterModule", () => {
       installId: "stable-test-install",
     });
     const bus = new EventBus();
-    const stagedEvents: Array<{ version: string; changed: readonly string[] }> = [];
-    bus.on("bundle.staged", (v, changed) => stagedEvents.push({ version: v, changed }));
+    const stagedEvents: Array<{ version: string; changed: readonly string[] }> =
+      [];
+    bus.on("bundle.staged", (v, changed) =>
+      stagedEvents.push({ version: v, changed }),
+    );
 
     const fetchedUrls: string[] = [];
     const nodeDepsHash = `sha256:${"a".repeat(64)}`;
     const nodeDepsShortId = `nd-${"a".repeat(16)}`;
 
-    const mkRef = (id: string, pack: typeof basePack, primaryBroken = false) => ({
+    const mkRef = (
+      id: string,
+      pack: typeof basePack,
+      primaryBroken = false,
+    ) => ({
       artifactId: `${id}-${pack.sha256.slice(0, 12)}`,
       format: "tar.zst" as const,
       url: primaryBroken
         ? `https://broken.example.com/${id}.tar.zst`
         : `https://cdn.example.com/linger/bundles/${id}/${id}.tar.zst`,
       ...(primaryBroken
-        ? { mirrors: [`https://mirror.example.com/linger/bundles/${id}/${id}.tar.zst`] }
+        ? {
+            mirrors: [
+              `https://mirror.example.com/linger/bundles/${id}/${id}.tar.zst`,
+            ],
+          }
         : {}),
       sha256: pack.sha256,
       size: pack.size,
@@ -146,7 +159,12 @@ describe("BundleUpdaterModule", () => {
 
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         updater,
       ],
@@ -155,7 +173,11 @@ describe("BundleUpdaterModule", () => {
     await host.start();
 
     // Pre-populate backend + node-native-deps in BundleStore!
-    await store.stageNodeDepsArchive(nodeDepsShortId, basePack.filePath, basePack.sha256);
+    await store.stageNodeDepsArchive(
+      nodeDepsShortId,
+      basePack.filePath,
+      basePack.sha256,
+    );
     await store.stageModuleArchive(
       "backend",
       `backend-${basePack.sha256.slice(0, 12)}`,
@@ -173,9 +195,13 @@ describe("BundleUpdaterModule", () => {
     expect(stagedEvents).toEqual([{ version: "0.2.15", changed: ["web"] }]);
     // Mirror was used for web, and ZERO other bundles were downloaded!
     expect(fetchedUrls).toContain("https://broken.example.com/web.tar.zst");
-    expect(fetchedUrls).toContain("https://mirror.example.com/linger/bundles/web/web.tar.zst");
+    expect(fetchedUrls).toContain(
+      "https://mirror.example.com/linger/bundles/web/web.tar.zst",
+    );
     expect(fetchedUrls.some((u) => u.includes("/backend/"))).toBe(false);
-    expect(fetchedUrls.some((u) => u.includes("/node-native-deps/"))).toBe(false);
+    expect(fetchedUrls.some((u) => u.includes("/node-native-deps/"))).toBe(
+      false,
+    );
 
     await host.stop("quit");
   });
@@ -183,7 +209,9 @@ describe("BundleUpdaterModule", () => {
   it("skips denylisted versions and defers when rollout percent is 0", async () => {
     const home = await makeTempDir("linger-updater-gate-");
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+    const publicPem = publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
 
     const store = new BundleStoreModule({ home, target: "darwin-arm64" });
     const config = new ConfigStore(path.join(home, "config.json"), {
@@ -213,9 +241,24 @@ describe("BundleUpdaterModule", () => {
         rollbackSafe: true,
       },
       bundles: {
-        web: { arch: "noarch", originAppVersion: "0.2.20", inputHash: "1".repeat(64), artifact: dummyRef },
-        backend: { arch: "per-target", originAppVersion: "0.2.20", inputHash: "2".repeat(64), targets: { "darwin-arm64": dummyRef } },
-        "node-native-deps": { arch: "per-target", originAppVersion: "0.2.0", inputHash: "3".repeat(64), targets: { "darwin-arm64": dummyRef } },
+        web: {
+          arch: "noarch",
+          originAppVersion: "0.2.20",
+          inputHash: "1".repeat(64),
+          artifact: dummyRef,
+        },
+        backend: {
+          arch: "per-target",
+          originAppVersion: "0.2.20",
+          inputHash: "2".repeat(64),
+          targets: { "darwin-arm64": dummyRef },
+        },
+        "node-native-deps": {
+          arch: "per-target",
+          originAppVersion: "0.2.0",
+          inputHash: "3".repeat(64),
+          targets: { "darwin-arm64": dummyRef },
+        },
       },
     };
     const signed = makeSignedPayload(manifest, privateKey);
@@ -232,7 +275,12 @@ describe("BundleUpdaterModule", () => {
     });
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         updater,
       ],
@@ -282,7 +330,12 @@ describe("BundleUpdaterModule", () => {
     });
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         updater,
       ],
@@ -324,7 +377,12 @@ describe("BundleUpdaterModule", () => {
     });
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         updater,
       ],

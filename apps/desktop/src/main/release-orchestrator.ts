@@ -60,8 +60,12 @@ export interface ReleaseOrchestratorHooks {
     changed: readonly BundleModuleId[],
   ) => readonly HealthProbe[];
   readonly onProgress?: (progress: ReleaseProgressUpdate) => void;
-  readonly onComplete?: (release: LocalReleaseDescriptor) => Promise<void> | void;
-  readonly onRollbackComplete?: (notice: RollbackNotice) => Promise<void> | void;
+  readonly onComplete?: (
+    release: LocalReleaseDescriptor,
+  ) => Promise<void> | void;
+  readonly onRollbackComplete?: (
+    notice: RollbackNotice,
+  ) => Promise<void> | void;
   readonly completePauseMs?: number;
   readonly rollbackPauseMs?: number;
   readonly healthGateTimeoutMs?: number;
@@ -114,9 +118,7 @@ export function diffReleaseModules(
     !current || current.infra.nodeDeps !== next.infra.nodeDeps;
 
   const onlyWeb =
-    !nodeDepsChanged &&
-    changed.length === 1 &&
-    changed[0] === "web";
+    !nodeDepsChanged && changed.length === 1 && changed[0] === "web";
 
   if (onlyWeb) {
     return {
@@ -446,14 +448,12 @@ export class ReleaseOrchestratorModule implements Module {
           .catch(() => undefined);
       }
     } else if (this.#hooks.restoreBaselineServices) {
-      await this.#hooks
-        .restoreBaselineServices(changedModules)
-        .catch((err) => {
-          ctx.log.warn("release_orchestrator.baseline_restore_failed", {
-            failedVersion,
-            error: err instanceof Error ? err.message : String(err),
-          });
+      await this.#hooks.restoreBaselineServices(changedModules).catch((err) => {
+        ctx.log.warn("release_orchestrator.baseline_restore_failed", {
+          failedVersion,
+          error: err instanceof Error ? err.message : String(err),
         });
+      });
       const watchdog = ctx.get<HealthWatchdogModule>("HealthWatchdog");
       const restoreProbes = this.#hooks.buildHealthProbes(
         undefined,
@@ -479,7 +479,12 @@ export class ReleaseOrchestratorModule implements Module {
     };
     this.#rollbackNotice = notice;
     this.#setState({ kind: "rolled_back", notice });
-    ctx.bus.emit("release.rolled_back", notice.fromVersion, notice.toVersion, notice.reason);
+    ctx.bus.emit(
+      "release.rolled_back",
+      notice.fromVersion,
+      notice.toVersion,
+      notice.reason,
+    );
     this.#hooks.onProgress?.({
       stage: "rolled_back",
       percent: 100,

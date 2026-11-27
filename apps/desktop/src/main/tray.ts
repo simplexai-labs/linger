@@ -185,7 +185,9 @@ export class TrayModule implements Module {
     ) {
       return { ...shellUpdate, scope: "shell" };
     }
-    const orch = this.#optional<ReleaseOrchestratorModule>("ReleaseOrchestrator")?.state();
+    const orch = this.#optional<ReleaseOrchestratorModule>(
+      "ReleaseOrchestrator",
+    )?.state();
     if (orch?.kind === "ready") {
       return { kind: "ready", version: orch.version, scope: orch.diff.scope };
     }
@@ -216,16 +218,18 @@ export class TrayModule implements Module {
     }
     const hasCustomV2Feed = Boolean(
       process.env.LINGER_UPDATE_FEED_URL?.trim() ||
-        this.#ctx!.config.get().updateFeedUrl,
+      this.#ctx!.config.get().updateFeedUrl,
     );
     if (shellUpdate.kind === "failed") {
       if (hasCustomV2Feed) {
-        if (bundle?.kind === "failed") return { kind: "failed", error: bundle.error };
+        if (bundle?.kind === "failed")
+          return { kind: "failed", error: bundle.error };
         if (bundleUpdater?.lastCheckSucceeded()) return { kind: "idle" };
       }
       return shellUpdate;
     }
-    if (bundle?.kind === "failed") return { kind: "failed", error: bundle.error };
+    if (bundle?.kind === "failed")
+      return { kind: "failed", error: bundle.error };
     return { kind: "idle" };
   }
 
@@ -277,7 +281,9 @@ export class TrayModule implements Module {
       }
       case "install-update": {
         const updater = ctx.get<UpdaterModule>("Updater");
-        const orchestrator = this.#optional<ReleaseOrchestratorModule>("ReleaseOrchestrator");
+        const orchestrator = this.#optional<ReleaseOrchestratorModule>(
+          "ReleaseOrchestrator",
+        );
         const orchState = orchestrator?.state();
         const shellKind = updater.state().kind;
         const shellOwnsInstall =

@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { zstdCompressSync } from "node:zlib";
@@ -34,11 +41,20 @@ const noopLog = {
 };
 
 async function startStore(home: string, seedDirectory?: string) {
-  const store = new BundleStoreModule({ home, seedDirectory, target: "darwin-arm64" });
+  const store = new BundleStoreModule({
+    home,
+    seedDirectory,
+    target: "darwin-arm64",
+  });
   const config = new ConfigStore(path.join(home, "desktop-config.json"));
   const host = new ModuleHost(
     [
-      { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+      {
+        name: "Config",
+        dependsOn: [],
+        start: async () => {},
+        stop: async () => {},
+      },
       store,
     ],
     { config, log: noopLog, bus: new EventBus() },
@@ -109,11 +125,18 @@ describe("BundleStoreModule", () => {
 
     // Rejects wrong sha256
     await expect(
-      store.stageModuleArchive("web", "web-bad", packed.filePath, "f".repeat(64)),
+      store.stageModuleArchive(
+        "web",
+        "web-bad",
+        packed.filePath,
+        "f".repeat(64),
+      ),
     ).rejects.toThrow("digest mismatch");
 
     // Promote 0.2.14 -> 0.2.15 -> rollback to 0.2.14 + denylist 0.2.15
-    await store.writeReleaseDescriptor(makeDescriptor("0.2.14", "111111111111"));
+    await store.writeReleaseDescriptor(
+      makeDescriptor("0.2.14", "111111111111"),
+    );
     await store.beginPending({
       appVersion: "0.2.14",
       releaseFile: "releases/0.2.14/release.json",
@@ -122,7 +145,9 @@ describe("BundleStoreModule", () => {
     await store.commitPending();
     expect((await store.readCurrent())?.appVersion).toBe("0.2.14");
 
-    await store.writeReleaseDescriptor(makeDescriptor("0.2.15", "222222222222"));
+    await store.writeReleaseDescriptor(
+      makeDescriptor("0.2.15", "222222222222"),
+    );
     await store.beginPending({
       appVersion: "0.2.15",
       releaseFile: "releases/0.2.15/release.json",
@@ -142,7 +167,9 @@ describe("BundleStoreModule", () => {
     expect(await store.isDenylisted("0.2.15")).toBe(true);
 
     // Pre-commit failure of 0.2.16 must keep current at 0.2.14 (never double-downgrade to previous)
-    await store.writeReleaseDescriptor(makeDescriptor("0.2.16", "333333333333"));
+    await store.writeReleaseDescriptor(
+      makeDescriptor("0.2.16", "333333333333"),
+    );
     await store.beginPending({
       appVersion: "0.2.16",
       releaseFile: "releases/0.2.16/release.json",
@@ -165,11 +192,7 @@ describe("BundleStoreModule", () => {
     const payloadDir = await makeTempDir("linger-seed-payload-");
     await writeFile(path.join(payloadDir, "hello.txt"), "seed-ok", "utf8");
 
-    const bundleNames = [
-      "web",
-      "backend",
-      "node-native-deps",
-    ] as const;
+    const bundleNames = ["web", "backend", "node-native-deps"] as const;
     const bundles: Record<string, unknown> = {};
     for (const name of bundleNames) {
       const packed = await packDeterministicTarZst(payloadDir, seedDir, name);
@@ -206,7 +229,11 @@ describe("BundleStoreModule", () => {
 
     const { store } = await startStore(home, seedDir);
     expect((await store.readCurrent())?.appVersion).toBe("0.2.0");
-    expect(existsSync(path.join(home, "infra/node-deps/nd-aaaaaaaaaaaaaaaa/verified.json"))).toBe(true);
+    expect(
+      existsSync(
+        path.join(home, "infra/node-deps/nd-aaaaaaaaaaaaaaaa/verified.json"),
+      ),
+    ).toBe(true);
 
     // Create an unreferenced old release + old store module + old node-deps
     const staleRelDir = path.join(home, "releases/0.1.9");
@@ -225,7 +252,9 @@ describe("BundleStoreModule", () => {
     expect(gc.removedModules).toContain("web/web-deadbeef0000");
     expect(gc.removedNodeDeps).toContain("nd-deadbeef00000000");
     // Current release 0.2.0 remains intact!
-    expect(existsSync(path.join(home, "releases/0.2.0/release.json"))).toBe(true);
+    expect(existsSync(path.join(home, "releases/0.2.0/release.json"))).toBe(
+      true,
+    );
   });
 
   it("cleans up corrupted pending.json on startup and rejects tar.zst path traversal entries", async () => {

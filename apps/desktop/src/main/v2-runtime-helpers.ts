@@ -71,7 +71,9 @@ export function resolveToolsNodePath(
   }
 
   if (options.resourcesPath) {
-    candidates.push(path.join(options.resourcesPath, "runtime", "bin", nodeExe));
+    candidates.push(
+      path.join(options.resourcesPath, "runtime", "bin", nodeExe),
+    );
     if (platform === "win32") {
       candidates.push(path.join(options.resourcesPath, "runtime", nodeExe));
     }

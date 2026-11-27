@@ -1,5 +1,12 @@
 import { createServer, type Server } from "node:http";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -34,9 +41,21 @@ describe("apps/web/static-host.mjs V2 zero-downtime hot reload", () => {
     const v2Root = path.join(storeWeb, "web-222222222222", "dist");
     await mkdir(v1Root, { recursive: true });
     await mkdir(v2Root, { recursive: true });
-    await writeFile(path.join(v1Root, "index.html"), "<html>v1-ui</html>", "utf8");
-    await writeFile(path.join(v2Root, "index.html"), "<html>v2-ui</html>", "utf8");
-    await writeFile(path.join(outsideDir, "index.html"), "<html>evil</html>", "utf8");
+    await writeFile(
+      path.join(v1Root, "index.html"),
+      "<html>v1-ui</html>",
+      "utf8",
+    );
+    await writeFile(
+      path.join(v2Root, "index.html"),
+      "<html>v2-ui</html>",
+      "utf8",
+    );
+    await writeFile(
+      path.join(outsideDir, "index.html"),
+      "<html>evil</html>",
+      "utf8",
+    );
 
     const controlToken = "secret-control-token-32bytes-hex";
     const handler = createStaticHost({
@@ -48,7 +67,9 @@ describe("apps/web/static-host.mjs V2 zero-downtime hot reload", () => {
       void handler(req, res);
     });
     servers.push(server);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     const base = `http://127.0.0.1:${port}`;
@@ -115,9 +136,21 @@ describe("apps/web/static-host.mjs V2 zero-downtime hot reload", () => {
       await mkdir(v1Root, { recursive: true });
       await mkdir(v2Root, { recursive: true });
       await mkdir(outside, { recursive: true });
-      await writeFile(path.join(v1Root, "index.html"), "<html>v1</html>", "utf8");
-      await writeFile(path.join(v2Root, "index.html"), "<html>v2-symlink</html>", "utf8");
-      await writeFile(path.join(outside, "index.html"), "<html>escape</html>", "utf8");
+      await writeFile(
+        path.join(v1Root, "index.html"),
+        "<html>v1</html>",
+        "utf8",
+      );
+      await writeFile(
+        path.join(v2Root, "index.html"),
+        "<html>v2-symlink</html>",
+        "utf8",
+      );
+      await writeFile(
+        path.join(outside, "index.html"),
+        "<html>escape</html>",
+        "utf8",
+      );
       await symlink(realHome, linkHome);
       const escapeLink = path.join(storeWebReal, "escape-link");
       await symlink(outside, escapeLink);
@@ -134,7 +167,9 @@ describe("apps/web/static-host.mjs V2 zero-downtime hot reload", () => {
         void handler(req, res);
       });
       servers.push(server);
-      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : 0;
       const base = `http://127.0.0.1:${port}`;
@@ -163,7 +198,9 @@ describe("apps/web/static-host.mjs V2 zero-downtime hot reload", () => {
         }),
       });
       expect(swapRes.status).toBe(200);
-      const page = await fetch(`${base}/`, { headers: { accept: "text/html" } });
+      const page = await fetch(`${base}/`, {
+        headers: { accept: "text/html" },
+      });
       expect(await page.text()).toBe("<html>v2-symlink</html>");
     },
   );

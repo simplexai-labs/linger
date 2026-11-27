@@ -79,7 +79,9 @@ describe("Node Services development supervisor", () => {
   it.skipIf(process.platform === "win32")(
     "recognizes a symlinked argv[1] entrypoint against realpath import.meta.url (P0-D)",
     async () => {
-      const root = await mkdtemp(path.join(tmpdir(), "linger-supervisor-entry-"));
+      const root = await mkdtemp(
+        path.join(tmpdir(), "linger-supervisor-entry-"),
+      );
       try {
         const realDir = path.join(root, "private", "tmp", "dist");
         const linkDir = path.join(root, "tmp-link");

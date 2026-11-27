@@ -117,7 +117,9 @@ export function resolveV2EsmResolveHookPath(nodeServicesDir?: string): string {
     const bundled = path.join(nodeServicesDir, "dist", V2_ESM_RESOLVE_FILENAME);
     if (existsSync(bundled)) return bundled;
   }
-  return fileURLToPath(new URL(`./${V2_ESM_RESOLVE_FILENAME}`, import.meta.url));
+  return fileURLToPath(
+    new URL(`./${V2_ESM_RESOLVE_FILENAME}`, import.meta.url),
+  );
 }
 
 function mergeNodeImportOption(

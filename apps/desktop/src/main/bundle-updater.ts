@@ -546,7 +546,9 @@ export class BundleUpdaterModule implements Module {
     await mkdir(path.dirname(destPath), { recursive: true, mode: 0o700 });
     const response = await (this.#options.fetch ?? fetch)(url);
     if (!response.ok || !response.body) {
-      throw new Error(`HTTP ${response.status} downloading ${artifact.artifactId}`);
+      throw new Error(
+        `HTTP ${response.status} downloading ${artifact.artifactId}`,
+      );
     }
     const hash = createHash("sha256");
     let received = 0;
@@ -554,7 +556,9 @@ export class BundleUpdaterModule implements Module {
       for await (const chunk of chunks) {
         received += chunk.length;
         if (received > artifact.size) {
-          throw new Error(`Artifact ${artifact.artifactId} exceeded announced size`);
+          throw new Error(
+            `Artifact ${artifact.artifactId} exceeded announced size`,
+          );
         }
         hash.update(chunk);
         onProgress(chunk.length);
@@ -573,7 +577,10 @@ export class BundleUpdaterModule implements Module {
 
   #nextRetryDelayMs(): number {
     const base = this.#options.retryDelayMs ?? RETRY_DELAY_MS;
-    const cap = Math.max(base, this.#options.checkIntervalMs ?? CHECK_INTERVAL_MS);
+    const cap = Math.max(
+      base,
+      this.#options.checkIntervalMs ?? CHECK_INTERVAL_MS,
+    );
     const exp = Math.min(Math.max(0, this.#consecutiveFailures - 1), 10);
     return Math.min(base * 2 ** exp, cap);
   }

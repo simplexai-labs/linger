@@ -43,12 +43,13 @@ const HTTPS_URL = z
 // or local/LAN test feed host without re-signing.
 const RELATIVE_BUNDLE_PATH = z
   .string()
-  .regex(/^bundles\/[A-Za-z0-9._/-]+$/, "Relative bundle path must stay under bundles/")
+  .regex(
+    /^bundles\/[A-Za-z0-9._/-]+$/,
+    "Relative bundle path must stay under bundles/",
+  )
   .refine(
     (value) =>
-      !value.includes("..") &&
-      !value.includes("//") &&
-      !value.endsWith("/"),
+      !value.includes("..") && !value.includes("//") && !value.endsWith("/"),
     { message: "Relative bundle path must be normalized and traversal-free" },
   );
 const ARTIFACT_URL = z.union([HTTPS_URL, RELATIVE_BUNDLE_PATH]);
@@ -83,11 +84,7 @@ export const PLATFORM_TARGETS = [
 ] as const;
 export type PlatformTarget = (typeof PLATFORM_TARGETS)[number];
 
-export const BUNDLE_IDS = [
-  "web",
-  "backend",
-  "node-native-deps",
-] as const;
+export const BUNDLE_IDS = ["web", "backend", "node-native-deps"] as const;
 export type BundleId = (typeof BUNDLE_IDS)[number];
 
 const deltaPatchRef = z.object({
@@ -362,7 +359,9 @@ export function evaluateShellCompatibility(
   }
 
   const candidates = (manifest.compatIndex ?? [])
-    .filter((entry) => compareVersions(shellVersion, entry.maxShellVersion) <= 0)
+    .filter(
+      (entry) => compareVersions(shellVersion, entry.maxShellVersion) <= 0,
+    )
     .sort((a, b) => compareVersions(b.appVersion, a.appVersion));
 
   if (candidates[0]) {

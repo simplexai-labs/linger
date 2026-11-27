@@ -96,7 +96,12 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
       "utf8",
     );
     for (const target of ["darwin-arm64", "win32-x64", "linux-x64"]) {
-      const pdfDir = path.join(tinyNativeDeps, target, "node_modules", "pdfjs-dist");
+      const pdfDir = path.join(
+        tinyNativeDeps,
+        target,
+        "node_modules",
+        "pdfjs-dist",
+      );
       await mkdir(pdfDir, { recursive: true });
       await writeFile(
         path.join(pdfDir, "package.json"),
@@ -124,12 +129,17 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
 
     expect(built.verification.ok).toBe(true);
     expect(built.verification.stepCount).toBe(4);
-    expect(built.verification.steps.every((s) => s.signatureVerified)).toBe(true);
+    expect(built.verification.steps.every((s) => s.signatureVerified)).toBe(
+      true,
+    );
 
     // Every step's minShellVersion MUST be satisfied by the 0.1.10-v2test.0 test shell!
     for (const step of built.index.steps) {
       const manifest = JSON.parse(
-        await readFile(path.join(kitDir, "steps", step.id, "app-manifest.json"), "utf8"),
+        await readFile(
+          path.join(kitDir, "steps", step.id, "app-manifest.json"),
+          "utf8",
+        ),
       ) as AppManifestV3;
       expect(manifest.compat.minShellVersion).toBe("0.1.10-v2test.0");
       expect(evaluateShellCompatibility(manifest, "0.1.10-v2test.0")).toEqual({
@@ -171,7 +181,12 @@ describe("V2 (2+1) signed test upgrade packs & portable feed server", () => {
 
       const host = new ModuleHost(
         [
-          { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+          {
+            name: "Config",
+            dependsOn: [],
+            start: async () => {},
+            stop: async () => {},
+          },
           store,
           updater,
         ],

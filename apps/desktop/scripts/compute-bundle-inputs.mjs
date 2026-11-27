@@ -20,11 +20,7 @@ const defaultRepoRoot = path.resolve(
   "../../..",
 );
 
-export const BUNDLE_IDS = Object.freeze([
-  "web",
-  "backend",
-  "node-native-deps",
-]);
+export const BUNDLE_IDS = Object.freeze(["web", "backend", "node-native-deps"]);
 
 export const PLATFORM_TARGETS = Object.freeze([
   "darwin-arm64",
@@ -146,7 +142,9 @@ export function computeNativeDepsHash(
 ) {
   const packagesBlockStart = lockfileText.indexOf("\npackages:\n");
   const packagesBlock =
-    packagesBlockStart >= 0 ? lockfileText.slice(packagesBlockStart) : lockfileText;
+    packagesBlockStart >= 0
+      ? lockfileText.slice(packagesBlockStart)
+      : lockfileText;
   const entryRegex =
     /\n {2}'?([^'\n:]+?)@([^'\n:]+?)'?:\n(?: {4}[^\n]+\n)*? {4}resolution: \{integrity: (sha\d+-[A-Za-z0-9+/=]+)\}/g;
 
@@ -229,14 +227,20 @@ function listTreeEntriesFromFs(repoRoot, ownedPaths) {
     const info = statSync(absPath);
     if (info.isDirectory()) {
       for (const name of readdirSync(absPath).sort()) {
-        if (name === "node_modules" || name === ".git" || name === "dist") continue;
+        if (name === "node_modules" || name === ".git" || name === "dist")
+          continue;
         walk(path.join(absPath, name), `${relPath}/${name}`);
       }
       return;
     }
     if (info.isFile()) {
-      const digest = createHash("sha256").update(readFileSync(absPath)).digest("hex");
-      results.push({ path: relPath.split(path.sep).join("/"), blobId: `fs:${digest}` });
+      const digest = createHash("sha256")
+        .update(readFileSync(absPath))
+        .digest("hex");
+      results.push({
+        path: relPath.split(path.sep).join("/"),
+        blobId: `fs:${digest}`,
+      });
     }
   };
   for (const owned of ownedPaths) {
@@ -305,7 +309,12 @@ export function computeBundleInputHash(
     arch: spec.arch,
     inputHash: hash.digest("hex"),
     fileCount: filtered.length,
-    ...(nativeDepsInfo ? { nativeDepsHash: nativeDepsInfo.hash, nativeDepsShortId: nativeDepsInfo.shortId } : {}),
+    ...(nativeDepsInfo
+      ? {
+          nativeDepsHash: nativeDepsInfo.hash,
+          nativeDepsShortId: nativeDepsInfo.shortId,
+        }
+      : {}),
   };
 }
 
@@ -400,7 +409,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ? JSON.parse(readFileSync(path.resolve(prevPath), "utf8"))
     : null;
   const targetsArg = flag("--targets");
-  const targets = targetsArg ? targetsArg.split(",").filter(Boolean) : PLATFORM_TARGETS;
+  const targets = targetsArg
+    ? targetsArg.split(",").filter(Boolean)
+    : PLATFORM_TARGETS;
 
   const result = planBundleBuilds(repoRoot, {
     ref,

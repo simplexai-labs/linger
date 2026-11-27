@@ -4,11 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  composeProject,
-  instanceRoot,
-  type Instance,
-} from "./instance.js";
+import { composeProject, instanceRoot, type Instance } from "./instance.js";
 import {
   inspectNativeProcess,
   startNativeProcess,
@@ -74,8 +70,12 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
     const home = await mkdtemp(path.join(tmpdir(), "linger-li-"));
     tempDirs.push(home);
 
-    expect(() => resolveSafeHomePath(home, "../escape")).toThrow("Unsafe relative path");
-    expect(() => resolveSafeHomePath(home, "/etc/passwd")).toThrow("Unsafe relative path");
+    expect(() => resolveSafeHomePath(home, "../escape")).toThrow(
+      "Unsafe relative path",
+    );
+    expect(() => resolveSafeHomePath(home, "/etc/passwd")).toThrow(
+      "Unsafe relative path",
+    );
 
     const mk = (mod: string) => ({
       artifactId: `${mod}-111111111111`,
@@ -119,11 +119,16 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
       releaseFile: "releases/0.2.15/release.json",
       updatedAt: "2026-11-24T12:00:00Z",
     });
-    expect((await readJsonIfExists(ptrFile, parseReleasePointer))?.appVersion).toBe("0.2.15");
+    expect(
+      (await readJsonIfExists(ptrFile, parseReleasePointer))?.appVersion,
+    ).toBe("0.2.15");
 
     const nodeEnv = resolveBundleRuntimeEnv({
       nodeDepsDir: path.join(home, "infra/node-deps/nd-aaaaaaaaaaaaaaaa"),
-      promptsDir: path.join(home, "store/backend/backend-111111111111/node-services/prompts"),
+      promptsDir: path.join(
+        home,
+        "store/backend/backend-111111111111/node-services/prompts",
+      ),
     });
     expect(nodeEnv.NODE_PATH).toContain("nd-aaaaaaaaaaaaaaaa");
     expect(nodeEnv.LINGER_PROMPTS_DIR).toContain("prompts");
@@ -149,7 +154,10 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
       path.join(home, "store/backend/backend-111111111111/skills"),
     );
 
-    const fallbackDeps = path.join(home, "repo/.simplexai-runtime/offline/node-services");
+    const fallbackDeps = path.join(
+      home,
+      "repo/.simplexai-runtime/offline/node-services",
+    );
     const nsCmd = planBundleNativeCommand("node-services", home, descriptor, {
       platform: "darwin",
       fallbackNodeDepsDir: fallbackDeps,
@@ -158,7 +166,10 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
     expect(nsCmd.args[1]).toContain("v2-esm-resolve.mjs");
     expect(nsCmd.args[2]).toBe("--conditions=linger-production");
     expect(nsCmd.args[3]).toBe(
-      path.join(home, "store/backend/backend-111111111111/node-services/dist/supervisor.js"),
+      path.join(
+        home,
+        "store/backend/backend-111111111111/node-services/dist/supervisor.js",
+      ),
     );
     expect(nsCmd.env.LINGER_NODE_DEPS_DIR).toBe(
       path.join(home, "infra/node-deps/nd-aaaaaaaaaaaaaaaa"),
@@ -169,11 +180,17 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
       path.join(fallbackDeps, "node_modules"),
     ]);
     expect(nsCmd.env.LINGER_VOICE_RUNTIME_DIR).toBe(
-      path.join(home, "store/backend/backend-111111111111/node-services/voice-runtime"),
+      path.join(
+        home,
+        "store/backend/backend-111111111111/node-services/voice-runtime",
+      ),
     );
     expect(nsCmd.env.NODE_OPTIONS).toContain("--import=file://");
     expect(nsCmd.env.LINGER_PROMPTS_DIR).toBe(
-      path.join(home, "store/backend/backend-111111111111/node-services/prompts"),
+      path.join(
+        home,
+        "store/backend/backend-111111111111/node-services/prompts",
+      ),
     );
   });
 
@@ -182,13 +199,25 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
     tempDirs.push(home);
     const root = instanceRoot({ name: "desktop", home });
     const repo = path.join(home, "repo");
-    const offlineWebDir = path.join(repo, ".simplexai-runtime", "offline", "web");
+    const offlineWebDir = path.join(
+      repo,
+      ".simplexai-runtime",
+      "offline",
+      "web",
+    );
     await mkdir(root, { recursive: true });
     await mkdir(offlineWebDir, { recursive: true });
 
     const observedFile = path.join(home, "web-observed.json");
     // Simulate esbuild-bundled offline static-host.mjs that stays alive and logs LINGER_WEB_ROOT, HOST, API keys, and PATH.
-    const voiceBin = path.join(home, "tools", "native", "components", "voice-sha", "bin");
+    const voiceBin = path.join(
+      home,
+      "tools",
+      "native",
+      "components",
+      "voice-sha",
+      "bin",
+    );
     await mkdir(voiceBin, { recursive: true });
     const exe = process.platform === "win32" ? ".exe" : "";
     await writeFile(path.join(voiceBin, `ffmpeg${exe}`), "", "utf8");
@@ -225,7 +254,11 @@ setInterval(() => {}, 60_000);
     const webDir = path.join(home, "store", "web", "web-222222222222");
     const webDistDir = path.join(webDir, "dist");
     await mkdir(webDistDir, { recursive: true });
-    await writeFile(path.join(webDistDir, "index.html"), "<html>v2</html>", "utf8");
+    await writeFile(
+      path.join(webDistDir, "index.html"),
+      "<html>v2</html>",
+      "utf8",
+    );
     await writeFile(
       path.join(webDir, "static-host.mjs"),
       'import sirv from "sirv";\nconsole.log(sirv);\n',
@@ -356,7 +389,12 @@ setInterval(() => {}, 60_000);
     tempDirs.push(home);
     const root = instanceRoot({ name: "desktop", home });
     const repo = path.join(home, "repo");
-    const offlineWebDir = path.join(repo, ".simplexai-runtime", "offline", "web");
+    const offlineWebDir = path.join(
+      repo,
+      ".simplexai-runtime",
+      "offline",
+      "web",
+    );
     const offlineNsDist = path.join(
       repo,
       ".simplexai-runtime",

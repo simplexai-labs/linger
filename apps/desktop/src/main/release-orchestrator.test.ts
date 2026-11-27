@@ -133,7 +133,12 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
 
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         watchdog,
         orch,
@@ -223,7 +228,10 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
     const bus = new EventBus();
 
     const progressEvents: ReleaseProgressUpdate[] = [];
-    const switchedCalls: Array<{ version: string; changed: readonly string[] }> = [];
+    const switchedCalls: Array<{
+      version: string;
+      changed: readonly string[];
+    }> = [];
     const completedVersions: string[] = [];
     const rolledBackComplete: string[] = [];
     let probeHealthy = true;
@@ -251,7 +259,12 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
 
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         watchdog,
         orch,
@@ -270,7 +283,9 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
       await store.commitPending();
 
       // 1. Web-only update goes through unified stop-and-swap + full progress sequence
-      await store.writeReleaseDescriptor(makeRelease("0.1.10-v2test.1", { web: "2" }));
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.10-v2test.1", { web: "2" }),
+      );
       await orch.onBundleStaged("0.1.10-v2test.1");
       expect(await orch.applyStaged()).toBe(true);
       expect(switchedCalls).toEqual([
@@ -380,7 +395,12 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
 
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         watchdog,
         orch,

@@ -349,7 +349,7 @@ export class DesktopIpcModule implements Module {
 
       const hasCustomV2Feed = Boolean(
         process.env.LINGER_UPDATE_FEED_URL?.trim() ||
-          ctx.config.get().updateFeedUrl,
+        ctx.config.get().updateFeedUrl,
       );
       if (shellState.kind === "failed") {
         if (hasCustomV2Feed) {

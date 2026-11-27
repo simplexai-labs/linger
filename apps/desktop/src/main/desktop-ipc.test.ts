@@ -358,7 +358,10 @@ describe("DesktopIpcModule updates", () => {
     });
 
     // V2 ready wins over Shell failed and updateInstall calls applyStaged().
-    f.setBundleUpdate({ kind: "staged", version: "0.2.15", changedModules: ["web"] }, true);
+    f.setBundleUpdate(
+      { kind: "staged", version: "0.2.15", changedModules: ["web"] },
+      true,
+    );
     f.setOrchestrator({ kind: "ready", version: "0.2.15", diff });
     expect(await f.invoke(IPC.updateState)).toEqual({
       kind: "ready",
@@ -476,7 +479,10 @@ describe("DesktopIpcModule updates", () => {
       expect(await custom.invoke(IPC.updateState)).toEqual({ kind: "idle" });
 
       // Custom V2 feed failure still surfaces the V2 error.
-      custom.setBundleUpdate({ kind: "failed", error: "Local feed down" }, false);
+      custom.setBundleUpdate(
+        { kind: "failed", error: "Local feed down" },
+        false,
+      );
       expect(await custom.invoke(IPC.updateState)).toEqual({
         kind: "failed",
         error: "Local feed down",

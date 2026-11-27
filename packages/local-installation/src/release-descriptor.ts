@@ -81,9 +81,14 @@ export function isSafeRelativePath(value: string): boolean {
   );
 }
 
-export function resolveSafeHomePath(home: string, relativePath: string): string {
+export function resolveSafeHomePath(
+  home: string,
+  relativePath: string,
+): string {
   if (!isSafeRelativePath(relativePath)) {
-    throw new Error(`Unsafe relative path in release descriptor: ${relativePath}`);
+    throw new Error(
+      `Unsafe relative path in release descriptor: ${relativePath}`,
+    );
   }
   const root = path.resolve(home);
   const resolved = path.resolve(root, ...relativePath.split("/"));
@@ -94,7 +99,9 @@ export function resolveSafeHomePath(home: string, relativePath: string): string 
   return resolved;
 }
 
-export function parseLocalReleaseDescriptor(value: unknown): LocalReleaseDescriptor {
+export function parseLocalReleaseDescriptor(
+  value: unknown,
+): LocalReleaseDescriptor {
   const raw = value as Partial<LocalReleaseDescriptor> | null | undefined;
   if (
     !raw ||
@@ -131,7 +138,9 @@ export function parseLocalReleaseDescriptor(value: unknown): LocalReleaseDescrip
       !SHA256_RE.test(entry.sha256 ?? "") ||
       !isSafeRelativePath(entry.path ?? "")
     ) {
-      throw new Error(`Invalid module entry '${mod}' in LocalReleaseDescriptor`);
+      throw new Error(
+        `Invalid module entry '${mod}' in LocalReleaseDescriptor`,
+      );
     }
   }
 
@@ -184,7 +193,10 @@ export function parseDenylistState(value: unknown): DenylistState {
 export async function writeJsonAtomic(
   targetPath: string,
   value: unknown,
-  { mode = 0o600, maxAttempts = 8 }: { mode?: number; maxAttempts?: number } = {},
+  {
+    mode = 0o600,
+    maxAttempts = 8,
+  }: { mode?: number; maxAttempts?: number } = {},
 ): Promise<void> {
   await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
   const tempPath = `${targetPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;

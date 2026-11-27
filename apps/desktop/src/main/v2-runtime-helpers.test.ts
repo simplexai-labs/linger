@@ -92,7 +92,12 @@ describe("resolveToolsNodePath (P0-A)", () => {
   it("falls back to Shell resources/runtime/bin/node when infra/node is absent", async () => {
     const root = await makeTempDir("linger-tools-node-");
     const home = path.join(root, "home");
-    const resourcesPath = path.join(root, "Linger.app", "Contents", "Resources");
+    const resourcesPath = path.join(
+      root,
+      "Linger.app",
+      "Contents",
+      "Resources",
+    );
     const shellNode = path.join(resourcesPath, "runtime", "bin", "node");
     await mkdir(path.dirname(shellNode), { recursive: true });
     await writeFile(shellNode, "#!/bin/sh\n", "utf8");
@@ -126,7 +131,14 @@ describe("resolveToolsNodePath (P0-A)", () => {
     ).toBeUndefined();
 
     // Only <home>/desktop/node/<ver>/bin/node exists.
-    const desktopNode = path.join(home, "desktop", "node", "v26.5.0", "bin", "node");
+    const desktopNode = path.join(
+      home,
+      "desktop",
+      "node",
+      "v26.5.0",
+      "bin",
+      "node",
+    );
     await mkdir(path.dirname(desktopNode), { recursive: true });
     await writeFile(desktopNode, "#!/bin/sh\n", "utf8");
     expect(
@@ -141,7 +153,14 @@ describe("resolveToolsNodePath (P0-A)", () => {
     ).toBe(desktopNode);
 
     // Once infra/node exists, it takes precedence over desktop/node.
-    const infraNode = path.join(home, "infra", "node", "v26.5.0", "bin", "node");
+    const infraNode = path.join(
+      home,
+      "infra",
+      "node",
+      "v26.5.0",
+      "bin",
+      "node",
+    );
     await mkdir(path.dirname(infraNode), { recursive: true });
     await writeFile(infraNode, "#!/bin/sh\n", "utf8");
     expect(
@@ -176,13 +195,24 @@ describe("buildV2HealthProbes (P0-C)", () => {
     const home = await makeTempDir("linger-probes-home-");
 
     // Web static-host stays 200 OK the whole time.
-    const web = await listenJson(() => ({ status: 200, body: { ok: true, service: "linger-web" } }));
+    const web = await listenJson(() => ({
+      status: 200,
+      body: { ok: true, service: "linger-web" },
+    }));
     // Node services stays 200 OK.
-    const nodeServices = await listenJson(() => ({ status: 200, body: { status: "ok" } }));
+    const nodeServices = await listenJson(() => ({
+      status: 200,
+      body: { status: "ok" },
+    }));
     // TeamHub simulates exit code 42 -> port closed / unreachable.
-    const closedTeamhub = await listenJson(() => ({ status: 200, body: { ok: true } }));
+    const closedTeamhub = await listenJson(() => ({
+      status: 200,
+      body: { ok: true },
+    }));
     const deadTeamhubPort = closedTeamhub.port;
-    await new Promise<void>((resolve) => closedTeamhub.server.close(() => resolve()));
+    await new Promise<void>((resolve) =>
+      closedTeamhub.server.close(() => resolve()),
+    );
 
     const store = new BundleStoreModule({ home, target: "darwin-arm64" });
     const watchdog = new HealthWatchdogModule();
@@ -211,7 +241,12 @@ describe("buildV2HealthProbes (P0-C)", () => {
     const noopLog = { info: () => {}, warn: () => {}, error: () => {} };
     const host = new ModuleHost(
       [
-        { name: "Config", dependsOn: [], start: async () => {}, stop: async () => {} },
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
         store,
         watchdog,
         orchestrator,
@@ -252,8 +287,14 @@ describe("buildV2HealthProbes (P0-C)", () => {
 
   it("fails backend health probe when node-services is down or local ports are unavailable", async () => {
     const web = await listenJson(() => ({ status: 200, body: { ok: true } }));
-    const teamhub = await listenJson(() => ({ status: 200, body: { ok: true } }));
-    const deadNs = await listenJson(() => ({ status: 200, body: { status: "ok" } }));
+    const teamhub = await listenJson(() => ({
+      status: 200,
+      body: { ok: true },
+    }));
+    const deadNs = await listenJson(() => ({
+      status: 200,
+      body: { status: "ok" },
+    }));
     const deadNsPort = deadNs.port;
     await new Promise<void>((resolve) => deadNs.server.close(() => resolve()));
 

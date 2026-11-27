@@ -173,7 +173,9 @@ export function createStaticHost({
       if (!existsSync(resolve(nextRoot, "index.html"))) {
         response.statusCode = 400;
         response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({ ok: false, error: "missing_index_html" }));
+        response.end(
+          JSON.stringify({ ok: false, error: "missing_index_html" }),
+        );
         return;
       }
       serveFiles = makeSirvHandler(nextRoot);

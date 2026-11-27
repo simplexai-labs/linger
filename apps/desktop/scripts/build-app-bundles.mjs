@@ -8,9 +8,23 @@
 //     [--prev-manifest <path>] [--sign-key <ed25519.pem>] \
 //     [--min-shell 0.1.10] [--rollout-percent 100] [--bundles web,backend]
 import { spawn } from "node:child_process";
-import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+  verify,
+} from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -23,7 +37,10 @@ import {
   planBundleBuilds,
 } from "./compute-bundle-inputs.mjs";
 
-const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const desktopDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const defaultRepoRoot = path.resolve(desktopDir, "../..");
 
 const runCmd = (command, args, options = {}) =>
@@ -47,7 +64,12 @@ export async function sha256File(filePath) {
  * Packs a directory deterministically into a `.tar.zst` archive using Node 26's
  * built-in zstd compressor and returns `{ file, artifactId, sha256, size }`.
  */
-export async function packDeterministicTarZst(sourceDir, outDir, bundleId, suffix = "") {
+export async function packDeterministicTarZst(
+  sourceDir,
+  outDir,
+  bundleId,
+  suffix = "",
+) {
   await mkdir(outDir, { recursive: true });
   const work = await mkdtemp(path.join(tmpdir(), `linger-pack-${bundleId}-`));
   try {
@@ -81,7 +103,10 @@ export async function packDeterministicTarZst(sourceDir, outDir, bundleId, suffi
         params: {
           [zlib.constants.ZSTD_c_compressionLevel]: 12,
           [zlib.constants.ZSTD_c_windowLog]: 24,
-          [zlib.constants.ZSTD_c_nbWorkers]: Math.min(availableParallelism(), 4),
+          [zlib.constants.ZSTD_c_nbWorkers]: Math.min(
+            availableParallelism(),
+            4,
+          ),
         },
       }),
       createWriteStream(stagedZst),
@@ -232,7 +257,9 @@ export function assembleManifestV3({
   const makeUrls = (bundleId, fileName) => {
     const relPath = `bundles/${bundleId}/${fileName}`;
     const isRelative = !baseUrl || baseUrl === "relative";
-    const url = isRelative ? relPath : `${baseUrl.replace(/\/+$/, "")}/${relPath}`;
+    const url = isRelative
+      ? relPath
+      : `${baseUrl.replace(/\/+$/, "")}/${relPath}`;
     const mirrors = mirrorBaseUrls
       .filter(Boolean)
       .map((m) => `${m.replace(/\/+$/, "")}/${relPath}`);
@@ -251,7 +278,9 @@ export function assembleManifestV3({
 
     const built = effectiveBuilt[bundleId];
     if (!built) {
-      throw new Error(`Bundle ${bundleId} marked BUILD but no artifact was provided`);
+      throw new Error(
+        `Bundle ${bundleId} marked BUILD but no artifact was provided`,
+      );
     }
 
     if (built.__inheritedEntry) {
@@ -267,7 +296,9 @@ export function assembleManifestV3({
         arch: "noarch",
         originAppVersion: appVersion,
         inputHash: entry.inputHash,
-        ...(entry.nativeDepsHash ? { nativeDepsHash: entry.nativeDepsHash } : {}),
+        ...(entry.nativeDepsHash
+          ? { nativeDepsHash: entry.nativeDepsHash }
+          : {}),
         artifact: {
           artifactId: built.artifactId,
           format: built.format ?? "tar.zst",
@@ -296,7 +327,9 @@ export function assembleManifestV3({
         arch: "per-target",
         originAppVersion: appVersion,
         inputHash: entry.inputHash,
-        ...(entry.nativeDepsHash ? { nativeDepsHash: entry.nativeDepsHash } : {}),
+        ...(entry.nativeDepsHash
+          ? { nativeDepsHash: entry.nativeDepsHash }
+          : {}),
         targets,
       };
     }
@@ -311,7 +344,9 @@ export function assembleManifestV3({
     rollout,
     compat: {
       minShellVersion: compat?.minShellVersion ?? "0.2.0",
-      ...(compat?.maxShellVersion ? { maxShellVersion: compat.maxShellVersion } : {}),
+      ...(compat?.maxShellVersion
+        ? { maxShellVersion: compat.maxShellVersion }
+        : {}),
       minNativeDepsHash: compat?.minNativeDepsHash ?? plan.nativeDepsHash,
       runnerGatewayProtocol: compat?.runnerGatewayProtocol ?? 1,
       dbSchemaEpoch: compat?.dbSchemaEpoch ?? 892,
@@ -353,7 +388,11 @@ export async function writeSignedManifestV3(
   await mkdir(outDir, { recursive: true });
   const manifestPath = path.join(outDir, "app-manifest.json");
   if (!privateKeyPem) {
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
     return { manifestPath, signaturePath: null };
   }
   const { bytes, signatureBase64 } = signManifestV3(
@@ -375,7 +414,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   };
   const mode = flag("--mode") ?? "plan";
   const repoRoot = path.resolve(flag("--repo") ?? defaultRepoRoot);
-  const outDir = path.resolve(flag("--out") ?? path.join(repoRoot, ".linger-runtime/app-bundles"));
+  const outDir = path.resolve(
+    flag("--out") ?? path.join(repoRoot, ".linger-runtime/app-bundles"),
+  );
   const prevPath = flag("--prev-manifest");
   const prevManifest = prevPath
     ? JSON.parse(await readFile(path.resolve(prevPath), "utf8"))
@@ -392,7 +433,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       prevManifest,
     });
     await mkdir(outDir, { recursive: true });
-    await writeFile(path.join(outDir, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+    await writeFile(
+      path.join(outDir, "plan.json"),
+      `${JSON.stringify(plan, null, 2)}\n`,
+    );
     process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
   } else if (mode === "backend") {
     const target = flag("--target");
@@ -400,14 +444,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const res = await packageBackendBundle({
       target,
       outDir: path.join(outDir, "bundles/backend"),
-      teamhubDir: flag("--teamhub-dir") ? path.resolve(flag("--teamhub-dir")) : null,
+      teamhubDir: flag("--teamhub-dir")
+        ? path.resolve(flag("--teamhub-dir"))
+        : null,
       nodeServicesDir: flag("--node-services-dir")
         ? path.resolve(flag("--node-services-dir"))
         : null,
       skillsDir: flag("--skills-dir")
         ? path.resolve(flag("--skills-dir"))
         : path.join(repoRoot, "skills/builtin"),
-      computerDaemonDir: flag("--daemon-dir") ? path.resolve(flag("--daemon-dir")) : null,
+      computerDaemonDir: flag("--daemon-dir")
+        ? path.resolve(flag("--daemon-dir"))
+        : null,
       installerDir: flag("--installer-dir")
         ? path.resolve(flag("--installer-dir"))
         : path.join(repoRoot, "apps/linger-installer/dist"),
@@ -419,7 +467,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const planFile = flag("--plan");
     const builtFile = flag("--built");
     if (!version || !baseUrl || !planFile) {
-      throw new Error("assemble-manifest requires --version, --base-url, and --plan");
+      throw new Error(
+        "assemble-manifest requires --version, --base-url, and --plan",
+      );
     }
     const plan = JSON.parse(await readFile(path.resolve(planFile), "utf8"));
     const builtArtifacts = builtFile
@@ -443,7 +493,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       mirrorBaseUrls: (flag("--mirrors") ?? "").split(",").filter(Boolean),
     });
     const signKeyPath = flag("--sign-key");
-    const privateKeyPem = signKeyPath ? await readFile(path.resolve(signKeyPath), "utf8") : null;
+    const privateKeyPem = signKeyPath
+      ? await readFile(path.resolve(signKeyPath), "utf8")
+      : null;
     let expectedPublicKeyPem = null;
     if (privateKeyPem && !args.includes("--skip-pubkey-check")) {
       const src = await readFile(
@@ -451,7 +503,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         "utf8",
       );
       expectedPublicKeyPem =
-        /-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/.exec(src)?.[0] ?? null;
+        /-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/.exec(
+          src,
+        )?.[0] ?? null;
     }
     const written = await writeSignedManifestV3(outDir, manifest, {
       privateKeyPem,

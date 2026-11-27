@@ -10,7 +10,14 @@
 //   node serve-test-feed.mjs --https [--host 0.0.0.0] [--port 8443]
 //   node serve-test-feed.mjs --https --cert ./cert.pem --key ./key.pem
 import { execFileSync } from "node:child_process";
-import { createReadStream, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -141,7 +148,9 @@ function renderDashboardHtml({ feedUrl, index, activeStep, downloadHistory }) {
     .join("\n");
 
   const envLoopback = isHttp ? "LINGER_ALLOW_LOOPBACK_TEST_FEED=1 " : "";
-  const winLoopback = isHttp ? '$env:LINGER_ALLOW_LOOPBACK_TEST_FEED="1"; ' : "";
+  const winLoopback = isHttp
+    ? '$env:LINGER_ALLOW_LOOPBACK_TEST_FEED="1"; '
+    : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -273,7 +282,9 @@ export async function createTestFeedServer({
       const found = resolveStepEntry(index.steps, target);
       if (!found) {
         res.writeHead(404, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: `Unknown step: ${target}` }));
+        res.end(
+          JSON.stringify({ ok: false, error: `Unknown step: ${target}` }),
+        );
         return;
       }
       activeStep = found;
@@ -293,9 +304,10 @@ export async function createTestFeedServer({
     }
 
     // Channel manifest & Ed25519 signature (exact untouched CI-signed bytes!)
-    const manifestMatch = /^\/channels\/(stable|beta|canary)\/(app-manifest\.json(?:\.sig)?)$/.exec(
-      pathname,
-    );
+    const manifestMatch =
+      /^\/channels\/(stable|beta|canary)\/(app-manifest\.json(?:\.sig)?)$/.exec(
+        pathname,
+      );
     if (manifestMatch) {
       const fileName = manifestMatch[2];
       const filePath = path.join(rootDir, "steps", activeStep.id, fileName);
@@ -312,7 +324,9 @@ export async function createTestFeedServer({
         status: 200,
         size: bytes.length,
       });
-      log(`[FEED] ${req.method} ${pathname} [${activeStep.id} / ${activeStep.appVersion}] -> 200 (${formatBytes(bytes.length)})`);
+      log(
+        `[FEED] ${req.method} ${pathname} [${activeStep.id} / ${activeStep.appVersion}] -> 200 (${formatBytes(bytes.length)})`,
+      );
       res.writeHead(200, {
         "content-type": fileName.endsWith(".json")
           ? "application/json; charset=utf-8"
@@ -325,12 +339,17 @@ export async function createTestFeedServer({
     }
 
     // Content-addressed bundle artifacts under /bundles/<bundleId>/<fileName>
-    const bundleMatch = /^\/bundles\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(pathname);
+    const bundleMatch = /^\/bundles\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(
+      pathname,
+    );
     if (bundleMatch) {
       const [, bundleId, fileName] = bundleMatch;
       const bundlesRoot = path.resolve(rootDir, "bundles");
       const filePath = path.resolve(bundlesRoot, bundleId, fileName);
-      if (!filePath.startsWith(`${bundlesRoot}${path.sep}`) || !existsSync(filePath)) {
+      if (
+        !filePath.startsWith(`${bundlesRoot}${path.sep}`) ||
+        !existsSync(filePath)
+      ) {
         res.writeHead(404);
         res.end("Bundle not found");
         return;
@@ -343,7 +362,9 @@ export async function createTestFeedServer({
         status: 200,
         size,
       });
-      log(`[FEED] DOWNLOAD ${bundleId}/${fileName} -> 200 (${formatBytes(size)})`);
+      log(
+        `[FEED] DOWNLOAD ${bundleId}/${fileName} -> 200 (${formatBytes(size)})`,
+      );
       res.writeHead(200, {
         "content-type": "application/zstd",
         "content-length": String(size),
@@ -384,7 +405,8 @@ export async function createTestFeedServer({
 
   const addr = server.address();
   const actualPort = typeof addr === "object" && addr ? addr.port : port;
-  const displayHost = host === "0.0.0.0" ? (detectLanIPv4s()[0] ?? "127.0.0.1") : host;
+  const displayHost =
+    host === "0.0.0.0" ? (detectLanIPv4s()[0] ?? "127.0.0.1") : host;
   feedUrl = `${useHttps ? "https" : "http"}://${displayHost}:${actualPort}`;
 
   return {
@@ -407,7 +429,10 @@ export async function createTestFeedServer({
   };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const args = process.argv.slice(2);
   const flag = (name) => {
     const idx = args.indexOf(name);
@@ -433,12 +458,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   const index = loadTestKitIndex(rootDir);
   const step = instance.getActiveStep();
-  process.stdout.write("\n============================================================\n");
+  process.stdout.write(
+    "\n============================================================\n",
+  );
   process.stdout.write(" Linger V2 Signed Test Upgrade Feed Server\n");
-  process.stdout.write("============================================================\n");
+  process.stdout.write(
+    "============================================================\n",
+  );
   process.stdout.write(` Dashboard & Feed : ${instance.feedUrl}\n`);
   process.stdout.write(` Active Step      : ${step.id} (${step.appVersion})\n`);
-  process.stdout.write(` Changed Modules  : ${step.changedModules.join(", ")}\n`);
+  process.stdout.write(
+    ` Changed Modules  : ${step.changedModules.join(", ")}\n`,
+  );
   if (instance.certPath) {
     process.stdout.write(` TLS Self-Signed  : ${instance.certPath}\n`);
   }
@@ -451,10 +482,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   process.stdout.write("\n Switch step anytime:\n");
   process.stdout.write("   - Type 00..03 + Enter in this terminal, OR\n");
   process.stdout.write(`   - Open ${instance.feedUrl} in your browser, OR\n`);
-  process.stdout.write(`   - curl -X POST "${instance.feedUrl}/__test/switch?step=01"\n\n`);
+  process.stdout.write(
+    `   - curl -X POST "${instance.feedUrl}/__test/switch?step=01"\n\n`,
+  );
 
   if (!args.includes("--no-tty") && process.stdin.isTTY) {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
     rl.on("line", (line) => {
       const cmd = line.trim();
       if (!cmd) return;
@@ -468,7 +504,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
           `[FEED] Active step -> ${next.id} (${next.appVersion}, changed: ${next.changedModules.join(", ")})\n`,
         );
       } catch (err) {
-        process.stdout.write(`[FEED] ${err instanceof Error ? err.message : String(err)}\n`);
+        process.stdout.write(
+          `[FEED] ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     });
   }

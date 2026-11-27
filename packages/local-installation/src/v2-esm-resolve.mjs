@@ -32,9 +32,8 @@ const depsAnchorUrls = [];
 const resolvedPrimaryDeps = depsDir ? path.resolve(depsDir) : undefined;
 if (resolvedPrimaryDeps) {
   depsAnchorUrls.push(
-    pathToFileURL(
-      path.join(resolvedPrimaryDeps, "__linger_deps_anchor__.mjs"),
-    ).href,
+    pathToFileURL(path.join(resolvedPrimaryDeps, "__linger_deps_anchor__.mjs"))
+      .href,
   );
 }
 const resolvedFallbackDeps = fallbackDepsDir
@@ -56,9 +55,9 @@ if (depsAnchorUrls.length > 0 || voiceRuntimeDir) {
   const isModuleNotFound = (error) =>
     Boolean(
       error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "ERR_MODULE_NOT_FOUND",
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ERR_MODULE_NOT_FOUND",
     );
 
   registerHooks({
