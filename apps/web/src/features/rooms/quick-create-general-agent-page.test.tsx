@@ -671,6 +671,33 @@ describe("quick Local Agent creation", () => {
     });
   });
 
+  it("preselects the first Computer when every one is offline", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        { ...computer, display_name: "Studio", status: "offline" },
+        {
+          ...computer,
+          computer_id: "computer-second",
+          display_name: "Laptop",
+          status: "offline",
+        },
+      ],
+    });
+    renderCreation(runtime, "local");
+    const trigger = await screen.findByRole("combobox", {
+      name: "Local Computer",
+    });
+    // No lone Computer step: the settings show at once, as in the desktop app.
+    await waitFor(() => expect(trigger).toHaveTextContent("Studio"));
+    expect(setting("Runtime")).toBeInTheDocument();
+    expect(setting("Model")).toBeInTheDocument();
+    expect(await screen.findByText(OFFLINE_COMPUTER_HINT)).toBeVisible();
+  });
+
   it.each(["no-model", "no-grant", "no-computer"])(
     "does not create an Agent for %s",
     async (condition) => {

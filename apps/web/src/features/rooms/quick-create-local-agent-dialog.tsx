@@ -121,13 +121,14 @@ export function QuickCreateLocalAgentDialog({
   const desktopComputer = selectableComputers.find(
     (computer) => computer.computer_id === desktopComputerId,
   );
-  // A Computer is chosen by default so the Agent's settings show at once: the
-  // one the desktop app runs on, else the only one, else the first online.
+  // A Computer is always chosen, as in the desktop app, so the Agent's
+  // settings show at once: the one the desktop app runs on, else the first
+  // online one, else the first; an offline one takes the Agent once it
+  // connects.
   const defaultComputer =
     desktopComputer ??
-    (selectableComputers.length === 1
-      ? selectableComputers[0]
-      : selectableComputers.find((computer) => computer.status === "online"));
+    selectableComputers.find((computer) => computer.status === "online") ??
+    selectableComputers[0];
   const selectedComputerId = computerId || defaultComputer?.computer_id || "";
   const selectedComputer = selectableComputers.find(
     (computer) => computer.computer_id === selectedComputerId,
