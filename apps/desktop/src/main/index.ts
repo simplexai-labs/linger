@@ -512,64 +512,103 @@ async function main(): Promise<void> {
       windows.loadServer("retry");
     },
     restartServices: async (release, changed) => {
-      const servicesToSwitch: ("teamhub" | "node-services" | "web")[] = [];
+      const storeServices: ("teamhub" | "node-services" | "web")[] = [];
+      const baselineServices: ("teamhub" | "node-services" | "web")[] = [];
       if (changed.includes("backend")) {
-        servicesToSwitch.push("teamhub", "node-services");
+        if (release.modules.backend.source === "shell") {
+          baselineServices.push("teamhub", "node-services");
+        } else {
+          storeServices.push("teamhub", "node-services");
+        }
       }
       if (changed.includes("web")) {
-        servicesToSwitch.push("web");
+        if (release.modules.web.source === "shell") {
+          baselineServices.push("web");
+        } else {
+          storeServices.push("web");
+        }
       }
       if (
-        servicesToSwitch.length > 0 &&
+        (storeServices.length > 0 || baselineServices.length > 0) &&
         (await localServer.hasLocalInstance())
       ) {
-        // P0-4: Delegate service release switching (`teamhub`, `node-services`,
-        // and/or `web`) exclusively through installer.js so PID tracking &
-        // uninstall --stop stay under a single lifecycle owner while PostgreSQL
-        // and LiveKit remain running.
-        await localServer.switchRelease(release.appVersion, {
-          services: servicesToSwitch,
-        });
+        if (storeServices.length > 0) {
+          // Delegate service release switching (`teamhub`, `node-services`,
+          // and/or `web`) exclusively through installer.js so PID tracking &
+          // uninstall --stop stay under a single lifecycle owner while PostgreSQL
+          // and LiveKit remain running.
+          await localServer.switchRelease(release.appVersion, {
+            services: storeServices,
+          });
+        }
+        if (baselineServices.length > 0) {
+          await localServer.restoreBaselineRelease({
+            services: baselineServices,
+          });
+        }
       }
       if (changed.includes("backend")) {
         const currentStoreHome = bundleStore.home;
-        const daemonDir = path.join(
-          currentStoreHome,
-          release.modules.backend.path,
-          "computer-daemon",
-        );
-        const daemonExe = path.join(
-          daemonDir,
-          process.platform === "win32"
-            ? "linger-computer-daemon.exe"
-            : "linger-computer-daemon",
-        );
-        if (existsSync(daemonExe)) {
+        const toolsDir = computerToolsDirectory();
+        if (release.modules.backend.source === "shell") {
           const toolsNode = resolveToolsNodePath({
             home: currentStoreHome,
-            releaseInfraNode: release.infra.node,
             resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
             isPackaged: app.isPackaged,
           });
-          const toolsDir = computerToolsDirectory();
           computerDaemon.reloadBinary({
             spawn: spawnDaemon(
-              daemonExe,
+              shellDaemonPath,
               path.join(userData, "logs", "computer-daemon.log"),
             ),
-            teamhubCliDirectory: path.join(daemonDir, "teamhub-cli"),
+            teamhubCliDirectory: path.join(here, "../teamhub-cli"),
             extraEnv: {
               ...(toolsNode ? { LINGER_TOOLS_NODE_PATH: toolsNode } : {}),
-              // P0-2: Allow externalized teamhub-cli wrappers to locate the Electron shell binary.
               LINGER_CLI_NODE_PATH: process.execPath,
-              // P1-1: Keep Shell-bundled computer-tools (Playwright, CuaDriver.app, QuickJS)
-              // reachable after daemon binary moves into `<home>/store/backend/<id>/`.
               ...(existsSync(toolsDir)
                 ? { LINGER_COMPUTER_TOOLS_DIR: toolsDir }
                 : {}),
             },
             whenIdle: false,
           });
+        } else {
+          const daemonDir = path.join(
+            currentStoreHome,
+            release.modules.backend.path,
+            "computer-daemon",
+          );
+          const daemonExe = path.join(
+            daemonDir,
+            process.platform === "win32"
+              ? "linger-computer-daemon.exe"
+              : "linger-computer-daemon",
+          );
+          if (existsSync(daemonExe)) {
+            const toolsNode = resolveToolsNodePath({
+              home: currentStoreHome,
+              releaseInfraNode: release.infra.node,
+              resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+              isPackaged: app.isPackaged,
+            });
+            computerDaemon.reloadBinary({
+              spawn: spawnDaemon(
+                daemonExe,
+                path.join(userData, "logs", "computer-daemon.log"),
+              ),
+              teamhubCliDirectory: path.join(daemonDir, "teamhub-cli"),
+              extraEnv: {
+                ...(toolsNode ? { LINGER_TOOLS_NODE_PATH: toolsNode } : {}),
+                // Allow externalized teamhub-cli wrappers to locate the Electron shell binary.
+                LINGER_CLI_NODE_PATH: process.execPath,
+                // Keep Shell-bundled computer-tools (Playwright, CuaDriver.app, QuickJS)
+                // reachable after daemon binary moves into `<home>/store/backend/<id>/`.
+                ...(existsSync(toolsDir)
+                  ? { LINGER_COMPUTER_TOOLS_DIR: toolsDir }
+                  : {}),
+              },
+              whenIdle: false,
+            });
+          }
         }
       }
       log.info("release_orchestrator.services_restarted", {

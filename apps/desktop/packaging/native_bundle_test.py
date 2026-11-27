@@ -58,6 +58,37 @@ class NativeBundleV2SeedTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 native_bundle.check_seed_manifest("darwin-arm64", seed_dir=tmp)
 
+    def test_shell_baseline_seed_manifest_passes_without_archives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = {
+                "schema": 1,
+                "mode": "shell-baseline",
+                "appVersion": "0.1.11-v2test.0",
+                "channel": "stable",
+                "compat": {
+                    "minShellVersion": "0.1.11-v2test.0",
+                    "minNativeDepsHash": "sha256:" + "a" * 64,
+                    "runnerGatewayProtocol": 1,
+                    "dbSchemaEpoch": 1,
+                    "rollbackSafe": True,
+                },
+                "infra": {
+                    "node": "bundled",
+                    "postgres": "bundled",
+                    "voiceTools": "bundled",
+                    "nodeDeps": "infra/node-deps/nd-" + "a" * 16,
+                },
+                "bundles": {
+                    mod: {"artifactId": "shell-baseline", "inputHash": "b" * 64}
+                    for mod in native_bundle.V2_SEED_MODULES
+                },
+            }
+            with open(os.path.join(tmp, "seed-manifest.json"), "w") as f:
+                json.dump(manifest, f)
+            result = native_bundle.check_seed_manifest("linux-x64", seed_dir=tmp)
+            self.assertEqual(result["mode"], "shell-baseline")
+            self.assertEqual(result["appVersion"], "0.1.11-v2test.0")
+
 
 if __name__ == "__main__":
     unittest.main()

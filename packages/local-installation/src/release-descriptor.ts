@@ -25,11 +25,15 @@ export interface ReleaseInfraPaths {
   readonly nodeDeps: string;
 }
 
+export type ReleaseModuleSource = "store" | "shell";
+
 export interface ReleaseModuleEntry {
   readonly artifactId: string;
   readonly originAppVersion: string;
   readonly sha256: string;
   readonly path: string;
+  readonly inputHash?: string;
+  readonly source?: ReleaseModuleSource;
 }
 
 export interface LocalReleaseDescriptor {
@@ -136,7 +140,13 @@ export function parseLocalReleaseDescriptor(
       entry.artifactId.length === 0 ||
       typeof entry.originAppVersion !== "string" ||
       !SHA256_RE.test(entry.sha256 ?? "") ||
-      !isSafeRelativePath(entry.path ?? "")
+      !isSafeRelativePath(entry.path ?? "") ||
+      (entry.inputHash !== undefined &&
+        (typeof entry.inputHash !== "string" ||
+          entry.inputHash.length === 0)) ||
+      (entry.source !== undefined &&
+        entry.source !== "store" &&
+        entry.source !== "shell")
     ) {
       throw new Error(
         `Invalid module entry '${mod}' in LocalReleaseDescriptor`,

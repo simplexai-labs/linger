@@ -165,6 +165,7 @@ export async function resolveColdStartDaemonLaunch(
       parseLocalReleaseDescriptor,
     );
     if (!release) return shellFallback;
+    if (release.modules.backend.source === "shell") return shellFallback;
 
     const backendDir = resolveSafeHomePath(
       options.home,

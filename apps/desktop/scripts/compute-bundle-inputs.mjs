@@ -251,6 +251,18 @@ function listTreeEntriesFromFs(repoRoot, ownedPaths) {
   return results;
 }
 
+function hasGitRef(repoRoot, ref) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", `${ref}^{tree}`], {
+      cwd: repoRoot,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function computeBundleInputHash(
   repoRoot,
   bundleId,
@@ -266,7 +278,7 @@ export function computeBundleInputHash(
   if (!spec) throw new Error(`Unknown bundle id: ${bundleId}`);
 
   const entries =
-    !useFs && ref
+    !useFs && ref && hasGitRef(repoRoot, ref)
       ? listTreeEntriesFromGit(repoRoot, ref, spec.paths)
       : listTreeEntriesFromFs(repoRoot, spec.paths);
 

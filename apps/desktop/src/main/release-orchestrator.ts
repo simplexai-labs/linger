@@ -9,6 +9,11 @@ import type { UpdateActionKind, UpdateScope } from "../shared/api.js";
 import type { BundleStoreModule } from "./bundle-store.js";
 import type { HealthProbe, HealthWatchdogModule } from "./health-watchdog.js";
 import type { Module, ModuleContext } from "./modules.js";
+import { appendRollbackHistory } from "./v2-rollback-history.js";
+import {
+  probeNameToServiceLog,
+  redactServiceLogText,
+} from "./v2-service-logs.js";
 
 export interface ReleaseDiff {
   readonly changedModules: readonly BundleModuleId[];
@@ -261,6 +266,8 @@ export class ReleaseOrchestratorModule implements Module {
 
     let dbBackupFile: string | undefined;
     let switchStarted = false;
+    let failedServices: readonly string[] | undefined;
+    let capturedServiceLogTails: Readonly<Record<string, string>> | undefined;
     try {
       if (
         !next.compat.rollbackSafe &&
@@ -304,30 +311,20 @@ export class ReleaseOrchestratorModule implements Module {
         intervalMs: this.#hooks.healthGateIntervalMs,
       });
       if (!health.ok) {
-        let serviceLogTails: Record<string, string> | undefined;
-        if (this.#hooks.readFailedServiceLogs) {
-          try {
-            const tails = await this.#hooks.readFailedServiceLogs(
-              health.failedProbes,
-            );
-            if (Object.keys(tails).length > 0) {
-              serviceLogTails = tails;
-            }
-          } catch (logReadError) {
-            ctx.log.warn("release_orchestrator.service_log_read_failed", {
-              appVersion: version,
-              failedProbes: health.failedProbes,
-              error:
-                logReadError instanceof Error
-                  ? logReadError.message
-                  : String(logReadError),
-            });
-          }
-        }
+        failedServices = this.#resolveFailedServices(
+          health.failedProbes,
+          diff.changedModules,
+        );
+        capturedServiceLogTails = await this.#captureServiceLogTails(
+          version,
+          health.failedProbes,
+        );
         ctx.log.warn("release_orchestrator.health_probe_failed", {
           appVersion: version,
           failedProbes: health.failedProbes,
-          ...(serviceLogTails ? { serviceLogTails } : {}),
+          ...(capturedServiceLogTails
+            ? { serviceLogTails: capturedServiceLogTails }
+            : {}),
         });
         throw new Error(
           `Health probes failed: ${health.failedProbes.join(", ")}`,
@@ -362,7 +359,12 @@ export class ReleaseOrchestratorModule implements Module {
           appVersion: version,
           windowMs: this.#hooks.observationWindowMs,
           maxCrashes: this.#hooks.observationMaxCrashes,
-          onRollback: async (reason) => {
+          onRollback: async (reason, crashedServices) => {
+            const services = this.#resolveFailedServices(
+              crashedServices ?? [],
+              diff.changedModules,
+            );
+            const tails = await this.#captureServiceLogTails(version, services);
             await this.#performRollback(
               version,
               current,
@@ -371,6 +373,8 @@ export class ReleaseOrchestratorModule implements Module {
               reason,
               dbBackupFile,
               next.compat.rollbackSafe,
+              services,
+              tails,
             );
           },
         });
@@ -390,6 +394,11 @@ export class ReleaseOrchestratorModule implements Module {
         await this.#hooks.onAbort?.(version, reason);
         return false;
       }
+      const services =
+        failedServices ?? this.#resolveFailedServices([], diff.changedModules);
+      const tails =
+        capturedServiceLogTails ??
+        (await this.#captureServiceLogTails(version, services));
       await this.#performRollback(
         version,
         current,
@@ -398,8 +407,58 @@ export class ReleaseOrchestratorModule implements Module {
         reason,
         dbBackupFile,
         next.compat.rollbackSafe,
+        services,
+        tails,
       );
       return false;
+    }
+  }
+
+  #resolveFailedServices(
+    probesOrServices: readonly string[],
+    changedModules: readonly BundleModuleId[],
+  ): string[] {
+    const resolved = new Set<string>();
+    for (const item of probesOrServices) {
+      const mapped = probeNameToServiceLog(item);
+      if (mapped) {
+        resolved.add(mapped);
+      } else if (item.trim()) {
+        resolved.add(item.trim());
+      }
+    }
+    if (resolved.size === 0) {
+      if (changedModules.includes("backend")) {
+        resolved.add("teamhub");
+        resolved.add("node-services");
+      }
+      if (changedModules.includes("web")) {
+        resolved.add("web");
+      }
+    }
+    return [...resolved];
+  }
+
+  async #captureServiceLogTails(
+    appVersion: string,
+    probesOrServices: readonly string[],
+  ): Promise<Readonly<Record<string, string>> | undefined> {
+    if (!this.#hooks.readFailedServiceLogs || probesOrServices.length === 0) {
+      return undefined;
+    }
+    try {
+      const tails = await this.#hooks.readFailedServiceLogs(probesOrServices);
+      return Object.keys(tails).length > 0 ? tails : undefined;
+    } catch (logReadError) {
+      this.#ctx?.log.warn("release_orchestrator.service_log_read_failed", {
+        appVersion,
+        failedProbes: probesOrServices,
+        error:
+          logReadError instanceof Error
+            ? logReadError.message
+            : String(logReadError),
+      });
+      return undefined;
     }
   }
 
@@ -411,36 +470,71 @@ export class ReleaseOrchestratorModule implements Module {
     reason: string,
     dbBackupFile?: string,
     rollbackSafe = true,
+    failedServices: readonly string[] = [],
+    serviceLogTails?: Readonly<Record<string, string>>,
   ): Promise<void> {
     const ctx = this.#ctx!;
     const store = ctx.get<BundleStoreModule>("BundleStore");
     const isPreCommit = stage === "migrate" || stage === "healthcheck";
+    const resolvedFailedServices =
+      failedServices.length > 0
+        ? [...failedServices]
+        : this.#resolveFailedServices([], changedModules);
+    const sanitizedReason = redactServiceLogText(reason);
 
-    // P0-1 safety invariant: NEVER run automated pg_restore after commit
+    // Safety invariant: NEVER run automated pg_restore after commit
     // (`crash-watchdog`), because live user writes may have occurred after the
     // release was committed. If the committed migration was also irreversible
     // (`rollbackSafe === false`), halt automatic rollback rather than running
     // older incompatible binaries against the migrated schema, and preserve
     // `dbBackupFile` for explicit manual recovery.
     if (!isPreCommit && !rollbackSafe) {
+      const manualReason = `${sanitizedReason} (non-rollbackSafe schema already committed; automatic DB restore suppressed to prevent data loss)`;
       ctx.log.error("release_orchestrator.manual_recovery_required", {
         failedVersion,
+        restoredVersion: failedVersion,
         previousVersion: previousRelease?.appVersion,
         stage,
-        reason,
-        dbBackupFile,
+        changedModules,
+        failedServices: resolvedFailedServices,
+        reason: manualReason,
+        ...(serviceLogTails ? { serviceLogTails } : {}),
+        rollbackSafe,
+        ...(dbBackupFile ? { dbBackupFile } : {}),
+        dbRestored: false,
+        manualRecoveryRequired: true,
+        denylisted: true,
       });
       await store.addDenylist({
         appVersion: failedVersion,
         failedAt: new Date().toISOString(),
         stage,
-        reason,
+        reason: sanitizedReason,
+      });
+      await appendRollbackHistory(store.home, {
+        timestamp: new Date().toISOString(),
+        failedVersion,
+        restoredVersion: failedVersion,
+        stage,
+        changedModules,
+        failedServices: resolvedFailedServices,
+        reason: manualReason,
+        ...(serviceLogTails ? { serviceLogTails } : {}),
+        rollbackSafe,
+        ...(dbBackupFile ? { dbBackupFile } : {}),
+        dbRestored: false,
+        manualRecoveryRequired: true,
+        denylisted: true,
+      }).catch((err) => {
+        ctx.log.warn("release_orchestrator.rollback_history_write_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
       this.#stagedVersion = undefined;
       const notice: RollbackNotice = {
         fromVersion: failedVersion,
         toVersion: failedVersion,
-        reason: `${reason} (non-rollbackSafe schema already committed; automatic DB restore suppressed to prevent data loss)`,
+        reason: manualReason,
         manualRecoveryRequired: true,
         ...(dbBackupFile ? { dbBackupFile } : {}),
       };
@@ -459,7 +553,8 @@ export class ReleaseOrchestratorModule implements Module {
       failedVersion,
       previousVersion: previousRelease?.appVersion,
       stage,
-      reason,
+      failedServices: resolvedFailedServices,
+      reason: sanitizedReason,
     });
     this.#hooks.onProgress?.({
       stage: "rolling_back",
@@ -468,17 +563,23 @@ export class ReleaseOrchestratorModule implements Module {
       version: failedVersion,
       targetVersion: previousRelease?.appVersion,
     });
+    let dbRestored = false;
     if (isPreCommit && dbBackupFile && this.#hooks.restoreDatabase) {
-      await this.#hooks.restoreDatabase(dbBackupFile).catch((err) => {
+      try {
+        await this.#hooks.restoreDatabase(dbBackupFile);
+        dbRestored = true;
+      } catch (err) {
         ctx.log.warn("release_orchestrator.db_restore_failed", {
-          error: String(err),
+          error: redactServiceLogText(
+            err instanceof Error ? err.message : String(err),
+          ),
         });
-      });
+      }
     }
     const restoredPtr = await store.rollbackToPrevious(
       failedVersion,
       stage,
-      reason,
+      sanitizedReason,
     );
     if (previousRelease) {
       await this.#hooks
@@ -519,14 +620,48 @@ export class ReleaseOrchestratorModule implements Module {
       }
     }
     this.#stagedVersion = undefined;
+    const restoredVersion =
+      restoredPtr?.appVersion ??
+      previousRelease?.appVersion ??
+      (this.#hooks.restoreBaselineServices ? "baseline" : "previous");
     const notice: RollbackNotice = {
       fromVersion: failedVersion,
-      toVersion:
-        restoredPtr?.appVersion ??
-        previousRelease?.appVersion ??
-        (this.#hooks.restoreBaselineServices ? "baseline" : "previous"),
-      reason,
+      toVersion: restoredVersion,
+      reason: sanitizedReason,
     };
+    ctx.log.warn("release_orchestrator.rolled_back", {
+      failedVersion,
+      restoredVersion,
+      stage,
+      changedModules,
+      failedServices: resolvedFailedServices,
+      reason: sanitizedReason,
+      ...(serviceLogTails ? { serviceLogTails } : {}),
+      rollbackSafe,
+      ...(dbBackupFile ? { dbBackupFile } : {}),
+      dbRestored,
+      manualRecoveryRequired: false,
+      denylisted: true,
+    });
+    await appendRollbackHistory(store.home, {
+      timestamp: new Date().toISOString(),
+      failedVersion,
+      restoredVersion,
+      stage,
+      changedModules,
+      failedServices: resolvedFailedServices,
+      reason: sanitizedReason,
+      ...(serviceLogTails ? { serviceLogTails } : {}),
+      rollbackSafe,
+      ...(dbBackupFile ? { dbBackupFile } : {}),
+      dbRestored,
+      manualRecoveryRequired: false,
+      denylisted: true,
+    }).catch((err) => {
+      ctx.log.warn("release_orchestrator.rollback_history_write_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     this.#rollbackNotice = notice;
     this.#setState({ kind: "rolled_back", notice });
     ctx.bus.emit(

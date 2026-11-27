@@ -218,6 +218,14 @@ export class BundleUpdaterModule implements Module {
       return;
     }
     const store = ctx.get<BundleStoreModule>("BundleStore");
+    // Ensure a brand-new local instance (created by Setup Wizard after
+    // BundleStore.start) or a Shell upgrade seeds state/current.json before
+    // comparing against the remote manifest.
+    await store.ensureSeeded().catch((error) => {
+      ctx.log.warn("bundle_updater.seed_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     const cfg = ctx.config.get();
     const feed =
       process.env.LINGER_UPDATE_FEED_URL?.trim() ||
@@ -426,18 +434,9 @@ export class BundleUpdaterModule implements Module {
     if (!nodeDepsArtifact) {
       throw new Error(`Manifest missing node-native-deps for ${target}`);
     }
-    if (
-      !(await store.hasVerifiedNodeDeps(
-        nodeDepsShortId,
-        nodeDepsArtifact.sha256,
-      ))
-    ) {
-      tasks.push({
-        id: "node-native-deps",
-        artifact: nodeDepsArtifact,
-        nodeDepsShortId,
-      });
-    }
+    const nodeDepsMatchesCurrent =
+      currentDesc !== undefined &&
+      path.basename(currentDesc.infra.nodeDeps) === nodeDepsShortId;
 
     const modules = {} as Record<
       BundleModuleId,
@@ -451,11 +450,23 @@ export class BundleUpdaterModule implements Module {
       if (!artifact) {
         throw new Error(`Manifest missing module '${modId}' for ${target}`);
       }
+      const currentMod = currentDesc?.modules[modId];
+      const canInheritShell =
+        currentMod?.source === "shell" &&
+        currentMod.inputHash !== undefined &&
+        currentMod.inputHash === entry.inputHash &&
+        (modId !== "backend" || nodeDepsMatchesCurrent);
+      if (canInheritShell) {
+        modules[modId] = { ...currentMod };
+        continue;
+      }
       modules[modId] = {
         artifactId: artifact.artifactId,
         originAppVersion: entry.originAppVersion,
         sha256: artifact.sha256,
         path: store.moduleRelativePath(modId, artifact.artifactId),
+        inputHash: entry.inputHash,
+        source: "store",
       };
       const alreadyCached = await store.hasVerifiedModule(
         modId,
@@ -465,6 +476,23 @@ export class BundleUpdaterModule implements Module {
       if (!alreadyCached) {
         tasks.push({ id: modId, artifact });
       }
+    }
+
+    // When backend remains on the Shell baseline with matching native deps
+    // (e.g. first pure-Web update), skip downloading node-native-deps too (0B).
+    const backendUsesStore = modules.backend.source !== "shell";
+    if (
+      (backendUsesStore || !nodeDepsMatchesCurrent) &&
+      !(await store.hasVerifiedNodeDeps(
+        nodeDepsShortId,
+        nodeDepsArtifact.sha256,
+      ))
+    ) {
+      tasks.unshift({
+        id: "node-native-deps",
+        artifact: nodeDepsArtifact,
+        nodeDepsShortId,
+      });
     }
 
     const changedModules = tasks.map((t) => t.id);

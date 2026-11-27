@@ -20,7 +20,10 @@ export interface CrashObservationOptions {
   readonly appVersion: string;
   readonly windowMs?: number;
   readonly maxCrashes?: number;
-  readonly onRollback: (reason: string) => Promise<void>;
+  readonly onRollback: (
+    reason: string,
+    crashedServices?: readonly string[],
+  ) => Promise<void>;
 }
 
 const DEFAULT_GATE_TIMEOUT_MS = 60_000;
@@ -43,7 +46,11 @@ export class HealthWatchdogModule implements Module {
     | {
         readonly appVersion: string;
         readonly maxCrashes: number;
-        readonly onRollback: (reason: string) => Promise<void>;
+        readonly onRollback: (
+          reason: string,
+          crashedServices?: readonly string[],
+        ) => Promise<void>;
+        readonly crashedServices: Set<string>;
         crashes: number;
         triggered: boolean;
         timer: NodeJS.Timeout;
@@ -115,6 +122,7 @@ export class HealthWatchdogModule implements Module {
       appVersion: options.appVersion,
       maxCrashes,
       onRollback: options.onRollback,
+      crashedServices: new Set(),
       crashes: 0,
       triggered: false,
       timer,
@@ -136,6 +144,7 @@ export class HealthWatchdogModule implements Module {
     const obs = this.#observation;
     if (!obs || obs.triggered) return false;
     obs.crashes += 1;
+    obs.crashedServices.add(serviceName);
     this.#ctx?.log.warn("health_watchdog.crash_recorded", {
       appVersion: obs.appVersion,
       service: serviceName,
@@ -150,6 +159,7 @@ export class HealthWatchdogModule implements Module {
     this.#observation = undefined;
     await obs.onRollback(
       `${serviceName} crashed ${obs.crashes} times within observation window: ${reason}`,
+      [...obs.crashedServices],
     );
     return true;
   }

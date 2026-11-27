@@ -211,9 +211,9 @@ export function resolvePostgresTool(
   const listDir = options.readdir ?? safeReaddir;
   const readFileText = options.readFileText ?? safeReadText;
 
-  const envKey =
-    tool === "pg_dump" ? "LINGER_PG_DUMP_BIN" : "LINGER_PG_RESTORE_BIN";
-  const envOverride = env[envKey]?.trim();
+  const envOverride = (
+    tool === "pg_dump" ? env.LINGER_PG_DUMP_BIN : env.LINGER_PG_RESTORE_BIN
+  )?.trim();
   if (envOverride) {
     return {
       executable: envOverride,

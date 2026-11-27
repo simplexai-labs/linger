@@ -23,6 +23,7 @@ import {
 } from "@linger/local-installation/release-descriptor";
 
 import type { Module, ModuleContext } from "./modules.js";
+import { compareVersions } from "./update-manifest.js";
 
 const runExec = promisify(execFile);
 
@@ -48,8 +49,9 @@ export interface GcResult {
   readonly removedNodeDeps: readonly string[];
 }
 
-export interface SeedManifest {
+export interface ArchiveSeedManifest {
   readonly schema: 1;
+  readonly mode?: "archive";
   readonly appVersion: string;
   readonly channel: "stable" | "beta" | "canary";
   readonly target: string;
@@ -63,10 +65,36 @@ export interface SeedManifest {
         readonly file: string;
         readonly sha256: string;
         readonly bytes: number;
+        readonly inputHash?: string;
       }
     >
   >;
 }
+
+export interface ShellBaselineSeedManifest {
+  readonly schema: 1;
+  readonly mode: "shell-baseline";
+  readonly appVersion: string;
+  readonly channel: "stable" | "beta" | "canary";
+  readonly compat: LocalReleaseDescriptor["compat"];
+  readonly infra: {
+    readonly node: string;
+    readonly postgres?: string;
+    readonly voiceTools?: string;
+    readonly nodeDeps: string;
+  };
+  readonly bundles: Readonly<
+    Record<
+      BundleModuleId | "node-native-deps",
+      {
+        readonly artifactId: string;
+        readonly inputHash: string;
+      }
+    >
+  >;
+}
+
+export type SeedManifest = ArchiveSeedManifest | ShellBaselineSeedManifest;
 
 const VERIFIED_MARKER = "verified.json";
 const DEFAULT_GC_MIN_AGE_MS = 24 * 60 * 60_000;
@@ -185,19 +213,44 @@ export class BundleStoreModule implements Module {
       await rm(this.#pointerPath("pending"), { force: true });
     }
 
-    const current = await this.readCurrent();
+    await this.ensureSeeded();
+  }
+
+  /**
+   * Idempotently ensures the local V2 store has a baseline release seeded from
+   * `seedDirectory/seed-manifest.json` when running in local server mode.
+   *
+   * Imports when no `state/current.json` exists yet OR when the bundled Shell
+   * seed version is strictly newer than the currently active release
+   * (Shell upgrade). Never overwrites an equal or newer V2 release.
+   */
+  async ensureSeeded(): Promise<boolean> {
     const allowSeed = this.#options.shouldImportSeed
       ? await this.#options.shouldImportSeed()
       : true;
-    if (!current && allowSeed && this.#options.seedDirectory) {
-      const seedManifestPath = path.join(
-        this.#options.seedDirectory,
-        "seed-manifest.json",
-      );
-      if (existsSync(seedManifestPath)) {
-        await this.importSeed(this.#options.seedDirectory);
-      }
+    if (!allowSeed || !this.#options.seedDirectory) return false;
+    const seedManifestPath = path.join(
+      this.#options.seedDirectory,
+      "seed-manifest.json",
+    );
+    if (!existsSync(seedManifestPath)) return false;
+
+    const seed = JSON.parse(
+      await readFile(seedManifestPath, "utf8"),
+    ) as SeedManifest;
+    const current = await this.readCurrent();
+    if (current && compareVersions(seed.appVersion, current.appVersion) <= 0) {
+      return false;
     }
+
+    await mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.releasesDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.storeDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.infraDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.downloadsDir, { recursive: true, mode: 0o700 });
+
+    await this.importSeed(this.#options.seedDirectory);
+    return true;
   }
 
   async stop(): Promise<void> {}
@@ -337,8 +390,12 @@ export class BundleStoreModule implements Module {
   }
 
   /**
-   * Imports a bundled offline Shell seed into `<LINGER_HOME>` on first launch
-   * so new installations work completely offline before the first update check.
+   * Imports a bundled Shell seed into `<LINGER_HOME>` so new or Shell-upgraded
+   * installations establish a V2 baseline immediately.
+   *
+   * Supports both zero-bloat `mode: "shell-baseline"` manifests (writes only
+   * `release.json` + `state/current.json` with zero archive extraction) and
+   * legacy offline archive seeds (`mode !== "shell-baseline"`).
    */
   async importSeed(seedDir: string): Promise<LocalReleaseDescriptor> {
     const manifestPath = path.join(seedDir, "seed-manifest.json");
@@ -347,32 +404,59 @@ export class BundleStoreModule implements Module {
     ) as SeedManifest;
     const moduleIds: readonly BundleModuleId[] = ["web", "backend"];
 
-    const nodeDepsEntry = seed.bundles["node-native-deps"];
-    const nodeDepsShortId = path.basename(seed.infra.nodeDeps);
-    await this.stageNodeDepsArchive(
-      nodeDepsShortId,
-      path.join(seedDir, nodeDepsEntry.file),
-      nodeDepsEntry.sha256,
-    );
-
     const modules = {} as Record<
       BundleModuleId,
       LocalReleaseDescriptor["modules"][BundleModuleId]
     >;
-    for (const mod of moduleIds) {
-      const entry = seed.bundles[mod];
-      await this.stageModuleArchive(
-        mod,
-        entry.artifactId,
-        path.join(seedDir, entry.file),
-        entry.sha256,
-      );
-      modules[mod] = {
-        artifactId: entry.artifactId,
-        originAppVersion: seed.appVersion,
-        sha256: entry.sha256,
-        path: this.moduleRelativePath(mod, entry.artifactId),
+    let infra: LocalReleaseDescriptor["infra"];
+
+    if (seed.mode === "shell-baseline") {
+      infra = {
+        node: seed.infra.node,
+        postgres: seed.infra.postgres ?? "bundled",
+        voiceTools: seed.infra.voiceTools ?? "bundled",
+        nodeDeps: seed.infra.nodeDeps,
       };
+      for (const mod of moduleIds) {
+        const entry = seed.bundles[mod];
+        const sentinelSha = createHash("sha256")
+          .update(`shell-baseline:${mod}:${entry.inputHash}`)
+          .digest("hex");
+        modules[mod] = {
+          artifactId: entry.artifactId,
+          originAppVersion: seed.appVersion,
+          sha256: sentinelSha,
+          path: `shell/${mod}`,
+          inputHash: entry.inputHash,
+          source: "shell",
+        };
+      }
+    } else {
+      const nodeDepsEntry = seed.bundles["node-native-deps"];
+      const nodeDepsShortId = path.basename(seed.infra.nodeDeps);
+      await this.stageNodeDepsArchive(
+        nodeDepsShortId,
+        path.join(seedDir, nodeDepsEntry.file),
+        nodeDepsEntry.sha256,
+      );
+      infra = seed.infra;
+      for (const mod of moduleIds) {
+        const entry = seed.bundles[mod];
+        await this.stageModuleArchive(
+          mod,
+          entry.artifactId,
+          path.join(seedDir, entry.file),
+          entry.sha256,
+        );
+        modules[mod] = {
+          artifactId: entry.artifactId,
+          originAppVersion: seed.appVersion,
+          sha256: entry.sha256,
+          path: this.moduleRelativePath(mod, entry.artifactId),
+          ...(entry.inputHash ? { inputHash: entry.inputHash } : {}),
+          source: "store",
+        };
+      }
     }
 
     const descriptor: LocalReleaseDescriptor = {
@@ -382,7 +466,7 @@ export class BundleStoreModule implements Module {
       installedAt: new Date().toISOString(),
       source: "shell-seed",
       compat: seed.compat,
-      infra: seed.infra,
+      infra,
       modules,
     };
     await this.writeReleaseDescriptor(descriptor);
@@ -395,6 +479,7 @@ export class BundleStoreModule implements Module {
     } satisfies ReleasePointer);
     this.#ctx?.log.info("bundle_store.seed_imported", {
       appVersion: seed.appVersion,
+      mode: seed.mode ?? "archive",
     });
     return descriptor;
   }
@@ -446,7 +531,9 @@ export class BundleStoreModule implements Module {
     platform: NodeJS.Platform = process.platform,
   ): Promise<string | undefined> {
     const release = await this.currentRelease().catch(() => undefined);
-    if (!release) return undefined;
+    if (!release || release.modules.backend.source === "shell") {
+      return undefined;
+    }
     const binaryName =
       platform === "win32"
         ? "linger-computer-daemon.exe"
@@ -577,6 +664,7 @@ export class BundleStoreModule implements Module {
       if (!desc) continue;
       pinnedNodeDeps.add(path.basename(desc.infra.nodeDeps));
       for (const [modId, mod] of Object.entries(desc.modules)) {
+        if (mod.source === "shell") continue;
         pinnedModules.add(`${modId}/${mod.artifactId}`);
       }
     }

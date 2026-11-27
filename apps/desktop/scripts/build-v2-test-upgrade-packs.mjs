@@ -38,6 +38,7 @@ import {
   BUNDLE_IDS,
   PLATFORM_TARGETS,
   computeNativeDepsHash,
+  planBundleBuilds,
 } from "./compute-bundle-inputs.mjs";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
@@ -464,11 +465,11 @@ LINGER_BUNDLE_CHECK_INTERVAL_MS=10000 \\
 
 ## 4. 4-Step Real-Device Verification Matrix (2+1 Model)
 
-> **Important (\`step-00-baseline\` manual activation):** \`step-00-baseline\` only downloads and stages the baseline bundles into \`<LINGER_HOME>/store/\` and does **not** auto-restart local services. After \`step-00-baseline\` is staged, you **must** click **Update Services** in the account menu to activate \`step-00-baseline\` (creating \`<LINGER_HOME>/state/current.json\`) **before** switching the test feed to \`step-01-web\`. Otherwise \`step-01-web\` compares against the unseeded Shell and triggers \`scope=backend\` (\`restart-services\`) instead of \`scope=web\` (\`reload-page\`).
+> **Automatic Shell Baseline Seeding:** The installed Desktop Shell ships a lightweight \`dist/seed/seed-manifest.json\` (\`mode: "shell-baseline"\`) that automatically seeds \`<LINGER_HOME>/state/current.json\` on first launch / post-setup with zero archive extraction. You can switch the test feed **directly to \`step-01-web\`** to verify a pure-Web hot update (\`scope=web\`, \`reload-page\`, 0B \`backend\` download, 0B \`node-native-deps\` download, zero backend restart) without activating \`step-00-baseline\` first. \`step-00-baseline\` remains available if you want to seed full store archives explicitly.
 
 | Step | Version | Changed Bundle | What to Observe |
 |---|---|---|---|
-| \`step-00-baseline\` | \`${versions["step-00-baseline"]}\` | All 3 (\`web\` + \`backend\` + \`node-native-deps\`) | Downloads and stages into \`<LINGER_HOME>/store/\` & \`infra/node-deps/\` without auto-restarting services. **Click "Update Services" in the account menu** to activate \`step-00-baseline\` (writing \`state/current.json\`) before switching to \`step-01-web\`, so steps 01–03 download **only 1/3 changed bundle** and \`step-01-web\` uses \`scope=web\` (\`reload-page\`). |
+| \`step-00-baseline\` | \`${versions["step-00-baseline"]}\` | All 3 (\`web\` + \`backend\` + \`node-native-deps\`, optional) | Matches the Shell's built-in \`seed-manifest.json\` version and \`inputHash\`. On a fresh Shell install, \`seed-manifest.json\` already establishes this baseline automatically; you may skip straight to \`step-01-web\`. |
 | \`step-01-web\` | \`${versions["step-01-web"]}\` | **ONLY \`web\`** (\`backend\` & \`node-native-deps\` skipped 0B) | Feed log shows **only \`bundles/web/...\` downloaded**. Web UI hot-reloads with bottom-right pill **\`Linger V2 Test · step-01-web · ${versions["step-01-web"]}\`**. No re-login; PG / TeamHub / LiveKit / Electron PIDs do NOT change. |
 | \`step-02-backend\` | \`${versions["step-02-backend"]}\` | **ONLY \`backend\`** (\`web\` & \`node-native-deps\` skipped 0B) | Feed log shows **only \`bundles/backend/backend-<target>-...\` downloaded**. Active agent tasks / voice sessions drain first (\`waiting\`); macOS Gatekeeper / Windows Authenticode accepts signed \`teamhub\` + \`linger-computer-daemon\`; atomic backend rolling restart completes while PG, LiveKit & Electron stay alive. \`skills/v2-upgrade-probe/SKILL.md\` and \`node-services/prompts/v2-upgrade-marker.txt\` appear on disk. |
 | \`step-03-rollback-faulty\` | \`${versions["step-03-rollback-faulty"]}\` | **ONLY faulty \`backend\`** (\`rollbackSafe: false\`) | Pre-migration \`pg_dump\` runs → faulty signed \`teamhub\` exits with code \`42\` → HealthWatchdog triggers \`pg_restore\` + atomic rollback to \`${versions["step-02-backend"]}\` → \`${versions["step-03-rollback-faulty"]}\` is written to \`state/denylist.json\` → subsequent update checks skip it (zero upgrade loop!). |
@@ -537,6 +538,10 @@ export async function buildV2TestUpgradePacks({
   const lockfileText = existsSync(lockfilePath)
     ? await readFile(lockfilePath, "utf8")
     : "";
+  const inputPlan = planBundleBuilds(repoRoot, {
+    ref: "HEAD",
+    lockfileText,
+  });
   const nativeDepsInfo = computeNativeDepsHash(lockfileText, {
     target: "all",
     nodeMajor: "26",
@@ -551,7 +556,12 @@ export async function buildV2TestUpgradePacks({
   const stepSummaries = [];
 
   try {
-    const packNoarch = async (bundleId, stageDir, originAppVersion) => {
+    const packNoarch = async (
+      bundleId,
+      stageDir,
+      originAppVersion,
+      overrideInputHash = null,
+    ) => {
       const destDir = path.join(absOut, "bundles", bundleId);
       const packed = await packDeterministicTarZst(stageDir, destDir, bundleId);
       checksumFiles.push({
@@ -561,9 +571,9 @@ export async function buildV2TestUpgradePacks({
       return {
         arch: "noarch",
         originAppVersion,
-        inputHash: sha256String(
-          `${bundleId}:${originAppVersion}:${packed.sha256}`,
-        ),
+        inputHash:
+          overrideInputHash ??
+          sha256String(`${bundleId}:${originAppVersion}:${packed.sha256}`),
         artifact: {
           artifactId: packed.artifactId,
           format: "tar.zst",
@@ -574,7 +584,12 @@ export async function buildV2TestUpgradePacks({
       };
     };
 
-    const packPerTarget = async (bundleId, stageByTarget, originAppVersion) => {
+    const packPerTarget = async (
+      bundleId,
+      stageByTarget,
+      originAppVersion,
+      overrideInputHash = null,
+    ) => {
       const destDir = path.join(absOut, "bundles", bundleId);
       const targetEntries = {};
       const hashParts = [];
@@ -606,9 +621,11 @@ export async function buildV2TestUpgradePacks({
       return {
         arch: "per-target",
         originAppVersion,
-        inputHash: sha256String(
-          `${bundleId}:${originAppVersion}:${hashParts.join("|")}`,
-        ),
+        inputHash:
+          overrideInputHash ??
+          sha256String(
+            `${bundleId}:${originAppVersion}:${hashParts.join("|")}`,
+          ),
         ...(bundleId === "backend"
           ? { nativeDepsHash: nativeDepsInfo.hash }
           : {}),
@@ -684,6 +701,9 @@ export async function buildV2TestUpgradePacks({
     };
 
     // --- Step 00: Baseline (web + unified backend + node-native-deps) ---
+    // Align baseline inputHashes with `compute-bundle-inputs.mjs` so fresh
+    // Shell installs seeded via `dist/seed/seed-manifest.json` can jump
+    // straight to `step-01-web` with 0B backend & 0B node-native-deps download.
     const v0 = versions["step-00-baseline"];
     const baselineBundles = {};
 
@@ -697,6 +717,7 @@ export async function buildV2TestUpgradePacks({
         staticHostSrc,
       }),
       v0,
+      inputPlan.bundles.web.inputHash,
     );
 
     const backendV0Stages = {};
@@ -727,11 +748,13 @@ export async function buildV2TestUpgradePacks({
       "backend",
       backendV0Stages,
       v0,
+      inputPlan.bundles.backend.inputHash,
     );
     baselineBundles["node-native-deps"] = await packPerTarget(
       "node-native-deps",
       nativeDepsStages,
       v0,
+      inputPlan.bundles["node-native-deps"].inputHash,
     );
 
     let prevBundles = baselineBundles;

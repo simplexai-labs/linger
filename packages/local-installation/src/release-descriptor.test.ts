@@ -113,6 +113,36 @@ describe("V2 local-installation release descriptors & decoupled bundles", () => 
     const loaded = await readJsonIfExists(file, parseLocalReleaseDescriptor);
     expect(loaded?.appVersion).toBe("0.2.15");
 
+    // Validates optional shell/store source and inputHash on hybrid descriptors.
+    const hybrid = parseLocalReleaseDescriptor({
+      ...descriptor,
+      modules: {
+        web: {
+          ...descriptor.modules.web,
+          source: "store",
+          inputHash: "f".repeat(64),
+        },
+        backend: {
+          ...descriptor.modules.backend,
+          artifactId: "shell-baseline",
+          path: "shell/backend",
+          source: "shell",
+          inputHash: "e".repeat(64),
+        },
+      },
+    });
+    expect(hybrid.modules.backend.source).toBe("shell");
+    expect(hybrid.modules.web.inputHash).toBe("f".repeat(64));
+    expect(() =>
+      parseLocalReleaseDescriptor({
+        ...descriptor,
+        modules: {
+          ...descriptor.modules,
+          backend: { ...descriptor.modules.backend, source: "invalid" },
+        },
+      }),
+    ).toThrow("Invalid module entry");
+
     const ptrFile = path.join(home, "state/current.json");
     await writeJsonAtomic(ptrFile, {
       appVersion: "0.2.15",
