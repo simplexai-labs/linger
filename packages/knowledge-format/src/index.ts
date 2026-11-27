@@ -15,6 +15,7 @@ const RESERVED_DOCUMENTS = new Set(["index.md", "log.md"]);
 const ISO_DATETIME_WITH_OFFSET =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/u;
 const FRONTMATTER_BLOCK = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u;
+const BYTE_ORDER_MARK = "\uFEFF";
 
 export interface OkfIssue {
   code: string;
@@ -36,19 +37,20 @@ export function validateOkfDocument(
   content: string,
   options: OkfDocumentOptions,
 ): OkfValidation {
+  const text = withoutByteOrderMark(content);
   const normalizedPath = options.relativePath.replaceAll("\\", "/");
   const filename = normalizedPath.split("/").at(-1) ?? normalizedPath;
   if (RESERVED_DOCUMENTS.has(filename)) {
-    return validateReservedDocument(content, normalizedPath, options);
+    return validateReservedDocument(text, normalizedPath, options);
   }
-  return validateConceptDocument(content);
+  return validateConceptDocument(text);
 }
 
 export function parseOkfFrontmatter(content: string): {
   fields?: Record<string, unknown>;
   issues: OkfIssue[];
 } {
-  const lines = content.split(/\r?\n/u);
+  const lines = withoutByteOrderMark(content).split(/\r?\n/u);
   if (lines[0] !== "---") {
     return {
       issues: [
@@ -87,22 +89,24 @@ export function parseOkfFrontmatter(content: string): {
 }
 
 export function normalizeOkfMarkdown(content: string): string {
-  const match = FRONTMATTER_BLOCK.exec(content);
+  const text = withoutByteOrderMark(content);
+  const match = FRONTMATTER_BLOCK.exec(text);
   if (!match?.[1]) {
-    return content;
+    return text;
   }
   const repaired = repairOkfFrontmatter(match[1]);
   if (repaired === match[1] || !parseYamlFrontmatter(repaired).fields) {
-    return content;
+    return text;
   }
-  const body = content.slice(match[0].length);
+  const body = text.slice(match[0].length);
   return `---\n${repaired}\n---\n${body}`;
 }
 
 export function setOkfRootIndexVersion(content: string): string {
-  const match = FRONTMATTER_BLOCK.exec(content);
+  const text = withoutByteOrderMark(content);
+  const match = FRONTMATTER_BLOCK.exec(text);
   if (!match) {
-    return `---\nokf_version: "${OKF_VERSION}"\n---\n\n${content.replace(/^\s+/u, "")}`;
+    return `---\nokf_version: "${OKF_VERSION}"\n---\n\n${text.replace(/^\s+/u, "")}`;
   }
   const block = match[1] ?? "";
   const lines = block.split(/\r?\n/u);
@@ -110,7 +114,14 @@ export function setOkfRootIndexVersion(content: string): string {
   const index = lines.findIndex((line) => /^okf_version\s*:/u.test(line));
   if (index === -1) lines.push(versionLine);
   else lines[index] = versionLine;
-  return `---\n${lines.join("\n")}\n---\n${content.slice(match[0].length)}`;
+  return `---\n${lines.join("\n")}\n---\n${text.slice(match[0].length)}`;
+}
+
+/** A leading byte-order mark names the encoding; it is not part of the document. */
+function withoutByteOrderMark(content: string): string {
+  return content.startsWith(BYTE_ORDER_MARK)
+    ? content.slice(BYTE_ORDER_MARK.length)
+    : content;
 }
 
 function parseYamlFrontmatter(

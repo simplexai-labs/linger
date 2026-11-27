@@ -114,4 +114,29 @@ describe("folder publication filtering", () => {
       code: "unsupported_entry_type",
     });
   });
+
+  describe("private folder names in any letter case", () => {
+    it("keeps the archive identical when a private folder is spelled with capitals", async () => {
+      const { root, write } = await fixture();
+      const pack = () =>
+        packContextSkillFolder({
+          playgroundRootPath: root,
+          folderPath: "skill",
+          signal: AbortSignal.timeout(5_000),
+        });
+      const clean = await pack();
+      for (const name of [
+        ".Git/config",
+        ".ENV",
+        ".Env.local",
+        "Node_Modules/dependency/index.js",
+        ".TeamHub/cli/credential",
+        ".AGENTS/private.json",
+      ])
+        await write(name, "private fixture contents\n");
+      const packed = await pack();
+      expect(packed.fileCount).toBe(3);
+      expect(packed.packageSha256).toBe(clean.packageSha256);
+    });
+  });
 });

@@ -201,4 +201,44 @@ sources:
       });
     },
   );
+
+  describe("a leading byte-order mark", () => {
+    const concept =
+      '---\ntype: Client Memory\ntitle: "Client: Example"\n---\n\n# Example\n';
+    const marked = `\uFEFF${concept}`;
+
+    it("reads front matter that an editor saved after a mark", () => {
+      expect(parseOkfFrontmatter(marked).fields).toEqual(
+        parseOkfFrontmatter(concept).fields,
+      );
+      expect(
+        validateOkfDocument(marked, { relativePath: "clients/example.md" }),
+      ).toEqual(
+        validateOkfDocument(concept, { relativePath: "clients/example.md" }),
+      );
+    });
+
+    it("keeps a bundle root index version instead of adding a second block", () => {
+      const index = '---\nokf_version: "0.2"\n---\n\n# Bundle\n';
+      const markedIndex = `\uFEFF${index}`;
+      expect(setOkfRootIndexVersion(markedIndex)).toBe(index);
+      expect(setOkfRootIndexVersion(marked)).toBe(
+        '---\ntype: Client Memory\ntitle: "Client: Example"\nokf_version: "0.2"\n---\n\n# Example\n',
+      );
+      expect(
+        validateOkfDocument(markedIndex, {
+          relativePath: "index.md",
+          requireRootVersion: true,
+        }),
+      ).toMatchObject({ valid: true });
+    });
+
+    it("normalizes away the mark and leaves a body that only looks like front matter alone", () => {
+      expect(normalizeOkfMarkdown(marked)).toBe(concept);
+      expect(normalizeOkfMarkdown(`${marked}${marked}`)).toBe(
+        `${concept}\uFEFF${concept}`,
+      );
+      expect(normalizeOkfMarkdown(`\uFEFFplain text`)).toBe("plain text");
+    });
+  });
 });

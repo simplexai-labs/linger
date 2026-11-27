@@ -24,6 +24,13 @@ const folders = new Map([
   ["sessions", "timeline/meetings"],
 ]);
 
+// Windows resolves these names to devices whatever the extension, so a page
+// titled `CON`, `nul.txt` or `com¹` cannot name a file there. The same pattern
+// guards a working copy in the CLI (`teamhub-workspace-files.ts`), including the
+// reserved superscript digits.
+const RESERVED_DEVICE_NAME =
+  /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/iu;
+
 function readableName(value: string): string {
   const clean = value
     .normalize("NFC")
@@ -32,7 +39,8 @@ function readableName(value: string): string {
     .replace(/\s+/gu, " ")
     .replace(/^[. ]+|[. ]+$/gu, "");
   // Keep room for the date, extension and a disambiguating ID even for CJK titles.
-  return [...clean].slice(0, 48).join("") || "Untitled";
+  const name = [...clean].slice(0, 48).join("") || "Untitled";
+  return RESERVED_DEVICE_NAME.test(name) ? `_${name}` : name;
 }
 
 /** Published page IDs stay stable. Only filenames in the reader's tree use titles. */
