@@ -49,7 +49,8 @@ describe("ConnectAppStatus", () => {
     fireEvent.click(startButton);
 
     const dialog = await screen.findByRole("dialog", { name: "Connect Gmail" });
-    expect(dialog).toHaveClass("app-dialog-standard", "app-key-dialog");
+    expect(dialog).toHaveClass("app-dialog-standard");
+    expect(dialog).toHaveAttribute("data-size", "sm");
     expect(dialog.querySelector(".app-dialog-description")).toBeNull();
     expect(dialog.querySelector("ol")).toBeNull();
     expect(dialog.querySelector("strong")).toBeNull();
@@ -60,8 +61,9 @@ describe("ConnectAppStatus", () => {
       "href",
       "https://dashboard.composio.dev/~/project/settings/api-keys",
     );
+    // Focus on open is covered with showModal below; jsdom has none.
     const input = within(dialog).getByLabelText("Composio API key");
-    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("data-autofocus");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("placeholder", "Paste your API key");
     expect(input).toHaveAccessibleDescription(
@@ -135,13 +137,13 @@ describe("ConnectAppStatus", () => {
     fireEvent.change(input, { target: { value: "ck_bad" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save key" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "Invalid Composio key.",
-    );
+    expect(
+      await within(dialog).findByText("Invalid Composio key."),
+    ).toBeVisible();
     expect(input).toHaveAttribute("aria-invalid", "true");
 
     fireEvent.change(input, { target: { value: "ck_bad2" } });
-    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(within(dialog).queryByText("Invalid Composio key.")).toBeNull();
     expect(input).not.toHaveAttribute("aria-invalid");
   });
 

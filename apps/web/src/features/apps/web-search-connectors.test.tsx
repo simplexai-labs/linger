@@ -52,8 +52,8 @@ describe("Web search connectors", () => {
 
     fireEvent.click(
       within(
-        screen.getByRole("tablist", { name: "Connector categories" }),
-      ).getByRole("tab", { name: "Web search" }),
+        screen.getByRole("group", { name: "Connector categories" }),
+      ).getByRole("button", { name: "Web search" }),
     );
     expect(
       screen.queryByRole("region", { name: "Application connections" }),

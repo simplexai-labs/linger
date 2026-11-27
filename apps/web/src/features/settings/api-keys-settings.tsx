@@ -4,11 +4,10 @@ import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { ModalDialog } from "@/components/ui/modal-dialog";
 import { StatusPill } from "@/components/ui/status-pill";
 import { AppLogoTile } from "@/features/apps/app-logo";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
-import { ComposioKeyForm } from "@/features/apps/provider-key-form";
+import { ComposioKeyDialog } from "@/features/apps/provider-key-form";
 import { voiceKeyMessages } from "@/features/rooms/voice-control/voice-key.messages";
 import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
@@ -90,28 +89,19 @@ export function ApiKeysSettings() {
       ) : null}
 
       {dialogOpen ? (
-        <ModalDialog
-          className="app-key-dialog"
-          closeOnBackdrop
+        <ComposioKeyDialog
           onClose={() => setDialogOpen(false)}
-          size="md"
+          onSaved={() => {
+            setSavedProvider("Composio");
+            setDialogOpen(false);
+          }}
           title={
             <span className="flex items-center gap-2.5">
               <AppLogoTile name="Composio" small url={composioLogoUrl} />
               {t(accountSettingsMessages.providerKey, { provider: "Composio" })}
             </span>
           }
-        >
-          <div className="px-5 pt-2 pb-4 text-sm text-app-body">
-            <ComposioKeyForm
-              onCancel={() => setDialogOpen(false)}
-              onSaved={() => {
-                setSavedProvider("Composio");
-                setDialogOpen(false);
-              }}
-            />
-          </div>
-        </ModalDialog>
+        />
       ) : null}
 
       {voiceDialog ? (

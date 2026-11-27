@@ -30,11 +30,6 @@ export const ANOTHER_ME_ONLY_APPS: ReadonlySet<string> = new Set([
 ]);
 
 /** The Connectors top-level tab for Composio apps. */
-export const APPS_FILTER = {
-  id: "apps",
-  label: m.filterApps,
-};
-
 /** The Connectors tab for web search, beside the Composio apps tab. */
 export const WEB_SEARCH_FILTER = {
   id: "web-search",

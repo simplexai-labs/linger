@@ -9,15 +9,13 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon, type IconSvgElement } from "@/components/ui/icon";
-import { ModalDialog } from "@/components/ui/modal-dialog";
 import { ConnectorsNotConfiguredMessage } from "@/features/apps/connect-app-flow";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
-import { ComposioKeyForm } from "@/features/apps/provider-key-form";
+import { ComposioKeyDialog } from "@/features/apps/provider-key-form";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import { useT } from "@/i18n/use-translation";
-import { cn } from "@/lib/cn";
 
 import { decisionCardHeading } from "./card-prompts";
 import { CardActions, CardError, CardRow } from "./approval-card-parts";
@@ -117,29 +115,13 @@ export function ProviderKeyDecision({
         {error ? <CardError>{error}</CardError> : null}
       </CardBox>
       {open && owner && !result ? (
-        <ModalDialog
-          className="app-key-dialog"
-          closeOnBackdrop
+        <ComposioKeyDialog
+          canSave={canSave}
+          fallback={<ConnectorsNotConfiguredMessage />}
           onClose={() => setOpen(false)}
-          size="md"
+          onSaved={() => setOpen(false)}
           title={t(cardsMessages.addComposioKeyTitle)}
-        >
-          <div
-            className={cn(
-              "px-5 pt-2 text-sm text-app-body",
-              canSave ? "pb-4" : "pb-5",
-            )}
-          >
-            {canSave ? (
-              <ComposioKeyForm
-                onCancel={() => setOpen(false)}
-                onSaved={() => setOpen(false)}
-              />
-            ) : (
-              <ConnectorsNotConfiguredMessage />
-            )}
-          </div>
-        </ModalDialog>
+        />
       ) : null}
     </>
   );

@@ -223,7 +223,7 @@ describe("VoiceKeyDialog", () => {
     const { onClose } = renderDialog(runtime, noKeys);
 
     const dialog = screen.getByRole("dialog", { name: "Soniox key" });
-    expect(dialog).toHaveClass("app-key-dialog");
+    expect(dialog).toHaveAttribute("data-size", "sm");
     expect(dialog.querySelector(".app-dialog-description")).toBeNull();
     expect(dialog.querySelector("ol")).toBeNull();
     expect(dialog).not.toHaveTextContent("Get your API key");
@@ -232,7 +232,7 @@ describe("VoiceKeyDialog", () => {
     ).toHaveAttribute("href", "https://console.soniox.com/");
 
     const input = within(dialog).getByLabelText("Soniox API key");
-    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("data-autofocus");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("placeholder", "Paste your API key");
     expect(input).toHaveAccessibleDescription(
@@ -269,21 +269,27 @@ describe("VoiceKeyDialog", () => {
     });
 
     const dialog = screen.getByRole("dialog", { name: "Turn on voice" });
-    const group = within(dialog).getByRole("group", { name: "Voice provider" });
-    expect(
-      within(group).getByRole("button", { name: "Soniox" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    const group = within(dialog).getByRole("radiogroup", {
+      name: "Voice provider",
+    });
+    expect(within(group).getByRole("radio", { name: "Soniox" })).toBeChecked();
     expect(
       within(dialog).getAllByText(
         "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
       ),
     ).toHaveLength(1);
 
-    fireEvent.click(within(group).getByRole("button", { name: "xAI" }));
-    expect(within(group).getByRole("button", { name: "xAI" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    const xai = within(group).getByRole("radio", { name: "xAI" });
+    xai.focus();
+    fireEvent.change(within(dialog).getByLabelText("Soniox API key"), {
+      target: { value: "draft" },
+    });
+    xai.focus();
+    fireEvent.click(xai);
+    expect(xai).toBeChecked();
+    // Switching keeps focus on the switch and starts an empty draft.
+    expect(xai).toHaveFocus();
+    expect(within(dialog).getByLabelText("xAI API key")).toHaveValue("");
     expect(
       within(dialog).getByRole("link", { name: "Get a key" }),
     ).toHaveAttribute("href", "https://console.x.ai/");

@@ -2319,11 +2319,6 @@ a[href][aria-disabled="true"],
   width: min(560px, calc(100vw - 32px));
 }
 
-/* Single-field provider key dialogs (Composio, voice) stay compact. */
-.app-dialog.app-key-dialog {
-  width: min(440px, calc(100vw - 32px));
-}
-
 .global-search-progress {
   position: relative;
   height: 1px;
@@ -4982,11 +4977,6 @@ button.question-choice:focus-visible {
 
 .workspace-file-tabs {
   margin-bottom: 20px;
-  scrollbar-width: none;
-}
-
-.workspace-file-tabs::-webkit-scrollbar {
-  display: none;
 }
 
 /* The Recent row: one line of cards that keeps its height, so the tabs below

@@ -1,14 +1,14 @@
 import { ViewIcon, ViewOffIcon } from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fieldControlClassName } from "@/components/ui/field";
+import { Field } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
+import { ModalDialog } from "@/components/ui/modal-dialog";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { commonMessages } from "@/i18n/common.messages";
 import { RichMessage, useT } from "@/i18n/use-translation";
-import { cn } from "@/lib/cn";
 
 import { externalAppsQueryOptions } from "./connected-apps-queries";
 import { connectorMessages as m } from "./connectors.messages";
@@ -40,9 +40,12 @@ export function ProviderKeyLink({ href }: { href: string }) {
 
 /**
  * Takes one provider API key and hands it to `save`. TeamHub checks a key
- * before keeping it and never returns it, so the field clears once it is saved.
+ * before keeping it and never returns it, so the field clears once it is
+ * saved. Returns the field and the dialog's buttons apart, so a dialog puts
+ * the buttons in its own footer where they stay in view. `resetKey` starts a
+ * new draft when it changes, such as on another provider.
  */
-export function ProviderKeyForm({
+export function useProviderKeyForm({
   describeError = (error) => error.message,
   helper,
   label,
@@ -51,6 +54,7 @@ export function ProviderKeyForm({
   onSaved,
   pendingLabel,
   placeholder,
+  resetKey = "",
   save,
 }: {
   /** The message shown under the field when `save` fails. */
@@ -63,139 +67,97 @@ export function ProviderKeyForm({
   /** The Save button's text while `save` runs; "Checking key..." without one. */
   pendingLabel?: string;
   placeholder?: string;
+  resetKey?: string;
   save: (apiKey: string) => Promise<unknown>;
-}) {
+}): { fields: ReactNode; actions: ReactNode } {
   const t = useT();
-  const inputId = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [apiKey, setApiKey] = useState("");
+  const formId = useId();
+  const [draft, setDraft] = useState({ for: resetKey, value: "" });
   const [visible, setVisible] = useState(false);
+  const apiKey = draft.for === resetKey ? draft.value : "";
   const mutation = useMutation({
-    mutationFn: () => save(apiKey.trim()),
+    mutationFn: (value: string) => save(value),
     onSuccess: () => {
-      setApiKey("");
+      setDraft({ for: resetKey, value: "" });
       setVisible(false);
       onSaved?.();
     },
   });
+  // A failure belongs to the draft it was for.
+  const error =
+    mutation.error && mutation.variables !== undefined && draft.for === resetKey
+      ? describeError(mutation.error)
+      : undefined;
 
-  useEffect(() => {
-    let active = true;
-    inputRef.current?.focus({ focusVisible: false });
-    // ModalDialog calls showModal() in its parent effect after child effects
-    // run, which moves focus to the first link in the body unless the input
-    // reclaims focus once the dialog is open.
-    queueMicrotask(() => {
-      if (active) inputRef.current?.focus({ focusVisible: false });
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const helperId = helper ? `${inputId}-helper` : undefined;
-  const error = mutation.error ? describeError(mutation.error) : undefined;
-  const errorId = error ? `${inputId}-error` : undefined;
-  const describedBy =
-    [helperId, errorId].filter(Boolean).join(" ") || undefined;
-
-  return (
+  const fields = (
     <form
+      id={formId}
       onSubmit={(event) => {
         event.preventDefault();
-        if (apiKey.trim() && !mutation.isPending) mutation.mutate();
+        if (apiKey.trim() && !mutation.isPending)
+          mutation.mutate(apiKey.trim());
       }}
     >
-      <div className="mb-1.5 flex items-baseline justify-between gap-3">
-        <label
-          className="text-sm font-medium text-foreground"
-          htmlFor={inputId}
-        >
-          {label}
-        </label>
-        {labelAction}
-      </div>
-      <div className="ui-field-frame">
-        <input
-          aria-describedby={describedBy}
-          aria-invalid={error ? true : undefined}
-          autoComplete="off"
-          className={cn(
-            fieldControlClassName,
-            "pr-11 font-mono placeholder:font-sans",
-          )}
-          disabled={mutation.isPending}
-          id={inputId}
-          onChange={(event) => {
-            setApiKey(event.target.value);
-            if (mutation.error) mutation.reset();
-          }}
-          placeholder={placeholder ?? t(m.apiKeyPlaceholder)}
-          ref={inputRef}
-          spellCheck={false}
-          type={visible ? "text" : "password"}
-          value={apiKey}
-        />
-        <span className="absolute inset-y-0 right-0 flex w-11 items-center justify-center">
+      <Field
+        autoComplete="off"
+        // The key is the dialog's one field; it takes focus over the "Get a
+        // key" link above it.
+        data-autofocus=""
+        error={error}
+        hint={helper}
+        inputClassName="font-mono placeholder:font-sans"
+        label={label}
+        labelAction={labelAction}
+        onChange={(event) => {
+          setDraft({ for: resetKey, value: event.target.value });
+          if (mutation.error) mutation.reset();
+        }}
+        placeholder={placeholder ?? t(m.apiKeyPlaceholder)}
+        spellCheck={false}
+        suffix={
           <button
             aria-label={t(visible ? m.hideApiKey : m.showApiKey)}
-            className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-            disabled={mutation.isPending}
+            className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => setVisible((current) => !current)}
             type="button"
           >
-            {visible ? (
-              <Icon icon={ViewOffIcon} size={16} />
-            ) : (
-              <Icon icon={ViewIcon} size={16} />
-            )}
+            <Icon icon={visible ? ViewOffIcon : ViewIcon} size={16} />
           </button>
-        </span>
-      </div>
-      {helper ? (
-        <p
-          className="mt-2 text-xs leading-5 text-muted-foreground"
-          id={helperId}
-        >
-          {helper}
-        </p>
-      ) : null}
-      {error ? (
-        <p
-          className="mt-1.5 text-xs text-destructive"
-          id={errorId}
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
-      <div className="mt-5 flex items-center justify-end gap-2">
-        {onCancel ? (
-          <Button
-            disabled={mutation.isPending}
-            onClick={onCancel}
-            tone="secondary"
-          >
-            {t(commonMessages.cancel)}
-          </Button>
-        ) : null}
-        <Button
-          disabled={!apiKey.trim()}
-          loading={mutation.isPending}
-          tone="primary"
-          type="submit"
-        >
-          {mutation.isPending
-            ? (pendingLabel ?? t(m.checkingKey))
-            : t(m.saveKey)}
-        </Button>
-      </div>
+        }
+        type={visible ? "text" : "password"}
+        value={apiKey}
+      />
     </form>
   );
+
+  const actions = (
+    <>
+      {onCancel ? (
+        <Button
+          disabled={mutation.isPending}
+          onClick={onCancel}
+          tone="secondary"
+        >
+          {t(commonMessages.cancel)}
+        </Button>
+      ) : null}
+      <Button
+        disabled={!apiKey.trim()}
+        form={formId}
+        loading={mutation.isPending}
+        tone="primary"
+        type="submit"
+      >
+        {mutation.isPending ? (pendingLabel ?? t(m.checkingKey)) : t(m.saveKey)}
+      </Button>
+    </>
+  );
+
+  return { actions, fields };
 }
 
 // A private deployment without COMPOSIO_API_KEY saves its key here.
-export function ComposioKeyForm({
+export function useComposioKeyForm({
   onCancel,
   onSaved,
 }: {
@@ -205,19 +167,53 @@ export function ComposioKeyForm({
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
   const t = useT();
+  return useProviderKeyForm({
+    helper: <RichMessage message={m.composioKeyReminder} tags={PERM_TAGS} />,
+    label: t(m.composioApiKey),
+    labelAction: <ProviderKeyLink href={COMPOSIO_KEYS_URL} />,
+    onCancel,
+    onSaved,
+    save: async (apiKey) => {
+      await client.saveExternalProviderKey(apiKey);
+      await queryClient.invalidateQueries({
+        queryKey: externalAppsQueryOptions(client).queryKey,
+      });
+    },
+  });
+}
+
+/**
+ * The Composio key dialog: its field in the body and Cancel / Save in the
+ * footer. A deployment that cannot save a key shows `fallback` instead.
+ */
+export function ComposioKeyDialog({
+  canSave = true,
+  description,
+  fallback,
+  onClose,
+  onSaved,
+  title,
+}: {
+  canSave?: boolean;
+  description?: ReactNode;
+  fallback?: ReactNode;
+  onClose: () => void;
+  onSaved: () => void;
+  title: ReactNode;
+}) {
+  const form = useComposioKeyForm({ onCancel: onClose, onSaved });
   return (
-    <ProviderKeyForm
-      helper={<RichMessage message={m.composioKeyReminder} tags={PERM_TAGS} />}
-      label={t(m.composioApiKey)}
-      labelAction={<ProviderKeyLink href={COMPOSIO_KEYS_URL} />}
-      onCancel={onCancel}
-      onSaved={onSaved}
-      save={async (apiKey) => {
-        await client.saveExternalProviderKey(apiKey);
-        await queryClient.invalidateQueries({
-          queryKey: externalAppsQueryOptions(client).queryKey,
-        });
-      }}
-    />
+    <ModalDialog
+      closeOnBackdrop
+      description={description}
+      footer={canSave ? form.actions : undefined}
+      onClose={onClose}
+      size="sm"
+      title={title}
+    >
+      <div className="px-5 py-4 text-sm text-app-body">
+        {canSave ? form.fields : fallback}
+      </div>
+    </ModalDialog>
   );
 }

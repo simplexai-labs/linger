@@ -5,6 +5,7 @@ export const voiceKeyMessages = defineMessages("voiceKey", {
   title: "{provider} key",
   turnOnVoice: "Turn on voice",
   voiceProvider: "Voice provider",
+  keyReplaceHint: "A key is active. Save a new key to replace it.",
   sonioxPurpose:
     "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
   xaiPurpose: "Turns Voice Mode into a live conversation with Grok.",

@@ -2,10 +2,9 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { connectorMessages } from "@/features/apps/connectors.messages";
 import {
-  ProviderKeyForm,
   ProviderKeyLink,
+  useProviderKeyForm,
 } from "@/features/apps/provider-key-form";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
@@ -19,7 +18,6 @@ import { commonMessages } from "@/i18n/common.messages";
 import type { Translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import { RichMessage, useT } from "@/i18n/use-translation";
-import { cn } from "@/lib/cn";
 
 import { publishVoiceMediaPolicy } from "./use-voice-media-policy";
 import { voiceKeyMessages as m } from "./voice-key.messages";
@@ -153,70 +151,90 @@ export function VoiceKeyDialog({
     !turnOnFailed &&
     status?.source !== "environment" &&
     status?.can_save !== false;
+  // One form for every provider: switching starts a new draft instead of
+  // remounting it, so focus stays on the provider switch.
+  const keyForm = useProviderKeyForm({
+    describeError: (error) => describeSaveError(error, provider, t),
+    helper: t(details.purpose),
+    label: t(m.apiKey, { provider: details.name }),
+    labelAction: <ProviderKeyLink href={details.href} />,
+    onCancel: onClose,
+    // TeamHub answers the save once the voice workers are up.
+    pendingLabel: t(m.turningOn),
+    resetKey: provider,
+    save: async (apiKey) => {
+      await teamHubData(
+        client.api.PUT("/v0/voice-provider-keys/{provider}", {
+          body: { api_key: apiKey },
+          params: { path: { provider } },
+        }),
+      );
+      // The Save button stays pending through this read.
+      await turnOn();
+    },
+  });
 
   return (
     <ModalDialog
-      className="app-key-dialog"
       closeOnBackdrop
       description={
-        providers.length === 1 &&
+        !turnOnFailed &&
         status?.source === "stored" &&
         status.can_save !== false
-          ? t(connectorMessages.keyReplaceHint)
+          ? t(m.keyReplaceHint)
           : undefined
       }
+      footer={
+        turnOnFailed ? (
+          <>
+            <Button disabled={retrying} onClick={onClose} tone="secondary">
+              {t(commonMessages.cancel)}
+            </Button>
+            <Button
+              loading={retrying}
+              onClick={() => {
+                setRetrying(true);
+                void turnOn().finally(() => setRetrying(false));
+              }}
+              tone="primary"
+            >
+              {t(commonMessages.tryAgain)}
+            </Button>
+          </>
+        ) : canSaveForm ? (
+          keyForm.actions
+        ) : undefined
+      }
       onClose={onClose}
-      size="md"
+      size="sm"
       title={
         providers.length > 1
           ? t(m.turnOnVoice)
           : t(m.title, { provider: details.name })
       }
     >
-      <div
-        className={cn(
-          "space-y-4 px-5 pt-2 text-sm text-app-body",
-          canSaveForm ? "pb-4" : "pb-5",
-        )}
-      >
+      <div className="space-y-4 px-5 py-4 text-sm text-app-body">
         {turnOnFailed ? (
-          <>
-            <p role="alert">{t(m.savedButOff)}</p>
-            <div className="flex items-center justify-end gap-2">
-              <Button disabled={retrying} onClick={onClose} tone="secondary">
-                {t(commonMessages.cancel)}
-              </Button>
-              <Button
-                loading={retrying}
-                onClick={() => {
-                  setRetrying(true);
-                  void turnOn().finally(() => setRetrying(false));
-                }}
-                tone="primary"
-              >
-                {t(commonMessages.tryAgain)}
-              </Button>
-            </div>
-          </>
+          <p role="alert">{t(m.savedButOff)}</p>
         ) : (
           <>
             {providers.length > 1 ? (
               <div
                 aria-label={t(m.voiceProvider)}
-                className="inline-flex rounded-lg bg-muted p-0.5"
-                role="group"
+                className="inline-flex w-fit gap-0.5 rounded-lg bg-muted p-0.5"
+                role="radiogroup"
               >
                 {providers.map((option) => (
                   <button
-                    aria-pressed={option === provider}
-                    className={cn(
-                      "rounded-md px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    aria-checked={option === provider}
+                    className={`h-7 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
                       option === provider
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                     key={option}
                     onClick={() => setProvider(option)}
+                    role="radio"
                     type="button"
                   >
                     {providerDetails[option].name}
@@ -248,26 +266,7 @@ export function VoiceKeyDialog({
                 />
               </p>
             ) : (
-              <ProviderKeyForm
-                describeError={(error) => describeSaveError(error, provider, t)}
-                helper={t(details.purpose)}
-                key={provider}
-                label={t(m.apiKey, { provider: details.name })}
-                labelAction={<ProviderKeyLink href={details.href} />}
-                onCancel={onClose}
-                // TeamHub answers the save once the voice workers are up.
-                pendingLabel={t(m.turningOn)}
-                save={async (apiKey) => {
-                  await teamHubData(
-                    client.api.PUT("/v0/voice-provider-keys/{provider}", {
-                      body: { api_key: apiKey },
-                      params: { path: { provider } },
-                    }),
-                  );
-                  // The Save button stays pending through this read.
-                  await turnOn();
-                }}
-              />
+              keyForm.fields
             )}
           </>
         )}

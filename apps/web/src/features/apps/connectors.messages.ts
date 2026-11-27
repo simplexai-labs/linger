@@ -12,9 +12,7 @@ export const connectorMessages = defineMessages("connectors", {
   loadingConnectors: "Loading connectors...",
   connectorsUnavailable: "Connectors are unavailable.",
   filterAll: "All",
-  filterApps: "Apps",
   connectorCategories: "Connector categories",
-  appCategories: "App categories",
   connectedOnly: "Connected only",
   applicationConnections: "Application connections",
   noConnectedApps: "No connected apps yet.",
@@ -137,7 +135,6 @@ export const connectorMessages = defineMessages("connectors", {
   composioKeyReminder:
     "Select <perm>Read All</perm> and <perm>Write All</perm> when creating your key.",
   composioApiKey: "Composio API key",
-  keyReplaceHint: "A key is active. Save a new key to replace it.",
   checkingKey: "Checking key...",
   saveKey: "Save key",
 
