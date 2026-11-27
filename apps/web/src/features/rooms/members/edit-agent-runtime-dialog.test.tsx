@@ -27,6 +27,12 @@ import {
 type LocalComputer = TeamHubLocalComputerPage["items"][number];
 
 describe("EditAgentRuntimeDialog", () => {
+  it("shows the saved model as it is while the computers load", () => {
+    renderDialog({ onSave: vi.fn(), computersPending: true });
+    expect(setting("Model")).toHaveTextContent("codex-default");
+    expect(setting("Model")).not.toHaveTextContent(/Unavailable/);
+  });
+
   it("preserves a removed model and requires an explicit selection", async () => {
     const registration = localCodexAgent();
     registration.runtime.model = "removed-model";
@@ -1097,6 +1103,7 @@ function renderDialog({
   onSave,
   registration = localCodexAgent(),
   computersOverride,
+  computersPending = false,
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   }),
@@ -1108,6 +1115,8 @@ function renderDialog({
   onSave: (input: AgentRuntimeUpdateInput) => void;
   registration?: TeamHubTenantAgent;
   computersOverride?: TeamHubLocalComputerPage;
+  /** Leaves the computers request unanswered, as while it is in flight. */
+  computersPending?: boolean;
 }) {
   const computers: TeamHubLocalComputerPage = computersOverride ?? {
     items: [
@@ -1117,7 +1126,9 @@ function renderDialog({
   };
   const client = {
     ...(api ? { api: api as never } : {}),
-    listTenantLocalComputers: vi.fn().mockResolvedValue(computers),
+    listTenantLocalComputers: computersPending
+      ? vi.fn(() => new Promise<TeamHubLocalComputerPage>(() => {}))
+      : vi.fn().mockResolvedValue(computers),
   };
 
   render(

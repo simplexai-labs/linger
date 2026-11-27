@@ -71,14 +71,6 @@ export function ComputerStatus({
   );
 }
 
-export function Placeholder({ children }: { children: ReactNode }) {
-  return (
-    <span className="truncate font-normal text-muted-foreground">
-      {children}
-    </span>
-  );
-}
-
 /**
  * One setting as a row: its name on the left and the product's Select on
  * the right, whose choices open in the shared floating list.

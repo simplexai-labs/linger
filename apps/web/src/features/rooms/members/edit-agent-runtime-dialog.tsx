@@ -271,11 +271,15 @@ export function EditAgentRuntimeDialog({
             placeholder={t(agentRuntimeMessages.noModels)}
             value={model}
           >
+            {/* Until the computers load, the saved model is shown as it is;
+                only a loaded catalog that lacks it marks it unavailable. */}
             {model && !modelIsAvailable ? (
               <SelectItem disabled value={model}>
-                {t(agentRuntimeMessages.unavailableOption, {
-                  name: unavailableModelLabel,
-                })}
+                {loading
+                  ? model
+                  : t(agentRuntimeMessages.unavailableOption, {
+                      name: unavailableModelLabel,
+                    })}
               </SelectItem>
             ) : null}
             {selection.modelOptions.map((item) => (
