@@ -206,7 +206,9 @@ export function ModelsPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-0 w-full max-w-(--app-settings-width) flex-col pb-10">
+    // Keeps its content's height so the Settings viewport scrolls it instead
+    // of squeezing the cards inside.
+    <main className="mx-auto flex w-full max-w-(--app-settings-width) flex-col pb-10">
       {sharedId ? (
         <ComputerModels
           computerId={sharedId}
