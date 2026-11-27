@@ -36,13 +36,18 @@ export function useAgentMoveTarget(
 
   const moving = computerId !== currentComputerId;
   const computer = computers?.find((item) => item.computer_id === computerId);
+  // Keep the Agent's current writable workspace on its Computer; if that
+  // grant was removed or downgraded, fall back to a writable workspace on the
+  // same Computer because Runtime settings does not offer a workspace picker.
   const grant = !computer
     ? undefined
     : moving
       ? findWritableGrant(computer)
-      : computer.workspace_grants.find(
-          (item) => item.grant_id === current?.workspace_grant_id,
-        );
+      : (computer.workspace_grants.find(
+          (item) =>
+            item.grant_id === current?.workspace_grant_id &&
+            item.mode === "workspace-write",
+        ) ?? findWritableGrant(computer));
   const runtime = computer?.runtimes.find((item) => item.type === runtimeType);
   const modelOptions = runtime?.status === "ready" ? runtime.models : [];
   // A Runtime chosen before it was ready has no model yet; once the Computer
@@ -92,6 +97,7 @@ export function useAgentMoveTarget(
       : undefined;
 
   function selectComputer(nextComputerId: string) {
+    if (nextComputerId === computerId) return;
     setComputerId(nextComputerId);
     if (nextComputerId === currentComputerId) {
       setRuntimeType(current?.runtime_type ?? "codex");
@@ -118,8 +124,9 @@ export function useAgentMoveTarget(
   }
 
   function selectRuntime(next: TeamHubLocalRuntimeType) {
-    const options =
-      computer?.runtimes.find((item) => item.type === next)?.models ?? [];
+    if (next === runtimeType) return;
+    const nextRuntime = computer?.runtimes.find((item) => item.type === next);
+    const options = nextRuntime?.status === "ready" ? nextRuntime.models : [];
     setRuntimeType(next);
     setModel(
       options.find((item) => item.id === model)?.id ?? options[0]?.id ?? "",

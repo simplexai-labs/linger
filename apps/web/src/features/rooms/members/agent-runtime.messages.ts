@@ -23,8 +23,12 @@ export const agentRuntimeMessages = defineMessages("agentRuntime", {
   reasoningLabel: "Agent reasoning effort",
   waitForAgent: "Wait for this Agent to finish before saving changes.",
   moveHint: "Local files stay on the old computer.",
+  workspaceRebindHint:
+    "The saved workspace is unavailable. Saving will use {workspace}.",
   noWritableWorkspace:
     "This computer has no writable workspace. Choose another computer.",
+  noWritableWorkspaceLocked:
+    "This computer has no writable workspace. Add a writable folder in <link>Settings › Computers</link>.",
   currentModelUnavailable:
     "The current model is unavailable. Choose another model.",
   noRuntimeModels: "No models are available for this runtime.",
