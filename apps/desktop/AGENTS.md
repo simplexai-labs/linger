@@ -754,6 +754,12 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   root `scripts/computer-tool-bundle.mjs`; `packaging/computer_tools.py` puts
   them in `resources/cli/` and `resources/runtime/` and checks every package
   for them (see [Computer Tools](../../docs/desktop-release.md#computer-tools)).
+  On Windows, `packaging/win/package.py` also stages a pinned portable PowerShell
+  7 LTS runtime (`PowerShell-7.6.10-win-x64.zip`, verified by SHA-256 and
+  reused from `~/.cache/linger-desktop` or `PWSH_MIRROR`) into
+  `resources/runtime/pwsh/`; the Daemon appends that directory to the end of
+  Windows Runtime `PATH` so Agents resolve `pwsh.exe` without overriding user
+  installs or system DLLs.
   `scripts/build-native-runtime.mjs` pins that shared `resources/runtime/bin/node(.exe)`
   digest in `manifest.json` (`node.shared: true`) instead of duplicating Node.js
   inside `dist/installer/native/runtime-<target>/`, and `packaging/mac/package.py`

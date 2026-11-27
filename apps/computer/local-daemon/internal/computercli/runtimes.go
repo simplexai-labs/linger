@@ -10,6 +10,7 @@ import (
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/computerconfig"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/localtools"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider"
 )
 
@@ -53,16 +54,29 @@ type runtimeCheck struct {
 type runtimeRequest struct {
 	configuredPaths map[string]string
 	environment     map[string]string
+	tempBase        string
 	live            bool
+}
+
+// validatedProbeTempBase returns <stateDirectory>/operation-tmp only when
+// stateDirectory exists as a validated owner-only private directory.
+func validatedProbeTempBase(stateDirectory string) string {
+	if stateDirectory == "" {
+		return ""
+	}
+	if err := privatefs.CheckPath(stateDirectory, "directory", true); err != nil {
+		return ""
+	}
+	return filepath.Join(stateDirectory, "operation-tmp")
 }
 
 // diagnoseRuntimes discovers the enabled Runtimes with the same discovery the
 // Daemon uses.
-func diagnoseRuntimes(ctx context.Context, configuredPaths, environment map[string]string, enabled []string) ([]runtimeDiagnostic, error) {
+func diagnoseRuntimes(ctx context.Context, request runtimeRequest, enabled []string) ([]runtimeDiagnostic, error) {
 	if enabled == nil {
 		enabled = runtimeTypes
 	}
-	checks, err := requestRuntimeChecks(ctx, enabled, runtimeRequest{configuredPaths: configuredPaths, environment: environment})
+	checks, err := requestRuntimeChecks(ctx, enabled, request)
 	diagnostics := make([]runtimeDiagnostic, 0, len(checks))
 	for _, check := range checks {
 		diagnostics = append(diagnostics, check.diagnostic)
@@ -90,6 +104,7 @@ func requestRuntimeChecks(ctx context.Context, types []string, request runtimeRe
 		BundledPaths:    resolveBundledRuntimePaths(),
 		Environment:     request.environment,
 		Runtimes:        selectedRuntimes,
+		TempBase:        request.tempBase,
 	})
 	if err != nil {
 		return nil, err

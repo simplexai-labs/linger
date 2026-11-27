@@ -53,8 +53,8 @@ export function Select({
   onValueChange: (value: string) => void;
   placeholder?: string;
   value: string;
-  /** "pill" is the compact filter trigger; "field" matches form inputs. */
-  variant?: "field" | "pill";
+  /** "pill" is the compact filter trigger; "subtle" is a quiet micro-chip; "field" matches form inputs. */
+  variant?: "field" | "pill" | "subtle";
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxId = useId();
@@ -86,7 +86,9 @@ export function Select({
         className={`${
           variant === "pill"
             ? "select-pill min-w-0 text-left disabled:cursor-not-allowed disabled:opacity-50"
-            : "ui-field-control flex min-w-0 items-center justify-between gap-2 px-3 text-left text-sm text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            : variant === "subtle"
+              ? "inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg bg-muted/65 px-2.5 text-left font-mono text-[11px] font-medium tracking-[-0.01em] text-foreground/80 transition-[color,background-color,box-shadow] duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+              : "ui-field-control flex min-w-0 items-center justify-between gap-2 px-3 text-left text-sm text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
         } ${className}`}
         disabled={disabled}
         id={id}
@@ -112,7 +114,7 @@ export function Select({
         <Icon
           className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
           icon={ArrowDown01Icon}
-          size={14}
+          size={variant === "subtle" ? 12 : 14}
         />
       </button>
       {open ? (

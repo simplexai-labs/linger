@@ -59,25 +59,78 @@ func TestDiscoverFindsCLIsInsideMacApplicationBundles(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("application bundles are a macOS install location")
 	}
-	home := t.TempDir()
-	options := DiscoveryOptions{Environment: map[string]string{"HOME": home, "PATH": filepath.Join(home, "empty")}}
-	for kind, bundle := range map[string]string{"codex": "Codex.app", "claude": "Claude.app"} {
-		if _, err := canonicalExecutable(filepath.Join("/Applications", bundle, "Contents", "Resources", kind)); err == nil {
-			t.Skipf("this machine has /Applications/%s installed", bundle)
-		}
-		if _, err := resolveExecutableEntry(context.Background(), kind, kind, options); err == nil {
-			t.Fatalf("%s found without an installed bundle", kind)
-		}
-		executable := filepath.Join(home, "Applications", bundle, "Contents", "Resources", kind)
-		if err := os.MkdirAll(filepath.Dir(executable), 0o700); err != nil {
+	writeExe := func(target string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if entry, err := resolveExecutableEntry(context.Background(), kind, kind, options); err != nil || entry != executable {
-			t.Fatalf("%s entry = %q, %v; want %q", kind, entry, err, executable)
+	}
+
+	t.Run("Codex.app and ChatGPT.app", func(t *testing.T) {
+		sysRoot := t.TempDir()
+		home := t.TempDir()
+		if got := resolveMacApplicationBundleIn("codex", sysRoot, home); got != "" {
+			t.Fatalf("unexpected codex without bundle: %q", got)
 		}
+		chatgptCodex := filepath.Join(sysRoot, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
+		writeExe(chatgptCodex)
+		if got := resolveMacApplicationBundleIn("codex", sysRoot, home); got != chatgptCodex {
+			t.Fatalf("chatgpt codex = %q; want %q", got, chatgptCodex)
+		}
+		codexApp := filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex")
+		writeExe(codexApp)
+		if got := resolveMacApplicationBundleIn("codex", sysRoot, home); got != codexApp {
+			t.Fatalf("Codex.app should take precedence over ChatGPT.app: got %q; want %q", got, codexApp)
+		}
+	})
+
+	t.Run("Claude.app and Claude Desktop managed claude-code", func(t *testing.T) {
+		sysRoot := t.TempDir()
+		home := t.TempDir()
+		if got := resolveMacApplicationBundleIn("claude", sysRoot, home); got != "" {
+			t.Fatalf("unexpected claude without bundle: %q", got)
+		}
+		older := filepath.Join(home, "Library", "Application Support", "Claude", "claude-code", "2.1.99", "aaa", "claude.app", "Contents", "MacOS", "claude")
+		newer := filepath.Join(home, "Library", "Application Support", "Claude", "claude-code", "2.1.309", "bbb", "claude.app", "Contents", "MacOS", "claude")
+		writeExe(older)
+		writeExe(newer)
+		if err := os.WriteFile(filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(newer)))), ".verified"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := resolveMacApplicationBundleIn("claude", sysRoot, home); got != newer {
+			t.Fatalf("claude desktop managed = %q; want %q", got, newer)
+		}
+		claudeApp := filepath.Join(home, "Applications", "Claude.app", "Contents", "Resources", "claude")
+		writeExe(claudeApp)
+		if got := resolveMacApplicationBundleIn("claude", sysRoot, home); got != claudeApp {
+			t.Fatalf("Claude.app = %q; want %q", got, claudeApp)
+		}
+	})
+}
+
+func TestResolveWindowsDesktopCLIFindsNewestClaudeCode(t *testing.T) {
+	appData := t.TempDir()
+	writeExe := func(target string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("exe"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	older := filepath.Join(appData, "Claude", "claude-code", "2.1.99", "claude.exe")
+	newer := filepath.Join(appData, "Claude", "claude-code", "2.1.309", "claude.exe")
+	writeExe(older)
+	writeExe(newer)
+	if got := resolveWindowsDesktopCLI("claude", appData); got != newer {
+		t.Fatalf("windows claude desktop = %q; want %q", got, newer)
+	}
+	if got := resolveWindowsDesktopCLI("codex", appData); got != "" {
+		t.Fatalf("unexpected codex match: %q", got)
 	}
 }
 

@@ -41,6 +41,21 @@ type probeOptions struct {
 	tempBase        string
 }
 
+type probePreparationError struct {
+	err error
+}
+
+func (e *probePreparationError) Error() string {
+	if e.err == nil {
+		return "Antigravity diagnostic environment could not be prepared"
+	}
+	return e.err.Error()
+}
+
+func (e *probePreparationError) Unwrap() error {
+	return e.err
+}
+
 func probeRuntime(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, options probeOptions) runtimeProbeOutcome {
 	if runtimeType == "pi" {
 		return probePiRuntime(ctx, executable, environment, timeout)
@@ -53,9 +68,13 @@ func probeRuntime(ctx context.Context, runtimeType, executable string, environme
 			return authentication
 		}
 	}
-	if err := probeRuntimeProtocol(ctx, runtimeType, executable, environment, timeout); err != nil {
+	if err := probeRuntimeProtocol(ctx, runtimeType, executable, environment, timeout, options.tempBase); err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Runtime protocol handshake could not be completed within its deadline"}
+		}
+		var prepErr *probePreparationError
+		if errors.As(err, &prepErr) {
+			return runtimeProbeOutcome{Status: "error", Code: "RUNTIME_DIAGNOSTIC_FAILED", Message: "Antigravity diagnostic environment could not be prepared"}
 		}
 		return runtimeProbeOutcome{Status: "incompatible", Code: "RUNTIME_INCOMPATIBLE", Message: "Runtime protocol handshake failed"}
 	}
@@ -74,7 +93,7 @@ func codexProbeArgs() []string {
 	return native.CodexAppServerArgs()
 }
 
-func probeRuntimeProtocol(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration) error {
+func probeRuntimeProtocol(ctx context.Context, runtimeType, executable string, environment map[string]string, timeout time.Duration, tempBase string) error {
 	var args []string
 	var payload string
 	switch runtimeType {
@@ -86,11 +105,12 @@ func probeRuntimeProtocol(ctx context.Context, runtimeType, executable string, e
 		payload = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"linger-computer-doctor","title":"Linger Computer Doctor","version":"1.0.0"},"capabilities":null}}` + "\n"
 
 	case "antigravity":
-		probeArgs, release, err := native.PrepareAntigravityProtocolProbe()
+		probeArgs, releaseProbe, err := native.PrepareAntigravityProtocolProbe(tempBase)
 		if err != nil {
-			return err
+			slog.Warn("runner.runtime_probe.prepare_failed", "runtime_type", runtimeType, "error", redact.Text(err.Error()))
+			return &probePreparationError{err: err}
 		}
-		defer release()
+		defer releaseProbe()
 		args = append([]string{"acp"}, probeArgs...)
 		payload = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}` + "\n"
 	case "claude":

@@ -228,8 +228,119 @@ it("tells an older Computer to update Linger instead of offering Antigravity", (
       onRemove={vi.fn()}
     />,
   );
-  const apps = screen.getByRole("region", { name: "AI apps" });
+  const apps = screen.getByRole("region", { name: "Harness" });
   expect(apps).toHaveTextContent("Needs a newer Linger");
   // Pi can still be added; Antigravity cannot until Linger is updated.
   expect(screen.getAllByRole("button", { name: "Add" })).toHaveLength(1);
+});
+
+it("prioritizes active and installed harnesses above available ones and shows Agent status inline", () => {
+  const computer: TeamHubLocalComputerPage["items"][number] = {
+    computer_id: "mac-air",
+    display_name: "whitedeMacBook-Air.local",
+    status: "online",
+    platform: "darwin",
+    daemon_version: "0.65.0",
+    upgrade_required: false,
+    active_operations: 0,
+    workspace_grants: [],
+    runtimes: [
+      { type: "claude", status: "not_installed", models: [] },
+      { type: "codex", status: "not_installed", models: [] },
+      { type: "pi", status: "ready", version: "1.6.0", models: [] },
+      { type: "antigravity", status: "ready", models: [] },
+    ],
+  };
+  const timestamp = "2026-07-31T09:00:00Z";
+  const agent = {
+    actor: {
+      created_at: timestamp,
+      display_name: "Code Reviewer",
+      handle: "@code_reviewer",
+      id: "actor-reviewer",
+      kind: "agent" as const,
+      tenant_id: "tenant-1",
+    },
+    agent_management_id: "agent-reviewer",
+    agent_type: "general" as const,
+    configuration_revision: 1,
+    created_at: timestamp,
+    created_by: {
+      id: "actor-human",
+      kind: "human" as const,
+      tenant_id: "tenant-1",
+      display_name: "White",
+    },
+    description: "",
+    instructions: "Review PRs.",
+    runtime: {
+      model: "openai/gpt-5.4",
+      placement: {
+        computer_id: "mac-air",
+        runtime_type: "claude" as const,
+        type: "local" as const,
+      },
+    },
+    skill_bindings: [],
+    updated_at: timestamp,
+    visibility_scope: "workspace" as const,
+  };
+  const agentAvailabilities = new Map([
+    [
+      "actor-reviewer",
+      {
+        activeTaskCount: 0,
+        available: false,
+        label: "Needs attention",
+        localRuntimeStatus: {
+          computer_id: "mac-air",
+          computer_status: "online" as const,
+          display_name: "whitedeMacBook-Air.local",
+          runtime_type: "claude" as const,
+          status: "authentication_required" as const,
+        },
+        status: "error" as const,
+      },
+    ],
+  ]);
+
+  render(
+    <ComputerDetail
+      activeRuntime="pi"
+      agentAvailabilities={agentAvailabilities}
+      agents={[agent]}
+      computer={computer}
+      onOpenAgent={vi.fn()}
+      onRemove={vi.fn()}
+    />,
+  );
+
+  // OS and app version sit directly on the hero card without requiring hover.
+  expect(screen.getByText("macOS · App 0.65.0")).toBeVisible();
+
+  // Active and installed harnesses precede available ones on the horizontal rail.
+  const harnessRegion = screen.getByRole("region", { name: "Harness" });
+  const harnessText = harnessRegion.textContent ?? "";
+  expect(harnessText.indexOf("Pi")).toBeLessThan(
+    harnessText.indexOf("Antigravity"),
+  );
+  expect(harnessText.indexOf("Antigravity")).toBeLessThan(
+    harnessText.indexOf("Claude Code"),
+  );
+  expect(harnessRegion).toHaveTextContent("In use");
+
+  // Agent attention reason renders inline on the card without hovering.
+  const agentButton = screen.getByRole("button", { name: /Code Reviewer/ });
+  expect(agentButton).toHaveTextContent("Claude Code sign-in needed");
+  // Non-full-width Hint inside the horizontal rail keeps `inline-flex` without stacking `flex`.
+  expect(agentButton.parentElement).toHaveClass("inline-flex");
+  expect(agentButton.parentElement).not.toHaveClass("flex");
+
+  // Left-edge section hints anchor to the start so tooltips never clip against the sidebar.
+  const harnessHint = screen.getByRole("tooltip", {
+    hidden: true,
+    name: /One ready harness is enough/,
+  });
+  expect(harnessHint).toHaveClass("left-0");
+  expect(harnessHint).not.toHaveClass("-translate-x-1/2");
 });

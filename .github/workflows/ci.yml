@@ -323,6 +323,7 @@ jobs:
       # hold the Windows launcher, process Job, CLI and overlay path code.
       - run: go test -run '^$' ./...
       - run: go test ./cmd/linger-computer-launcher ./cmd/linger-pi-launcher ./cmd/linger-teamhub-launcher ./internal/computercli ./internal/computerconfig ./internal/localmodels ./internal/process
+      - run: go test -v ./internal/provider -run '^TestWindowsAntigravityProbeUsesPrivateTempBase$'
       # A failed run saves unpruned; the next successful push prunes.
       - if: success() && github.event_name == 'push'
         run: |

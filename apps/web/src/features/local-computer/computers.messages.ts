@@ -7,6 +7,12 @@ export const computersMessages = defineMessages("computers", {
   allComputers: "All computers",
   connect: "Connect",
   directoryLabel: "Local computers directory",
+  computersSummary: {
+    one: "{count} computer",
+    other: "{count} computers",
+  },
+  onlineCount: "{count} online",
+  thisComputer: "This computer",
   reconnecting: "Reconnecting…",
   offline: "Offline",
   offlineSince: "Offline · {time}",
@@ -31,16 +37,24 @@ export const computersMessages = defineMessages("computers", {
   // One Computer's detail.
   detailsLabel: "{computer} details",
   agents: "Agents",
-  aiApps: "AI apps",
-  aiAppsHint: "One ready app is enough.",
-  localModels: "Local models",
+  aiApps: "Harness",
+  aiAppsHint: "One ready harness is enough.",
+  inUse: "In use",
+  scrollLeft: "Scroll left",
+  scrollRight: "Scroll right",
+  systemSection: "System",
   manageLocalModels: "Manage local models",
-  power: "Power",
+  manageLocalModelsHint: "Download and load models that run on this computer",
   preventSleep: "Prevent sleep",
   preventSleepHint:
     "Keeps this computer awake for overnight Memory and Wiki tasks.",
   preventSleepFailed: "Could not update sleep setting. Try again.",
   access: "Access",
+  accessDescription: "Browser & folders",
+  foldersCount: {
+    one: "{count} folder",
+    other: "{count} folders",
+  },
   advanced: "Advanced",
   update: "Update",
   updateTo: "Update to {version}",
@@ -65,7 +79,6 @@ export const computersMessages = defineMessages("computers", {
   reconnect: "Reconnect",
   reconnectHint: "For a reset or replaced computer.",
   add: "Add",
-  optionalApp: "{description} · optional",
   notInstalled: "Not installed",
   needsNewerLinger: "Needs a newer Linger",
   needsNewerLingerHint: "Update Linger on {computer} to add {app}",
@@ -107,8 +120,6 @@ export const computersMessages = defineMessages("computers", {
 
   // The Agents on a Computer.
   noAgents: "No Agents on this computer yet. Create one from Chats.",
-  less: "Less",
-  more: "More",
   tasksRunning: {
     one: "{count} task running",
     other: "{count} tasks running",

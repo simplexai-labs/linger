@@ -55,8 +55,12 @@ const desktopConfig = z.object({
   // PI_CODING_AGENT_DIR). The Computer daemon runs with them.
   runtimeEnvironment: z.record(z.string(), z.string()).optional(),
   // The runtime the person chose in that installation; the daemon marks it
-  // so TeamHub places Another Me on it.
-  preferredRuntime: z.enum(["codex", "claude", "pi"]).optional(),
+  // so TeamHub places Another Me on it. A value this version does not offer
+  // is dropped, not the whole file.
+  preferredRuntime: z
+    .enum(["codex", "claude", "pi"])
+    .optional()
+    .catch(undefined),
   // The backup of the earlier Simplex app's data that the local server
   // already told about and enrolled this computer again for.
   legacyBackup: z.string().optional(),

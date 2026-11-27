@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  Alert02Icon,
+  AlertCircleIcon,
   Copy01Icon,
   LinkSquare02Icon,
   Tick02Icon,
@@ -61,10 +63,12 @@ const segmentColors = ["bg-rain-500", "bg-lichen-500", "bg-sun-500"] as const;
 const componentColor = "bg-muted-foreground/40";
 
 function Fact({
+  bordered = true,
   children,
   className,
   label,
 }: {
+  bordered?: boolean;
   children: ReactNode;
   className?: string;
   label: string;
@@ -73,6 +77,7 @@ function Fact({
     <div
       className={cn(
         "flex min-h-9 items-center gap-3 py-1.5 text-sm",
+        bordered && "border-t border-border/70",
         className,
       )}
     >
@@ -195,6 +200,83 @@ function gatewayFactValue(
   return <span className="text-app-warning">{t(m.gatewayPiUnavailable)}</span>;
 }
 
+function SpecTile({
+  gauge,
+  label,
+  subline,
+  value,
+}: {
+  gauge?: {
+    readonly ratio: number;
+    readonly tone: "danger" | "ok" | "warning";
+  };
+  label: string;
+  subline?: ReactNode;
+  value: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-[11px] font-medium text-muted-foreground">
+        {label}
+      </span>
+      <span className="mt-1 block text-[15px] font-semibold leading-snug tracking-[-0.015em] tabular-nums text-foreground">
+        {value}
+      </span>
+      {gauge ? (
+        <span
+          aria-hidden
+          className="mt-1.5 block h-1 max-w-28 overflow-hidden rounded-full bg-muted"
+        >
+          <span
+            className={cn(
+              "block h-full rounded-full transition-[width] duration-200",
+              gauge.tone === "danger"
+                ? "bg-app-danger/70"
+                : gauge.tone === "warning"
+                  ? "bg-app-warning/80"
+                  : "bg-app-success/75",
+            )}
+            style={{
+              width: `${Math.min(100, Math.max(6, gauge.ratio * 100))}%`,
+            }}
+          />
+        </span>
+      ) : null}
+      {subline ? (
+        <span className="mt-1 block text-[11px] leading-snug tabular-nums text-muted-foreground/80">
+          {subline}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function MetaItem({
+  label,
+  subline,
+  value,
+}: {
+  label: string;
+  subline?: ReactNode;
+  value: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-[11px] text-muted-foreground/80">
+        {label}
+      </span>
+      <span className="mt-0.5 block truncate text-xs font-medium text-foreground/90">
+        {value}
+      </span>
+      {subline ? (
+        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/75">
+          {subline}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** Everything about one model on one Computer, shown when its row expands. */
 export function ModelFacts({
   assignableAgents = [],
@@ -235,7 +317,12 @@ export function ModelFacts({
   const capabilities = modelCapabilities(model);
   const parameters = parametersLabel(model, t);
   const engineDisplay = model.engine_label ?? engineBadgeCopy(model.engine);
-  const engineHint = engineHintCopy(model.engine, model.fit, t);
+  const rawEngineHint = engineHintCopy(model.engine, model.fit, t);
+  // Avoid repeating "Unified memory" under Engine when the Memory column already names it.
+  const engineHint =
+    pool?.kind === "unified" && model.engine === "llama.cpp"
+      ? undefined
+      : rawEngineHint;
   const concurrency = concurrencyCopy(model.concurrency, t);
   const hostRam =
     model.host_ram_bytes && model.host_ram_bytes > 0
@@ -244,11 +331,6 @@ export function ModelFacts({
   const speed = speedLabel(model, t);
   const sourceUrl = safeModelSourceUrl(model.source_url);
   const reclaimable = memoryReclaimable(view, model);
-  const availableNeedsRoom =
-    status === "available" &&
-    pool !== undefined &&
-    poolOtherBytes(pool) > 0 &&
-    poolFreeBytes(pool) < model.memory_bytes;
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
   const idleUsedWarning =
@@ -273,34 +355,78 @@ export function ModelFacts({
     !isAgentUsingModel(entry, primaryAgent, computerId) &&
     primaryAgent.busy;
   const memorySize = formatGigabytes(model.memory_bytes, t);
-  const memoryPlace =
-    onComputer && pool ? poolLabel(view, pool, t) : plannedPlace;
+  const memoryPoolLabel = pool ? poolLabel(view, pool, t) : plannedPlace;
+  const useInlineMemoryOn = Boolean(
+    (onComputer && pool) || pool?.kind === "gpu",
+  );
+  const unavailableMemoryReason =
+    status === "unavailable" &&
+    model.availability.reason?.code === "MEMORY_INSUFFICIENT"
+      ? model.availability.reason
+      : undefined;
+  const memoryCapacityBytes =
+    pool?.total_bytes ?? unavailableMemoryReason?.have_bytes;
+  const memoryGauge =
+    memoryCapacityBytes && memoryCapacityBytes > 0
+      ? {
+          ratio: model.memory_bytes / memoryCapacityBytes,
+          tone:
+            unavailableMemoryReason || model.memory_bytes > memoryCapacityBytes
+              ? ("danger" as const)
+              : model.memory_bytes / memoryCapacityBytes > 0.8
+                ? ("warning" as const)
+                : ("ok" as const),
+        }
+      : undefined;
   const driverUpdateBlocked =
     status === "unavailable" &&
     model.availability.reason?.code === "DRIVER_UPDATE_REQUIRED";
   const engineShortName = engineBadgeCopy(model.engine);
+  const hasMetadata = Boolean(
+    model.publisher || engineDisplay || concurrency || model.license || hostRam,
+  );
+  const hasFooterTags = Boolean(model.quant || capabilities.length);
+  const hasRuntimeLinks = Boolean(
+    onComputer || sourceUrl || model.endpoint || hasFooterTags,
+  );
+
   return (
-    <div>
+    <div className="space-y-4">
       {model.error || status === "unavailable" ? (
         <div
           className={cn(
-            "my-1.5 rounded-lg border px-3 py-0.5",
+            "flex items-start gap-2.5 rounded-xl px-3.5 py-2.5 text-xs leading-relaxed",
             driverUpdateBlocked && !model.error
-              ? "border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)]"
-              : "border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)]",
+              ? "bg-[var(--app-status-warning-surface)]/75 text-foreground"
+              : "bg-[var(--app-status-danger-surface)]/70 text-app-danger",
           )}
         >
-          {model.error ? (
-            <Fact label={t(stopped ? m.factLastDownload : m.factLastLoad)}>
-              <span className="text-app-danger">
-                {modelErrorCopy(model.error, t)}
-              </span>
-            </Fact>
-          ) : null}
-          {status === "unavailable" ? (
-            <Fact label={t(m.factWhyNot)}>
-              <div className="grid gap-2">
-                <span
+          <Icon
+            className={cn(
+              "mt-0.5 shrink-0",
+              driverUpdateBlocked && !model.error
+                ? "text-app-warning"
+                : "text-app-danger",
+            )}
+            icon={
+              driverUpdateBlocked && !model.error
+                ? Alert02Icon
+                : AlertCircleIcon
+            }
+            size={14}
+          />
+          <div className="min-w-0 flex-1 space-y-2">
+            {model.error ? (
+              <p>
+                <span className="mr-1.5 font-medium">
+                  {t(stopped ? m.factLastDownload : m.factLastLoad)} ·
+                </span>
+                <span>{modelErrorCopy(model.error, t)}</span>
+              </p>
+            ) : null}
+            {status === "unavailable" ? (
+              <div className="space-y-2">
+                <p
                   className={
                     driverUpdateBlocked ? "text-foreground" : "text-app-danger"
                   }
@@ -311,210 +437,225 @@ export function ModelFacts({
                     t,
                     engineShortName,
                   )}
-                </span>
+                </p>
                 {driverUpdateBlocked ? (
-                  <div className="grid gap-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {onUpdateDriver ? (
-                        <Button
-                          onClick={onUpdateDriver}
-                          size="compact"
-                          tone="primary"
-                        >
-                          {t(m.updateDriverAction)}
-                        </Button>
-                      ) : null}
-                      {onRecheck && !disabled ? (
-                        <Button
-                          loading={rechecking}
-                          onClick={onRecheck}
-                          size="compact"
-                          tone="secondary"
-                        >
-                          {t(m.driverCheckAgain)}
-                        </Button>
-                      ) : null}
-                      <a
-                        className="inline-flex items-center gap-1 text-xs font-medium text-app-link underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        href={NVIDIA_DRIVER_GUIDE_URL}
-                        rel="noopener noreferrer"
-                        target="_blank"
+                  <div className="flex flex-wrap items-center gap-2">
+                    {onUpdateDriver ? (
+                      <Button
+                        onClick={onUpdateDriver}
+                        size="compact"
+                        tone="primary"
                       >
-                        <span>{t(m.driverGuide)}</span>
-                        <Icon icon={LinkSquare02Icon} size={14} />
-                      </a>
-                    </div>
+                        {t(m.updateDriverAction)}
+                      </Button>
+                    ) : null}
+                    {onRecheck && !disabled ? (
+                      <Button
+                        loading={rechecking}
+                        onClick={onRecheck}
+                        size="compact"
+                        tone="subtle"
+                      >
+                        {t(m.driverCheckAgain)}
+                      </Button>
+                    ) : null}
+                    <a
+                      className="inline-flex items-center gap-1 text-xs font-medium text-app-link underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      href={NVIDIA_DRIVER_GUIDE_URL}
+                      rel="noopener noreferrer"
+                      target="_blank"
+                    >
+                      <span>{t(m.driverGuide)}</span>
+                      <Icon icon={LinkSquare02Icon} size={14} />
+                    </a>
                   </div>
                 ) : null}
               </div>
-            </Fact>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       ) : null}
       {model.note ? (
-        <div className="my-1.5 rounded-lg border border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)] px-3 py-0.5">
-          <Fact label={t(m.factNote)}>
-            <span className="text-app-warning">
-              {modelNoteCopy(
-                model.note.code,
-                placeName(view, model.pool, t),
-                t,
-              )}
-            </span>
-          </Fact>
+        <div className="flex items-start gap-2.5 rounded-xl bg-[var(--app-status-warning-surface)]/75 px-3.5 py-2.5 text-xs leading-relaxed text-app-warning">
+          <Icon className="mt-0.5 shrink-0" icon={Alert02Icon} size={14} />
+          <p className="min-w-0 flex-1">
+            {modelNoteCopy(model.note.code, placeName(view, model.pool, t), t)}
+          </p>
         </div>
       ) : null}
       {idleUsedWarning ? (
-        <div className="my-1.5">
-          <FormFeedback tone="warning">
-            {t(m.idleUsedWarning, {
-              count: usedNames.length,
-              names: joinList(usedNames, t),
-            })}
-          </FormFeedback>
-        </div>
+        <FormFeedback tone="warning">
+          {t(m.idleUsedWarning, {
+            count: usedNames.length,
+            names: joinList(usedNames, t),
+          })}
+        </FormFeedback>
       ) : null}
-      {availableNeedsRoom ? (
-        <div className="my-1.5">
-          <FormFeedback tone="warning">
-            {t(m.downloadNeedsRoom, {
-              free: formatGigabytes(poolFreeBytes(pool), t),
-              pool: poolLabel(view, pool, t),
-            })}
-          </FormFeedback>
-        </div>
-      ) : null}
-      <div className="grid grid-cols-1 gap-x-6 @xl:grid-cols-2">
-        {capabilities.length ? (
-          <Fact className="@xl:col-span-2" label={t(m.factCapabilities)}>
-            <span className="flex flex-wrap gap-1.5">
-              {capabilities.map((capability) => (
-                <span
-                  className="inline-flex h-[22px] items-center rounded-sm bg-muted px-2 text-xs font-medium text-secondary-foreground"
-                  key={capability}
-                >
-                  {capabilityCopy(capability, t)}
-                </span>
-              ))}
-            </span>
-          </Fact>
-        ) : null}
-        {model.publisher ? (
-          <Fact label={t(m.factPublisher)}>{model.publisher}</Fact>
-        ) : null}
+
+      <div
+        className={cn(
+          "grid grid-cols-2 gap-x-6 gap-y-4",
+          parameters ? "@lg:grid-cols-4" : "@lg:grid-cols-3",
+        )}
+      >
         {parameters ? (
-          <Fact label={t(m.factParameters)}>{parameters}</Fact>
+          <SpecTile label={t(m.factParameters)} value={parameters} />
         ) : null}
-        {engineDisplay ? (
-          <Fact label={t(m.factEngine)}>
-            <span className="block">{engineDisplay}</span>
-            {engineHint ? (
-              <span className="block text-xs text-muted-foreground">
-                {engineHint}
-              </span>
-            ) : null}
-          </Fact>
-        ) : null}
-        {concurrency ? (
-          <Fact label={t(m.factConcurrency)}>{concurrency}</Fact>
-        ) : null}
-        <Fact label={t(m.factMemory)}>
-          {memoryPlace
-            ? t(m.memoryOn, { place: memoryPlace, size: memorySize })
-            : memorySize}
-        </Fact>
-        {hostRam ? <Fact label={t(m.factSystemMemory)}>{hostRam}</Fact> : null}
-        <Fact label={t(onComputer ? m.factOnDisk : m.factDownload)}>
-          {formatGigabytes(model.download_bytes, t)}
-        </Fact>
-        <Fact label={t(m.factContext)}>
-          {contextLabel(model.context_tokens, t)}
-        </Fact>
-        <Fact label={t(m.factVersion)}>
-          <code className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-xs text-secondary-foreground">
-            {model.quant}
-          </code>
-        </Fact>
-        {speed ? <Fact label={t(m.factSpeed)}>{speed}</Fact> : null}
-        {model.license ? (
-          <Fact label={t(m.factLicense)}>{model.license}</Fact>
-        ) : null}
-        {onComputer ? (
-          <Fact
-            className={
-              usedNames.length > 1 || showAgentPicker || primaryBusy
-                ? "@xl:col-span-2"
-                : undefined
-            }
-            label={t(m.factUsedBy)}
-          >
-            <span className="flex flex-wrap items-center gap-2">
-              <span>
-                {usedNames.length ? joinList(usedNames, t) : t(m.noAgentYet)}
-              </span>
-              {showAgentPicker && onAssignAgent ? (
-                <Select
-                  aria-label={t(m.switchAgentTo, { name: model.name })}
-                  disabled={disabled || Boolean(assigningAgentId)}
-                  onValueChange={(actorId) => {
-                    const target = unassigned.find(
-                      (agent) => agent.actorId === actorId,
-                    );
-                    if (target) onAssignAgent(target);
-                  }}
-                  placeholder={t(
-                    assigningAgentId ? m.switchingAgent : m.switchAgent,
-                  )}
-                  value=""
-                  variant="pill"
-                >
-                  {unassigned.map((agent) => (
-                    <SelectItem
-                      disabled={agent.busy}
-                      key={agent.actorId}
-                      value={agent.actorId}
-                    >
-                      {agent.busy
-                        ? t(m.agentWorking, { name: agent.name })
-                        : agent.name}
-                    </SelectItem>
-                  ))}
-                </Select>
-              ) : primaryBusy ? (
-                <span className="text-xs text-muted-foreground">
-                  {t(m.finishTurnToSwitch)}
-                </span>
-              ) : null}
-            </span>
-          </Fact>
-        ) : null}
-        {sourceUrl ? (
-          <Fact className="@xl:col-span-2" label={t(m.factSource)}>
-            <a
-              className="inline-flex max-w-full items-center gap-1 text-app-link underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              href={sourceUrl}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              <span className="truncate">{modelSourceLabel(sourceUrl)}</span>
-              <Icon className="shrink-0" icon={LinkSquare02Icon} size={14} />
-            </a>
-          </Fact>
-        ) : null}
-        {status === "loaded" && model.endpoint ? (
-          <Fact className="@xl:col-span-2" label={t(m.factGateway)}>
-            {gatewayFactValue(entry, view, computer, t)}
-          </Fact>
-        ) : null}
-        {model.endpoint ? (
-          <Fact className="@xl:col-span-2" label={t(m.factEndpoint)}>
-            <CopyEndpoint
-              endpoint={model.endpoint.base_url}
-              name={model.name}
-            />
-          </Fact>
-        ) : null}
+        <SpecTile
+          gauge={memoryGauge}
+          label={t(m.factMemory)}
+          subline={
+            !useInlineMemoryOn && memoryPoolLabel
+              ? memoryPoolLabel
+              : t(m.runtimeMemory)
+          }
+          value={
+            useInlineMemoryOn && memoryPoolLabel
+              ? t(m.memoryOn, { place: memoryPoolLabel, size: memorySize })
+              : memorySize
+          }
+        />
+        <SpecTile
+          label={t(onComputer ? m.factOnDisk : m.factDownload)}
+          subline={t(m.diskSpace)}
+          value={formatGigabytes(model.download_bytes, t)}
+        />
+        <SpecTile
+          label={t(m.factContext)}
+          subline={speed}
+          value={contextLabel(model.context_tokens, t)}
+        />
       </div>
+
+      {hasMetadata ? (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border/40 pt-3.5 @lg:grid-cols-4">
+          {model.publisher ? (
+            <MetaItem label={t(m.factPublisher)} value={model.publisher} />
+          ) : null}
+          {engineDisplay ? (
+            <MetaItem
+              label={t(m.factEngine)}
+              subline={engineHint}
+              value={engineDisplay}
+            />
+          ) : null}
+          {concurrency ? (
+            <MetaItem label={t(m.factConcurrency)} value={concurrency} />
+          ) : null}
+          {model.license ? (
+            <MetaItem label={t(m.factLicense)} value={model.license} />
+          ) : null}
+          {hostRam ? (
+            <MetaItem label={t(m.factSystemMemory)} value={hostRam} />
+          ) : null}
+        </div>
+      ) : null}
+
+      {hasRuntimeLinks ? (
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-border/40 pt-3 text-xs">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+            {onComputer ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t(m.factUsedBy)}
+                </span>
+                <span className="font-medium text-foreground">
+                  {usedNames.length ? joinList(usedNames, t) : t(m.noAgentYet)}
+                </span>
+                {showAgentPicker && onAssignAgent ? (
+                  <Select
+                    aria-label={t(m.switchAgentTo, { name: model.name })}
+                    disabled={disabled || Boolean(assigningAgentId)}
+                    onValueChange={(actorId) => {
+                      const target = unassigned.find(
+                        (agent) => agent.actorId === actorId,
+                      );
+                      if (target) onAssignAgent(target);
+                    }}
+                    placeholder={t(
+                      assigningAgentId ? m.switchingAgent : m.switchAgent,
+                    )}
+                    value=""
+                    variant="pill"
+                  >
+                    {unassigned.map((agent) => (
+                      <SelectItem
+                        disabled={agent.busy}
+                        key={agent.actorId}
+                        value={agent.actorId}
+                      >
+                        {agent.busy
+                          ? t(m.agentWorking, { name: agent.name })
+                          : agent.name}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                ) : primaryBusy ? (
+                  <span className="text-muted-foreground">
+                    {t(m.finishTurnToSwitch)}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {status === "loaded" && model.endpoint ? (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t(m.factGateway)}
+                </span>
+                <span className="font-medium text-foreground">
+                  {gatewayFactValue(entry, view, computer, t)}
+                </span>
+              </div>
+            ) : null}
+            {model.endpoint ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t(m.factEndpoint)}
+                </span>
+                <CopyEndpoint
+                  endpoint={model.endpoint.base_url}
+                  name={model.name}
+                />
+              </div>
+            ) : null}
+            {sourceUrl ? (
+              <a
+                className="inline-flex max-w-full items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                href={sourceUrl}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <span className="truncate">{modelSourceLabel(sourceUrl)}</span>
+                <Icon className="shrink-0" icon={LinkSquare02Icon} size={12} />
+              </a>
+            ) : null}
+          </div>
+          {hasFooterTags ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {model.quant ? (
+                <code className="inline-flex h-5 items-center rounded-md bg-muted/75 px-2 font-mono text-[11px] font-medium text-muted-foreground">
+                  {model.quant}
+                </code>
+              ) : null}
+              {capabilities.length ? (
+                <div
+                  aria-label={t(m.factCapabilities)}
+                  className="flex flex-wrap items-center gap-1.5"
+                >
+                  {capabilities.map((capability) => (
+                    <span
+                      className="inline-flex h-5 items-center rounded-md bg-muted/75 px-2 text-[11px] font-medium text-muted-foreground"
+                      key={capability}
+                    >
+                      {capabilityCopy(capability, t)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -637,7 +778,7 @@ export function AdvancedDialog({
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
               {t(m.factMemory)}
             </h3>
-            <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
+            <div className="divide-y divide-border/50 rounded-2xl bg-muted/35 px-3.5">
               {view.pools.map((pool) => (
                 <PoolBar
                   colorOf={colorOf}
@@ -688,14 +829,19 @@ export function AdvancedDialog({
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
               {t(m.hardware)}
             </h3>
-            <div className="rounded-xl border border-border bg-app-canvas/40 px-3.5">
+            <div className="rounded-2xl bg-muted/35 px-3.5">
               {host.os_label ? (
-                <Fact label={t(m.factSystem)}>{host.os_label}</Fact>
+                <Fact bordered={false} label={t(m.factSystem)}>
+                  {host.os_label}
+                </Fact>
               ) : null}
               {host.engine_label ? (
                 <Fact label={t(m.factEngine)}>{host.engine_label}</Fact>
               ) : null}
-              <Fact label={t(m.factMemory)}>
+              <Fact
+                bordered={Boolean(host.os_label || host.engine_label)}
+                label={t(m.factMemory)}
+              >
                 {formatGigabytes(host.ram_total_bytes, t)}
               </Fact>
               {host.gpus.map((gpu) => (

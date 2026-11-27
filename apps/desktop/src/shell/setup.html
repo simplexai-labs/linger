@@ -521,8 +521,8 @@
       }
       section[data-customizing="true"] h1 {
         margin-bottom: 2px;
-        font-size: 22px;
-        line-height: 28px;
+        font-size: 21px;
+        line-height: 26px;
       }
       section[data-customizing="true"] .lead {
         font-size: 12.5px;
@@ -976,7 +976,8 @@
       .choice.byok-box {
         flex-direction: column;
         align-items: stretch;
-        gap: 10px;
+        gap: 8px;
+        padding: 9px 0;
       }
       .byok-row {
         display: flex;
@@ -986,23 +987,70 @@
       }
       .byok-row label {
         color: var(--muted);
-        font-size: 12px;
+        font-size: 11.5px;
         font-weight: 500;
       }
-      /* BYOK fields, built once by byokFields() for the setup form and the
-         sign-in dialog: the base URL and two optional comboboxes (path and
-         endpoint) on one row, the key, then the model with List models and
-         Test beside it, and one status line. */
+      /* API Key fields, built once by byokFields() for the setup form and the
+         sign-in dialog: provider preset, API key, model with refresh and Test,
+         and a collapsed Advanced options drawer for engine, path, and endpoint. */
       .byok-fields {
         display: grid;
         gap: 7px;
         font-size: 12px;
         text-align: left;
       }
+      .byok-provider-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        height: 32px;
+        border: 1px solid #e2e2dc;
+        border-radius: 8px;
+        background: #fafaf8;
+        transition:
+          border-color 140ms ease,
+          background-color 140ms ease;
+      }
+      .byok-provider-wrap:focus-within {
+        border-color: var(--ink);
+        background: #fff;
+      }
+      .byok-provider {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 100%;
+        height: 100%;
+        padding: 0 28px 0 10px;
+        border: 0;
+        outline: none;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .byok-provider-wrap svg {
+        position: absolute;
+        right: 9px;
+        width: 10px;
+        height: 10px;
+        color: var(--faint);
+        pointer-events: none;
+      }
+      .byok-custom-base[hidden] {
+        display: none;
+      }
       .byok-fields .ep {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto auto;
         gap: 6px;
+      }
+      .byok-fields .ep[data-base-outside="true"] {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+      .byok-fields .ep[data-base-outside="true"] > .cb .cb-input {
+        width: 100%;
+        max-width: none;
       }
       .byok-fields .ep-base-wrap,
       .byok-fields .ep > .cb,
@@ -1011,7 +1059,7 @@
         display: flex;
         align-items: center;
         min-width: 0;
-        height: 30px;
+        height: 32px;
         padding: 0 4px 0 10px;
         border: 1px solid #e2e2dc;
         border-radius: 8px;
@@ -1019,6 +1067,76 @@
         transition:
           border-color 140ms ease,
           background-color 140ms ease;
+      }
+      .byok-adv {
+        margin-top: 1px;
+      }
+      .byok-adv > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 0;
+        color: var(--muted);
+        font-size: 11.5px;
+        font-weight: 500;
+        list-style: none;
+        cursor: pointer;
+      }
+      .byok-adv > summary::-webkit-details-marker {
+        display: none;
+      }
+      .byok-adv > summary:hover {
+        color: var(--ink);
+      }
+      .byok-adv-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        flex: none;
+      }
+      .byok-adv-title svg {
+        width: 10px;
+        height: 10px;
+        color: var(--faint);
+        transform: rotate(-90deg);
+        transition: transform 150ms ease;
+      }
+      .byok-adv[open] .byok-adv-title svg {
+        transform: rotate(0deg);
+      }
+      .byok-adv-meta {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 400;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .byok-adv-body {
+        display: grid;
+        gap: 8px;
+        margin-top: 6px;
+        padding: 9px 10px;
+        border: 1px solid #ecece7;
+        border-radius: 10px;
+        background: #f8f8f5;
+      }
+      .byok-adv-body .ep-base-wrap,
+      .byok-adv-body .ep > .cb {
+        height: 29px;
+        background: #fff;
+      }
+      .byok-adv-url {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+      }
+      .byok-status[hidden] {
+        display: none;
       }
       .byok-fields .byok-key {
         width: 100%;
@@ -1199,12 +1317,12 @@
         flex: 1;
       }
       .model-row > .change {
-        height: 30px;
+        height: 32px;
       }
       .model-row > .list-btn {
         display: grid;
         place-items: center;
-        width: 30px;
+        width: 32px;
         padding: 0;
         color: var(--muted);
       }
@@ -1332,13 +1450,30 @@
       }
       .choice.optional-keys {
         display: block;
+        padding: 7px 0;
       }
       .choice.optional-keys summary {
+        display: flex;
+        align-items: center;
+        gap: 5px;
         cursor: pointer;
         color: var(--muted);
         font-size: 12px;
         font-weight: 500;
         list-style: none;
+      }
+      .choice.optional-keys summary::before {
+        content: "";
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        border-right: 1.4px solid var(--faint);
+        border-bottom: 1.4px solid var(--faint);
+        transform: rotate(-45deg);
+        transition: transform 150ms ease;
+      }
+      .choice.optional-keys[open] summary::before {
+        transform: rotate(45deg);
       }
       .choice.optional-keys summary::-webkit-details-marker {
         display: none;
@@ -1346,6 +1481,24 @@
       .choice.optional-keys[open] summary {
         margin-bottom: 8px;
         color: var(--ink);
+      }
+      .choice.location-row {
+        padding: 7px 0;
+      }
+      .choice.location-row .text {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .choice.location-row strong {
+        flex: none;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .choice.location-row .sub {
+        font-family: var(--mono);
+        font-size: 11.5px;
       }
       .choices,
       .panel {
@@ -1401,6 +1554,10 @@
       .seg button {
         position: relative;
         z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
         min-width: 56px;
         height: 26px;
         padding: 0 10px;
@@ -1416,7 +1573,8 @@
         color: var(--ink);
       }
       /* The localmodels tool's pick for this computer. */
-      .seg button[data-recommended="true"]::after {
+      .seg button[data-recommended="true"]::after,
+      .harness-btn[data-recommended="true"]::after {
         content: "";
         position: absolute;
         top: 4px;
@@ -1425,6 +1583,86 @@
         height: 5px;
         border-radius: 50%;
         background: #d9822b;
+      }
+      .harness-btn[data-recommended="true"]::after {
+        top: 6px;
+        right: 6px;
+      }
+      .choice.harness {
+        flex-wrap: wrap;
+        row-gap: 8px;
+      }
+      .choice.harness .sub {
+        white-space: normal;
+      }
+      .harness-grid {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .harness-btn {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid #e6e6e1;
+        border-radius: 9px;
+        background: #fff;
+        color: #52524b;
+        font-size: 12px;
+        font-weight: 500;
+        text-align: left;
+        transition:
+          border-color 140ms ease,
+          background-color 140ms ease,
+          color 140ms ease;
+      }
+      .harness-btn[data-value="recommended"] {
+        grid-column: 1 / -1;
+        justify-content: center;
+      }
+      .harness-btn:hover:not(:disabled) {
+        border-color: #c4c4bc;
+        color: var(--ink);
+      }
+      .harness-btn[aria-checked="true"] {
+        border-color: var(--ink);
+        background: #fff;
+        color: var(--ink);
+        box-shadow: 0 1px 2px rgba(20, 20, 16, 0.08);
+        cursor: default;
+      }
+      .harness-btn[data-detected="true"] {
+        color: var(--ink);
+      }
+      .harness-btn[data-detected="false"]:not([aria-checked="true"]) {
+        color: #8c8b82;
+      }
+      .harness-btn span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .harness-icon {
+        width: 15px;
+        height: 15px;
+        flex: none;
+        object-fit: contain;
+        transition:
+          filter 160ms ease,
+          opacity 160ms ease;
+      }
+      .seg .harness-icon {
+        width: 14px;
+        height: 14px;
+      }
+      [data-detected="false"] .harness-icon {
+        filter: grayscale(1);
+        opacity: 0.38;
       }
       .seg button[aria-checked="true"] {
         color: var(--ink);
@@ -2224,7 +2462,7 @@
                       class="byok-tip-btn"
                       aria-describedby="byok-tip-text"
                     >
-                      BYOK
+                      <span data-t="apiKeySource"></span>
                       <span
                         class="byok-tooltip"
                         id="byok-tip-text"
@@ -2267,9 +2505,9 @@
                     ></button>
                   </div>
                 </div>
-                <div class="choice" id="subscription-row" hidden>
+                <div class="choice harness" id="subscription-row" hidden>
                   <div class="text">
-                    <strong data-t="aiRuntime"></strong
+                    <strong data-t="accountChoice"></strong
                     ><span
                       class="sub"
                       id="runtime-sub"
@@ -2277,47 +2515,51 @@
                     ></span>
                   </div>
                   <div
-                    class="seg"
+                    class="harness-grid"
                     role="radiogroup"
                     data-t-aria-label="aiRuntime"
                     data-plan="runtime"
                   >
-                    <span class="knob"></span>
                     <button
                       type="button"
                       role="radio"
+                      class="harness-btn"
                       data-value="recommended"
                       data-t="auto"
                     ></button>
-                    <button type="button" role="radio" data-value="codex">
-                      Codex
+                    <button
+                      type="button"
+                      role="radio"
+                      class="harness-btn"
+                      data-value="claude"
+                      data-detected="false"
+                    >
+                      <img
+                        class="harness-icon"
+                        src="/harness-claude.svg"
+                        alt=""
+                        aria-hidden="true"
+                      />
+                      <span>Claude Code</span>
                     </button>
-                    <button type="button" role="radio" data-value="claude">
-                      Claude Code
+                    <button
+                      type="button"
+                      role="radio"
+                      class="harness-btn"
+                      data-value="codex"
+                      data-detected="false"
+                    >
+                      <img
+                        class="harness-icon"
+                        src="/harness-codex.svg"
+                        alt=""
+                        aria-hidden="true"
+                      />
+                      <span>Codex</span>
                     </button>
                   </div>
                 </div>
                 <div class="choice byok-box" id="byok-row" hidden>
-                  <div class="byok-row">
-                    <label id="byok-runtime-label" data-t="aiRuntime"></label>
-                    <div
-                      class="seg"
-                      role="radiogroup"
-                      aria-labelledby="byok-runtime-label"
-                      data-byok="runtime"
-                    >
-                      <span class="knob"></span>
-                      <button type="button" role="radio" data-value="claude">
-                        Claude Code
-                      </button>
-                      <button type="button" role="radio" data-value="codex">
-                        Codex
-                      </button>
-                      <button type="button" role="radio" data-value="pi">
-                        Pi
-                      </button>
-                    </div>
-                  </div>
                   <div class="byok-fields" id="byok-fields"></div>
                 </div>
                 <details class="choice optional-keys" id="optional-keys">
@@ -2591,14 +2833,47 @@
                 ></button>
               </div>
               <div class="runtimes" id="runtime-signin-runtimes" hidden>
-                <button class="secondary" data-switch="codex" type="button">
-                  Codex
+                <button
+                  class="secondary"
+                  data-switch="claude"
+                  data-detected="false"
+                  type="button"
+                >
+                  <img
+                    class="harness-icon"
+                    src="/harness-claude.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                  <span>Claude Code</span>
                 </button>
-                <button class="secondary" data-switch="claude" type="button">
-                  Claude Code
+                <button
+                  class="secondary"
+                  data-switch="codex"
+                  data-detected="false"
+                  type="button"
+                >
+                  <img
+                    class="harness-icon"
+                    src="/harness-codex.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                  <span>Codex</span>
                 </button>
-                <button class="secondary" data-switch="pi" type="button">
-                  Pi
+                <button
+                  class="secondary"
+                  data-switch="pi"
+                  data-detected="false"
+                  type="button"
+                >
+                  <img
+                    class="harness-icon"
+                    src="/harness-pi.svg"
+                    alt=""
+                    aria-hidden="true"
+                  />
+                  <span>Pi</span>
                 </button>
               </div>
               <form class="signin-byok" id="runtime-signin-byok" hidden>
@@ -3149,6 +3424,90 @@
         pi: "openai-chat",
       };
       const DEFAULT_PATH = "/v1";
+      const BYOK_PROVIDERS = [
+        {
+          id: "openrouter",
+          label: "OpenRouter",
+          baseUrl: "https://openrouter.ai/api",
+          path: "/v1",
+          endpoint: "/chat/completions",
+          runtime: "pi",
+          modelPlaceholder: "deepseek/deepseek-v4.1-flash-1017",
+        },
+        {
+          id: "deepseek",
+          label: "DeepSeek",
+          baseUrl: "https://api.deepseek.com",
+          path: "/v1",
+          endpoint: "/chat/completions",
+          runtime: "pi",
+          modelPlaceholder: "deepseek-chat",
+        },
+        {
+          id: "openai",
+          label: "OpenAI",
+          baseUrl: "https://api.openai.com",
+          path: "/v1",
+          endpoint: "/responses",
+          runtime: "codex",
+          modelPlaceholder: "gpt-5.4",
+        },
+        {
+          id: "anthropic",
+          label: "Anthropic",
+          baseUrl: "https://api.anthropic.com",
+          path: "/v1",
+          endpoint: "/messages",
+          runtime: "claude",
+          modelPlaceholder: "claude-sonnet-4-6",
+        },
+        {
+          id: "zhipu",
+          labelKey: "providerZhipu",
+          baseUrl: "https://open.bigmodel.cn",
+          path: "/api/paas/v4",
+          endpoint: "/chat/completions",
+          runtime: "pi",
+          modelPlaceholder: "glm-4.6",
+        },
+        {
+          id: "volcano",
+          labelKey: "providerVolcano",
+          baseUrl: "https://ark.cn-beijing.volces.com",
+          path: "/api/v3",
+          endpoint: "/chat/completions",
+          runtime: "pi",
+          modelPlaceholder: "doubao-seed-1-6",
+        },
+        {
+          id: "gemini",
+          label: "Google Gemini",
+          baseUrl: "https://generativelanguage.googleapis.com",
+          path: "/v1beta/openai",
+          endpoint: "/chat/completions",
+          runtime: "pi",
+          modelPlaceholder: "gemini-2.5-pro",
+        },
+        {
+          id: "custom",
+          labelKey: "providerCustom",
+          baseUrl: "",
+          path: DEFAULT_PATH,
+          endpoint: null,
+          runtime: "pi",
+          modelPlaceholder: "",
+        },
+      ];
+      const byokProviderById = (id) =>
+        BYOK_PROVIDERS.find((item) => item.id === id) ?? BYOK_PROVIDERS[0];
+      const byokProviderName = (item) =>
+        item.labelKey ? t(item.labelKey) : item.label;
+      const defaultProviderForRuntime = (runtime) =>
+        runtime === "claude"
+          ? "anthropic"
+          : runtime === "codex"
+            ? "openai"
+            : "openrouter";
       const PATH_OPTIONS = [
         { value: "/v1", label: t("pathMostProviders") },
         { value: "/api/paas/v4", label: t("pathZhipu") },
@@ -3346,21 +3705,50 @@
         return combo;
       };
 
-      // The BYOK fields, built once for the setup form and once for the
-      // sign-in dialog. runtimeOf() names the runtime the endpoint serves,
-      // which picks the default endpoint and format; changed() runs on every
-      // edit.
+      // The API Key fields, built once for the setup form and once for the
+      // sign-in dialog. Presets hide path/endpoint/engine plumbing inside a
+      // collapsed Advanced options drawer while still sending base + path +
+      // endpoint verbatim.
       const byokForms = [];
-      const byokFields = (root, prefix, runtimeOf, changed) => {
+      const byokFields = (root, prefix, runtimeOf, changed, options = {}) => {
+        const allowRuntime = Boolean(options.allowRuntime);
+        const runtimeControlsHtml = allowRuntime
+          ? `
+            <div class="byok-row">
+              <label id="${prefix}-runtime-label">${esc(t("aiRuntime"))}</label>
+              <div
+                class="seg"
+                role="radiogroup"
+                aria-labelledby="${prefix}-runtime-label"
+                data-byok="runtime"
+              >
+                <span class="knob"></span>
+                <button type="button" role="radio" data-value="pi" data-detected="false">
+                  <img class="harness-icon" src="/harness-pi.svg" alt="" aria-hidden="true" />
+                  <span>Pi</span>
+                </button>
+                <button type="button" role="radio" data-value="claude" data-detected="false">
+                  <img class="harness-icon" src="/harness-claude.svg" alt="" aria-hidden="true" />
+                  <span>Claude Code</span>
+                </button>
+                <button type="button" role="radio" data-value="codex" data-detected="false">
+                  <img class="harness-icon" src="/harness-codex.svg" alt="" aria-hidden="true" />
+                  <span>Codex</span>
+                </button>
+              </div>
+            </div>`
+          : "";
         root.innerHTML = `
-          <div class="ep">
-            <span class="ep-base-wrap"><input class="ep-base" id="${prefix}-url"
-              type="url" autocomplete="off" spellcheck="false"
-              aria-label="${esc(t("baseUrl"))}"
-              placeholder="${esc(t("baseUrlPlaceholder"))}" /></span>
-            <div></div>
-            <div></div>
+          <div class="byok-provider-wrap">
+            <select class="byok-provider" id="${prefix}-provider" aria-label="${esc(t("provider"))}">
+              ${BYOK_PROVIDERS.map(
+                (item) =>
+                  `<option value="${item.id}">${esc(byokProviderName(item))}</option>`,
+              ).join("")}
+            </select>
+            ${ICONS.chevron}
           </div>
+          <div class="byok-custom-base" hidden></div>
           <input class="byok-key" id="${prefix}-key" type="password"
             autocomplete="off" spellcheck="false" aria-label="${esc(t("apiKey"))}"
             placeholder="${esc(t("apiKeyPlaceholder"))}" />
@@ -3372,16 +3760,42 @@
             <div class="byok-toast" id="${prefix}-toast" role="status"
               aria-live="polite" hidden></div>
           </div>
-          <div class="byok-status" id="${prefix}-status" aria-live="polite"></div>`;
-        const blank = () => ({
-          baseUrl: "",
-          path: DEFAULT_PATH,
-          // null follows the runtime's default.
-          endpoint: null,
-          apiKey: "",
-          modelId: "",
-        });
-        let f = blank();
+          <div class="byok-status" id="${prefix}-status" aria-live="polite" hidden></div>
+          <details class="byok-adv" id="${prefix}-advanced">
+            <summary>
+              <span class="byok-adv-title">${ICONS.chevron}<span>${esc(t("advancedOptions"))}</span></span>
+              <span class="byok-adv-meta"></span>
+            </summary>
+            <div class="byok-adv-body">
+              ${runtimeControlsHtml}
+              <div class="ep" data-base-outside="false">
+                <span class="ep-base-wrap"><input class="ep-base" id="${prefix}-url"
+                  type="url" autocomplete="off" spellcheck="false"
+                  aria-label="${esc(t("baseUrl"))}"
+                  placeholder="${esc(t("baseUrlPlaceholder"))}" /></span>
+                <div></div>
+                <div></div>
+              </div>
+              <div class="byok-adv-url" id="${prefix}-adv-url"></div>
+            </div>
+          </details>`;
+        const initialProviderId = () =>
+          options.initialProvider ? options.initialProvider() : "openrouter";
+        const stateFromPreset = (providerId, keepKey = "") => {
+          const preset = byokProviderById(providerId);
+          return {
+            provider: preset.id,
+            baseUrl: preset.baseUrl,
+            path: preset.path,
+            // null follows the runtime's default.
+            endpoint: preset.endpoint,
+            apiKey: keepKey,
+            modelId: "",
+          };
+        };
+        let f = stateFromPreset(initialProviderId());
+        let touched = false;
+        let baseOutside = f.provider === "custom";
         // The latest test and model listing; each sequence number drops an
         // answer to a request the fields have changed since.
         let check = null;
@@ -3392,8 +3806,12 @@
         let toastTimer = 0;
         let toastShown = "";
 
+        const safeRuntime = () => {
+          const rt = runtimeOf();
+          return rt in RUNTIME_FORMATS ? rt : "pi";
+        };
         const defaultEndpoint = () =>
-          BYOK_FORMATS[RUNTIME_FORMATS[runtimeOf()]].suffix;
+          BYOK_FORMATS[RUNTIME_FORMATS[safeRuntime()]].suffix;
         const endpointValue = () => f.endpoint ?? defaultEndpoint();
         const baseUrl = () => f.baseUrl.trim().replace(/\/+$/, "");
         const apiRoot = () => baseUrl() + normalizePath(f.path);
@@ -3403,7 +3821,7 @@
           const url = requestUrl();
           for (const [protocol, { suffix }] of Object.entries(BYOK_FORMATS))
             if (url.endsWith(suffix)) return { protocol, fromUrl: true };
-          return { protocol: RUNTIME_FORMATS[runtimeOf()], fromUrl: false };
+          return { protocol: RUNTIME_FORMATS[safeRuntime()], fromUrl: false };
         };
         const validParts = () =>
           [normalizePath(f.path), normalizePath(endpointValue())].every(
@@ -3451,14 +3869,57 @@
           }
         };
         const edit = (next, all) => {
+          touched = true;
           f = { ...f, ...next };
           resetResults(all);
           changed();
         };
 
+        const providerSelect = root.querySelector(".byok-provider");
+        const customBaseSlot = root.querySelector(".byok-custom-base");
+        const epRow = root.querySelector(".ep");
+        const baseWrap = root.querySelector(".ep-base-wrap");
         const base = root.querySelector(".ep-base");
+        const advDetails = root.querySelector(".byok-adv");
+        const advMeta = root.querySelector(".byok-adv-meta");
+        const advUrl = root.querySelector(".byok-adv-url");
+
+        const placeBaseInput = (outside) => {
+          baseOutside = outside;
+          if (outside) {
+            if (baseWrap.parentElement !== customBaseSlot)
+              customBaseSlot.append(baseWrap);
+          } else if (baseWrap.parentElement !== epRow) {
+            epRow.prepend(baseWrap);
+          }
+          customBaseSlot.hidden = !outside;
+          epRow.dataset.baseOutside = String(outside);
+        };
+        placeBaseInput(baseOutside);
+
+        providerSelect.addEventListener("change", () => {
+          const preset = byokProviderById(providerSelect.value);
+          touched = true;
+          f = {
+            ...f,
+            provider: preset.id,
+            baseUrl: preset.baseUrl,
+            path: preset.path,
+            endpoint: preset.endpoint,
+          };
+          if (options.onPresetRuntime) options.onPresetRuntime(preset.runtime);
+          placeBaseInput(preset.id === "custom");
+          resetResults(true);
+          changed();
+          render();
+          if (preset.id === "custom") base.focus();
+        });
+        advDetails.addEventListener("toggle", () => {
+          if (advDetails.open) requestAnimationFrame(placeKnobs);
+        });
+
         base.addEventListener("input", () => {
-          edit({ baseUrl: base.value }, true);
+          edit({ baseUrl: base.value, provider: "custom" }, true);
           render();
         });
         base.addEventListener("blur", () => {
@@ -3473,7 +3934,7 @@
           heading: esc(t("pathHeading")),
           placeholder: "-",
           get: () => f.path,
-          set: (value) => edit({ path: value }, true),
+          set: (value) => edit({ path: value, provider: "custom" }, true),
           commit: () => {
             f = { ...f, path: normalizePath(f.path) };
           },
@@ -3492,7 +3953,10 @@
           get: endpointValue,
           set: (value) =>
             edit(
-              { endpoint: value === defaultEndpoint() ? null : value },
+              {
+                endpoint: value === defaultEndpoint() ? null : value,
+                provider: "custom",
+              },
               false,
             ),
           commit: () => {
@@ -3509,7 +3973,7 @@
               ...option,
               tag:
                 option.value === defaultEndpoint()
-                  ? t("runtimeDefault", { runtime: RUNTIMES[runtimeOf()] })
+                  ? t("runtimeDefault", { runtime: RUNTIMES[safeRuntime()] })
                   : "",
             })),
         });
@@ -3601,11 +4065,23 @@
           root,
           complete,
           modelId: () => f.modelId.trim(),
+          providerLabel: () => {
+            const preset = byokProviderById(f.provider);
+            return preset.id === "custom" ? "" : byokProviderName(preset);
+          },
           config: () => ({
             ...endpoint(),
             modelId: f.modelId.trim(),
-            runtime: runtimeOf(),
+            runtime: safeRuntime(),
           }),
+          // Keeps an untouched sign-in fallback aligned with the active runtime.
+          syncDefaultPreset: () => {
+            if (touched) return;
+            const target = initialProviderId();
+            if (f.provider === target) return;
+            f = stateFromPreset(target, f.apiKey);
+            placeBaseInput(f.provider === "custom");
+          },
           // The runtime changed: its default endpoint and format may differ.
           runtimeChanged: () => resetResults(false),
           clearKey: () => {
@@ -3613,7 +4089,10 @@
             key.value = "";
           },
           reset: () => {
-            f = blank();
+            touched = false;
+            f = stateFromPreset(initialProviderId());
+            placeBaseInput(f.provider === "custom");
+            advDetails.open = false;
             resetResults(true);
           },
           // A click outside the toast and Test dismisses it.
@@ -3622,8 +4101,14 @@
               hideToast();
           },
           sync: (busy) => {
+            const preset = byokProviderById(f.provider);
+            if (providerSelect.value !== f.provider)
+              providerSelect.value = f.provider;
+            providerSelect.disabled = busy;
             if (base.value !== f.baseUrl) base.value = f.baseUrl;
             if (key.value !== f.apiKey) key.value = f.apiKey;
+            modelCombo.input.placeholder =
+              preset.modelPlaceholder || t("modelPlaceholder");
             path.sync();
             endpointCombo.sync();
             modelCombo.sync();
@@ -3659,28 +4144,52 @@
                 toastShown = html;
               }
             }
-            let line;
+            const resolvedParts = [
+              allowRuntime ? RUNTIMES[safeRuntime()] : "",
+              normalizePath(f.path) + normalizePath(endpointValue()),
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            if (advMeta.textContent !== resolvedParts)
+              advMeta.textContent = resolvedParts;
+            let urlPreviewHtml = "";
+            if (!validParts()) {
+              urlPreviewHtml = esc(t("invalidParts"));
+            } else if (!baseUrl()) {
+              urlPreviewHtml = esc(t("greyDefaults"));
+            } else {
+              const { protocol, fromUrl } = format();
+              const values = {
+                format: BYOK_FORMATS[protocol].label,
+                runtime: RUNTIMES[safeRuntime()],
+                url: requestUrl(),
+              };
+              urlPreviewHtml = tHtml(
+                fromUrl ? "sendsTo" : "sendsToRuntime",
+                values,
+              );
+            }
+            if (advUrl.innerHTML !== urlPreviewHtml)
+              advUrl.innerHTML = urlPreviewHtml;
+
+            let line = null;
             if (!validParts())
               line = { tone: "err", html: esc(t("invalidParts")) };
             else if (models?.state === "failed")
               line = { tone: "err", html: esc(models.message) };
             else if (listing)
               line = { html: tHtml("listingFrom", { url: modelsUrl() }) };
-            else if (!baseUrl()) line = { html: esc(t("greyDefaults")) };
-            else {
-              const { protocol, fromUrl } = format();
-              const values = {
-                format: BYOK_FORMATS[protocol].label,
-                runtime: RUNTIMES[runtimeOf()],
-                url: requestUrl(),
-              };
-              line = {
-                html: tHtml(fromUrl ? "sendsTo" : "sendsToRuntime", values),
-              };
+            else if (baseOutside && baseUrl()) line = { html: urlPreviewHtml };
+
+            status.hidden = !line;
+            if (line) {
+              if (line.tone) status.dataset.tone = line.tone;
+              else delete status.dataset.tone;
+              if (status.innerHTML !== line.html) status.innerHTML = line.html;
+            } else {
+              delete status.dataset.tone;
+              if (status.innerHTML) status.innerHTML = "";
             }
-            if (line.tone) status.dataset.tone = line.tone;
-            else delete status.dataset.tone;
-            if (status.innerHTML !== line.html) status.innerHTML = line.html;
           },
         };
         byokForms.push(form);
@@ -3705,9 +4214,10 @@
         render();
         open.input.focus();
       });
-      // The setup form's runtime; the sign-in dialog's endpoint serves the
-      // runtime signing in.
-      let byokRuntime = "claude";
+      // The setup form's API Key engine (defaults to the active provider's
+      // natural engine unless overridden in Advanced options).
+      let byokRuntime = "pi";
+      let byokRuntimeExplicit = false;
       let signInByokOpen = false;
       const mainByok = byokFields(
         $("byok-fields"),
@@ -3716,21 +4226,30 @@
         () => {
           picked = true;
         },
+        {
+          allowRuntime: true,
+          initialProvider: () => "openrouter",
+          onPresetRuntime: (nextRuntime) => {
+            if (!byokRuntimeExplicit) byokRuntime = nextRuntime;
+          },
+        },
       );
       const signInByok = byokFields(
         $("signin-byok-fields"),
         "signin-byok",
         () => state.localServer.signIn?.runtime ?? "claude",
         () => {},
+        {
+          allowRuntime: false,
+          initialProvider: () =>
+            defaultProviderForRuntime(
+              state?.localServer?.signIn?.runtime ?? "claude",
+            ),
+        },
       );
       // Provider keys typed or removed here ("" removes the saved one); kept
       // only in the inputs and sent once with Install.
       let keys = {};
-      const isDefaultPlan = (local) =>
-        JSON.stringify(plan) === JSON.stringify(defaults()) &&
-        !local.location.custom &&
-        !Object.keys(keys).length;
-
       const host = (url) => {
         try {
           return new URL(url).host;
@@ -4100,6 +4619,7 @@
         $("runtime-signin-runtimes").hidden = !otherRuntimes && !pi;
         $("runtime-signin-other").hidden = pi;
         $("runtime-signin-byok").hidden = !signInByokOpen;
+        signInByok.syncDefaultPreset();
         signInByok.sync(busy);
         $("runtime-signin-byok-submit").disabled =
           busy || !signInByok.complete();
@@ -4302,7 +4822,6 @@
         const held = models.state === "checked" && !!models.blockedNow;
         const heldModel = held && models.model;
         plan.localModel = plan.source === "local" && !!model;
-        const custom = !isDefaultPlan(local);
         // Quick Install waits for the check, so it installs what it shows.
         // BYOK uses the user's own endpoint and does not depend on local-model
         // inspection, so its Install button unblocks once the fields are valid.
@@ -4316,7 +4835,11 @@
           choice.source === "local"
             ? t("localModelPi")
             : choice.source === "byok"
-              ? ["BYOK", RUNTIMES[byokRuntime], mainByok.modelId()]
+              ? [
+                  t("apiKeySource"),
+                  mainByok.providerLabel(),
+                  mainByok.modelId(),
+                ]
                   .filter(Boolean)
                   .join(" · ")
               : RUNTIMES[choice.runtime];
@@ -4340,7 +4863,7 @@
         const label = waitingForCheck
           ? '<span class="spinner"></span>' +
             esc(t(fetching ? "downloadingTools" : "checkingComputer"))
-          : esc(t(custom ? "install" : "quickInstall"));
+          : esc(t(customizing ? "install" : "quickInstall"));
         if ($("local-install-label").innerHTML !== label)
           $("local-install-label").innerHTML = label;
         document.querySelector('[data-step="welcome"]').dataset.customizing =
@@ -4609,8 +5132,25 @@
         const subKnown =
           recommended.source === "subscription" &&
           recommended.runtime !== "recommended";
+        const detectedRuntimes = new Set(
+          models.state === "checked" && Array.isArray(models.runtimes)
+            ? models.runtimes
+                .filter((entry) => entry.installed)
+                .map((entry) => entry.runtime)
+            : [],
+        );
+        const detectedSubNames = ["claude", "codex"]
+          .filter((name) => detectedRuntimes.has(name))
+          .map((name) => RUNTIMES[name]);
         $("runtime-sub").textContent = subKnown
-          ? t("recommendedRuntime", { runtime: RUNTIMES[recommended.runtime] })
+          ? detectedSubNames.length > 0
+            ? t("detectedAndRecommendedRuntime", {
+                detected: detectedSubNames.join(t("listSep")),
+                runtime: RUNTIMES[recommended.runtime],
+              })
+            : t("recommendedRuntime", {
+                runtime: RUNTIMES[recommended.runtime],
+              })
           : t("subscriptionHint");
         for (const seg of document.querySelectorAll("[data-plan]"))
           for (const option of seg.querySelectorAll("button")) {
@@ -4637,6 +5177,8 @@
               option.dataset.recommended = String(
                 subKnown && value === recommended.runtime,
               );
+              if (value !== "recommended")
+                option.dataset.detected = String(detectedRuntimes.has(value));
               option.disabled = busy;
             }
           }
@@ -4647,7 +5189,15 @@
             "aria-checked",
             String(byokRuntime === option.dataset.value),
           );
+          option.dataset.detected = String(
+            detectedRuntimes.has(option.dataset.value),
+          );
           option.disabled = busy;
+        }
+        for (const option of document.querySelectorAll("[data-switch]")) {
+          option.dataset.detected = String(
+            detectedRuntimes.has(option.dataset.switch),
+          );
         }
         mainByok.sync(busy);
         requestAnimationFrame(placeKnobs);
@@ -5181,7 +5731,8 @@
         if (!customizing) {
           picked = false;
           pickedAutoBeforeCheck = false;
-          byokRuntime = "claude";
+          byokRuntime = "pi";
+          byokRuntimeExplicit = false;
           mainByok.reset();
           clearKeys();
         }
@@ -5228,6 +5779,7 @@
         option.addEventListener("click", () => {
           picked = true;
           byokRuntime = option.dataset.value;
+          byokRuntimeExplicit = true;
           mainByok.runtimeChanged();
           render();
         });

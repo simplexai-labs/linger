@@ -113,6 +113,15 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 		d.discardPreparedOperationAsync(prepared, "admission_failure")
 		return err
 	}
+	if prepared != nil {
+		prepared.suppressReceipt()
+	}
+	// Register before sending operation.accepted and releasing admissionMu so an
+	// immediate operation.cancel, drain, stop, or occupancy check triggered by
+	// the acceptance frame never misses the Operation.
+	d.activeMu.Lock()
+	d.activeOperations[command.OperationID] = active
+	d.activeMu.Unlock()
 	slog.Info("runner.operation.accepted", "operation_id", command.OperationID, "command_id", command.CommandID,
 		"runner_id", command.RunnerID, "agent_id", command.AgentID, "kind", command.OperationKind,
 		"accepted_at_unix_ms", time.Now().UnixMilli())
@@ -130,14 +139,6 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 	// any later event whose delivery fails. The Operation stays admitted and
 	// starts; the returned error reconnects, the next hello reports it active,
 	// and the Gateway's re-sent start replays the accepted event.
-	if prepared != nil {
-		prepared.suppressReceipt()
-	}
-	// Register before releasing admissionMu: drain, stop and Context
-	// occupancy must see this Operation from the moment it is accepted.
-	d.activeMu.Lock()
-	d.activeOperations[command.OperationID] = active
-	d.activeMu.Unlock()
 	acceptedRevision := d.authorityRevision
 	// Capture the welcomed feature flags before returning to the connection loop
 	// so a transient stream drop during gateway remount cannot downgrade an

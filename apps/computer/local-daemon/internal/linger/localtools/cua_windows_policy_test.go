@@ -10,26 +10,31 @@ import (
 func TestWindowsInputRefusal(t *testing.T) {
 	chromium := func() bool { return true }
 	native := func() bool { return false }
+	foregroundGuidance := []string{
+		"Do not retry with foreground delivery",
+		"omit delivery_mode, try another control or route, or tell the user what you could not do",
+	}
 	cases := []struct {
-		name      string
-		tool      string
-		arguments map[string]any
-		chromium  func() bool
-		refused   bool
+		name         string
+		tool         string
+		arguments    map[string]any
+		chromium     func() bool
+		refused      bool
+		wantContains []string
 	}{
-		{"background scroll", "scroll", map[string]any{"pid": 1.0, "direction": "down"}, chromium, false},
-		{"explicit background", "click", map[string]any{"pid": 1.0, "delivery_mode": "background"}, chromium, false},
-		{"foreground scroll", "scroll", map[string]any{"pid": 1.0, "delivery_mode": "foreground"}, native, true},
-		{"foreground keys", "type_text", map[string]any{"pid": 1.0, "delivery_mode": "foreground"}, native, true},
-		{"desktop point", "scroll", map[string]any{"x": 1.0, "y": 1.0, "scope": "desktop"}, native, true},
-		{"window scope", "click", map[string]any{"pid": 1.0, "scope": "window"}, native, false},
-		{"chromium double click", "double_click", map[string]any{"pid": 1.0}, chromium, true},
-		{"chromium right click", "right_click", map[string]any{"pid": 1.0}, chromium, true},
-		{"native right click", "right_click", map[string]any{"pid": 1.0}, native, false},
-		{"chromium click", "click", map[string]any{"pid": 1.0}, chromium, false},
-		{"bring to front", "bring_to_front", map[string]any{"pid": 1.0}, native, true},
-		{"move cursor", "move_cursor", map[string]any{"x": 1.0, "y": 1.0}, native, true},
-		{"read", "get_window_state", map[string]any{"pid": 1.0, "scope": "desktop"}, native, false},
+		{"background scroll", "scroll", map[string]any{"pid": 1.0, "direction": "down"}, chromium, false, nil},
+		{"explicit background", "click", map[string]any{"pid": 1.0, "delivery_mode": "background"}, chromium, false, nil},
+		{"foreground scroll", "scroll", map[string]any{"pid": 1.0, "delivery_mode": "foreground"}, native, true, foregroundGuidance},
+		{"foreground keys", "type_text", map[string]any{"pid": 1.0, "delivery_mode": "foreground"}, native, true, foregroundGuidance},
+		{"desktop point", "scroll", map[string]any{"x": 1.0, "y": 1.0, "scope": "desktop"}, native, true, []string{"Omit scope and target a window with pid and window_id from list_windows, or tell the user what you could not do"}},
+		{"window scope", "click", map[string]any{"pid": 1.0, "scope": "window"}, native, false, nil},
+		{"chromium double click", "double_click", map[string]any{"pid": 1.0}, chromium, true, nil},
+		{"chromium right click", "right_click", map[string]any{"pid": 1.0}, chromium, true, nil},
+		{"native right click", "right_click", map[string]any{"pid": 1.0}, native, false, nil},
+		{"chromium click", "click", map[string]any{"pid": 1.0}, chromium, false, nil},
+		{"bring to front", "bring_to_front", map[string]any{"pid": 1.0}, native, true, nil},
+		{"move cursor", "move_cursor", map[string]any{"x": 1.0, "y": 1.0}, native, true, nil},
+		{"read", "get_window_state", map[string]any{"pid": 1.0, "scope": "desktop"}, native, false, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,6 +44,11 @@ func TestWindowsInputRefusal(t *testing.T) {
 			}
 			if err != nil && (!errors.Is(err, errNotSent) || !strings.HasPrefix(err.Error(), "COMPUTER_INPUT_NOT_SENT")) {
 				t.Fatalf("refusal is not a not-sent error: %v", err)
+			}
+			for _, phrase := range tc.wantContains {
+				if !strings.Contains(err.Error(), phrase) {
+					t.Fatalf("refusal %q missing guidance %q", err.Error(), phrase)
+				}
 			}
 		})
 	}

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="mac_lid" x1="24" y1="8" x2="24" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E4E7EC"/>
+      <stop offset="1" stop-color="#C3C8D1"/>
+    </linearGradient>
+    <linearGradient id="mac_screen" x1="10" y1="11" x2="38" y2="31" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#283C6F"/>
+      <stop offset="0.52" stop-color="#697ED2"/>
+      <stop offset="1" stop-color="#E8B486"/>
+    </linearGradient>
+    <linearGradient id="mac_gloss" x1="10" y1="11" x2="26" y2="27" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="mac_base" x1="3" y1="35" x2="45" y2="35" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C8CDD6"/>
+      <stop offset="0.18" stop-color="#ECEEF2"/>
+      <stop offset="0.5" stop-color="#F5F6F8"/>
+      <stop offset="0.82" stop-color="#ECEEF2"/>
+      <stop offset="1" stop-color="#C4C9D2"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="24" cy="39.2" rx="20.5" ry="1.8" fill="#1A191A" fill-opacity="0.09"/>
+  <rect x="6.5" y="8.5" width="35" height="25" rx="3.2" fill="url(#mac_lid)" stroke="#B4BAC4" stroke-width="0.6"/>
+  <rect x="8" y="10" width="32" height="22" rx="1.8" fill="#141519"/>
+  <rect x="9.2" y="11.2" width="29.6" height="19.6" rx="1.1" fill="url(#mac_screen)"/>
+  <path d="M9.2 12.3C9.2 11.7 9.7 11.2 10.3 11.2H27.5L15.5 30.8H10.3C9.7 30.8 9.2 30.3 9.2 29.7V12.3Z" fill="url(#mac_gloss)"/>
+  <path d="M21 11.2H27V11.9C27 12.35 26.65 12.7 26.2 12.7H21.8C21.35 12.7 21 12.35 21 11.9V11.2Z" fill="#141519"/>
+  <rect x="17" y="28.4" width="14" height="1.3" rx="0.65" fill="#FFFFFF" fill-opacity="0.48"/>
+  <path d="M3 33.8C3 33.47 3.27 33.2 3.6 33.2H44.4C44.73 33.2 45 33.47 45 33.8V34.6C45 36.15 43.75 37.4 42.2 37.4H5.8C4.25 37.4 3 36.15 3 34.6V33.8Z" fill="url(#mac_base)"/>
+  <path d="M19.5 33.2H28.5V33.9C28.5 34.34 28.14 34.7 27.7 34.7H20.3C19.86 34.7 19.5 34.34 19.5 33.9V33.2Z" fill="#B5BBC5"/>
+  <path d="M5.8 37.4H42.2C43.55 37.4 44.68 36.45 44.94 35.18C44.52 36.05 43.62 36.65 42.58 36.65H5.42C4.38 36.65 3.48 36.05 3.06 35.18C3.32 36.45 4.45 37.4 5.8 37.4Z" fill="#9FA6B2"/>
+</svg>

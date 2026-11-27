@@ -717,7 +717,7 @@ describe("setup page Quick Install recommendation", () => {
       welcome({ state: "unavailable" }),
       "welcome",
     );
-    expect($("plan-summary").textContent).toBe("Best AI runtime");
+    expect($("plan-summary").textContent).toBe("Best Harness");
     expect($("plan-why").textContent).toBe(
       "Couldn't check this computer for a local model.",
     );
@@ -852,44 +852,58 @@ describe("setup page Quick Install recommendation", () => {
     localServer: { ...base.localServer, ...localServer },
   });
 
-  it("builds the request address from base URL, path and endpoint, with tooltip, refresh, Test and secret scrubbing", async () => {
+  const selectProvider = (selectId: string, value: string) => {
+    const select = $(selectId) as HTMLSelectElement;
+    select.value = value;
+    select.dispatchEvent(new Event("change"));
+  };
+
+  it("defaults API Key to OpenRouter with collapsed Advanced options, supports presets, refresh, Test and secret scrubbing", async () => {
     const { run } = await openPage(welcome(small), "welcome");
     $("local-customize").click();
     const byokSource = document.querySelector<HTMLButtonElement>(
       '[data-plan="source"] [data-value="byok"]',
     )!;
     expect(byokSource.getAttribute("aria-describedby")).toBe("byok-tip-text");
-    expect($("byok-tip-text").textContent).toContain("Bring Your Own Key");
+    expect($("byok-tip-text").textContent).toContain("OpenRouter");
     byokSource.click();
     expect($("byok-row").hidden).toBe(false);
     expect($("local-row").hidden).toBe(true);
     expect($("subscription-row").hidden).toBe(true);
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    // Grey defaults: /v1, and the runtime's own endpoint.
+    // OpenRouter preset is selected by default and Advanced options start folded.
+    const provider = $("byok-provider") as HTMLSelectElement;
+    const advanced = $("byok-advanced") as HTMLDetailsElement;
     const path = $("byok-path") as HTMLInputElement;
     const endpoint = $("byok-endpoint") as HTMLInputElement;
+    expect(provider.value).toBe("openrouter");
+    expect(advanced.open).toBe(false);
+    expect(($("byok-url") as HTMLInputElement).value).toBe(
+      "https://openrouter.ai/api",
+    );
     expect(path.value).toBe("/v1");
-    expect(endpoint.value).toBe("/messages");
-    expect(path.parentElement!.dataset.default).toBe("true");
-    expect(endpoint.parentElement!.dataset.default).toBe("true");
-    expect($("byok-status").textContent).toBe(
-      "Grey values are defaults. Path and endpoint are optional.",
+    expect(endpoint.value).toBe("/chat/completions");
+    expect($("byok-status").hidden).toBe(true);
+    expect($("byok-adv-url").textContent).toBe(
+      "Sends OpenAI Chat Completions requests to https://openrouter.ai/api/v1/chat/completions",
     );
 
+    // Selecting Zhipu GLM fills its base URL, path, and endpoint in one step.
+    selectProvider("byok-provider", "zhipu");
+    expect(($("byok-url") as HTMLInputElement).value).toBe(
+      "https://open.bigmodel.cn",
+    );
+    expect(path.value).toBe("/api/paas/v4");
+    expect(endpoint.value).toBe("/chat/completions");
+    expect($("byok-adv-url").textContent).toBe(
+      "Sends OpenAI Chat Completions requests to https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    );
+    // Power users can still override the AI engine inside Advanced options.
     document
       .querySelector<HTMLButtonElement>(
         '[data-byok="runtime"] [data-value="codex"]',
       )!
       .click();
-    expect(endpoint.value).toBe("/responses");
-    type("byok-url", "https://open.bigmodel.cn/");
-    pick("byok-path", "/api/paas/v4");
-    expect(path.value).toBe("/api/paas/v4");
-    expect(path.parentElement!.dataset.default).toBe("false");
-    pick("byok-endpoint", "/chat/completions");
-    expect($("byok-status").textContent).toBe(
-      "Sends OpenAI Chat Completions requests to https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    );
     type("byok-key", "sk-top-secret");
 
     // Refresh lists the endpoint's models and opens them.
@@ -928,7 +942,7 @@ describe("setup page Quick Install recommendation", () => {
       .click();
     expect(($("byok-model") as HTMLInputElement).value).toBe("glm-4.6");
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
-    expect($("plan-summary").textContent).toBe("BYOK · Codex · glm-4.6");
+    expect($("plan-summary").textContent).toBe("API Key · Zhipu GLM · glm-4.6");
 
     // Test sends one request and floats the outcome under the button.
     run.mockImplementationOnce(async () =>
@@ -960,7 +974,7 @@ describe("setup page Quick Install recommendation", () => {
     });
   });
 
-  it("sends a pasted full address as is, and keeps a failed test until the fields change", async () => {
+  it("reveals Base URL for custom endpoints, sends a pasted full address as is, and keeps a failed test until the fields change", async () => {
     const { run } = await openPage(welcome(small), "welcome");
     $("local-customize").click();
     document
@@ -968,11 +982,18 @@ describe("setup page Quick Install recommendation", () => {
         '[data-plan="source"] [data-value="byok"]',
       )!
       .click();
+    selectProvider("byok-provider", "custom");
+    document
+      .querySelector<HTMLButtonElement>(
+        '[data-byok="runtime"] [data-value="claude"]',
+      )!
+      .click();
     type("byok-url", "https://llm.example.com/gateway");
     pick("byok-path", "");
     pick("byok-endpoint", "");
     expect(($("byok-path") as HTMLInputElement).value).toBe("");
-    // No known ending: the Claude Code runtime's own format.
+    // No known ending: the Claude Code engine's own format.
+    expect($("byok-status").hidden).toBe(false);
     expect($("byok-status").textContent).toBe(
       "Sends Anthropic Messages (the Claude Code format) requests to https://llm.example.com/gateway",
     );
@@ -1086,6 +1107,7 @@ describe("setup page Quick Install recommendation", () => {
         download: { completed: 8 * 1024 ** 2, total: 64 * 1024 ** 2 },
       }),
     );
+    selectProvider("byok-provider", "custom");
     document
       .querySelector<HTMLButtonElement>(
         '[data-byok="runtime"] [data-value="codex"]',
@@ -1817,6 +1839,53 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     });
     expect($("local-driver-status").textContent).toContain(
       "NVIDIA driver 621.24 installed. Restart Windows to finish",
+    );
+  });
+
+  it("shows subscription Harnesses with detected status and lets the user pick Codex", async () => {
+    const detectedCheck: SetupLocalModelsCheck = {
+      ...small,
+      recommendation: "claude",
+      runtimes: [
+        {
+          runtime: "claude",
+          installed: true,
+          authenticated: true,
+          ready: true,
+        },
+        {
+          runtime: "codex",
+          installed: false,
+          authenticated: false,
+          ready: false,
+        },
+        { runtime: "pi", installed: true, authenticated: true, ready: true },
+      ],
+    };
+    const { run } = await openPage(welcome(detectedCheck), "welcome");
+    expect($("local-install-label").textContent).toBe("Quick Install");
+    $("local-customize").click();
+    expect($("local-install-label").textContent).toBe("Install");
+
+    const harness = (value: string) =>
+      document.querySelector<HTMLButtonElement>(
+        `[data-plan="runtime"] [data-value="${value}"]`,
+      )!;
+    expect(harness("claude").dataset.detected).toBe("true");
+    expect(harness("claude").dataset.recommended).toBe("true");
+    expect(harness("codex").dataset.detected).toBe("false");
+    expect(harness("codex").dataset.recommended).toBe("false");
+    expect($("runtime-sub").textContent).toBe(
+      "Detected: Claude Code · Recommended: Claude Code.",
+    );
+
+    harness("codex").click();
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.start",
+        runtime: "codex",
+      }),
     );
   });
 });
