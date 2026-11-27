@@ -22,13 +22,24 @@ export function sessionParts<T extends SessionText>(
         text = "";
       }
       // A single overlong line is cut so no piece exceeds the limit.
-      for (let start = 0; start < line.length; start += MAX_PART_CHARS) {
-        const slice = line.slice(start, start + MAX_PART_CHARS);
+      for (let start = 0; start < line.length; ) {
+        let end = Math.min(start + MAX_PART_CHARS, line.length);
+        if (
+          end < line.length &&
+          line.charCodeAt(end - 1) >= 0xd800 &&
+          line.charCodeAt(end - 1) <= 0xdbff &&
+          line.charCodeAt(end) >= 0xdc00 &&
+          line.charCodeAt(end) <= 0xdfff
+        ) {
+          end -= 1;
+        }
+        const slice = line.slice(start, end);
         if (text.length + slice.length > MAX_PART_CHARS) {
           split.push({ path: session.path, content: text });
           text = "";
         }
         text += slice;
+        start = end;
       }
     }
     if (text) split.push({ path: session.path, content: text });
