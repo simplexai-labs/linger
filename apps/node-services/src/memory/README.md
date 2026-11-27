@@ -17,6 +17,13 @@ and then the repair for unquoted colon-bearing values. If neither parses, the
 reader uses the body heading and summary with empty metadata. A damaged report
 therefore remains readable without blocking other reports in the Memory browser;
 the reader does not rewrite the file. Publication validation remains strict.
+The browser keeps that metadata in a per-process catalog: while
+`memory.revision` is unchanged it answers from the catalog and re-reads only
+pages whose size or modification time changed, so a page edited outside the
+service can lag by up to five seconds. The published entry IDs and sort order
+are unchanged. The cursor is now an opaque keyset (the last page's
+`updated_at` and path), stable across inserts; a numeric offset cursor from an
+older server is still accepted.
 
 ## Search
 

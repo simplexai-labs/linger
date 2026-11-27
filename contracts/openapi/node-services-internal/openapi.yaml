@@ -653,7 +653,7 @@ paths:
           required: false
           schema:
             type: string
-            pattern: ^[0-9]{1,9}$
+            pattern: ^[A-Za-z0-9_-]{1,1024}$
         - name: limit
           in: query
           required: false
@@ -1739,8 +1739,7 @@ components:
           items:
             $ref: "#/components/schemas/MemoryEntry"
         next_cursor:
-          type: string
-          pattern: ^[0-9]{1,9}$
+          $ref: ../components/common.yaml#/components/schemas/Cursor
     PocketNoteTrackingRefreshRequest:
       type: object
       additionalProperties: false

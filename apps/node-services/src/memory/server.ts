@@ -714,7 +714,7 @@ function parseMemoryEntryListRequest(search: URLSearchParams): {
     !isId(tenantId) ||
     !isId(ownerActorId) ||
     (kind !== undefined && !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/u.test(kind)) ||
-    (cursor !== undefined && !/^[0-9]{1,9}$/u.test(cursor))
+    (cursor !== undefined && !/^[A-Za-z0-9_-]{1,1024}$/u.test(cursor))
   ) {
     throw new TypeError("Memory entry list request is invalid");
   }

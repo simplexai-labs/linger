@@ -836,7 +836,7 @@ export interface components {
     };
     MemoryEntryPage: {
       items: components["schemas"]["MemoryEntry"][];
-      next_cursor?: string;
+      next_cursor?: components["schemas"]["Cursor"];
     };
     PocketNoteTrackingRefreshRequest: {
       tenant_id: components["schemas"]["AgentId"];
@@ -1767,6 +1767,8 @@ export interface components {
       /** @enum {string} */
       status: "cancel_requested" | "canceled" | "already_terminal";
     };
+    /** @description Opaque pagination cursor. Clients must not parse or modify it. */
+    Cursor: string;
     /** @description Opaque, case-sensitive TeamHub identifier. */
     DocumentInternalId: string;
     SchemaVersion: number;
