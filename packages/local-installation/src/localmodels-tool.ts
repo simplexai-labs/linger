@@ -1576,6 +1576,10 @@ async function runLocalmodelsCommand(
 // cancelling loads, until none is loading.
 const CANCEL_POLL_MS = 500;
 const CANCEL_WAIT_MS = 10_000;
+// Each stop command gets the stack and plan commands' budget: a busy GPU or
+// a loaded machine pushes a single command past a probe's budget, and the
+// caller's signal still bounds the whole stop.
+const STOP_COMMAND_TIMEOUT_MS = 120_000;
 /**
  * Stops what the pinned kit runs for a home, through that kit: first every
  * load the model library is running (`library cancel`), reading the library
@@ -1644,7 +1648,7 @@ export async function stopLocalmodels(
     const startedAt = Date.now();
     const result = await run(home, args, {
       signal: options.signal,
-      timeoutMs: 30_000,
+      timeoutMs: STOP_COMMAND_TIMEOUT_MS,
     }).catch((error: unknown) => {
       options.signal.throwIfAborted();
       return {

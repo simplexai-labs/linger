@@ -682,6 +682,20 @@ test("unloads the library's models, then stops the controller and the stack thro
     [f.home, ["stack", "down", "--json"]],
   ]);
 });
+test("gives every stop command the stack commands' budget, since a loaded machine pushes a single command past a probe's", async () => {
+  const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
+    args[1] === "status"
+      ? libraryStatus([])
+      : { code: 0, stdout: "{}", stderr: "" },
+  );
+  await stopLocalmodels(
+    "/home",
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { run, installed: async () => true },
+  );
+  expect(run.mock.calls.length).toBeGreaterThan(0);
+  for (const call of run.mock.calls) expect(call[2]?.timeoutMs).toBe(120_000);
+});
 // A library whose reads follow `reads` in turn, repeating the last.
 function libraryReads(
   reads: { id: string; state: string }[][],
