@@ -8,12 +8,11 @@ export const voiceKeyMessages = defineMessages("voiceKey", {
   sonioxPurpose:
     "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
   xaiPurpose: "Turns Voice Mode into a live conversation with Grok.",
-  stepOpen: "Open the {provider} Console and sign in or create an account.",
-  stepCreate: "Create an API key.",
-  stepPaste: "Copy the key, paste it below, and select Save key.",
   apiKey: "{provider} API key",
   turningOn: "Turning on voice…",
   savedButOff: "The key is saved, but voice could not be turned on. Try again.",
+  keyFromEnvironmentNotice:
+    "This server sets the {provider} key with <code>{variable}</code>, so it cannot be changed here.",
   cannotSaveHere:
     "This server cannot save a {provider} key here. Whoever runs it must set <code>{variable}</code>, or set <code>{storageVariable}</code> so keys can be saved here.",
   invalidKey: "Enter a valid API key.",

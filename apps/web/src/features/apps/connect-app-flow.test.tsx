@@ -37,7 +37,7 @@ function ConnectFlowHarness({ app }: { app: TeamHubExternalApp }) {
 describe("ConnectAppStatus", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("shows the concise Composio key guide without subtitle or input hint", async () => {
+  it("shows the minimalist Option A Composio key form with inline link, helper, toggle, and Cancel", async () => {
     const { app, runtime } = await setupRuntime({
       canSave: true,
       configured: false,
@@ -49,14 +49,11 @@ describe("ConnectAppStatus", () => {
     fireEvent.click(startButton);
 
     const dialog = await screen.findByRole("dialog", { name: "Connect Gmail" });
-    expect(dialog).toHaveClass("app-dialog-standard");
+    expect(dialog).toHaveClass("app-dialog-standard", "app-key-dialog");
     expect(dialog.querySelector(".app-dialog-description")).toBeNull();
     expect(dialog.querySelector("ol")).toBeNull();
     expect(dialog.querySelector("strong")).toBeNull();
-    expect(dialog).toHaveTextContent("Get your API key");
-    expect(dialog).toHaveTextContent(
-      "Don't forget to select Read All and Write All.",
-    );
+    expect(dialog).not.toHaveTextContent("Get your API key");
     expect(
       within(dialog).getByRole("link", { name: "Get a key" }),
     ).toHaveAttribute(
@@ -64,10 +61,88 @@ describe("ConnectAppStatus", () => {
       "https://dashboard.composio.dev/~/project/settings/api-keys",
     );
     const input = within(dialog).getByLabelText("Composio API key");
-    expect(input).not.toHaveAttribute("aria-describedby");
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("type", "password");
+    expect(input).toHaveAttribute("placeholder", "Paste your API key");
+    expect(input).toHaveAccessibleDescription(
+      "Select Read All and Write All when creating your key.",
+    );
+
+    const toggle = within(dialog).getByRole("button", { name: "Show API key" });
+    fireEvent.click(toggle);
+    expect(input).toHaveAttribute("type", "text");
+    expect(
+      within(dialog).getByRole("button", { name: "Hide API key" }),
+    ).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Hide API key" }),
+    );
+    expect(input).toHaveAttribute("type", "password");
+
     expect(
       within(dialog).getByRole("button", { name: "Save key" }),
     ).toBeDisabled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("focuses the key input instead of the Get a key link when showModal opens the dialog", async () => {
+    const originalShowModal = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function showModal(
+      this: HTMLDialogElement,
+    ) {
+      this.open = true;
+      this.querySelector<HTMLElement>("button, input")?.focus();
+    };
+    try {
+      const { app, runtime } = await setupRuntime({
+        canSave: true,
+        configured: false,
+      });
+      mount(runtime, app);
+
+      const startButton = screen.getByRole("button", { name: "Start connect" });
+      await waitFor(() => expect(startButton).toBeEnabled());
+      fireEvent.click(startButton);
+
+      const dialog = await screen.findByRole("dialog", {
+        name: "Connect Gmail",
+      });
+      const input = within(dialog).getByLabelText("Composio API key");
+      await waitFor(() => expect(input).toHaveFocus());
+    } finally {
+      HTMLDialogElement.prototype.showModal = originalShowModal;
+    }
+  });
+
+  it("clears a previous save error as soon as the user edits the key", async () => {
+    const { app, runtime } = await setupRuntime({
+      canSave: true,
+      configured: false,
+    });
+    vi.spyOn(runtime.client, "saveExternalProviderKey").mockRejectedValueOnce(
+      new Error("Invalid Composio key."),
+    );
+    mount(runtime, app);
+
+    const startButton = screen.getByRole("button", { name: "Start connect" });
+    await waitFor(() => expect(startButton).toBeEnabled());
+    fireEvent.click(startButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "Connect Gmail" });
+    const input = within(dialog).getByLabelText("Composio API key");
+    fireEvent.change(input, { target: { value: "ck_bad" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save key" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Invalid Composio key.",
+    );
+    expect(input).toHaveAttribute("aria-invalid", "true");
+
+    fireEvent.change(input, { target: { value: "ck_bad2" } });
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(input).not.toHaveAttribute("aria-invalid");
   });
 
   it("renders a compact single-row confirmation dialog after saving the key and connects on click", async () => {
@@ -207,12 +282,11 @@ describe("ConnectAppStatus", () => {
         expectedDescription,
       );
       if (canSave) {
-        expect(dialog).toHaveTextContent(
-          "Don't forget to select Read All and Write All.",
-        );
         expect(
           within(dialog).getByLabelText("Composio API key"),
-        ).not.toHaveAttribute("aria-describedby");
+        ).toHaveAccessibleDescription(
+          "Select Read All and Write All when creating your key.",
+        );
       } else {
         expect(dialog).toHaveTextContent("COMPOSIO_API_KEY");
         expect(

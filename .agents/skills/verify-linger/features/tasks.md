@@ -123,7 +123,7 @@ Neither proves a real supplier account was used.
 
 **Setup:** For a real claim, identify the authorized supplier account, Agent grant and allowed target/action.
 Use the current provider and tool prerequisites from the [TeamHub CLI README](../../../../apps/teamhub-cli/README.md).
-The Connectors page (`/t/{tenantId}/apps`, nav label `Connectors`) renders the 16 grouped managed apps from `apps/web/src/features/apps/app-groups.ts` (backed by the 18-app catalog in `apps/teamhub/internal/externalsource/catalog.go`, omitting `googledrive` and `facebook` unless already connected), filtered by category tabs and a `Connected only` toggle.
+The Connectors page (`/t/{tenantId}/apps`, nav label `Connectors`) renders the 16 grouped managed apps from `apps/web/src/features/apps/app-groups.ts` (backed by the 18-app catalog in `apps/teamhub/internal/externalsource/catalog.go`, omitting `googledrive` and `facebook` unless already connected), filtered by top-level tabs (`All`, `Apps` with category sub-filters, and `Web search`) plus a `Connected only` toggle.
 It has no search box, provider toolkit sync or paginated catalog; GitLab and HubSpot are not offered.
 Connecting needs a Composio API key from `COMPOSIO_API_KEY` or saved in the Connectors setup modal or `Settings → Security → API keys`.
 

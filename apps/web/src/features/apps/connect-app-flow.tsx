@@ -20,7 +20,6 @@ import {
 } from "./feishu-connect-guide";
 import { openOAuthUrl } from "./oauth-popup";
 import { ComposioKeyForm } from "./provider-key-form";
-import { ComposioKeyGuide } from "./provider-key-guide";
 import {
   isComposioKeyRejected,
   useCreateExternalConnection,
@@ -204,12 +203,14 @@ function ConnectAppSetupDialog({
         </span>
       }
     >
-      <div className="space-y-4 px-5 py-5 text-sm text-app-body">
+      <div
+        className={cn(
+          "px-5 pt-2 text-sm text-app-body",
+          flow.canSaveKey ? "pb-4" : "pb-5",
+        )}
+      >
         {flow.canSaveKey ? (
-          <>
-            <ComposioKeyGuide />
-            <ComposioKeyForm onSaved={flow.keySaved} />
-          </>
+          <ComposioKeyForm onCancel={flow.closeSetup} onSaved={flow.keySaved} />
         ) : flow.keyRejected ? (
           <p className="text-app-muted">
             <RichMessage message={m.updateServerKey} tags={CODE_TAGS} />

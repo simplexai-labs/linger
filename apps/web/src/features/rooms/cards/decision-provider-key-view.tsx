@@ -13,11 +13,11 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { ConnectorsNotConfiguredMessage } from "@/features/apps/connect-app-flow";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
 import { ComposioKeyForm } from "@/features/apps/provider-key-form";
-import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
 import { useT } from "@/i18n/use-translation";
+import { cn } from "@/lib/cn";
 
 import { decisionCardHeading } from "./card-prompts";
 import { CardActions, CardError, CardRow } from "./approval-card-parts";
@@ -77,6 +77,7 @@ export function ProviderKeyDecision({
   }
 
   const result = card.status === "pending" ? null : keyResult(card);
+  const canSave = catalog.data?.provider_key.can_save !== false;
   return (
     <>
       <CardBox
@@ -123,14 +124,19 @@ export function ProviderKeyDecision({
           size="md"
           title={t(cardsMessages.addComposioKeyTitle)}
         >
-          <div className="space-y-4 px-5 py-5 text-sm text-app-body">
-            {catalog.data?.provider_key.can_save === false ? (
-              <ConnectorsNotConfiguredMessage />
+          <div
+            className={cn(
+              "px-5 pt-2 text-sm text-app-body",
+              canSave ? "pb-4" : "pb-5",
+            )}
+          >
+            {canSave ? (
+              <ComposioKeyForm
+                onCancel={() => setOpen(false)}
+                onSaved={() => setOpen(false)}
+              />
             ) : (
-              <>
-                <ComposioKeyGuide />
-                <ComposioKeyForm onSaved={() => setOpen(false)} />
-              </>
+              <ConnectorsNotConfiguredMessage />
             )}
           </div>
         </ModalDialog>

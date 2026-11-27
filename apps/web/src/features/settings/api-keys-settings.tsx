@@ -9,7 +9,6 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { AppLogoTile } from "@/features/apps/app-logo";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
 import { ComposioKeyForm } from "@/features/apps/provider-key-form";
-import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
 import { voiceKeyMessages } from "@/features/rooms/voice-control/voice-key.messages";
 import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
@@ -103,9 +102,9 @@ export function ApiKeysSettings() {
             </span>
           }
         >
-          <div className="space-y-4 px-5 py-5 text-sm text-app-body">
-            <ComposioKeyGuide />
+          <div className="px-5 pt-2 pb-4 text-sm text-app-body">
             <ComposioKeyForm
+              onCancel={() => setDialogOpen(false)}
               onSaved={() => {
                 setSavedProvider("Composio");
                 setDialogOpen(false);

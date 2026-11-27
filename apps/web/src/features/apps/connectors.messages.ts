@@ -12,7 +12,9 @@ export const connectorMessages = defineMessages("connectors", {
   loadingConnectors: "Loading connectors...",
   connectorsUnavailable: "Connectors are unavailable.",
   filterAll: "All",
+  filterApps: "Apps",
   connectorCategories: "Connector categories",
+  appCategories: "App categories",
   connectedOnly: "Connected only",
   applicationConnections: "Application connections",
   noConnectedApps: "No connected apps yet.",
@@ -127,11 +129,15 @@ export const connectorMessages = defineMessages("connectors", {
   notConfigured:
     "Connecting apps needs a Composio API key. Set <code>COMPOSIO_API_KEY</code> on the server.",
 
-  // API key guide and form. Read All and Write All are labels in Composio.
-  getYourApiKey: "Get your API key",
+  // API key form and status. Read All and Write All are labels in Composio.
   getAKey: "Get a key",
-  composioKeyReminder: "Don't forget to select Read All and Write All.",
+  apiKeyPlaceholder: "Paste your API key",
+  showApiKey: "Show API key",
+  hideApiKey: "Hide API key",
+  composioKeyReminder:
+    "Select <perm>Read All</perm> and <perm>Write All</perm> when creating your key.",
   composioApiKey: "Composio API key",
+  keyReplaceHint: "A key is active. Save a new key to replace it.",
   checkingKey: "Checking key...",
   saveKey: "Save key",
 

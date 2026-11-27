@@ -249,7 +249,7 @@ describe("Web search connectors", () => {
     renderPage(runtime);
 
     await screen.findByRole("region", { name: "Web search" });
-    fireEvent.click(screen.getByRole("button", { name: "Connected only" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Connected only" }));
     expect(
       cardNames(
         screen.getByRole("region", { name: "Application connections" }),

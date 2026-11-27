@@ -25,6 +25,7 @@ import { useT } from "@/i18n/use-translation";
 import { AppLogo } from "./app-logo";
 import {
   ANOTHER_ME_ONLY_APPS,
+  APPS_FILTER,
   appSummary,
   groupCatalogApps,
   WEB_SEARCH_FILTER,
@@ -61,8 +62,10 @@ export function ConnectedAppsPage() {
   const apps = useQuery(externalAppsQueryOptions(client));
   const connections = useQuery(externalConnectionsQueryOptions(client));
   const webSearch = useQuery(webSearchBackendsQueryOptions(client));
-  // "all" shows every group; otherwise one group's id.
+  // "all" shows every section; otherwise one top-level tab id.
   const [filter, setFilter] = useState("all");
+  // "all" shows every app group under Apps; otherwise one group's id.
+  const [appGroup, setAppGroup] = useState("all");
   const [connectedOnly, setConnectedOnly] = useState(false);
   // TeamHub lists only Connections that are not revoked.
   const visibleConnections = connections.data?.connections ?? [];
@@ -86,23 +89,36 @@ export function ConnectedAppsPage() {
   );
   const filters = [
     { id: "all", label: t(m.filterAll) },
-    ...groups.map(({ group }) => ({ id: group.id, label: t(group.title) })),
+    { id: APPS_FILTER.id, label: t(APPS_FILTER.label) },
     { id: WEB_SEARCH_FILTER.id, label: t(WEB_SEARCH_FILTER.label) },
   ];
-  const groupApps = groups.find((entry) => entry.group.id === filter)?.apps;
+  const effectiveAppGroup = groups.some((entry) => entry.group.id === appGroup)
+    ? appGroup
+    : "all";
+  const appsFilter = filter === APPS_FILTER.id;
+  const searchFilter = filter === WEB_SEARCH_FILTER.id;
+  const selectedGroupApps =
+    appsFilter && effectiveAppGroup !== "all"
+      ? groups.find((entry) => entry.group.id === effectiveAppGroup)?.apps
+      : undefined;
   // Connected only narrows whichever view is open; with All it is one grid.
-  const filteredApps = connectedOnly
-    ? (groupApps ?? connectedApps).filter((app) => connectedApps.includes(app))
-    : groupApps;
+  const connectedAppSet = new Set(connectedApps);
+  const filteredApps = selectedGroupApps
+    ? connectedOnly
+      ? selectedGroupApps.filter((app) => connectedAppSet.has(app))
+      : selectedGroupApps
+    : connectedOnly
+      ? connectedApps
+      : undefined;
   const allSearchBackends = webSearch.data?.backends ?? [];
   const searchBackends = connectedOnly
     ? connectedWebSearchBackends(allSearchBackends)
     : shownWebSearchBackends(allSearchBackends);
-  const searchFilter = filter === WEB_SEARCH_FILTER.id;
   // DuckDuckGo needs no key, so Connected only always keeps the section.
   const showSearch = filter === "all" || searchFilter;
   const showApps =
-    !searchFilter && (!showSearch || !filteredApps || filteredApps.length > 0);
+    !searchFilter &&
+    (appsFilter || !showSearch || !filteredApps || filteredApps.length > 0);
 
   function renderApp(app: TeamHubExternalApp) {
     return (
@@ -178,19 +194,63 @@ export function ConnectedAppsPage() {
                 className="min-w-0 flex-1"
                 items={filters}
                 label={t(m.connectorCategories)}
-                onChange={setFilter}
+                onChange={(next) => {
+                  setFilter(next);
+                  if (next !== APPS_FILTER.id) setAppGroup("all");
+                }}
                 value={filter}
               />
-              <Button
-                aria-pressed={connectedOnly}
-                className="shrink-0"
-                onClick={() => setConnectedOnly((value) => !value)}
-                size="large"
-                tone={connectedOnly ? "primary" : "secondary"}
+              <label
+                className={cn(
+                  "inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-2 text-sm transition-colors duration-150 motion-reduce:transition-none",
+                  connectedOnly
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
               >
-                {t(m.connectedOnly)}
-              </Button>
+                <span>{t(m.connectedOnly)}</span>
+                <input
+                  checked={connectedOnly}
+                  className="agent-connector-switch"
+                  onChange={(event) => setConnectedOnly(event.target.checked)}
+                  role="switch"
+                  type="checkbox"
+                />
+              </label>
             </div>
+            {appsFilter && groups.length > 0 ? (
+              <div
+                aria-label={t(m.appCategories)}
+                className="workspace-file-filters"
+                role="group"
+              >
+                {[
+                  { id: "all", label: t(m.filterAll) },
+                  ...groups.map(({ group }) => ({
+                    id: group.id,
+                    label: t(group.title),
+                  })),
+                ].map((item) => {
+                  const active = item.id === effectiveAppGroup;
+                  return (
+                    <button
+                      aria-pressed={active}
+                      className={cn(
+                        "inline-flex h-7 shrink-0 items-center rounded-full px-3 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+                        active
+                          ? "bg-muted text-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      )}
+                      key={item.id}
+                      onClick={() => setAppGroup(item.id)}
+                      type="button"
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             {!showApps ? null : filteredApps ? (
               filteredApps.length ? (
                 <section

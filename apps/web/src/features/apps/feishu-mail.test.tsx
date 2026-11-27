@@ -67,7 +67,7 @@ describe("Feishu Mail", () => {
     const { unmount } = renderPage(runtime);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Connected only" }),
+      await screen.findByRole("switch", { name: "Connected only" }),
     );
     const connected = screen.getByRole("region", {
       name: "Application connections",

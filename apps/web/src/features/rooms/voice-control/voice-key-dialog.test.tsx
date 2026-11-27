@@ -200,19 +200,120 @@ describe("VoiceKeyDialog", () => {
     runtime: ReturnType<typeof createTestTeamHubRuntime>,
     policy: TeamHubVoiceMediaPolicy,
     onReady = vi.fn(),
+    {
+      onClose = vi.fn(),
+      providers = ["soniox"] as readonly ("soniox" | "xai")[],
+    } = {},
   ) {
     renderWithRuntime(
       runtime,
       <VoiceKeyDialog
-        onClose={vi.fn()}
+        onClose={onClose}
         onReady={onReady}
         policy={policy}
-        providers={["soniox"]}
+        providers={providers}
         tenantId="tenant-northstar"
       />,
     );
-    return onReady;
+    return { onClose, onReady };
   }
+
+  it("renders the Option A form layout with inline link, helper, show/hide toggle, and Cancel", () => {
+    const runtime = createTestTeamHubRuntime();
+    const { onClose } = renderDialog(runtime, noKeys);
+
+    const dialog = screen.getByRole("dialog", { name: "Soniox key" });
+    expect(dialog).toHaveClass("app-key-dialog");
+    expect(dialog.querySelector(".app-dialog-description")).toBeNull();
+    expect(dialog.querySelector("ol")).toBeNull();
+    expect(dialog).not.toHaveTextContent("Get your API key");
+    expect(
+      within(dialog).getByRole("link", { name: "Get a key" }),
+    ).toHaveAttribute("href", "https://console.soniox.com/");
+
+    const input = within(dialog).getByLabelText("Soniox API key");
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("type", "password");
+    expect(input).toHaveAttribute("placeholder", "Paste your API key");
+    expect(input).toHaveAccessibleDescription(
+      "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
+    );
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Show API key" }),
+    );
+    expect(input).toHaveAttribute("type", "text");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Hide API key" }),
+    );
+    expect(input).toHaveAttribute("type", "password");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the replace hint when a single provider already has a stored key", () => {
+    const runtime = createTestTeamHubRuntime();
+    renderDialog(runtime, sonioxSaved);
+
+    const dialog = screen.getByRole("dialog", { name: "Soniox key" });
+    expect(dialog.querySelector(".app-dialog-description")).toHaveTextContent(
+      "A key is active. Save a new key to replace it.",
+    );
+  });
+
+  it("switches providers with the segmented control without duplicating the purpose copy", () => {
+    const runtime = createTestTeamHubRuntime();
+    renderDialog(runtime, noKeys, vi.fn(), {
+      providers: ["soniox", "xai"],
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Turn on voice" });
+    const group = within(dialog).getByRole("group", { name: "Voice provider" });
+    expect(
+      within(group).getByRole("button", { name: "Soniox" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(dialog).getAllByText(
+        "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
+      ),
+    ).toHaveLength(1);
+
+    fireEvent.click(within(group).getByRole("button", { name: "xAI" }));
+    expect(within(group).getByRole("button", { name: "xAI" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      within(dialog).getByRole("link", { name: "Get a key" }),
+    ).toHaveAttribute("href", "https://console.x.ai/");
+    expect(
+      within(dialog).getByLabelText("xAI API key"),
+    ).toHaveAccessibleDescription(
+      "Turns Voice Mode into a live conversation with Grok.",
+    );
+    expect(
+      within(dialog).getAllByText(
+        "Turns Voice Mode into a live conversation with Grok.",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("explains when the server sets a key from the environment", () => {
+    const runtime = createTestTeamHubRuntime();
+    renderDialog(runtime, {
+      ...noKeys,
+      soniox_key: { source: "environment", can_save: false },
+    });
+
+    const dialog = screen.getByRole("dialog", { name: "Soniox key" });
+    expect(dialog.querySelector(".app-dialog-description")).toBeNull();
+    expect(within(dialog).queryByLabelText("Soniox API key")).toBeNull();
+    expect(dialog).toHaveTextContent(
+      "This server sets the Soniox key with SONIOX_API_KEY, so it cannot be changed here.",
+    );
+    expect(within(dialog).getByText("SONIOX_API_KEY").tagName).toBe("CODE");
+  });
 
   it.each([
     [
@@ -246,7 +347,7 @@ describe("VoiceKeyDialog", () => {
       // The prose is irrelevant: only the code picks the message.
       teamHubErrorResponse(status, code, "unrelated server prose"),
     );
-    const onReady = renderDialog(runtime, noKeys);
+    const { onReady } = renderDialog(runtime, noKeys);
     fireEvent.change(screen.getByLabelText("Soniox API key"), {
       target: { value: "bad-key" },
     });
@@ -311,7 +412,7 @@ describe("VoiceKeyDialog", () => {
         source: "stored",
         can_save: true,
       }));
-    const onReady = renderDialog(runtime, noKeys);
+    const { onClose, onReady } = renderDialog(runtime, noKeys);
     fireEvent.change(screen.getByLabelText("Soniox API key"), {
       target: { value: "soniox-key" },
     });
@@ -319,7 +420,9 @@ describe("VoiceKeyDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The key is saved, but voice could not be turned on. Try again.",
     );
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
     expect(onReady).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
     expect(reads).toBe(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));

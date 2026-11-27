@@ -196,7 +196,6 @@ function WebSearchBackendDialog({
   const usage = usageLine(backend, translation);
   return (
     <ModalDialog
-      className="app-key-dialog"
       closeOnBackdrop
       onClose={onClose}
       size="md"
