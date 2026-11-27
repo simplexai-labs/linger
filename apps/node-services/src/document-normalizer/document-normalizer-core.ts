@@ -249,14 +249,14 @@ function parseDelimitedRows(text: string, delimiter: string): string[][] {
       field = "";
       continue;
     }
-    if (character === "\n") {
+    if (character === "\n" || character === "\r") {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
       row.push(field);
       if (row.some((value) => value.trim())) rows.push(row);
       row = [];
       field = "";
       continue;
     }
-    if (character === "\r") continue;
     field += character;
   }
   if (inQuotes) {
