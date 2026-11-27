@@ -9,6 +9,7 @@ import {
   isInProcessDocumentSource,
   normalizeDocumentContent,
 } from "../../src/document-normalizer/document-normalizer-core.js";
+import { pdfjsFactoryDirectoryUrl } from "../../src/document-normalizer/document-pdf-extract.js";
 import {
   DOC_MEDIA_TYPE,
   DocumentNormalizationError,
@@ -51,6 +52,18 @@ describe("document normalization", () => {
     );
 
     expect(markdown).toBe("PDF text layer\n");
+  });
+
+  it("normalizes Windows and POSIX pdfjs factory asset directories with a trailing slash", () => {
+    expect(
+      pdfjsFactoryDirectoryUrl("C:\\Users\\alice\\pdfjs-dist\\cmaps\\"),
+    ).toBe("C:/Users/alice/pdfjs-dist/cmaps/");
+    expect(pdfjsFactoryDirectoryUrl("C:\\Users\\alice\\pdfjs-dist\\wasm")).toBe(
+      "C:/Users/alice/pdfjs-dist/wasm/",
+    );
+    expect(
+      pdfjsFactoryDirectoryUrl("/opt/app/pdfjs-dist/standard_fonts/"),
+    ).toBe("/opt/app/pdfjs-dist/standard_fonts/");
   });
 
   it("preserves DOCX formatting and applies NFC", async () => {

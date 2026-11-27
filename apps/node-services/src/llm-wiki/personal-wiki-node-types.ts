@@ -411,7 +411,9 @@ function readPrompt(filename: string): string {
   const prompt = readFileSync(
     path.join(promptsRoot, "llm-wiki", "personal", filename),
     "utf8",
-  ).trim();
+  )
+    .replaceAll("\r\n", "\n")
+    .trim();
   if (!prompt) {
     throw new Error(`Personal Wiki extraction prompt is empty: ${filename}`);
   }

@@ -8,7 +8,9 @@ import { zstdCompressSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import { ZipFile } from "yazl";
 
-import { tarCommand, unpackArchive } from "./local-server.js";
+import { tarCommand } from "@linger/local-installation/archive";
+
+import { unpackArchive } from "./local-server.js";
 import { tempDirectory } from "./test-support.js";
 
 const createZip = async (
@@ -51,8 +53,20 @@ describe("unpackArchive", () => {
 
     const tarFile = path.join(root, "pkg.tar");
     const tgzFile = path.join(root, "pkg.tar.gz");
-    execFileSync("tar", ["-cf", tarFile, "-C", path.join(root, "src"), "top"]);
-    execFileSync("tar", ["-czf", tgzFile, "-C", path.join(root, "src"), "top"]);
+    execFileSync(tarCommand(), [
+      "-cf",
+      tarFile,
+      "-C",
+      path.join(root, "src"),
+      "top",
+    ]);
+    execFileSync(tarCommand(), [
+      "-czf",
+      tgzFile,
+      "-C",
+      path.join(root, "src"),
+      "top",
+    ]);
     const zstFile = path.join(root, "pkg.tar.zst");
     await writeFile(zstFile, zstdCompressSync(await readFile(tarFile)));
     const zipFile = path.join(root, "node.zip");
@@ -153,7 +167,13 @@ describe("unpackArchive", () => {
     await mkdir(src, { recursive: true });
     await writeFile(path.join(src, "hello.txt"), "symlink-ok\n");
     const tgzFile = path.join(root, "pkg.tar.gz");
-    execFileSync("tar", ["-czf", tgzFile, "-C", path.join(root, "src"), "top"]);
+    execFileSync(tarCommand(), [
+      "-czf",
+      tgzFile,
+      "-C",
+      path.join(root, "src"),
+      "top",
+    ]);
 
     // Deeper real directory reached through a shallower symlink, matching macOS /tmp -> /private/tmp.
     const deepReal = path.join(root, "a", "b", "c", "target");

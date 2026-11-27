@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { extractArchiveFallback } from "./archive.js";
+import { extractArchiveFallback, tarCommand } from "./archive.js";
 
 const roots: string[] = [];
 
@@ -116,14 +116,14 @@ describe("extractArchiveFallback", () => {
 
     const tarPath = path.join(root, "source.tar");
     const tgzPath = path.join(root, "source.tar.gz");
-    execFileSync("tar", [
+    execFileSync(tarCommand(), [
       "-cf",
       tarPath,
       "-C",
       path.join(root, "src"),
       "linger-source",
     ]);
-    execFileSync("tar", [
+    execFileSync(tarCommand(), [
       "-czf",
       tgzPath,
       "-C",

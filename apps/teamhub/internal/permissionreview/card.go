@@ -3,6 +3,7 @@ package permissionreview
 import (
 	"encoding/json"
 	"net/url"
+	stdpath "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -314,17 +315,70 @@ func writeLines(b *strings.Builder, mark, text string) {
 
 // displayPath shows a path relative to the workspace, cut from the left when
 // long so the file name stays.
-func displayPath(path, workspace string) string {
-	if workspace != "" && filepath.IsAbs(path) {
-		if relative, err := filepath.Rel(workspace, path); err == nil && !strings.HasPrefix(relative, "..") {
-			path = relative
+func displayPath(filePath, workspace string) string {
+	if workspace != "" {
+		if relative, ok := relativeDisplayPath(workspace, filePath); ok {
+			filePath = relative
 		}
 	}
-	runes := []rune(path)
+	runes := []rune(filePath)
 	if len(runes) <= maxTitleFragment {
-		return path
+		return filePath
 	}
 	return "…" + string(runes[len(runes)-maxTitleFragment+1:])
+}
+
+// relativeDisplayPath computes a workspace-relative path for both POSIX and
+// Windows paths regardless of the host OS TeamHub runs on.
+func relativeDisplayPath(workspace, target string) (string, bool) {
+	if strings.HasPrefix(workspace, "/") && strings.HasPrefix(target, "/") &&
+		!strings.HasPrefix(workspace, "//") && !strings.HasPrefix(target, "//") {
+		return relativeSlashPath(stdpath.Clean(workspace), stdpath.Clean(target), false)
+	}
+	if isWindowsDrivePath(workspace) && isWindowsDrivePath(target) {
+		wsDrive, wsRest := workspace[:2], stdpath.Clean("/"+strings.ReplaceAll(workspace[2:], `\`, "/"))
+		targetDrive, targetRest := target[:2], stdpath.Clean("/"+strings.ReplaceAll(target[2:], `\`, "/"))
+		if !strings.EqualFold(wsDrive, targetDrive) {
+			return "", false
+		}
+		return relativeSlashPath(wsRest, targetRest, true)
+	}
+	if filepath.IsAbs(workspace) && filepath.IsAbs(target) {
+		relative, err := filepath.Rel(workspace, target)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(relative), true
+		}
+	}
+	return "", false
+}
+
+func relativeSlashPath(workspace, target string, foldCase bool) (string, bool) {
+	if pathsEqual(workspace, target, foldCase) {
+		return ".", true
+	}
+	prefix := workspace
+	if prefix != "/" {
+		prefix += "/"
+	}
+	if len(target) < len(prefix) || !pathsEqual(target[:len(prefix)], prefix, foldCase) {
+		return "", false
+	}
+	return target[len(prefix):], true
+}
+
+func pathsEqual(a, b string, foldCase bool) bool {
+	if foldCase {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func isWindowsDrivePath(value string) bool {
+	if len(value) < 3 || value[1] != ':' || (value[2] != '\\' && value[2] != '/') {
+		return false
+	}
+	drive := value[0]
+	return (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
 }
 
 // commandHead is the command's first line, cut to a title's length.
