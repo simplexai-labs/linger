@@ -38,7 +38,7 @@ type Official struct {
 // domain filing; the Noise session through it stays end-to-end encrypted.
 var Officials = []Official{
 	{ID: "relay_official_global", URL: "wss://relay.heylinger.com", Label: "Linger Global"},
-	{ID: "relay_official_mainland", URL: "ws://47.111.147.142:7787", Label: "Linger Mainland China"},
+	{ID: "relay_official_mainland", URL: "ws://120.26.232.218:7787", Label: "Linger Mainland China"},
 }
 
 const maxLabelLength = 60

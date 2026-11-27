@@ -204,7 +204,7 @@ TeamHub keeps one control link to every enabled node in its Relay node list
 (`mobile_relay_nodes`, `internal/mobilerelay`), each reconnecting on its own
 and logging `mobile.relay_connected` with its `relay`. The list holds the
 official nodes, `wss://relay.heylinger.com` abroad and
-`ws://47.111.147.142:7787` in mainland China, which TeamHub adds at start, and
+`ws://120.26.232.218:7787` in mainland China, which TeamHub adds at start, and
 custom nodes the Human adds. Official nodes can be turned off but not removed.
 `TEAMHUB_MOBILE_RELAY_URL` adds one more node at start (a Quick Install sets it
 in the instance's `user.env`); set empty, TeamHub keeps no Relay link at all.

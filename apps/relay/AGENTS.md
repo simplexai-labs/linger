@@ -18,6 +18,8 @@ self-host it; see `README.md`.
 - `internal/config`: the only place that reads the environment
   (`RELAY_*`).
 - `internal/relay`: HTTP routes, host proof, splice, rate limits.
+- `deploy`: the official nodes' systemd unit, provisioning user data,
+  `deploy.sh`, `healthcheck.sh`, and the runbook `OPERATIONS.md`.
 - `internal/push`: the Push Service (`/v1/push/grants`, `/v1/push/send`),
   mounted only when `RELAY_PUSH_SEAL_KEY` is set. It seals push grants with
   XChaCha20-Poly1305 and sends content-free alerts through Expo.

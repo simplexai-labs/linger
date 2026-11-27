@@ -1,0 +1,22 @@
+# The official Relay nodes run the binary under systemd. deploy.sh installs
+# this unit on every deploy; each node's RELAY_* settings, secrets included,
+# live only in /etc/linger-relay/env on that machine.
+[Unit]
+Description=Linger Relay (forwards end-to-end encrypted phone sessions)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/linger-relay/relay
+EnvironmentFile=/etc/linger-relay/env
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=256M
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

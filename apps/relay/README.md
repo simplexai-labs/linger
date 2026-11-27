@@ -7,7 +7,8 @@ socket for it, and the Relay forwards bytes between the two.
 
 Everything the Relay forwards is end-to-end encrypted between the phone and
 your computer. The Relay cannot read it, keeps no logs of it, and stores
-nothing on disk. You can use the official Relay or run your own.
+nothing on disk. You can use the official Relay or run your own. Linger's own
+nodes are described in `deploy/OPERATIONS.md`.
 
 ## Run it
 

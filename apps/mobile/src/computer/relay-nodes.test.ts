@@ -14,7 +14,7 @@ const global: RelayNode = {
 };
 const mainland: RelayNode = {
   id: "relay_official_mainland",
-  url: "ws://47.111.147.142:7787",
+  url: "ws://120.26.232.218:7787",
   label: "Linger Mainland China",
 };
 

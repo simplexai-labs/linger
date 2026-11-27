@@ -1,0 +1,66 @@
+name: Relay health
+
+# Checks the official Relay nodes' public /healthz every five minutes, so a
+# node that goes down does not wait for a tester to notice. A failed scheduled
+# run opens one issue and later failures comment on it; the first healthy run
+# after that closes it. GitHub's schedule can run a few minutes late.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/relay-health.yml
+      - apps/relay/deploy/healthcheck.sh
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: relay-health-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: Relay node down
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: apps/relay/deploy
+      - name: Check both nodes
+        id: check
+        run: |
+          set -o pipefail
+          apps/relay/deploy/healthcheck.sh | tee "$RUNNER_TEMP/health.txt"
+      - name: Report a scheduled failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$(cat "$RUNNER_TEMP/health.txt" 2>/dev/null || echo "The check did not run.")
+
+          Run: $RUN
+          Runbook: apps/relay/deploy/OPERATIONS.md"
+          issue=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body "$body"
+          fi
+      - name: Close the alert once healthy
+        if: success() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          issue=$(gh issue list --state open --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue close "$issue" --comment "Both nodes answer /healthz again."
+          fi

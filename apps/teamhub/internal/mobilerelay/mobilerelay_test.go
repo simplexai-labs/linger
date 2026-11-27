@@ -8,7 +8,7 @@ import (
 
 func TestNormalizeURLKeepsOnlyAWebSocketOrigin(t *testing.T) {
 	for raw, want := range map[string]string{
-		"ws://47.111.147.142:7787":   "ws://47.111.147.142:7787",
+		"ws://120.26.232.218:7787":   "ws://120.26.232.218:7787",
 		" wss://Relay.Example.com/ ": "wss://relay.example.com",
 	} {
 		got, err := NormalizeURL(raw)
@@ -42,7 +42,7 @@ func TestCheckPublicRefusesPrivateAddresses(t *testing.T) {
 		"ws://192.168.1.20":        ErrPrivate,
 		"ws://169.254.169.254":     ErrPrivate,
 		"ws://[::1]:7787":          ErrPrivate,
-		"ws://47.111.147.142:7787": nil,
+		"ws://120.26.232.218:7787": nil,
 	} {
 		if err := CheckPublic(context.Background(), raw); !errors.Is(err, want) {
 			t.Errorf("CheckPublic(%q) = %v, want %v", raw, err, want)
