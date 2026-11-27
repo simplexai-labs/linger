@@ -145,10 +145,61 @@ async function save(
 // One resolution per home and process, so concurrent downloads share a probe.
 interface Resolution {
   promise: Promise<RegionResolutionInfo>;
+  settled?: RegionResolutionInfo;
   controller: AbortController | undefined;
   waiters: number;
 }
 const resolutions = new Map<string, Resolution>();
+
+/**
+ * Returns the download region for `home` only when already known without
+ * probing npm registries: `SIMPLEX_REGION` when forced, a settled in-process
+ * resolution, or a fresh `<home>/runtime/region.json` record. Returns
+ * `undefined` when a network probe would be needed.
+ */
+export async function cachedRegion(
+  home: string,
+  options: {
+    signal?: AbortSignal;
+    onResolved?: (info: RegionResolutionInfo) => void;
+  } = {},
+): Promise<Region | undefined> {
+  const signal = options.signal;
+  signal?.throwIfAborted();
+  const startedAt = performance.now();
+  const elapsed = () => Math.max(0, Math.round(performance.now() - startedAt));
+  const file = regionFile(home);
+  const forced = forcedRegion();
+  if (forced) {
+    const saved = await readRecord(file);
+    signal?.throwIfAborted();
+    if (
+      saved?.region !== forced ||
+      saved.method !== "env" ||
+      !fresh(saved, Date.now())
+    )
+      await save(file, forced, "env");
+    signal?.throwIfAborted();
+    options.onResolved?.({ region: forced, method: "env", ms: elapsed() });
+    return forced;
+  }
+  const settled = resolutions.get(file)?.settled;
+  if (settled) {
+    options.onResolved?.(settled);
+    return settled.region;
+  }
+  const saved = await readRecord(file);
+  signal?.throwIfAborted();
+  if (saved && fresh(saved, Date.now())) {
+    options.onResolved?.({
+      region: saved.region,
+      method: "cache",
+      ms: elapsed(),
+    });
+    return saved.region;
+  }
+  return undefined;
+}
 
 async function resolve(
   file: string,
@@ -216,8 +267,9 @@ export async function resolveRegion(
     };
     resolutions.set(file, resolution);
     resolution.promise.then(
-      () => {
+      (info) => {
         resolution.controller = undefined;
+        resolution.settled = info;
       },
       () => {
         resolution.controller = undefined;
@@ -265,8 +317,10 @@ export async function recordRegionFallback(
   const current = (await resolutions.get(file)?.promise.catch(() => undefined))
     ?.region;
   if (current === region) return;
+  const info: RegionResolutionInfo = { region, method: "fallback", ms: 0 };
   resolutions.set(file, {
-    promise: Promise.resolve({ region, method: "fallback", ms: 0 }),
+    promise: Promise.resolve(info),
+    settled: info,
     controller: undefined,
     waiters: 0,
   });

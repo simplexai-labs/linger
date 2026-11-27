@@ -9,6 +9,19 @@ import {
 
 const PDFJS_MODULE_URL = import.meta.resolve("pdfjs-dist/legacy/build/pdf.mjs");
 
+// pdfjs-dist rejects factory base paths unless they end with a forward slash,
+// while its Node loader passes `${baseUrl}${filename}` directly to fs.readFile.
+export function pdfjsFactoryDirectoryUrl(directoryPath: string): string {
+  const normalized = directoryPath.replaceAll("\\", "/");
+  return normalized.endsWith("/") ? normalized : `${normalized}/`;
+}
+
+function resolvePdfjsAssetDirectory(relativeDirectory: string): string {
+  return pdfjsFactoryDirectoryUrl(
+    fileURLToPath(new URL(relativeDirectory, PDFJS_MODULE_URL)),
+  );
+}
+
 export async function extractPdfMarkdown(source: Uint8Array): Promise<string> {
   if (!Buffer.from(source.subarray(0, 1024)).includes(Buffer.from("%PDF-"))) {
     throw new DocumentNormalizationError("DOCUMENT_SOURCE_INVALID");
@@ -16,11 +29,9 @@ export async function extractPdfMarkdown(source: Uint8Array): Promise<string> {
   const loading = getDocument({
     data: Uint8Array.from(source),
     cMapPacked: true,
-    cMapUrl: fileURLToPath(new URL("../../cmaps/", PDFJS_MODULE_URL)),
-    standardFontDataUrl: fileURLToPath(
-      new URL("../../standard_fonts/", PDFJS_MODULE_URL),
-    ),
-    wasmUrl: fileURLToPath(new URL("../../wasm/", PDFJS_MODULE_URL)),
+    cMapUrl: resolvePdfjsAssetDirectory("../../cmaps/"),
+    standardFontDataUrl: resolvePdfjsAssetDirectory("../../standard_fonts/"),
+    wasmUrl: resolvePdfjsAssetDirectory("../../wasm/"),
     disableFontFace: true,
     useSystemFonts: false,
     stopAtErrors: true,

@@ -10,6 +10,18 @@ export interface ExtractArchiveFallbackOptions {
   signal?: AbortSignal;
 }
 
+// Windows' built-in bsdtar accepts drive-letter paths (C:\...), whereas MSYS
+// GNU tar earlier on PATH (Git Bash) treats "C:" as a remote host name.
+export function tarCommand(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform !== "win32") return "tar";
+  const systemRoot =
+    env.SystemRoot?.trim() || env.windir?.trim() || "C:\\Windows";
+  return path.win32.join(systemRoot, "System32", "tar.exe");
+}
+
 /**
  * Pure-Node fallback extractor used when system tar.exe is absent on stripped
  * Windows images. Supports verified .zip, .tar, .tar.gz/.tgz, and .tar.zst.

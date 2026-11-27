@@ -235,7 +235,9 @@ describe("LocalServerModule resume coordination", () => {
       }) + "\\n");
     `);
     await warm.host.start();
-    await vi.waitFor(() => expect(warm.module.status().phase).toBe("ready"));
+    await waitForInstaller(() =>
+      expect(warm.module.status().phase).toBe("ready"),
+    );
     expect(
       warm.logs.find(
         (entry) => entry.event === "local_server.installer_resume_timings",
@@ -268,7 +270,9 @@ describe("LocalServerModule resume coordination", () => {
       }) + "\\n");
     `);
     await cold.host.start();
-    await vi.waitFor(() => expect(cold.module.status().phase).toBe("ready"));
+    await waitForInstaller(() =>
+      expect(cold.module.status().phase).toBe("ready"),
+    );
     expect(
       cold.logs.find(
         (entry) => entry.event === "local_server.installer_resume_timings",
@@ -302,7 +306,9 @@ describe("LocalServerModule resume coordination", () => {
         }) + "\\n");
       `);
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(
         f.logs.find(
           (entry) => entry.event === "local_server.installer_resume_timings",
@@ -442,7 +448,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(runtimeEvents).toHaveBeenCalledTimes(1);
     expect(
       f.logs.find(
@@ -476,7 +482,7 @@ describe("LocalServerModule resume coordination", () => {
 
     await f.host.start();
 
-    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
     expect(runtimeEvents).toHaveBeenCalledTimes(1);
     await f.host.stop("quit");
   });
@@ -1167,7 +1173,9 @@ describe("LocalServerModule resume coordination", () => {
         process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
       `);
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(f.config.get().localServer).toBe(true);
 
       // Moving ports for the same local server preserves localServer.
@@ -1198,12 +1206,14 @@ describe("LocalServerModule resume coordination", () => {
         },
       );
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
 
       const opened = vi.fn();
       f.bus.on("setup.open", opened);
       f.bus.emit("local-server.reset");
-      await vi.waitFor(() => expect(opened).toHaveBeenCalledOnce());
+      await waitForInstaller(() => expect(opened).toHaveBeenCalledOnce());
       expect(f.hide).toHaveBeenCalledOnce();
       expect(f.loadServer).toHaveBeenCalledOnce();
       expect(f.config.get().serverUrl).toBeUndefined();
@@ -1279,7 +1289,9 @@ describe("LocalServerModule resume coordination", () => {
         );
         await f.host.start();
         if (localServer === true) {
-          await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+          await waitForInstaller(() =>
+            expect(f.module.status().phase).toBe("ready"),
+          );
           rmSync(path.join(f.home, "desktop", "local-server.json"), {
             force: true,
           });
@@ -1332,7 +1344,9 @@ describe("LocalServerModule resume coordination", () => {
         },
       );
       await f.host.start();
-      await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
       expect(f.config.get().localServer).toBe(true);
 
       // Local -> remote clears both the tracked local origin and localServer.
@@ -1658,7 +1672,9 @@ describe("orphaned local server recovery during LocalServerModule.start()", () =
       { record: "valid", reachable: false },
     );
     await valid.host.start();
-    await vi.waitFor(() => expect(valid.module.status().phase).toBe("ready"));
+    await waitForInstaller(() =>
+      expect(valid.module.status().phase).toBe("ready"),
+    );
     expect(valid.setupOpened).not.toHaveBeenCalled();
     expect(valid.config.get().computerId).toBe("cmp_1");
     expect(valid.credentials.read()?.computerId).toBe("cmp_1");

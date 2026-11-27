@@ -1,3 +1,4 @@
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readMemoryConfig } from "../../src/memory/config.js";
@@ -26,7 +27,14 @@ describe("readMemoryConfig", () => {
         LINGER_SECRET_SEED: seed,
         AGENT_HOME: "/srv/mirror",
       }).dataRoot,
-    ).toBe("/srv/mirror/agent-manager/workspaces/context-host");
+    ).toBe(
+      path.resolve(
+        "/srv/mirror",
+        "agent-manager",
+        "workspaces",
+        "context-host",
+      ),
+    );
   });
   it("requires the secret seed", () => {
     expect(() => readMemoryConfig({})).toThrow(

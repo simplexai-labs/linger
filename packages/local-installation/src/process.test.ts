@@ -53,7 +53,10 @@ it("reports nonzero exit without exposing argv in errors", async () => {
   ).toBe(7);
   await expect(
     runProcess("/missing-linger-private-secret", []),
-  ).rejects.toThrow(/unavailable/i);
+  ).rejects.toMatchObject({
+    code: "COMMAND_EXECUTABLE_UNAVAILABLE",
+    message: "Command executable unavailable",
+  });
 });
 it("bounds captured output rather than buffering forever", async () => {
   await expect(
@@ -144,7 +147,7 @@ it("pipes private input to the child without putting it in argv, environment or 
   expect(output.join("").includes(secret.trim())).toBe(false);
 });
 it("handles closed stdin without uncaught EPIPE or exposing private input", async () => {
-  const result = await runProcess(
+  const failure = await runProcess(
     process.execPath,
     [
       "-e",
@@ -152,11 +155,14 @@ it("handles closed stdin without uncaught EPIPE or exposing private input", asyn
     ],
     { input: "fixture-private-input".repeat(500_000) },
   ).then(
-    () => "success",
-    (error: Error) => error.message,
+    () => undefined,
+    (error: Error & { code?: string }) => error,
   );
-  expect(result).toMatch(/input|stdin/i);
-  expect(result).not.toContain("fixture-private-input");
+  expect(failure).toMatchObject({
+    code: "COMMAND_STDIN_UNAVAILABLE",
+    message: "Command stdin unavailable",
+  });
+  expect(failure?.message).not.toContain("fixture-private-input");
 });
 it("cancels a child with a blocked stdin write", async () => {
   const controller = new AbortController();

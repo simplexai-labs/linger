@@ -44,7 +44,7 @@ describe("rebuild state archive", () => {
       "agent_a",
       new Date("2026-09-30T02:00:00.000Z"),
     );
-    expect(path.relative(root, archive)).toBe(
+    expect(path.relative(root, archive).replaceAll("\\", "/")).toBe(
       "agent_a/memory.pre-rebuild-2026-09-30T02-00-00-000Z",
     );
     const exists = (file: string) =>

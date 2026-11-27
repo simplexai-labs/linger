@@ -23,6 +23,20 @@ const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
 it("copies the complete current CLI artifact and runs it on the bundled runtime without workspace dependencies", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "computer-teamhub-artifact-"));
   try {
+    if (process.platform === "win32") {
+      // System TEMP can inherit shared ACEs; teamhub.exe enforces owner-only ACLs.
+      const whoami = await launch("whoami", ["/user", "/fo", "csv", "/nh"]);
+      const sid = /"(S-1-[0-9-]+)"/u.exec(whoami.stdout)?.[1];
+      if (sid) {
+        await launch("icacls", [
+          root,
+          "/inheritance:r",
+          "/grant:r",
+          `*${sid}:(OI)(CI)F`,
+          "*S-1-5-18:(OI)(CI)F",
+        ]);
+      }
+    }
     const source = path.join(root, "apps/teamhub-cli/dist");
     const scripts = path.join(root, "apps/computer/scripts");
     const destination = path.join(root, "apps/computer/dist/bundle/cli");
@@ -47,7 +61,12 @@ it("copies the complete current CLI artifact and runs it on the bundled runtime 
       path.join(destination, "teamhub-chunks/obsolete-destination.js"),
       "throw new Error('obsolete');",
     );
-    await launch(process.execPath, [script]);
+    const bundleArgs = [
+      script,
+      "--local-daemon-dir",
+      path.join(repositoryRoot, "apps/computer/local-daemon"),
+    ];
+    await launch(process.execPath, bundleArgs);
     const manifest = JSON.parse(
       await readFile(path.join(destination, "teamhub-assets.json"), "utf8"),
     );
@@ -80,7 +99,7 @@ it("copies the complete current CLI artifact and runs it on the bundled runtime 
       path.join(source, "teamhub.js"),
       "throw new Error('corrupt');",
     );
-    await expect(launch(process.execPath, [script])).rejects.toThrow(
+    await expect(launch(process.execPath, bundleArgs)).rejects.toThrow(
       /does not match its manifest/u,
     );
     const relocated = path.join(root, "cli");
@@ -88,27 +107,35 @@ it("copies the complete current CLI artifact and runs it on the bundled runtime 
     await rm(path.join(root, "apps"), { recursive: true });
     // The launcher runs the bundled runtime beside cli/, never node on PATH.
     await mkdir(path.join(root, "runtime/bin"), { recursive: true });
-    await symlink(process.execPath, path.join(root, "runtime/bin/node"));
-    const tools = path.join(root, "path");
-    await mkdir(tools);
-    const dirname = await launch("/bin/sh", ["-c", "command -v dirname"]);
-    await symlink(dirname.stdout.trim(), path.join(tools, "dirname"));
-    const environment = {
-      PATH: tools,
-      TEAMHUB_CONFIG: path.join(root, "missing.json"),
-    };
-    const help = await launch(
-      path.join(relocated, "teamhub"),
-      ["docs", "--help"],
-      {
-        cwd: root,
-        env: environment,
-      },
-    );
+    let launcherPath: string;
+    let environment: NodeJS.ProcessEnv;
+    if (process.platform === "win32") {
+      await copyFile(process.execPath, path.join(root, "runtime/bin/node.exe"));
+      launcherPath = path.join(relocated, "teamhub.exe");
+      environment = {
+        SystemRoot: process.env.SystemRoot,
+        TEAMHUB_CONFIG: path.join(root, "missing.json"),
+      };
+    } else {
+      await symlink(process.execPath, path.join(root, "runtime/bin/node"));
+      const tools = path.join(root, "path");
+      await mkdir(tools);
+      const dirname = await launch("/bin/sh", ["-c", "command -v dirname"]);
+      await symlink(dirname.stdout.trim(), path.join(tools, "dirname"));
+      launcherPath = path.join(relocated, "teamhub");
+      environment = {
+        PATH: tools,
+        TEAMHUB_CONFIG: path.join(root, "missing.json"),
+      };
+    }
+    const help = await launch(launcherPath, ["docs", "--help"], {
+      cwd: root,
+      env: environment,
+    });
     expect(help.stdout).toContain("teamhub docs list");
     expect(help.stderr).toBe("");
     const schema = await launch(
-      path.join(relocated, "teamhub"),
+      launcherPath,
       ["message", "send", "--schema", "--json"],
       { cwd: root, env: environment },
     );
@@ -117,4 +144,4 @@ it("copies the complete current CLI artifact and runs it on the bundled runtime 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-}, 30_000);
+}, 60_000);

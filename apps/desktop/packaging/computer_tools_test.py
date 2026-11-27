@@ -92,10 +92,12 @@ def stage(root, target):
 class ComputerToolsTest(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp()
+        self._resource_seq = 0
         self.addCleanup(shutil.rmtree, self.root)
 
     def resources(self, target="linux-x64"):
-        resources = os.path.join(self.root, target, "resources")
+        self._resource_seq += 1
+        resources = os.path.join(self.root, f"{target}-{self._resource_seq}", "resources")
         return resources, stage(resources, target)
 
     def test_accepts_the_staged_tools_of_every_shipped_target(self):
@@ -115,11 +117,12 @@ class ComputerToolsTest(unittest.TestCase):
             computer_tools.check(resources, "linux-x64")
 
     def test_rejects_changed_unlisted_or_missing_files(self):
-        resources, tools = self.resources()
+        target = HOST_FIXTURE_TARGET
+        resources, tools = self.resources(target)
         with open(os.path.join(tools, PI_EXTENSION), "ab") as out:
             out.write(b"//")
         with self.assertRaisesRegex(computer_tools.Invalid, "do not match their manifest"):
-            computer_tools.verify(resources, "linux-x64")
+            computer_tools.verify(resources, target)
 
         resources, tools = self.resources("win32-x64")
         with open(os.path.join(tools, "extra.js"), "w") as out:
@@ -127,10 +130,10 @@ class ComputerToolsTest(unittest.TestCase):
         with self.assertRaisesRegex(computer_tools.Invalid, "do not match their manifest"):
             computer_tools.verify(resources, "win32-x64")
 
-        resources, _ = self.resources("darwin-arm64")
-        os.remove(os.path.join(resources, "runtime", "bin", "node"))
+        resources, _ = self.resources(target)
+        os.remove(os.path.join(resources, computer_tools.node_path(target)))
         with self.assertRaisesRegex(computer_tools.Invalid, "missing or not executable"):
-            computer_tools.verify(resources, "darwin-arm64")
+            computer_tools.verify(resources, target)
 
     def test_rejects_tools_for_another_target(self):
         resources, _ = self.resources("darwin-arm64")

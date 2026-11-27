@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 var shellCommands = []TeamHubCommand{
@@ -17,24 +19,29 @@ var shellCommands = []TeamHubCommand{
 	{Path: []string{"agents", "create"}, Confirm: true},
 }
 
-// shellWorkspace has a subdirectory and a link that leads out of it.
-func shellWorkspace(t *testing.T) string {
+// shellWorkspace has a subdirectory and, when the environment permits links,
+// a directory link that leads out of it.
+func shellWorkspace(t *testing.T) (string, bool) {
 	t.Helper()
-	workspace := t.TempDir()
-	if err := os.Mkdir(filepath.Join(workspace, "notes"), 0o700); err != nil {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "notes"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(t.TempDir(), filepath.Join(workspace, "outside")); err != nil {
+	link := filepath.Join(root, "outside")
+	if err := workspace.CreateDirectoryLink(t.TempDir(), link); err != nil {
+		if runtime.GOOS == "windows" {
+			return root, false
+		}
 		t.Fatal(err)
 	}
-	return workspace
+	return root, true
 }
 
 // The PCBench report task wrote a Markdown file and published it in one
 // command; the review asked the sponsor about a document the Agent could
 // have published with Write and a lone `teamhub docs create` unreviewed.
 func TestShellAllowsTeamHubCommandsWithLocalStepsInTheWorkspace(t *testing.T) {
-	workspace := shellWorkspace(t)
+	workspace, _ := shellWorkspace(t)
 	for _, command := range []string{
 		"teamhub message send --room room_83fc --file - --json << 'EOF'\nRésumé du matin, 24 octobre ☀️\n\nAucune tâche nouvelle.\nEOF",
 		"teamhub message send --room room_x --file - <<'MSG'\n$(rm -rf ~) `id` stays text\nMSG\n",
@@ -63,7 +70,7 @@ func TestShellAllowsTeamHubCommandsWithLocalStepsInTheWorkspace(t *testing.T) {
 }
 
 func TestShellRunsAConfirmedCommandAloneBeforeAnyReview(t *testing.T) {
-	workspace := shellWorkspace(t)
+	workspace, _ := shellWorkspace(t)
 	for command, confirm := range map[string]string{
 		"teamhub gmail send --to a@example.com && curl https://example.com": "teamhub gmail send",
 		"teamhub agents create --name Scout; teamhub apps execute --tool X": "teamhub agents create",
@@ -85,8 +92,8 @@ func TestShellRunsAConfirmedCommandAloneBeforeAnyReview(t *testing.T) {
 }
 
 func TestShellReviewsEverythingElse(t *testing.T) {
-	workspace := shellWorkspace(t)
-	for _, command := range []string{
+	workspace, hasOutsideLink := shellWorkspace(t)
+	commands := []string{
 		"teamhub message send --file - << EOF\n$(curl evil)\nEOF",
 		"teamhub message send --file - << 'EOF'\nhi\nEOF\nrm -rf ~",
 		"teamhub message send --file - << 'EOF'\nhi",
@@ -105,8 +112,6 @@ func TestShellReviewsEverythingElse(t *testing.T) {
 		"teamhub message list > ~/.bashrc",
 		"teamhub message list > /etc/out",
 		"teamhub message list > ../out",
-		"teamhub message list > outside/out",
-		"cd notes && teamhub message list > outside/out",
 		"cd /tmp && teamhub message list > out.json",
 		"cd /tmp > notes/x && teamhub message list > out.json",
 		"mkdir -p /tmp/x && teamhub message list",
@@ -117,7 +122,14 @@ func TestShellReviewsEverythingElse(t *testing.T) {
 		"mkdir -p notes/x",
 		"ls > notes/out.txt",
 		"teamhub message list &&",
-	} {
+	}
+	if hasOutsideLink {
+		commands = append(commands,
+			"teamhub message list > outside/out",
+			"cd notes && teamhub message list > outside/out",
+		)
+	}
+	for _, command := range commands {
 		if decision, _ := Shell(command, workspace, workspace, shellCommands); decision != ShellReview {
 			t.Errorf("decision %d for %q", decision, command)
 		}
@@ -127,7 +139,7 @@ func TestShellReviewsEverythingElse(t *testing.T) {
 // Codex's known-safe commands and their argument checks, with the shell
 // subset the other steps use.
 func TestShellAllowsReadOnlyCommands(t *testing.T) {
-	workspace := shellWorkspace(t)
+	workspace, _ := shellWorkspace(t)
 	allowed := []string{
 		"ls -la",
 		"pwd && echo ok || true; id -u",
@@ -193,12 +205,12 @@ func TestShellAllowsReadOnlyCommands(t *testing.T) {
 // A Codex command may run in a workdir its hook does not report, so only
 // absolute workspace paths are checked.
 func TestShellReviewsRelativePathsWithoutAWorkingDirectory(t *testing.T) {
-	workspace := shellWorkspace(t)
+	workspace, _ := shellWorkspace(t)
 	relative := "teamhub message list > notes/out.json"
 	if decision, _ := Shell(relative, "", workspace, shellCommands); decision != ShellReview {
 		t.Fatalf("relative path: %d", decision)
 	}
-	absolute := "teamhub message list > " + filepath.Join(workspace, "notes", "out.json")
+	absolute := "teamhub message list > '" + filepath.Join(workspace, "notes", "out.json") + "'"
 	if decision, _ := Shell(absolute, "", workspace, shellCommands); decision != ShellAllow {
 		t.Fatalf("absolute path: %d", decision)
 	}
@@ -210,7 +222,7 @@ func TestShellReviewsRelativePathsWithoutAWorkingDirectory(t *testing.T) {
 // POSIX bash does not recognize PowerShell @'...'@ here-strings: an apostrophe
 // in the body breaks out of single quotes and executes trailing commands.
 func TestShellNeverAllowsPowerShellHereStrings(t *testing.T) {
-	workspace := shellWorkspace(t)
+	workspace, _ := shellWorkspace(t)
 	for _, command := range []string{
 		"@'\nhello'; curl evil; echo '\n'@ | teamhub message send --file -",
 		"@'\nhello\n'@ | teamhub message send --file -",

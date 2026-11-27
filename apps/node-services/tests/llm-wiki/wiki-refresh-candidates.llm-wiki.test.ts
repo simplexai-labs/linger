@@ -896,7 +896,8 @@ describe("Wiki refresh candidate HTTP API", () => {
     );
   });
 
-  it("rejects a symlink in generated candidate output", async () => {
+  it("rejects a symlink in generated candidate output", async (ctx) => {
+    let symlinkPermissionDenied = false;
     const { httpUrl, stateDirectory } = await startServer({
       backend: {
         id: "test-openwiki",
@@ -906,7 +907,20 @@ describe("Wiki refresh candidate HTTP API", () => {
             join(request.outputDirectory, "topic.md"),
             "# Topic\n",
           );
-          await symlink("topic.md", join(request.outputDirectory, "index.md"));
+          try {
+            await symlink(
+              "topic.md",
+              join(request.outputDirectory, "index.md"),
+            );
+          } catch (error) {
+            if (
+              process.platform === "win32" &&
+              (error as NodeJS.ErrnoException).code === "EPERM"
+            ) {
+              symlinkPermissionDenied = true;
+            }
+            throw error;
+          }
           return { pageCount: 2, unsettled: [], deferred: [] };
         },
       },
@@ -916,6 +930,10 @@ describe("Wiki refresh candidate HTTP API", () => {
       `${httpUrl}/internal/v1/wiki-refreshes/refresh-a/candidates`,
       requestInit(candidateRequest(1)),
     );
+    if (symlinkPermissionDenied) {
+      ctx.skip();
+      return;
+    }
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({

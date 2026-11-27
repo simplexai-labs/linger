@@ -9,7 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { ensureLocalAccount, localIdentityProof } from "./account.js";
+import {
+  ensureLocalAccount,
+  localIdentityProof,
+  preProvisionLocalAccount,
+} from "./account.js";
 import type { Instance } from "./instance.js";
 import {
   expectPrivateFixtureFile,
@@ -506,4 +510,124 @@ it("sends no password to another program answering at the origin", async () => {
   expect(requests).toEqual(["/v0/local/identity", "/v0/local/identity"]);
   expect(provisionOwner).not.toHaveBeenCalled();
   expect(JSON.parse(await readFile(f.file, "utf8")).provisioned).toBe(false);
+});
+
+it("preProvisionLocalAccount creates the account file and owner without HTTP or marking provisioned", async () => {
+  const f = await fixture();
+  const fetchSpy = vi.fn();
+  vi.stubGlobal("fetch", fetchSpy);
+  let created = false;
+  provisionOwner.mockImplementation(async (email, password) => {
+    const saved = JSON.parse(await readFile(f.file, "utf8"));
+    expect(saved.provisioned).toBe(false);
+    expect(email).toBe(saved.email);
+    expect(password).toBe(saved.password);
+    created = true;
+  });
+
+  await preProvisionLocalAccount(f.instance, f.signal, owner);
+
+  expect(created).toBe(true);
+  expect(provisionOwner).toHaveBeenCalledOnce();
+  expect(fetchSpy).not.toHaveBeenCalled();
+  const savedAfterPre = JSON.parse(await readFile(f.file, "utf8"));
+  expect(savedAfterPre.provisioned).toBe(false);
+  await expectPrivateFixtureFile(f.file);
+
+  // ensureLocalAccount still verifies origin, succeeds on first login, and
+  // marks provisioned without running provisionOwner again.
+  provisionOwner.mockClear();
+  const requests: string[] = [];
+  stubFetch(
+    vi.fn(async (url: string) => {
+      requests.push(new URL(url).pathname);
+      return new Response(null, {
+        status: url.endsWith("/logout") ? 204 : created ? 200 : 401,
+        headers: created ? { "set-cookie": "session=test; HttpOnly" } : {},
+      });
+    }),
+  );
+  const ensured = await ensureLocalAccount(f.instance, f.signal, owner);
+  expect(ensured.email).toBe(savedAfterPre.email);
+  expect(ensured.password).toBe(savedAfterPre.password);
+  expect(provisionOwner).not.toHaveBeenCalled();
+  expect(requests).toEqual(["/v0/auth/login", "/v0/auth/logout"]);
+  expect(JSON.parse(await readFile(f.file, "utf8")).provisioned).toBe(true);
+});
+
+it("preProvisionLocalAccount skips already-provisioned accounts without calling provisionOwner", async () => {
+  const f = await fixture();
+  const saved = JSON.stringify({
+    email: "owner@linger.local",
+    password: "saved-private-password",
+    provisioned: true,
+  });
+  await writeFile(f.file, saved, { mode: 0o600 });
+  vi.stubGlobal("fetch", vi.fn());
+
+  await preProvisionLocalAccount(f.instance, f.signal, owner);
+
+  expect(provisionOwner).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(await readFile(f.file, "utf8")).toBe(saved);
+});
+
+it("preProvisionLocalAccount ignores invalid or unsafe files so ensureLocalAccount reports the error", async () => {
+  const f = await fixture();
+  const malformed = '{"password":"private-password" malformed}';
+  await writeFile(f.file, malformed, { mode: 0o600 });
+  vi.stubGlobal("fetch", vi.fn());
+
+  await expect(
+    preProvisionLocalAccount(f.instance, f.signal, owner),
+  ).resolves.toBeUndefined();
+  expect(provisionOwner).not.toHaveBeenCalled();
+  expect(await readFile(f.file, "utf8")).toBe(malformed);
+
+  // Also returns silently for a symlink/non-private file without modifying it.
+  await rm(f.file);
+  const target = path.join(f.instance.root, "target");
+  const instance = { ...f.instance };
+  if (process.platform === "win32") {
+    await mkdir(target);
+    await writeFile(path.join(target, path.basename(f.file)), "{}");
+    instance.root = path.join(f.instance.root, "junction");
+    await symlink(target, instance.root, "junction");
+  } else {
+    await writeFile(target, "{}", { mode: 0o600 });
+    await symlink(target, f.file);
+  }
+  await expect(
+    preProvisionLocalAccount(instance, f.signal, owner),
+  ).resolves.toBeUndefined();
+  expect(provisionOwner).not.toHaveBeenCalled();
+});
+
+it("preProvisionLocalAccount swallows non-abort owner failures and propagates aborts", async () => {
+  const f = await fixture();
+  provisionOwner.mockRejectedValueOnce(new Error("db busy"));
+  await expect(
+    preProvisionLocalAccount(f.instance, f.signal, owner),
+  ).resolves.toBeUndefined();
+  expect(provisionOwner).toHaveBeenCalledOnce();
+  expect(JSON.parse(await readFile(f.file, "utf8")).provisioned).toBe(false);
+
+  // Already aborted before start throws without calling provisionOwner.
+  provisionOwner.mockClear();
+  const reason = new Error("aborted before preProvision");
+  await expect(
+    preProvisionLocalAccount(f.instance, AbortSignal.abort(reason), owner),
+  ).rejects.toBe(reason);
+  expect(provisionOwner).not.toHaveBeenCalled();
+
+  // Aborted while provisionOwner is running rethrows.
+  const controller = new AbortController();
+  const abortError = new Error("aborted mid-provision");
+  provisionOwner.mockImplementationOnce(async () => {
+    controller.abort(abortError);
+    throw abortError;
+  });
+  await expect(
+    preProvisionLocalAccount(f.instance, controller.signal, owner),
+  ).rejects.toBe(abortError);
 });

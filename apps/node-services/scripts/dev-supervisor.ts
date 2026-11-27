@@ -2,6 +2,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import {
+  delay,
+  readTeamHubHealthUrl,
+  waitForTeamHubHealth,
+} from "../src/teamhub-health.js";
+
+export { waitForTeamHubHealth };
+
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 const hostEntryPoint = path.join(packageRoot, "src/main.ts");
 const featureCatalogGenerator = path.join(
@@ -21,6 +29,13 @@ export interface NodeServicesDevSupervisorOptions {
   signal: AbortSignal;
   spawnNodeServices?: () => NodeServicesChild;
   waitForTeamHub?: (signal: AbortSignal) => Promise<void>;
+  /**
+   * Whether to wait for TeamHub before the very first spawn. Defaults to true
+   * for development (`tsx`); compiled native runs set false so `dist/main.js`
+   * starts booting non-TeamHub roles immediately and waits just-in-time via
+   * `--wait-teamhub`.
+   */
+  waitBeforeFirstSpawn?: boolean;
   waitBeforeRestart?: (signal: AbortSignal) => Promise<void>;
   /**
    * Regenerates the static agent-features manifest before each (re)start so
@@ -38,14 +53,19 @@ export async function superviseNodeServicesDevelopment(
   const waitForTeamHub =
     options.waitForTeamHub ??
     ((signal) => waitForTeamHubHealth(readTeamHubHealthUrl(), signal));
+  const waitBeforeFirstSpawn = options.waitBeforeFirstSpawn ?? true;
   const waitBeforeRestart =
     options.waitBeforeRestart ?? ((signal) => delay(500, signal));
   const refreshFeatureCatalog =
     options.refreshFeatureCatalog ?? generateFeatureCatalog;
 
+  let attempt = 0;
   while (!options.signal.aborted) {
-    await waitForTeamHub(options.signal);
-    if (options.signal.aborted) return;
+    if (attempt > 0 || waitBeforeFirstSpawn) {
+      await waitForTeamHub(options.signal);
+      if (options.signal.aborted) return;
+    }
+    attempt += 1;
 
     await refreshFeatureCatalog(options.signal);
     if (options.signal.aborted) return;
@@ -63,38 +83,6 @@ export async function superviseNodeServicesDevelopment(
   }
 }
 
-export async function waitForTeamHubHealth(
-  healthUrl: string,
-  signal: AbortSignal,
-  options: {
-    fetcher?: typeof fetch;
-    retryDelayMs?: number;
-    requestTimeoutMs?: number;
-    sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  } = {},
-): Promise<void> {
-  const fetcher = options.fetcher ?? fetch;
-  const retryDelayMs = options.retryDelayMs ?? 500;
-  const requestTimeoutMs = options.requestTimeoutMs ?? 1_000;
-  const sleep = options.sleep ?? delay;
-
-  while (!signal.aborted) {
-    try {
-      const response = await fetcher(healthUrl, {
-        signal: AbortSignal.any([
-          signal,
-          AbortSignal.timeout(requestTimeoutMs),
-        ]),
-      });
-      if (response.ok) return;
-    } catch {
-      // TeamHub is still starting or reloading.
-    }
-
-    await sleep(retryDelayMs, signal);
-  }
-}
-
 function defaultSpawnNodeServices(): NodeServicesChild {
   return spawn(process.execPath, ["--import", "tsx", hostEntryPoint], {
     cwd: packageRoot,
@@ -103,15 +91,19 @@ function defaultSpawnNodeServices(): NodeServicesChild {
 }
 
 // Runs as its own process, like Node Services, so this supervisor keeps only
-// built-in imports. Its notes go to stderr; stdout belongs to Node Services.
-// The desktop's offline runtime ships main.ts compiled beside this file, with
-// its feature catalog built in (apps/desktop/scripts/build-native-runtime.mjs).
-// It stays in this process's directory, the checkout, against which the
-// bundle resolves relative settings.
+// built-in and zero-dependency imports. Its notes go to stderr; stdout belongs
+// to Node Services. The desktop's offline runtime ships main.ts compiled beside
+// this file, with its feature catalog built in
+// (apps/desktop/scripts/build-native-runtime.mjs). It stays in this process's
+// directory, the checkout, against which the bundle resolves relative settings.
 function spawnCompiledNodeServices(): NodeServicesChild {
   return spawn(
     process.execPath,
-    ["--conditions=linger-production", path.join(packageRoot, "dist/main.js")],
+    [
+      "--conditions=linger-production",
+      path.join(packageRoot, "dist/main.js"),
+      "--wait-teamhub",
+    ],
     { stdio: "inherit", windowsHide: true },
   );
 }
@@ -131,14 +123,6 @@ async function generateFeatureCatalog(signal: AbortSignal): Promise<void> {
       `agent-features catalog generation exited with code ${String(result.code)}`,
     );
   }
-}
-
-function readTeamHubHealthUrl(): string {
-  // Same single-host default as the Agent Service itself; tests run this
-  // script without the service sources beside it.
-  const baseUrl =
-    process.env.TEAMHUB_BASE_URL?.trim() || "http://127.0.0.1:8080";
-  return new URL("healthz", `${baseUrl.replace(/\/$/, "")}/`).toString();
 }
 
 function waitForChildExit(
@@ -180,32 +164,21 @@ function waitForChildExit(
   });
 }
 
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(finish, milliseconds);
-    const onAbort = (): void => finish();
-
-    function finish(): void {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }
-
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 async function main(): Promise<void> {
   const controller = new AbortController();
   process.once("SIGINT", () => controller.abort());
   process.once("SIGTERM", () => controller.abort());
+  const compiled = process.argv.includes("--compiled");
   await superviseNodeServicesDevelopment({
     signal: controller.signal,
-    ...(process.argv.includes("--compiled") && {
+    ...(compiled && {
       spawnNodeServices: spawnCompiledNodeServices,
       refreshFeatureCatalog: async () => {},
+      waitBeforeFirstSpawn: false,
+      waitForTeamHub: (signal) =>
+        waitForTeamHubHealth(readTeamHubHealthUrl(), signal, {
+          retryDelayMs: 200,
+        }),
     }),
   });
 }

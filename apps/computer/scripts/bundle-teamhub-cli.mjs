@@ -82,6 +82,11 @@ await writeFile(
 await chmod(new URL("teamhub", cli), 0o755);
 
 if (process.platform === "win32") {
+  const flagIndex = process.argv.indexOf("--local-daemon-dir");
+  const localDaemonDir =
+    flagIndex >= 0 && process.argv[flagIndex + 1]
+      ? process.argv[flagIndex + 1]
+      : fileURLToPath(new URL("../local-daemon/", import.meta.url));
   const result = spawnSync(
     "go",
     [
@@ -92,7 +97,7 @@ if (process.platform === "win32") {
       "./cmd/linger-computer-launcher",
     ],
     {
-      cwd: fileURLToPath(new URL("../local-daemon/", import.meta.url)),
+      cwd: localDaemonDir,
       env: { ...process.env, CGO_ENABLED: "0" },
       stdio: "inherit",
     },

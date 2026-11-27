@@ -6,6 +6,10 @@ import {
   superviseNodeServicesDevelopment,
   waitForTeamHubHealth,
 } from "../scripts/dev-supervisor.js";
+import {
+  readTeamHubHealthUrl,
+  waitForTeamHubHealth as sharedWaitForTeamHubHealth,
+} from "../src/teamhub-health.js";
 
 class FakeNodeServicesChild extends EventEmitter {
   readonly kill = vi.fn(() => true);
@@ -69,5 +73,48 @@ describe("Node Services development supervisor", () => {
 
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-exports the shared waitForTeamHubHealth helper and builds the TeamHub health URL", () => {
+    expect(waitForTeamHubHealth).toBe(sharedWaitForTeamHubHealth);
+    expect(readTeamHubHealthUrl({})).toBe("http://127.0.0.1:8080/healthz");
+    expect(
+      readTeamHubHealthUrl({ TEAMHUB_BASE_URL: "http://127.0.0.1:9090/" }),
+    ).toBe("http://127.0.0.1:9090/healthz");
+  });
+
+  it("skips waiting for TeamHub before the first spawn when waitBeforeFirstSpawn is false, then waits before restarts", async () => {
+    const controller = new AbortController();
+    const firstChild = new FakeNodeServicesChild();
+    const secondChild = new FakeNodeServicesChild();
+    const spawnNodeServices = vi
+      .fn()
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(secondChild);
+    const waitForTeamHub = vi.fn().mockResolvedValue(undefined);
+    const refreshFeatureCatalog = vi.fn().mockResolvedValue(undefined);
+
+    const running = superviseNodeServicesDevelopment({
+      signal: controller.signal,
+      waitBeforeFirstSpawn: false,
+      refreshFeatureCatalog,
+      spawnNodeServices,
+      waitBeforeRestart: vi.fn().mockResolvedValue(undefined),
+      waitForTeamHub,
+    });
+
+    await vi.waitFor(() => expect(spawnNodeServices).toHaveBeenCalledOnce());
+    expect(waitForTeamHub).not.toHaveBeenCalled();
+
+    firstChild.emit("exit", 1, null);
+    await vi.waitFor(() => expect(spawnNodeServices).toHaveBeenCalledTimes(2));
+    expect(waitForTeamHub).toHaveBeenCalledOnce();
+    expect(spawnNodeServices.mock.invocationCallOrder[1]!).toBeGreaterThan(
+      waitForTeamHub.mock.invocationCallOrder[0]!,
+    );
+
+    controller.abort();
+    secondChild.emit("exit", null, "SIGTERM");
+    await running;
   });
 });

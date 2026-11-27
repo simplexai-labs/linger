@@ -431,56 +431,61 @@ describe("ensureStableBundledPi", () => {
 });
 
 describe("withBundledPiPath", () => {
-  it("orders user PATH > ~/.local/bin > newer harness Pi > bundled Pi and excludes older or equal harness copies", async () => {
-    const root = await makeTempDir("linger-bundled-pi-path-posix-");
-    const home = path.join(root, "linger-home");
-    const userHome = path.join(root, "user-home");
-    const userBin = path.join(root, "user-bin");
-    const localBin = path.join(userHome, ".local", "bin");
-    const bundledBin = path.join(
-      root,
-      "resources",
-      "cli",
-      "computer-tools",
-      "bin",
-    );
-    const piTools = path.join(home, "runtime", "harness", "tools", "pi");
+  // Real Windows temp directories contain a drive colon ("C:\"), which collides
+  // with the Linux PATH delimiter ":". Windows PATH behavior is tested below.
+  it.skipIf(process.platform === "win32")(
+    "orders user PATH > ~/.local/bin > newer harness Pi > bundled Pi and excludes older or equal harness copies",
+    async () => {
+      const root = await makeTempDir("linger-bundled-pi-path-posix-");
+      const home = path.join(root, "linger-home");
+      const userHome = path.join(root, "user-home");
+      const userBin = path.join(root, "user-bin");
+      const localBin = path.join(userHome, ".local", "bin");
+      const bundledBin = path.join(
+        root,
+        "resources",
+        "cli",
+        "computer-tools",
+        "bin",
+      );
+      const piTools = path.join(home, "runtime", "harness", "tools", "pi");
 
-    await mkdir(userBin, { recursive: true });
-    await mkdir(localBin, { recursive: true });
-    await mkdir(bundledBin, { recursive: true });
+      await mkdir(userBin, { recursive: true });
+      await mkdir(localBin, { recursive: true });
+      await mkdir(bundledBin, { recursive: true });
 
-    for (const ver of ["1.2.0", "1.5.2", "1.6.0", "1.10.0", "invalid"]) {
-      const dir = path.join(piTools, ver);
-      await mkdir(dir, { recursive: true });
-      const bin = path.join(dir, "pi");
-      await writeFile(bin, "#!/bin/sh\n", { mode: 0o755 });
-      if (process.platform !== "win32") await chmod(bin, 0o755);
-    }
+      for (const ver of ["1.2.0", "1.5.2", "1.6.0", "1.10.0", "invalid"]) {
+        const dir = path.join(piTools, ver);
+        await mkdir(dir, { recursive: true });
+        const bin = path.join(dir, "pi");
+        await writeFile(bin, "#!/bin/sh\n", { mode: 0o755 });
+        if (process.platform !== "win32") await chmod(bin, 0o755);
+      }
 
-    const bundledPi: BundledPi = {
-      binDir: bundledBin,
-      executable: path.join(bundledBin, "pi"),
-      version: "1.5.2",
-    };
+      const bundledPi: BundledPi = {
+        binDir: bundledBin,
+        executable: path.join(bundledBin, "pi"),
+        version: "1.5.2",
+      };
 
-    const result = await withBundledPiPath(
-      {
-        HOME: userHome,
-        PATH: `${userBin}:${localBin}`,
-      },
-      { home, bundledPi, platform: "linux" },
-    );
+      const result = await withBundledPiPath(
+        {
+          HOME: userHome,
+          PATH: `${userBin}:${localBin}`,
+        },
+        { home, bundledPi, platform: "linux" },
+      );
 
-    expect(result.SIMPLEX_PI_PATH).toBeUndefined();
-    expect(result.PATH?.split(":")).toEqual([
-      userBin,
-      localBin,
-      path.join(piTools, "1.10.0"),
-      path.join(piTools, "1.6.0"),
-      bundledBin,
-    ]);
-  });
+      expect(result.SIMPLEX_PI_PATH).toBeUndefined();
+      expect(result.PATH?.split(":")).toEqual([
+        userBin,
+        localBin,
+        path.join(piTools, "1.10.0"),
+        path.join(piTools, "1.6.0"),
+        bundledBin,
+      ]);
+    },
+  );
 
   it("preserves Windows Path casing without duplicate keys and includes %APPDATA%\\npm before harness and bundled Pi", async () => {
     const root = await makeTempDir("linger-bundled-pi-path-win-");
@@ -548,114 +553,119 @@ describe("findHigherPrecedencePi", () => {
     }
   }
 
-  it("returns SIMPLEX_PI_PATH (valid or invalid), non-bundled LINGER_PI_PATH, user PATH Pi, ~/.local/bin/pi, and strictly newer harness Pi", async () => {
-    const root = await makeTempDir("linger-higher-pi-");
-    const home = path.join(root, "linger-home");
-    const userHome = path.join(root, "user-home");
-    const userBin = path.join(root, "user-bin");
-    const localBin = path.join(userHome, ".local", "bin");
-    const bundledBin = path.join(root, "bundled", "bin");
-    const stableBin = path.join(home, "runtime", "bundled-pi", "bin");
-    const piTools = path.join(home, "runtime", "harness", "tools", "pi");
+  // Real Windows temp directories contain a drive colon ("C:\"), which collides
+  // with the Linux PATH delimiter ":". Windows precedence is tested below.
+  it.skipIf(process.platform === "win32")(
+    "returns SIMPLEX_PI_PATH (valid or invalid), non-bundled LINGER_PI_PATH, user PATH Pi, ~/.local/bin/pi, and strictly newer harness Pi",
+    async () => {
+      const root = await makeTempDir("linger-higher-pi-");
+      const home = path.join(root, "linger-home");
+      const userHome = path.join(root, "user-home");
+      const userBin = path.join(root, "user-bin");
+      const localBin = path.join(userHome, ".local", "bin");
+      const bundledBin = path.join(root, "bundled", "bin");
+      const stableBin = path.join(home, "runtime", "bundled-pi", "bin");
+      const piTools = path.join(home, "runtime", "harness", "tools", "pi");
 
-    await mkdir(userBin, { recursive: true });
-    await mkdir(localBin, { recursive: true });
-    await writeExec(path.join(bundledBin, "pi"));
-    await writeExec(path.join(stableBin, "pi"));
-    await writeExec(path.join(piTools, "1.2.0", "pi"));
-    await writeExec(path.join(piTools, "1.5.2", "pi"));
+      await mkdir(userBin, { recursive: true });
+      await mkdir(localBin, { recursive: true });
+      await writeExec(path.join(bundledBin, "pi"));
+      await writeExec(path.join(stableBin, "pi"));
+      await writeExec(path.join(piTools, "1.2.0", "pi"));
+      await writeExec(path.join(piTools, "1.5.2", "pi"));
 
-    const bundledPi: BundledPi = {
-      binDir: bundledBin,
-      executable: path.join(bundledBin, "pi"),
-      version: "1.5.2",
-    };
-    const baseOpts = { home, bundledPi, platform: "linux" as const };
+      const bundledPi: BundledPi = {
+        binDir: bundledBin,
+        executable: path.join(bundledBin, "pi"),
+        version: "1.5.2",
+      };
+      const baseOpts = { home, bundledPi, platform: "linux" as const };
 
-    // Bundled Pi and stable link in PATH/LINGER_PI_PATH, plus <= 1.5.2 harness copies, do not outrank bundled Pi.
-    await expect(
-      findHigherPrecedencePi(
-        {
-          HOME: userHome,
-          PATH: `${bundledBin}:${stableBin}:${userBin}`,
-          LINGER_PI_PATH: path.join(stableBin, "pi"),
-        },
-        baseOpts,
-      ),
-    ).resolves.toBeUndefined();
-    await expect(
-      findHigherPrecedencePi(
-        {
-          HOME: userHome,
-          PATH: userBin,
-          LINGER_PI_PATH: path.join(bundledBin, "pi"),
-        },
-        baseOpts,
-      ),
-    ).resolves.toBeUndefined();
+      // Bundled Pi and stable link in PATH/LINGER_PI_PATH, plus <= 1.5.2 harness copies, do not outrank bundled Pi.
+      await expect(
+        findHigherPrecedencePi(
+          {
+            HOME: userHome,
+            PATH: `${bundledBin}:${stableBin}:${userBin}`,
+            LINGER_PI_PATH: path.join(stableBin, "pi"),
+          },
+          baseOpts,
+        ),
+      ).resolves.toBeUndefined();
+      await expect(
+        findHigherPrecedencePi(
+          {
+            HOME: userHome,
+            PATH: userBin,
+            LINGER_PI_PATH: path.join(bundledBin, "pi"),
+          },
+          baseOpts,
+        ),
+      ).resolves.toBeUndefined();
 
-    // SIMPLEX_PI_PATH always outranks bundled Pi even when pointing to a missing path.
-    await expect(
-      findHigherPrecedencePi(
-        {
-          HOME: userHome,
-          PATH: "",
-          SIMPLEX_PI_PATH: "/nonexistent/custom/pi",
-        },
-        baseOpts,
-      ),
-    ).resolves.toBe("/nonexistent/custom/pi");
-    const validCustomPi = path.join(root, "custom", "pi");
-    await writeExec(validCustomPi);
-    await expect(
-      findHigherPrecedencePi(
-        {
-          HOME: userHome,
-          PATH: "",
-          SIMPLEX_PI_PATH: validCustomPi,
-        },
-        baseOpts,
-      ),
-    ).resolves.toBe(validCustomPi);
+      // SIMPLEX_PI_PATH always outranks bundled Pi even when pointing to a missing path.
+      await expect(
+        findHigherPrecedencePi(
+          {
+            HOME: userHome,
+            PATH: "",
+            SIMPLEX_PI_PATH: "/nonexistent/custom/pi",
+          },
+          baseOpts,
+        ),
+      ).resolves.toBe("/nonexistent/custom/pi");
+      const validCustomPi = path.join(root, "custom", "pi");
+      await writeExec(validCustomPi);
+      await expect(
+        findHigherPrecedencePi(
+          {
+            HOME: userHome,
+            PATH: "",
+            SIMPLEX_PI_PATH: validCustomPi,
+          },
+          baseOpts,
+        ),
+      ).resolves.toBe(validCustomPi);
 
-    // Non-bundled LINGER_PI_PATH outranks bundled Pi.
-    await expect(
-      findHigherPrecedencePi(
-        {
-          HOME: userHome,
-          PATH: "",
-          LINGER_PI_PATH: validCustomPi,
-        },
-        baseOpts,
-      ),
-    ).resolves.toBe(validCustomPi);
+      // Non-bundled LINGER_PI_PATH outranks bundled Pi.
+      await expect(
+        findHigherPrecedencePi(
+          {
+            HOME: userHome,
+            PATH: "",
+            LINGER_PI_PATH: validCustomPi,
+          },
+          baseOpts,
+        ),
+      ).resolves.toBe(validCustomPi);
 
-    // Strictly newer harness Pi outranks bundled Pi.
-    await writeExec(path.join(piTools, "1.7.0", "pi"));
-    await expect(
-      findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
-    ).resolves.toBe(path.join(piTools, "1.7.0", "pi"));
+      // Strictly newer harness Pi outranks bundled Pi.
+      await writeExec(path.join(piTools, "1.7.0", "pi"));
+      await expect(
+        findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
+      ).resolves.toBe(path.join(piTools, "1.7.0", "pi"));
 
-    // ~/.local/bin/pi outranks harness Pi.
-    await writeExec(path.join(localBin, "pi"));
-    await expect(
-      findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
-    ).resolves.toBe(path.join(localBin, "pi"));
-
-    // Non-executable pi in userBin is ignored on POSIX.
-    if (process.platform !== "win32") {
-      await writeExec(path.join(userBin, "pi"), false);
+      // ~/.local/bin/pi outranks harness Pi.
+      await writeExec(path.join(localBin, "pi"));
       await expect(
         findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
       ).resolves.toBe(path.join(localBin, "pi"));
-    }
 
-    // Executable user PATH Pi outranks ~/.local/bin/pi.
-    await writeExec(path.join(userBin, "pi"), true);
-    await expect(
-      findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
-    ).resolves.toBe(path.join(userBin, "pi"));
-  });
+      // Non-executable pi in userBin is ignored on POSIX.
+      if (process.platform !== "win32") {
+        await writeExec(path.join(userBin, "pi"), false);
+        await expect(
+          findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
+        ).resolves.toBe(path.join(localBin, "pi"));
+      }
+
+      // Executable user PATH Pi outranks ~/.local/bin/pi.
+      await writeExec(path.join(userBin, "pi"), true);
+      await expect(
+        findHigherPrecedencePi({ HOME: userHome, PATH: userBin }, baseOpts),
+      ).resolves.toBe(path.join(userBin, "pi"));
+    },
+  );
 
   it("checks Windows case-insensitive env vars and .cmd/.exe shims", async () => {
     const root = await makeTempDir("linger-higher-pi-win-");

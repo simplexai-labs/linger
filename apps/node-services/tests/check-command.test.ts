@@ -13,7 +13,9 @@ const concurrentlyCli = join(
   "dist/bin/index.js",
 );
 
-it.each(["none", "typecheck", "lint", "test"])(
+it
+  .skipIf(process.platform === "win32")
+  .each(["none", "typecheck", "lint", "test"])(
   "joins both static checks before tests and propagates %s failure",
   async (failure) => {
     const root = await mkdtemp(join(tmpdir(), "node-services-check-"));

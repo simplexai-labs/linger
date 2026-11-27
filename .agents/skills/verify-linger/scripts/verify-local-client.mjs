@@ -56,11 +56,34 @@ function commandName(name) {
   return isWindows ? `${name}.cmd` : name;
 }
 
+function quoteWindowsCmdArg(arg) {
+  if (/[\r\n]/.test(arg)) {
+    throw new Error(`Unsupported newline in Windows command argument: ${arg}`);
+  }
+  if (/^[A-Za-z0-9_./\\:@+-]+$/.test(arg)) return arg;
+  return `"${arg.replaceAll('"', '\\"')}"`;
+}
+
+function resolveSpawn(command, commandArgs) {
+  if (isWindows && /\.(?:cmd|bat)$/iu.test(command)) {
+    const comspec = process.env.ComSpec || "cmd.exe";
+    const line = [command, ...commandArgs].map(quoteWindowsCmdArg).join(" ");
+    return {
+      command: comspec,
+      args: ["/d", "/s", "/c", `"${line}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return { command, args: commandArgs, windowsVerbatimArguments: false };
+}
+
 function runSyncText(command, commandArgs, cwd = repoRoot) {
-  const result = spawnSync(command, commandArgs, {
+  const spec = resolveSpawn(command, commandArgs);
+  const result = spawnSync(spec.command, spec.args, {
     cwd,
     encoding: "utf8",
     windowsHide: true,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
   });
   return {
     status: result.status ?? 1,
@@ -146,11 +169,13 @@ async function runStep(name, command, commandArgs, options = {}) {
   const startedAt = Date.now();
   logLine(`=== [${name}] ${command} ${commandArgs.join(" ")} ===`);
   return await new Promise((resolve) => {
-    const child = spawn(command, commandArgs, {
+    const spec = resolveSpawn(command, commandArgs);
+    const child = spawn(spec.command, spec.args, {
       cwd,
       env: { ...process.env, ...options.env },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      windowsVerbatimArguments: spec.windowsVerbatimArguments,
     });
     child.stdout.on("data", (chunk) => {
       process.stdout.write(chunk);
@@ -518,6 +543,11 @@ if (!smokeOnly) {
         "src/native-process-windows-live.test.ts",
       ]),
     );
+    skippedOs.push({
+      check: "windows-nsi-setup-and-uninstall",
+      reason:
+        "Requires packaged NSIS setup executable; run the Windows recipe in features/desktop-and-installer.md",
+    });
   } else {
     skippedOs.push({
       check: "windows-native-acl-and-process",

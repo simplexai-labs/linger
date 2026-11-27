@@ -166,7 +166,9 @@ export async function runProcess(
       .stderr!.setEncoding("utf8")
       .on("data", (value: string) => output(value, "stderr"));
     child.once("error", () => {
-      failure = new Error("Command executable unavailable");
+      failure = Object.assign(new Error("Command executable unavailable"), {
+        code: "COMMAND_EXECUTABLE_UNAVAILABLE",
+      });
     });
     if (options.inputStream) {
       void pipeline(options.inputStream, child.stdin!).catch(() =>
@@ -175,7 +177,11 @@ export async function runProcess(
     }
     if (options.input !== undefined) {
       child.stdin!.on("error", () =>
-        stop(new Error("Command stdin unavailable")),
+        stop(
+          Object.assign(new Error("Command stdin unavailable"), {
+            code: "COMMAND_STDIN_UNAVAILABLE",
+          }),
+        ),
       );
       child.stdin!.end(options.input);
     }

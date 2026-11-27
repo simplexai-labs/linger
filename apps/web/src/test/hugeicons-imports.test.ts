@@ -132,5 +132,5 @@ describe("real @hugeicons/core-free-icons", () => {
       const perIcon = (await import(/* @vite-ignore */ file!)).default;
       expect(perIcon, name).toBe(barrel[name]);
     }
-  });
+  }, 30_000);
 });

@@ -220,6 +220,11 @@ func TestWindowsDiscoverDeadlineRequiresFullProtocolRecovery(t *testing.T) {
 }
 
 func TestWindowsDiscoverNativeProtocolsAndAuthenticationWithSanitizedEnvironment(t *testing.T) {
+	previousRegistry := readWindowsRegistryEnv
+	readWindowsRegistryEnv = func() (windowsRegistrySnapshot, bool) {
+		return windowsRegistrySnapshot{}, false
+	}
+	t.Cleanup(func() { readWindowsRegistryEnv = previousRegistry })
 	// This fixture tests protocol and authentication behavior, not probe latency.
 	timeout := 3 * time.Second
 	if value := os.Getenv("LINGER_TEST_WINDOWS_TIMEOUT_SCALE"); value != "" {
@@ -306,6 +311,11 @@ func TestWindowsDiscoverNativeProtocolsAndAuthenticationWithSanitizedEnvironment
 }
 
 func TestWindowsDiscoverFollowsStandaloneCodexJunctions(t *testing.T) {
+	previousRegistry := readWindowsRegistryEnv
+	readWindowsRegistryEnv = func() (windowsRegistrySnapshot, bool) {
+		return windowsRegistrySnapshot{}, false
+	}
+	t.Cleanup(func() { readWindowsRegistryEnv = previousRegistry })
 	// Standalone Codex: Programs\OpenAI\Codex\bin -> current\bin, current -> releases\<version>.
 	root := t.TempDir()
 	release := filepath.Join(root, "releases", "0.166.0")

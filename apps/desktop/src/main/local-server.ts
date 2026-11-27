@@ -35,7 +35,10 @@ import {
   readLocalIdentity,
   readLocalLogin,
 } from "@linger/local-installation/account";
-import { extractArchiveFallback } from "@linger/local-installation/archive";
+import {
+  extractArchiveFallback,
+  tarCommand,
+} from "@linger/local-installation/archive";
 import { downloadInRegion } from "@linger/local-installation/region";
 import { latestLegacyBackup } from "@linger/local-installation/legacy-database";
 import { legacyMigrationPending } from "@linger/local-installation/home";
@@ -4385,18 +4388,37 @@ export class LocalServerModule implements Module {
   async #isOrphanedLocalServer(config: DesktopConfig): Promise<boolean> {
     if (!config.serverUrl || !config.computerId) return false;
     if (!isManagedLocalServerConfig(config)) return false;
+    const recordFile = this.#recordFile();
     try {
-      await stat(this.#recordFile());
+      await stat(recordFile);
       return false;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
     }
+    // Windows stat() reports ENOENT instead of ENOTDIR when traversing through
+    // a regular file ancestor, so check ancestors before treating it as absent.
+    if (await this.#hasNonDirectoryAncestor(recordFile)) return false;
     return !(await answers(
       this.#options.fetch ?? fetch,
       config.serverUrl,
       ORPHANED_SERVER_PROBE_MS,
       { ready: false },
     ));
+  }
+
+  async #hasNonDirectoryAncestor(target: string): Promise<boolean> {
+    let current = path.dirname(target);
+    while (true) {
+      try {
+        const info = await stat(current);
+        return !info.isDirectory();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) return false;
+      current = parent;
+    }
   }
 
   // The person gave up on the installation the window used, whose services
@@ -6319,18 +6341,6 @@ const isFile = async (file: string): Promise<boolean> => {
     return false;
   }
 };
-
-// Windows' own bsdtar reads both the tar.gz source package and the Node zip;
-// a GNU tar earlier on PATH (Git for Windows) reads neither "C:" paths nor zips.
-export function tarCommand(
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  if (platform !== "win32") return "tar";
-  const systemRoot =
-    env.SystemRoot?.trim() || env.windir?.trim() || "C:\\Windows";
-  return path.win32.join(systemRoot, "System32", "tar.exe");
-}
 
 export interface UnpackArchiveOptions {
   readonly command?: string;

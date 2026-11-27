@@ -27,6 +27,7 @@ func TestTitleNamesTheActionFromTheCallAndHostEvidence(t *testing.T) {
 		{"several files", Action{Surface: "file_edit", Tool: "apply_patch"},
 			Evidence{Patch: "*** Update File: a.go\n*** Delete File: b.go\n*** Add File: c.go"}, "Edit a.go and 2 more files"},
 		{"edit in workspace", Action{Surface: "file_edit", Tool: "Edit", Input: `{"file_path":"/home/agent/work/example-repo/apps/x.py","old_string":"a","new_string":"b"}`}, Evidence{}, "Edit apps/x.py"},
+		{"edit in sibling prefix workspace", Action{Surface: "file_edit", Tool: "Edit", Input: `{"file_path":"/home/agent/work/example-repo-other/apps/x.py","old_string":"a","new_string":"b"}`}, Evidence{}, "Edit /home/agent/work/example-repo-other/apps/x.py"},
 		{"write outside workspace", Action{Surface: "file_edit", Tool: "Write", Input: `{"file_path":"/etc/hosts","content":"x"}`}, Evidence{}, "Write /etc/hosts"},
 		{"page with site", Action{Surface: "browser", Tool: "mcp__browser__browser_click", Input: `{"ref":"e42","element":"Send"}`},
 			Evidence{Browser: gitlab}, `Click "Merge" · GitLab (gitlab.example.com)`},
@@ -50,6 +51,23 @@ func TestTitleNamesTheActionFromTheCallAndHostEvidence(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := Title(c.action, c.evidence, workspace); got != c.want {
+			t.Errorf("%s: title=%q want %q", c.name, got, c.want)
+		}
+	}
+
+	const winWorkspace = `C:\Users\alice\work\example-repo`
+	winCases := []struct {
+		name   string
+		action Action
+		want   string
+	}{
+		{"windows edit in workspace", Action{Surface: "file_edit", Tool: "Edit", Input: `{"file_path":"C:\\Users\\alice\\work\\example-repo\\apps\\x.py"}`}, "Edit apps/x.py"},
+		{"windows case-folded drive", Action{Surface: "file_edit", Tool: "Edit", Input: `{"file_path":"c:/Users/alice/work/example-repo/apps/x.py"}`}, "Edit apps/x.py"},
+		{"windows sibling prefix", Action{Surface: "file_edit", Tool: "Edit", Input: `{"file_path":"C:\\Users\\alice\\work\\example-repo-2\\apps\\x.py"}`}, `Edit C:\Users\alice\work\example-repo-2\apps\x.py`},
+		{"windows other drive", Action{Surface: "file_edit", Tool: "Write", Input: `{"file_path":"D:\\etc\\hosts"}`}, `Write D:\etc\hosts`},
+	}
+	for _, c := range winCases {
+		if got := Title(c.action, Evidence{}, winWorkspace); got != c.want {
 			t.Errorf("%s: title=%q want %q", c.name, got, c.want)
 		}
 	}

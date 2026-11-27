@@ -69,6 +69,7 @@ import {
   type LocalServerOptions,
 } from "./local-server.js";
 import { localIdentityProof } from "@linger/local-installation/account";
+import { tarCommand } from "@linger/local-installation/archive";
 import * as fsRetry from "@linger/local-installation/fs-retry";
 import { ensureLocalmodelsTool } from "@linger/local-installation/localmodels-tool";
 import * as nativeProcess from "@linger/local-installation/native-process";
@@ -363,7 +364,7 @@ const sourceArchive = (root: string, variant?: string) => {
     ),
   );
   const file = path.join(root, "linger.tar.gz");
-  execFileSync("tar", [
+  execFileSync(tarCommand(), [
     "-czf",
     file,
     "-C",
@@ -1261,7 +1262,7 @@ describe("LocalServerModule", () => {
     mkdirSync(store, { recursive: true });
     writeFileSync(path.join(store, "index"), "packages");
     const bundleFile = path.join(root, "deps.tar.gz");
-    execFileSync("tar", [
+    execFileSync(tarCommand(), [
       "-czf",
       bundleFile,
       "-C",
@@ -1886,7 +1887,13 @@ describe("LocalServerModule", () => {
     writeFileSync(
       path.join(bundle, "runtime.tar.zst"),
       zstdCompressSync(
-        execFileSync("tar", ["-cf", "-", "-C", path.dirname(tree), "runtime"]),
+        execFileSync(tarCommand(), [
+          "-cf",
+          "-",
+          "-C",
+          path.dirname(tree),
+          "runtime",
+        ]),
       ),
     );
     const runtimeSha256 = createHash("sha256")
@@ -1980,7 +1987,7 @@ describe("LocalServerModule", () => {
     writeFileSync(path.join(skeletonRoot, "scripts", "with-local-env.mjs"), "");
 
     const archiveFile = path.join(f.root, "skeleton-linger.tar.gz");
-    execFileSync("tar", [
+    execFileSync(tarCommand(), [
       "-czf",
       archiveFile,
       "-C",
@@ -2017,7 +2024,7 @@ describe("LocalServerModule", () => {
     writeFileSync(
       path.join(runtimeBundle, "runtime.tar.zst"),
       zstdCompressSync(
-        execFileSync("tar", [
+        execFileSync(tarCommand(), [
           "-cf",
           "-",
           "-C",
@@ -6194,7 +6201,7 @@ describe("LocalServerModule after a restart", () => {
     writeFileSync(path.join(pkg, "tool.json"), manifestBody);
     const tgz = path.join(root, "localmodels.tgz");
     execFileSync(
-      process.platform === "win32" ? "tar.exe" : "tar",
+      tarCommand(),
       ["-czf", tgz, "-C", path.join(root, "kit"), "package"],
       { env: { ...process.env, COPYFILE_DISABLE: "1" } },
     );
@@ -6503,6 +6510,17 @@ describe("LocalServerModule after a restart", () => {
       },
       enrolled,
       (home) => {
+        if (process.platform === "win32") {
+          fixtureNode(
+            path.join(
+              home,
+              "desktop",
+              "node",
+              `v${NODE_RUNTIME_VERSION}`,
+              "node.exe",
+            ),
+          );
+        }
         const repo = path.join(home, "desktop", "source", repoName);
         unpackedSource(repo);
         mkdirSync(path.join(home, "desktop"), { recursive: true });
@@ -9022,6 +9040,51 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
     return { ...f, archive };
   };
 
+  // Match the host's child-process abort semantics (stdin EOF on Windows,
+  // SIGTERM on POSIX) when testing Bifrost pre-fetch cancellation.
+  const hostCheckoutFixture = (
+    extra: (home: string) => Partial<LocalServerOptions> = () => ({}),
+    api = installerApi(),
+  ) => {
+    const platform: NodeJS.Platform =
+      process.platform === "win32" ? "win32" : "linux";
+    return fixture(
+      (home) => ({
+        ...withCheckout(home),
+        platform,
+        arch: "x64",
+        ...(platform === "win32"
+          ? { checkPrivateLocation: async () => {} }
+          : {}),
+        ...extra(home),
+      }),
+      {},
+      (home) => {
+        checkout(home);
+        writeFileSync(
+          path.join(path.dirname(home), "installer", "distribution.json"),
+          JSON.stringify({
+            platform,
+            arch: "x64",
+            nativeSources: [{ target: `${platform}-x64` }],
+          }),
+        );
+        if (platform === "win32") {
+          fixtureNode(
+            path.join(
+              home,
+              "desktop",
+              "node",
+              `v${NODE_RUNTIME_VERSION}`,
+              "node.exe",
+            ),
+          );
+        }
+      },
+      api,
+    );
+  };
+
   it("silently pre-stages bundled source and native runtime during inspect() and joins on begin() with granular timings", async () => {
     const info = vi.spyOn(silentLog, "info");
     const f = setupBundledArchiveFixture("linux", "x64");
@@ -9244,7 +9307,7 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
 
     // 2. Switching location via chooseLocation() also cancels Bifrost pre-fetch
     //    for the old home and leaves the new candidate untouched.
-    const f2 = fixture(withCheckout, {}, checkout);
+    const f2 = hostCheckoutFixture();
     writeFileSync(path.join(f2.root, "prefetch-track"), "");
     writeFileSync(path.join(f2.root, "prefetch-hang"), "");
     const picked = path.join(f2.root, "other-home");
@@ -9288,7 +9351,7 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
       }
       return origHandle(url, init);
     };
-    const fByok = fixture(withCheckout, {}, checkout, byokApi);
+    const fByok = hostCheckoutFixture(undefined, byokApi);
     fByokRoot = fByok.root;
     writeFileSync(path.join(fByok.root, "prefetch-track"), "");
     writeFileSync(path.join(fByok.root, "prefetch-hang"), "");
@@ -9339,7 +9402,7 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
     }
 
     // 2. Pure subscription install (claude/codex) aborts in-flight Bifrost pre-fetch.
-    const fSub = fixture(withCheckout, {}, checkout);
+    const fSub = hostCheckoutFixture();
     writeFileSync(path.join(fSub.root, "prefetch-track"), "");
     writeFileSync(path.join(fSub.root, "prefetch-hang"), "");
     await fSub.host.start();
@@ -9784,13 +9847,8 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
       setupChoice: "codex",
     });
     signInApi.runtime.login = { state: "idle" };
-    const fSignIn = fixture(
-      (home) => ({
-        ...withCheckout(home),
-        signInPollMs: 20,
-      }),
-      {},
-      checkout,
+    const fSignIn = hostCheckoutFixture(
+      () => ({ signInPollMs: 20 }),
       signInApi,
     );
     writeFileSync(path.join(fSignIn.root, "prefetch-track"), "");

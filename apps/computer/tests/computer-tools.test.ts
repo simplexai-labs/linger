@@ -12,6 +12,7 @@ import {
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
@@ -508,12 +509,14 @@ it("stages a compact self-contained computer-tools bundle with bundled Pi MCP, j
         target: string,
       ) => Promise<string[]>;
     };
+    const stageTarget =
+      process.platform === "win32" ? "win32-x64" : "linux-x64";
     const manifest = await bundler.stageComputerTools(root, {
-      target: "linux-x64",
+      target: stageTarget,
     });
     const validated = await bundler.validatedComputerToolAssets(
       root,
-      "linux-x64",
+      stageTarget,
     );
     expect(validated).toContain("cli/computer-tools/manifest.json");
     expect(manifest.assets.length).toBeLessThan(400);
@@ -1977,11 +1980,15 @@ it("waits for cold-start MCP initialize and tools/list before sending a prefix w
       { mode: 0o600 },
     );
 
-    const piCliPath = new URL(
-      "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
-      import.meta.url,
-    ).pathname;
-    const piMcpPath = new URL("../tools/pi-mcp.mjs", import.meta.url).pathname;
+    const piCliPath = fileURLToPath(
+      new URL(
+        "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+        import.meta.url,
+      ),
+    );
+    const piMcpPath = fileURLToPath(
+      new URL("../tools/pi-mcp.mjs", import.meta.url),
+    );
     const shellTool = process.platform === "win32" ? "powershell" : "bash";
 
     const { spawn } = await import("node:child_process");

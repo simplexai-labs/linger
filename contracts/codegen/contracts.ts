@@ -3,7 +3,7 @@
 // directories the entries name. Generation clears those directories first, so
 // a removed contract or output leaves nothing behind; verification compares
 // them whole and rejects any directory that no entry owns.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -70,8 +70,142 @@ const runnerGatewayOutput = `${typescriptGeneratedDirectory}/runner-gateway`;
 // OpenAPI server dependencies of the main generated Go module.
 export const runnerGatewayGoOutput = "go/runnergateway";
 
+const DEFAULT_OAPI_CODEGEN_ARGS = [
+  "go",
+  "run",
+  "github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1",
+] as const;
+
 function run(command: string, args: string[]) {
   execFileSync(command, args, { cwd: repositoryRoot, stdio: "inherit" });
+}
+
+function runNodeTool(relativeScript: string, args: string[]) {
+  run(process.execPath, [path.join(repositoryRoot, relativeScript), ...args]);
+}
+
+function runOapiCodegen(args: string[]) {
+  const configured = process.env.OAPI_CODEGEN_COMMAND?.trim();
+  if (!configured) {
+    run(DEFAULT_OAPI_CODEGEN_ARGS[0], [
+      ...DEFAULT_OAPI_CODEGEN_ARGS.slice(1),
+      ...args,
+    ]);
+    return;
+  }
+  if (!/[|&;<>()$`\\"'\n]/u.test(configured)) {
+    const [command, ...prefix] = configured.split(/\s+/u);
+    run(command!, [...prefix, ...args]);
+    return;
+  }
+  run("sh", ["-c", `${configured} "$@"`, "oapi-codegen", ...args]);
+}
+
+function listTreeFiles(root: string): string[] {
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      path.posix.join(
+        path.relative(root, entry.parentPath).replaceAll(path.sep, "/"),
+        entry.name,
+      ),
+    )
+    .sort();
+}
+
+function truncateDiffLine(line: string, limit = 120): string {
+  return line.length <= limit ? line : `${line.slice(0, limit - 1)}...`;
+}
+
+function firstLineDifference(
+  committedText: string,
+  generatedText: string,
+): string {
+  const leftLines = committedText.split("\n");
+  const rightLines = generatedText.split("\n");
+  const count = Math.max(leftLines.length, rightLines.length);
+  for (let index = 0; index < count; index += 1) {
+    const leftLine = leftLines[index];
+    const rightLine = rightLines[index];
+    if (leftLine !== rightLine) {
+      const committedPreview =
+        leftLine === undefined
+          ? "<eof>"
+          : JSON.stringify(truncateDiffLine(leftLine));
+      const generatedPreview =
+        rightLine === undefined
+          ? "<eof>"
+          : JSON.stringify(truncateDiffLine(rightLine));
+      return `line ${index + 1}: committed=${committedPreview} generated=${generatedPreview}`;
+    }
+  }
+  return "byte content differs";
+}
+
+export function diffDirectories(
+  committedDir: string,
+  generatedDir: string,
+  normalizeCrlf = process.platform === "win32",
+): string[] {
+  const committedFiles = listTreeFiles(committedDir);
+  const generatedFiles = listTreeFiles(generatedDir);
+  const differences: string[] = [];
+  const committedSet = new Set(committedFiles);
+  const generatedSet = new Set(generatedFiles);
+
+  for (const file of committedFiles) {
+    if (!generatedSet.has(file)) {
+      differences.push(`only in committed: ${file}`);
+    }
+  }
+  for (const file of generatedFiles) {
+    if (!committedSet.has(file)) {
+      differences.push(`only in generated: ${file}`);
+    }
+  }
+  for (const file of committedFiles) {
+    if (!generatedSet.has(file)) continue;
+    const left = readFileSync(path.join(committedDir, file));
+    const right = readFileSync(path.join(generatedDir, file));
+    if (left.equals(right)) continue;
+    const leftText = normalizeCrlf
+      ? left.toString("utf8").replaceAll("\r\n", "\n")
+      : left.toString("utf8");
+    const rightText = normalizeCrlf
+      ? right.toString("utf8").replaceAll("\r\n", "\n")
+      : right.toString("utf8");
+    if (normalizeCrlf && leftText === rightText) {
+      continue;
+    }
+    differences.push(
+      `differs: ${file} (${firstLineDifference(leftText, rightText)})`,
+    );
+  }
+  return differences;
+}
+
+function directoryDiffers(
+  directory: string,
+  committedDir: string,
+  generatedDir: string,
+): boolean {
+  if (process.platform !== "win32") {
+    const result = spawnSync("diff", ["-ru", committedDir, generatedDir], {
+      cwd: repositoryRoot,
+      stdio: "inherit",
+    });
+    if (!result.error) {
+      return result.status !== 0;
+    }
+    if ((result.error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw result.error;
+    }
+  }
+  const differences = diffDirectories(committedDir, generatedDir);
+  for (const difference of differences) {
+    process.stderr.write(`contracts/generated/${directory}: ${difference}\n`);
+  }
+  return differences.length > 0;
 }
 
 export function generateContracts(
@@ -79,13 +213,6 @@ export function generateContracts(
   buildRoot = path.join(repositoryRoot, ".contracts-build"),
   entries: ContractEntry[] = contractEntries,
 ) {
-  // The Makefile pins the oapi-codegen version in this command.
-  const oapiCodegen = process.env.OAPI_CODEGEN_COMMAND;
-  if (!oapiCodegen) {
-    throw new Error(
-      "OAPI_CODEGEN_COMMAND is required; run make contracts-generate",
-    );
-  }
   rmSync(path.join(outputRoot, typescriptGeneratedDirectory), {
     force: true,
     recursive: true,
@@ -105,9 +232,7 @@ export function generateContracts(
 
   for (const entry of entries) {
     const bundle = path.join(buildRoot, `${entry.id}.yaml`);
-    run("pnpm", [
-      "exec",
-      "redocly",
+    runNodeTool("node_modules/@redocly/cli/bin/cli.js", [
       "bundle",
       entry.entrypoint,
       "--output",
@@ -118,9 +243,7 @@ export function generateContracts(
       typescriptGeneratedOutput(entry.id),
     );
     mkdirSync(typescriptOutput, { recursive: true });
-    run("pnpm", [
-      "exec",
-      "openapi-typescript",
+    runNodeTool("node_modules/openapi-typescript/bin/cli.js", [
       bundle,
       "-o",
       path.join(typescriptOutput, "types.ts"),
@@ -128,10 +251,7 @@ export function generateContracts(
     if (!entry.go) continue;
     const goOutput = path.join(outputRoot, goGeneratedOutput(entry.go));
     mkdirSync(goOutput, { recursive: true });
-    run("sh", [
-      "-c",
-      `${oapiCodegen} "$@"`,
-      "oapi-codegen",
+    runOapiCodegen([
       "-generate",
       // TeamHub mounts its own routes over the types; Go callers get a client.
       entry.go.mode === "client" ? "types,client" : "types",
@@ -143,18 +263,13 @@ export function generateContracts(
     ]);
   }
 
-  run("pnpm", [
-    "exec",
-    "node",
-    "contracts/codegen/generate-runner-contract.mjs",
+  runNodeTool("contracts/codegen/generate-runner-contract.mjs", [
     "--output",
     path.join(outputRoot, runnerGatewayOutput),
     "--go-output",
     path.join(outputRoot, runnerGatewayGoOutput),
   ]);
-  run("pnpm", [
-    "exec",
-    "prettier",
+  runNodeTool("node_modules/prettier/bin/prettier.cjs", [
     path.join(outputRoot, typescriptGeneratedDirectory),
     "--write",
   ]);
@@ -299,13 +414,13 @@ export function verifyContracts(entries: ContractEntry[] = contractEntries) {
         entry.go ? [goGeneratedOutput(entry.go)] : [],
       ),
     ]) {
-      try {
-        run("diff", [
-          "-ru",
+      if (
+        directoryDiffers(
+          directory,
           path.join(committedRoot, directory),
           path.join(outputRoot, directory),
-        ]);
-      } catch {
+        )
+      ) {
         failures.push(`${directory} differs from a fresh generation`);
       }
     }

@@ -17,5 +17,8 @@ describe("Vitest isolation partition", () => {
     expect(isolated).toContain("src/features/rooms/room-surface.test.tsx");
     expect(shared).toContain("src/features/rooms/room-navigation.test.tsx");
     expect(isolated.filter((file) => shared.includes(file))).toEqual([]);
+    expect([...isolated, ...shared].every((file) => !file.includes("\\"))).toBe(
+      true,
+    );
   });
 });

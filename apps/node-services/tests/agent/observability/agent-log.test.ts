@@ -394,9 +394,11 @@ describe("logAgentEvent", () => {
         event: "local_run.started",
       }),
     ]);
-    expect(statSync(root).mode & 0o777).toBe(0o700);
-    expect(statSync(agentDirectory).mode & 0o777).toBe(0o700);
-    expect(statSync(filePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(root).mode & 0o777).toBe(0o700);
+      expect(statSync(agentDirectory).mode & 0o777).toBe(0o700);
+      expect(statSync(filePath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("routes events without an agent identity to the system log", async () => {
@@ -426,8 +428,10 @@ describe("logAgentEvent", () => {
     logAgentEvent("info", "agent_manager.started");
 
     await flushAgentLogs(2000);
-    expect(statSync(root).mode & 0o777).toBe(0o755);
-    expect(statSync(path.join(root, "system")).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect(statSync(root).mode & 0o777).toBe(0o755);
+      expect(statSync(path.join(root, "system")).mode & 0o777).toBe(0o700);
+    }
   });
 
   it("hashes unsafe agent IDs before using them as directory names", async () => {

@@ -2103,7 +2103,9 @@ function readPrompt(filename: string): string {
   return readFileSync(
     join(promptsRoot, "llm-wiki", "personal", filename),
     "utf8",
-  ).trim();
+  )
+    .replaceAll("\r\n", "\n")
+    .trim();
 }
 
 /** A batch checkpoint resumes only under the prompts that wrote it. */

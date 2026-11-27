@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/finalpath"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 )
 
@@ -450,7 +451,7 @@ func (r *Runtime) ensureChild(hard, scheduling context.Context) (*child, error) 
 			return nil, err
 		}
 	}
-	engineDir, err := filepath.EvalSymlinks(r.opts.QuickJSDirectory)
+	engineDir, err := finalpath.Resolve(r.opts.QuickJSDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("open bundled UI engine: %w", err)
 	}

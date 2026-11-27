@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/finalpath"
 )
 
 // ShellDecision is the Daemon's own answer to a shell command.
@@ -346,6 +348,11 @@ func (p *shellPaths) inside(path string) bool {
 	if path == "" || slices.Contains(strings.Split(filepath.ToSlash(path), "/"), "..") {
 		return false
 	}
+	// A leading slash or backslash is rooted in POSIX/Git Bash shells and
+	// drive-relative on Windows, never a path relative to the workspace.
+	if (strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\`)) && !filepath.IsAbs(path) {
+		return false
+	}
 	for _, place := range p.places {
 		resolved := path
 		if !filepath.IsAbs(path) {
@@ -513,7 +520,7 @@ func withinWorkspace(workspace, path string) bool {
 	if workspace == "" || !filepath.IsAbs(workspace) || !filepath.IsAbs(path) {
 		return false
 	}
-	root, err := filepath.EvalSymlinks(workspace)
+	root, err := finalpath.Resolve(workspace)
 	if err != nil {
 		return false
 	}
@@ -529,7 +536,7 @@ func withinWorkspace(workspace, path string) bool {
 		rest = filepath.Join(filepath.Base(existing), rest)
 		existing = parent
 	}
-	resolved, err := filepath.EvalSymlinks(existing)
+	resolved, err := finalpath.Resolve(existing)
 	if err != nil {
 		return false
 	}

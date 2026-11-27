@@ -317,7 +317,8 @@ func TestCloseRevokesActiveCallbackAndPreventsReuse(t *testing.T) {
 }
 
 func TestUnconfirmedCleanupPreventsReplacement(t *testing.T) {
-	r, err := New(t.Context(), Options{NodePath: "/fixture/node", QuickJSDirectory: "/fixture/quickjs", Dispatch: noCalls(t)})
+	root := t.TempDir()
+	r, err := New(t.Context(), Options{NodePath: filepath.Join(root, "node"), QuickJSDirectory: filepath.Join(root, "quickjs"), Dispatch: noCalls(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

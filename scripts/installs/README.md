@@ -156,7 +156,13 @@ region and `fallback`, and later downloads start there (unless
 | localmodels kit                      | CloudFront, then npm | `cdn.npmmirror.com` where it has the kit |
 | Voice model packages (node-services) | `registry.npmjs.org` | `registry.npmmirror.com`                 |
 
-A registry or `GOPROXY` the person configured still wins. The installer
-passes the resolved region as `SIMPLEX_REGION` to every `localmodels` child
-(stack, foundations, Harness) and to every native service, so none of them
-probes again.
+A registry or `GOPROXY` the person configured still wins. When a region is
+already forced (`SIMPLEX_REGION`) or cached in `region.json`, the installer
+passes it as `SIMPLEX_REGION` to every `localmodels` child (stack, foundations,
+Harness) and to every native service so none of them probes again. On a cold
+home without a cached region, offline native installs run the probe in the
+background without blocking startup (adopting the result before services start
+if ready, else continuing with `global`), and `localmodels` children receive
+`SIMPLEX_REGION=auto` with `SIMPLEX_REGION_FILE` set to
+`<LINGER_HOME>/runtime/region.json` so non-downloading commands skip probing
+while downloading commands resolve lazily and share `region.json`.

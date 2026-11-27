@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -57,6 +58,9 @@ func (f *shutdownFixture) CloseContext(ctx context.Context) error {
 }
 
 func TestShutdownProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support Process.Signal(SIGTERM)")
+	}
 	for _, mode := range []string{"success", "failure", "hang", "startup", "http-timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			command := exec.Command(os.Args[0], "-test.run=^TestShutdownProcessHelper$")

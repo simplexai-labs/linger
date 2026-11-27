@@ -11,11 +11,11 @@
     "start": "node static-host.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint --max-warnings=0 src e2e build-assets.mjs panel-url-preview.mjs postcss.config.mjs static-host.mjs vite.config.ts vite.mermaid-preview.config.ts vitest.config.ts",
-    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run --config vitest.config.ts",
+    "test": "node ../../scripts/run-with-env.mjs NODE_OPTIONS=--no-experimental-webstorage -- node ./node_modules/vitest/vitest.mjs run --config vitest.config.ts",
     "test:build": "vitest run --config vitest.build.config.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "test:e2e": "pnpm --dir ../.. test:e2e",
-    "build:assets": "MIMALLOC_ARENA_EAGER_COMMIT=0 MIMALLOC_PURGE_DELAY=0 NODE_ENV=production vite build --mode production && MIMALLOC_ARENA_EAGER_COMMIT=0 MIMALLOC_PURGE_DELAY=0 NODE_ENV=production vite build --mode production --config vite.mermaid-preview.config.ts && node build-assets.mjs"
+    "build:assets": "node ../../scripts/run-with-env.mjs MIMALLOC_ARENA_EAGER_COMMIT=0 MIMALLOC_PURGE_DELAY=0 NODE_ENV=production -- node ./node_modules/vite/bin/vite.js build --mode production && node ../../scripts/run-with-env.mjs MIMALLOC_ARENA_EAGER_COMMIT=0 MIMALLOC_PURGE_DELAY=0 NODE_ENV=production -- node ./node_modules/vite/bin/vite.js build --mode production --config vite.mermaid-preview.config.ts && node build-assets.mjs"
   },
   "engines": {
     "node": ">=26.5.0 <27"

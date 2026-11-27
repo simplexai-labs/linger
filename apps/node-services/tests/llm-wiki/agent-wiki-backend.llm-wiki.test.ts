@@ -319,7 +319,8 @@ async function generate(
   });
   const result = await backend.generate(request);
   const files = (await readdir(request.outputDirectory, { recursive: true }))
-    .filter((path) => path.endsWith(".md"))
+    .map((entry) => entry.replaceAll("\\", "/"))
+    .filter((entry) => entry.endsWith(".md"))
     .sort();
   return {
     result,
@@ -900,7 +901,8 @@ ${filler}
       request,
     );
     const files = (await readdir(request.outputDirectory, { recursive: true }))
-      .filter((path) => path.startsWith("clients/") && !isIndex(path))
+      .map((entry) => entry.replaceAll("\\", "/"))
+      .filter((entry) => entry.startsWith("clients/") && !isIndex(entry))
       .sort();
     return {
       files,

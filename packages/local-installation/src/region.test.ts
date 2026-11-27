@@ -5,6 +5,7 @@ import path from "node:path";
 import { requestUrlText } from "@linger/service-kit";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  cachedRegion,
   downloadInRegion,
   forcedRegion,
   formatRegionDownloadEvent,
@@ -598,4 +599,135 @@ it("emits region resolution, mirror switch, and region fallback events from down
     "Download failed on cdn.npmmirror.com (HTTP 404); switching to nodejs.org.",
     "Download region fallback: cn -> global (nodejs.org).",
   ]);
+});
+
+it("cachedRegion returns undefined on a cold home without probing or poisoning resolveRegion", async () => {
+  const directory = await home();
+  const fetcher = probe(4096, 16);
+  vi.stubGlobal("fetch", fetcher);
+  const onResolved = vi.fn();
+  try {
+    expect(await cachedRegion(directory, { onResolved })).toBeUndefined();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(onResolved).not.toHaveBeenCalled();
+    await expect(readFile(regionFile(directory))).rejects.toThrow();
+
+    // A later resolveRegion still probes normally because cachedRegion added no entry.
+    expect(await resolveRegion(directory, { fetcher })).toBe("cn");
+    expect(fetcher).toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it("cachedRegion returns forced SIMPLEX_REGION, persists it, and validates invalid values", async () => {
+  const directory = await home();
+  await saved(directory, { region: "global", method: "probe" });
+  vi.stubEnv("SIMPLEX_REGION", "cn");
+  let info: RegionResolutionInfo | undefined;
+  expect(
+    await cachedRegion(directory, {
+      onResolved: (value) => {
+        info = value;
+      },
+    }),
+  ).toBe("cn");
+  expect(info).toMatchObject({ region: "cn", method: "env" });
+  expect(info?.ms).toBeGreaterThanOrEqual(0);
+  expect(await read(directory)).toMatchObject({ region: "cn", method: "env" });
+
+  vi.stubEnv("SIMPLEX_REGION", "mars");
+  await expect(cachedRegion(directory)).rejects.toThrow(/auto, global or cn/);
+});
+
+it("cachedRegion returns a settled in-process resolution or fallback without touching disk", async () => {
+  const directory = await home();
+  expect(await resolveRegion(directory, { fetcher: probe(4096, 16) })).toBe(
+    "cn",
+  );
+  await rm(regionFile(directory));
+  let settledInfo: RegionResolutionInfo | undefined;
+  expect(
+    await cachedRegion(directory, {
+      onResolved: (value) => {
+        settledInfo = value;
+      },
+    }),
+  ).toBe("cn");
+  expect(settledInfo).toMatchObject({ region: "cn", method: "probe" });
+
+  await recordRegionFallback(directory, "global");
+  let fallbackInfo: RegionResolutionInfo | undefined;
+  expect(
+    await cachedRegion(directory, {
+      onResolved: (value) => {
+        fallbackInfo = value;
+      },
+    }),
+  ).toBe("global");
+  expect(fallbackInfo).toMatchObject({ region: "global", method: "fallback" });
+});
+
+it("cachedRegion returns undefined immediately while a resolveRegion probe is still in flight", async () => {
+  const directory = await home();
+  const started = gate();
+  const release = gate();
+  let requests = 0;
+  const fetcher = vi.fn(async (input: string | URL | Request) => {
+    if (++requests === 2) started.resolve();
+    await release.promise;
+    return probe(4096, 16)(input);
+  }) as unknown as typeof fetch;
+  const pending = resolveRegion(directory, { fetcher });
+  await started.promise;
+
+  // Does not block or disturb the in-flight probe.
+  expect(await cachedRegion(directory)).toBeUndefined();
+
+  release.resolve();
+  expect(await pending).toBe("cn");
+  expect(await cachedRegion(directory)).toBe("cn");
+});
+
+it("cachedRegion returns fresh disk cache and returns undefined for stale or invalid records", async () => {
+  const freshHome = await home();
+  await saved(freshHome, {
+    region: "cn",
+    resolved_at: new Date(Date.now() - 2 * hour).toISOString(),
+  });
+  let cacheInfo: RegionResolutionInfo | undefined;
+  expect(
+    await cachedRegion(freshHome, {
+      onResolved: (value) => {
+        cacheInfo = value;
+      },
+    }),
+  ).toBe("cn");
+  expect(cacheInfo).toMatchObject({ region: "cn", method: "cache" });
+
+  for (const record of [
+    {
+      region: "cn",
+      resolved_at: new Date(Date.now() - 25 * hour).toISOString(),
+    },
+    { region: "mars" },
+  ]) {
+    const staleHome = await home();
+    await saved(staleHome, record as Pick<RegionRecord, "region">);
+    expect(await cachedRegion(staleHome)).toBeUndefined();
+  }
+});
+
+it("cachedRegion refuses an aborted caller even when cached or forced", async () => {
+  const directory = await home();
+  await saved(directory, { region: "cn" });
+  const reason = new Error("cancelled before cachedRegion");
+  await expect(
+    cachedRegion(directory, { signal: AbortSignal.abort(reason) }),
+  ).rejects.toBe(reason);
+
+  vi.stubEnv("SIMPLEX_REGION", "cn");
+  await expect(
+    cachedRegion(directory, { signal: AbortSignal.abort(reason) }),
+  ).rejects.toBe(reason);
 });

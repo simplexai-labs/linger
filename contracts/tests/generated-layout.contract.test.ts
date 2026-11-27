@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   contractEntries,
+  diffDirectories,
   openApiTreeFailures,
   unownedGeneratedDirectories,
 } from "../codegen/contracts";
@@ -88,5 +89,35 @@ describe("generated contract layout", () => {
 
   it("covers every committed OpenAPI file", () => {
     expect(openApiTreeFailures()).toEqual([]);
+  });
+
+  it("compares generated contract trees without requiring POSIX diff", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "contract-diff-"));
+    try {
+      const committed = path.join(root, "committed");
+      const generated = path.join(root, "generated");
+      mkdirSync(path.join(committed, "nested"), { recursive: true });
+      mkdirSync(path.join(generated, "nested"), { recursive: true });
+      writeFileSync(path.join(committed, "nested/a.ts"), "line1\r\nline2\r\n");
+      writeFileSync(path.join(generated, "nested/a.ts"), "line1\nline2\n");
+
+      expect(diffDirectories(committed, generated, true)).toEqual([]);
+      expect(diffDirectories(committed, generated, false)).toEqual([
+        'differs: nested/a.ts (line 1: committed="line1\\r" generated="line1")',
+      ]);
+
+      writeFileSync(path.join(generated, "nested/a.ts"), "line1\nchanged\n");
+      expect(diffDirectories(committed, generated, true)).toEqual([
+        'differs: nested/a.ts (line 2: committed="line2" generated="changed")',
+      ]);
+      writeFileSync(path.join(generated, "nested/a.ts"), "line1\nline2\n");
+
+      writeFileSync(path.join(generated, "nested/extra.ts"), "extra\n");
+      expect(diffDirectories(committed, generated, true)).toEqual([
+        "only in generated: nested/extra.ts",
+      ]);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 });
