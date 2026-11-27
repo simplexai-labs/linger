@@ -338,25 +338,39 @@ describe("runAgentTask", () => {
     expect(validate!({ actions: [] })).toBeUndefined();
   });
 
-  it("sends each step once with its cap in a session of its own", async () => {
-    const call = vi.fn().mockResolvedValue({
-      output: { actions: [{ tool: "finish", summary: "ok" }] },
-      model: "test",
+  it("keeps one session for a run and sends a later step only its new results", async () => {
+    const calls: ModelChainCallRequest[] = [];
+    const replies = [
+      { actions: [{ tool: "read", arguments: { source: "s1" } }] },
+      { actions: [{ tool: "finish", summary: "ok" }] },
+    ];
+    const call = vi.fn(async (request: ModelChainCallRequest) => {
+      calls.push(request);
+      return { output: replies.shift()!, model: "test" };
     });
     const result = await runAgentTask({
       model: stubChain({ call }),
       step: "test",
       task: { ...task, maxOutputChars: 24_000 },
-      input: "",
+      input: `Evidence: ${"x".repeat(400)}`,
       environment: environment(),
     });
     expect(result.finished).toBe(true);
-    expect(call).toHaveBeenCalledTimes(1);
-    expect(call.mock.calls[0]![0]).toMatchObject({
-      step: "test/1",
-      maxOutputChars: 24_000,
-      sessionKey: expect.stringMatching(/\/1$/u),
-    });
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(calls[0]).toMatchObject({ step: "test/1", maxOutputChars: 24_000 });
+    expect(calls[0]!.input).toBe(calls[0]!.retryInput);
+    expect(calls[0]!.input).toContain("Evidence:");
+
+    expect(calls[1]!.sessionKey).toBe(calls[0]!.sessionKey);
+    expect(calls[1]!.input).toContain("## Results of step 1");
+    expect(calls[1]!.input).toContain("ok: text of s1");
+    expect(calls[1]!.input).not.toContain("Evidence:");
+    expect(calls[1]!.retryInput).toContain("Evidence:");
+    // The point of the session: the later turn is much smaller than the
+    // compacted prompt a fresh session would get.
+    expect(estimateTokens(calls[1]!.input)).toBeLessThan(
+      estimateTokens(calls[1]!.retryInput!),
+    );
   });
 
   it("passes a step's failure past its kind's attempts to the caller", async () => {
@@ -378,6 +392,42 @@ describe("runAgentTask", () => {
       ).rejects.toMatchObject({ kind });
       expect(call).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("starts a new session with the full prompt after a retried step", async () => {
+    const calls: ModelChainCallRequest[] = [];
+    const replies = [
+      {
+        output: { actions: [{ tool: "read", arguments: { source: "s1" } }] },
+        attempts: 1,
+      },
+      {
+        output: { actions: [{ tool: "read", arguments: { source: "s2" } }] },
+        attempts: 2,
+      },
+      {
+        output: { actions: [{ tool: "finish", summary: "done" }] },
+        attempts: 1,
+      },
+    ];
+    const call = vi.fn(async (request: ModelChainCallRequest) => {
+      calls.push(request);
+      return { ...replies.shift()!, model: "test" };
+    });
+    const result = await runAgentTask({
+      model: stubChain({ call }),
+      step: "test",
+      task: { ...task, maxSteps: 3 },
+      input: "Evidence.",
+      environment: environment(),
+    });
+    expect(result).toMatchObject({ finished: true, summary: "done" });
+    expect(calls).toHaveLength(3);
+    // The retried step left a failed answer in its thread; the next step
+    // must not continue it with a bare delta.
+    expect(calls[2]!.sessionKey).not.toBe(calls[1]!.sessionKey);
+    expect(calls[2]!.input).toBe(calls[2]!.retryInput);
+    expect(calls[2]!.input).toContain("Evidence.");
   });
 
   it("keeps a rejected draft until it is resent, says what is owed and ends once nothing is", async () => {
@@ -422,8 +472,10 @@ describe("runAgentTask", () => {
       'Your rejected draft, to fix and resend in full: {"text":""}',
     );
     expect(inputs[2]).toContain("Still to do: propose note n1.");
-    // Once resent, the older rejection only points at the newer one.
-    expect(inputs[3]).toContain(
+    // The delta carries the latest rejection; the compacted prompt a fresh
+    // session would get shows that the earlier one was already resent.
+    expect(inputs[3]).toContain("- propose note n1\n  rejected: text is empty");
+    expect(call.mock.calls[3]![0].retryInput).toContain(
       "- propose note n1\n  rejected; resent in step 3",
     );
     expect(inputs[3]).toContain("This is the last step (4 of 4).");
@@ -506,7 +558,37 @@ describe("runAgentTask", () => {
     // The latest step keeps its result; older ones lose theirs, then go.
     expect(inputs[3]).toContain("ok: s3 x");
     expect(inputs[3]).not.toContain("ok: s1 x");
-    expect(inputs[3]).toMatch(/Steps 1 to \d are omitted|result shortened/u);
+    // A fresh session (a rotation or a retry) still gets the compacted whole.
+    const retry = call.mock.calls[3]![0].retryInput!;
+    expect(retry).toContain("ok: s3 x");
+    expect(retry).toMatch(/Steps 1 to \d are omitted|result shortened/u);
+  });
+
+  it("starts a fresh session once the run would pass the step budget", async () => {
+    const sessions: Array<string | undefined> = [];
+    const call = vi.fn(async (request: ModelChainCallRequest) => {
+      sessions.push(request.sessionKey);
+      return {
+        output: {
+          actions: [{ tool: "read", arguments: { source: "s1" } }],
+        },
+        model: "test",
+      };
+    });
+    const instructionTokens = estimateTokens(agentInstructions(task));
+    await runAgentTask({
+      model: stubChain({ call }),
+      step: "test",
+      task: { ...task, maxSteps: 3 },
+      input: "Evidence.",
+      environment: environment(),
+      // The fixed prefix alone is past the step budget: the next step starts
+      // a fresh thread instead of growing this one.
+      maxInputTokens: instructionTokens,
+    });
+    expect(sessions).toHaveLength(3);
+    expect(new Set(sessions).size).toBeGreaterThan(1);
+    expect(sessions.every(Boolean)).toBe(true);
   });
 
   it("cuts a step's results to the task's character budget", async () => {

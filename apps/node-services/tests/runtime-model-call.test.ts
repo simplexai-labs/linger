@@ -1563,6 +1563,71 @@ describe("Runner Gateway model invocation adapter", () => {
         (error as Error).message.startsWith(COMPUTER_OFFLINE_MESSAGE),
       ).toBe(true);
   });
+  it("sends a Codex session only the new input and every other Runtime the whole prompt", async () => {
+    const { modelCall, invokeModel } = setup();
+    const request = {
+      ...ask,
+      instructions: "Answer.",
+      input: "New results",
+      retryInput: "Whole task",
+      sessionKey: "session_1",
+    };
+    await modelCall.call({
+      ...request,
+      owner: { tenantId: "tenant_1", ownerActorId: "alice" },
+    });
+    await modelCall.call({
+      ...request,
+      owner: { tenantId: "tenant_1", ownerActorId: "bob" },
+    });
+    expect(invokeModel.mock.calls[0]![1].input).toBe("New results");
+    expect(invokeModel.mock.calls[0]![1].sessionKey).toBe("session_1");
+    expect(invokeModel.mock.calls[1]![1].input).toBe("Whole task");
+  });
+
+  it("gives each retried step its own fresh session", async () => {
+    const { modelCall, invokeModel } = setup({
+      placements: [alice],
+      outcomes: [
+        completed("not json"),
+        completed('{"answer":"yes"}'),
+        completed("not json"),
+        completed('{"answer":"yes"}'),
+      ],
+    });
+    const request = {
+      ...ask,
+      instructions: "Answer.",
+      sessionKey: "run",
+    };
+    await modelCall.call({ ...request, key: "run/1", input: "one" });
+    await modelCall.call({ ...request, key: "run/2", input: "two" });
+    const first = invokeModel.mock.calls[1]![1].sessionKey;
+    const second = invokeModel.mock.calls[3]![1].sessionKey;
+    expect(first).toMatch(/^retry:/u);
+    expect(second).toMatch(/^retry:/u);
+    expect(first).not.toBe(second);
+  });
+
+  it("gives a correction the whole prompt in a fresh session", async () => {
+    const { modelCall, invokeModel } = setup({
+      outcomes: [completed("not json"), completed('{"answer":"yes"}')],
+    });
+    await modelCall.call({
+      ...ask,
+      instructions: "Answer.",
+      input: "New results",
+      retryInput: "Whole task",
+      sessionKey: "session_1",
+      owner: { tenantId: "tenant_1", ownerActorId: "alice" },
+    });
+    expect(invokeModel.mock.calls[0]![1].input).toBe("New results");
+    expect(invokeModel.mock.calls[1]![1].input).toContain("Whole task");
+    expect(invokeModel.mock.calls[1]![1].input).toContain(
+      "## Required Correction",
+    );
+    expect(invokeModel.mock.calls[1]![1].sessionKey).toMatch(/^retry:/u);
+  });
 });
 
 describe("Structured model invoke outcomes and interactive-isolated background breaker", () => {

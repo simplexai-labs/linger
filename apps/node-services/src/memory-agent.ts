@@ -10,6 +10,7 @@ import {
   ModelBudgetSpentError,
   schemaProblem,
   type ModelCallEffort,
+  type ModelCallResult,
   type ModelChain,
   type ModelRunBudget,
 } from "./runtime-model-call.js";
@@ -210,10 +211,10 @@ export async function runAgentTask(request: {
   /** Names this agent task's steps within the model task; unique per run. */
   readonly step: string;
   readonly task: AgentTask;
-  /** The task's own evidence and context. Every step is one stateless call
-   * that sends it again with the history: each call names a Runtime session
-   * of its own, so Codex applies the reply cap while no thread carries one
-   * call into the next. */
+  /** The task's own evidence and context. A Codex run keeps its steps in one
+   * Runtime thread and sends only the previous step's results after the
+   * first; every other Runtime, and every retry, gets the whole prompt with
+   * the compacted history. */
   readonly input: string;
   /** Tokens one step's call may hold; past 85% of it, older steps are
    * shortened. Omitted, half the default context window. */
@@ -236,23 +237,58 @@ export async function runAgentTask(request: {
   const ran = new Map<string, number>();
   let accepted = 0;
   let rejected = 0;
+  // Codex keeps one session's turns in a thread; other Runtimes start empty,
+  // so the call layer sends the full prompt to them and on every retry.
+  let sessionKey = session;
+  let threadTokens = estimateTokens(instructions);
+  // A retried or corrected step leaves its failed answer in the Daemon's
+  // thread, so the next step starts a fresh one with the full prompt.
+  let rotateNext = false;
+  const threadBudget = Math.min(
+    Math.floor(
+      (request.maxInputTokens ?? taskTokens(undefined)) * HISTORY_COMPACT_SHARE,
+    ),
+    CODEX_SESSION_INPUT_LIMIT,
+  );
   for (let index = 0; index < task.maxSteps; index += 1) {
     signal.throwIfAborted();
     if (request.budget?.spent) break;
-    const output = await callStep(
+    const fullInput = stepInput(request, instructions, steps, index);
+    const delta = index === 0 ? fullInput : stepDelta(request, steps, index);
+    let input = delta;
+    if (
+      index > 0 &&
+      (rotateNext || threadTokens + estimateTokens(delta) > threadBudget)
+    ) {
+      // The thread is as long as this run allows, or the last step failed an
+      // attempt: start a new one with the compacted history.
+      sessionKey = `${session}/${index + 1}`;
+      input = fullInput;
+      rotateNext = false;
+      threadTokens = estimateTokens(instructions) + estimateTokens(fullInput);
+    } else {
+      threadTokens += estimateTokens(input);
+    }
+    const step = await callStep(
       request,
-      session,
+      index,
+      sessionKey,
+      input,
+      fullInput,
       instructions,
       schema,
       actionsSchema,
-      steps,
-      index,
     ).catch((error: unknown) => {
       if (error instanceof ModelBudgetSpentError) return undefined;
       throw error;
     });
-    if (output === undefined) break;
-    const actions = parseActions(output, task);
+    if (step === undefined) break;
+    // A retry or correction leaves the failed answer in the thread; the next
+    // step must not continue it.
+    if ((step.attempts ?? 1) > 1) rotateNext = true;
+    // The thread also carries the model's own turns, not only our inputs.
+    threadTokens += estimateTokens(JSON.stringify(step.output));
+    const actions = parseActions(step.output, task);
     const calls: string[] = [];
     const results: AgentObservation[] = [];
     const drafts: (string | undefined)[] = [];
@@ -352,18 +388,20 @@ export async function runAgentTask(request: {
 /** One step's call; the chain's kind retries and corrects it. */
 async function callStep(
   request: Parameters<typeof runAgentTask>[0],
-  session: string,
+  index: number,
+  sessionKey: string,
+  input: string,
+  retryInput: string,
   instructions: string,
   schema: Record<string, unknown>,
   actionsSchema: Record<string, unknown>,
-  steps: readonly AgentStepRecord[],
-  index: number,
-): Promise<Record<string, unknown>> {
-  const { output } = await request.model.call({
+): Promise<ModelCallResult<Record<string, unknown>>> {
+  return await request.model.call({
     step: `${request.step}/${index + 1}`,
     effort: request.task.effort,
     instructions,
-    input: stepInput(request, instructions, steps, index),
+    input,
+    retryInput,
     schemaName: STEP_SCHEMA_NAME,
     outputSchema: schema,
     validate: (output) => {
@@ -381,14 +419,16 @@ async function callStep(
     ...(request.task.maxOutputChars === undefined
       ? {}
       : { maxOutputChars: request.task.maxOutputChars }),
-    // One turn per session: the reply cap applies and nothing accumulates.
-    sessionKey: `${session}/${index + 1}`,
+    sessionKey,
   });
-  return output;
 }
 
 /** Share of a step's token budget past which older steps are shortened. */
 const HISTORY_COMPACT_SHARE = 0.85;
+
+/** The Daemon retires a Codex thread at 150k input tokens, so the run rotates
+ * below it with room for Codex's own preamble and the final turn. */
+const CODEX_SESSION_INPUT_LIMIT = 120_000;
 
 /**
  * One step's input: the task input, the steps so far, and where it stands.
@@ -405,20 +445,12 @@ function stepInput(
   const budget = Math.floor(
     (request.maxInputTokens ?? taskTokens(undefined)) * HISTORY_COMPACT_SHARE,
   );
-  const step =
-    index + 1 < request.task.maxSteps
-      ? `This is step ${index + 1} of at most ${request.task.maxSteps}.`
-      : `This is the last step (${index + 1} of ${request.task.maxSteps}). Results of reads would come too late, so act now on what you already have.`;
-  // What the task still owes after the steps so far, so the model need not
-  // infer it from the history. A task owing nothing has already ended.
-  const owed = steps.length ? request.environment.unfinished?.() : undefined;
-  const status = owed ? `Still to do: ${owed}.\n\n` : "";
   const compose = (detail: HistoryDetail) =>
     `${request.input.trim()}
 
 ${renderHistory(steps, detail)}
 
-${status}${step}`;
+${stepTail(request, steps, index)}`;
   let input = compose("full");
   for (const detail of ["calls", "latest"] as const) {
     if (estimateTokens(instructions) + estimateTokens(input) <= budget) break;
@@ -427,42 +459,118 @@ ${status}${step}`;
   return input;
 }
 
+/**
+ * What a Codex session needs after its first turn: the previous step's
+ * actions and results. The thread already holds the task input, the
+ * instructions and the earlier steps.
+ *
+ * Node cannot see the Daemon's thread lifecycle: an idle restart, a busy
+ * thread or a turn the Daemon retired starts a new one, and this delta would
+ * arrive without the task. The run rotates after any retried step and below
+ * the Daemon's 150k retirement, but that window stays open.
+ */
+function stepDelta(
+  request: Parameters<typeof runAgentTask>[0],
+  steps: readonly AgentStepRecord[],
+  index: number,
+): string {
+  const previous = renderStep(steps, index - 1, "full") ?? "";
+  // A rejected draft older than the latest step stays visible: the session may
+  // have rotated, and the model must still fix it in full.
+  const older = pendingDrafts(steps.slice(0, -1));
+  const pending = older.length
+    ? `## Drafts still to fix\n\n${older.join("\n\n")}\n\n`
+    : "";
+  return `## Results of step ${index}
+
+${previous}
+
+${pending}The task input and earlier steps are in this session's thread; this message adds the latest results.
+
+${stepTail(request, steps, index)}`;
+}
+
+/** Rejected drafts no later step has proposed again, oldest first. */
+function pendingDrafts(steps: readonly AgentStepRecord[]): string[] {
+  const drafts: string[] = [];
+  steps.forEach((step, index) => {
+    step.calls.forEach((call, position) => {
+      if (!call.startsWith("propose ")) return;
+      if (step.observations[position]?.ok) return;
+      const resent = steps.findIndex(
+        (later, laterIndex) => laterIndex > index && later.calls.includes(call),
+      );
+      if (resent >= 0) return;
+      const draft = step.drafts?.[position];
+      if (draft)
+        drafts.push(
+          `- ${call}\n  Your rejected draft, to fix and resend in full: ${draft}`,
+        );
+    });
+  });
+  return drafts;
+}
+
+/** Where the task stands after the steps so far. */
+function stepTail(
+  request: Parameters<typeof runAgentTask>[0],
+  steps: readonly AgentStepRecord[],
+  index: number,
+): string {
+  const step =
+    index + 1 < request.task.maxSteps
+      ? `This is step ${index + 1} of at most ${request.task.maxSteps}.`
+      : `This is the last step (${index + 1} of ${request.task.maxSteps}). Results of reads would come too late, so act now on what you already have.`;
+  // What the task still owes after the steps so far, so the model need not
+  // infer it from the history. A task owing nothing has already ended.
+  const owed = steps.length ? request.environment.unfinished?.() : undefined;
+  const status = owed ? `Still to do: ${owed}.\n\n` : "";
+  return `${status}${step}`;
+}
+
 /** How much of the steps before the latest one the history keeps. */
 type HistoryDetail = "full" | "calls" | "latest";
+
+function renderStep(
+  steps: readonly AgentStepRecord[],
+  index: number,
+  detail: HistoryDetail,
+): string | undefined {
+  const last = steps.length - 1;
+  if (index < last && detail === "latest") return undefined;
+  const step = steps[index]!;
+  /** The later step that proposed the same object again, if any. */
+  const resentIn = (call: string) => {
+    if (!call.startsWith("propose ")) return -1;
+    return steps.findIndex(
+      (later, position) => position > index && later.calls.includes(call),
+    );
+  };
+  const results = index === last || detail === "full";
+  const actions = step.calls.length
+    ? step.calls
+        .map((call, position) => {
+          const observation = step.observations[position];
+          const status = observation?.ok ? "ok" : "rejected";
+          // A rejected draft stays until its object is proposed again; the
+          // later proposal's result supersedes the older issues.
+          const resent = resentIn(call);
+          if (!observation?.ok && resent >= 0)
+            return `- ${call}\n  rejected; resent in step ${resent + 1}`;
+          const draft = step.drafts?.[position];
+          return `- ${call}\n  ${results ? `${status}: ${indent(observation?.content ?? "")}` : `${status} (result shortened to fit the context)`}${draft ? `\n  Your rejected draft, to fix and resend in full: ${draft}` : ""}`;
+        })
+        .join("\n")
+    : "- (no actions)";
+  return `### Step ${index + 1}\n\n${actions}`;
+}
 
 function renderHistory(
   steps: readonly AgentStepRecord[],
   detail: HistoryDetail,
 ): string {
   if (steps.length === 0) return "## Previous steps\n\nNone yet.";
-  const last = steps.length - 1;
-  /** The later step that proposed the same object again, if any. */
-  const resentIn = (index: number, call: string) => {
-    if (!call.startsWith("propose ")) return -1;
-    return steps.findIndex(
-      (later, position) => position > index && later.calls.includes(call),
-    );
-  };
-  const rendered = steps.map((step, index) => {
-    if (index < last && detail === "latest") return undefined;
-    const results = index === last || detail === "full";
-    const actions = step.calls.length
-      ? step.calls
-          .map((call, position) => {
-            const observation = step.observations[position];
-            const status = observation?.ok ? "ok" : "rejected";
-            // A rejected draft stays until its object is proposed again; the
-            // later proposal's result supersedes the older issues.
-            const resent = resentIn(index, call);
-            if (!observation?.ok && resent >= 0)
-              return `- ${call}\n  rejected; resent in step ${resent + 1}`;
-            const draft = step.drafts?.[position];
-            return `- ${call}\n  ${results ? `${status}: ${indent(observation?.content ?? "")}` : `${status} (result shortened to fit the context)`}${draft ? `\n  Your rejected draft, to fix and resend in full: ${draft}` : ""}`;
-          })
-          .join("\n")
-      : "- (no actions)";
-    return `### Step ${index + 1}\n\n${actions}`;
-  });
+  const rendered = steps.map((_, index) => renderStep(steps, index, detail));
   const omitted = rendered.filter((step) => step === undefined).length;
   return `## Previous steps\n\n${[
     ...(omitted

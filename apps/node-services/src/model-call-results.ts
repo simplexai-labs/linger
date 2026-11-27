@@ -3,6 +3,8 @@ import type { ModelInvokeFile } from "@linger/wire-contracts/runner-gateway/type
 /** A finished call's answer, as the caller receives it. */
 export interface ModelCallAnswer {
   readonly model: string;
+  /** Attempts the Runtime call took, including corrections and retries. */
+  readonly attempts?: number;
   /** A JSON object, the text, or the workspace's final files. */
   readonly output:
     | Readonly<Record<string, unknown>>
