@@ -33,7 +33,7 @@ func TestVoiceInitialMediaStartKeepsSpeechAudioAndTranscriptTail(t *testing.T) {
 			env, alice, root := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 16<<20, 1<<30, nil)
 			q := store.New(env.pool)
 			roomID := env.createRoom(alice, acmeTenant, "Actual media start", "actual-media-start")
-			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_actual_start", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "actual-start", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_actual_start", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "actual-start", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -267,7 +267,7 @@ func assertInitialStopBeforeMedia(t *testing.T) {
 	env, alice, _ := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 1<<20, 1<<30, nil)
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Stop before media", "stop-before-media")
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_stop_before_media", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "stop-before-media", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_stop_before_media", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "stop-before-media", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

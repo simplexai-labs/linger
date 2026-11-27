@@ -81,7 +81,7 @@ func (h voiceEpochHarness) progress(ctx context.Context, voiceSessionID string, 
 func createRecordingVoiceSession(t *testing.T, env *testEnv, q *store.Queries, roomID, id string) store.VoiceSession {
 	t.Helper()
 	ctx := t.Context()
-	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{ID: id, AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "room-" + id, ParticipantIdentity: "publisher-" + id, Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{Client: "web", ID: id, AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "room-" + id, ParticipantIdentity: "publisher-" + id, Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

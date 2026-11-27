@@ -26,7 +26,7 @@ func TestLiveKitCaptureWithoutAudioFinalizesFromLiveTranscript(t *testing.T) {
 			if direct.err != nil || (direct.status != http.StatusCreated && direct.status != http.StatusOK) {
 				t.Fatalf("direct Room status=%d err=%v", direct.status, direct.err)
 			}
-			voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{ID: "voice_without_audio", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: direct.roomID, ProviderRoomName: "without-audio", ParticipantIdentity: "without-audio", Purpose: "hardware_control"})
+			voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{Client: "web", ID: "voice_without_audio", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: direct.roomID, ProviderRoomName: "without-audio", ParticipantIdentity: "without-audio", Purpose: "hardware_control"})
 			if err != nil {
 				t.Fatal(err)
 			}

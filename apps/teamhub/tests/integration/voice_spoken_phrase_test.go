@@ -20,7 +20,7 @@ func TestVoiceFinalSayingEndRecordingIsSpeech(t *testing.T) {
 		func(cfg *config.Config) { cfg.Voice.RuntimeToken = "voice-phrase-token" })
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Spoken phrase", "voice-spoken-phrase")
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_spoken_phrase", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "spoken-phrase", ParticipantIdentity: "spoken-phrase", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_spoken_phrase", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "spoken-phrase", ParticipantIdentity: "spoken-phrase", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

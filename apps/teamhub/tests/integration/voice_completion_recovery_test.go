@@ -36,7 +36,7 @@ func TestVoiceCompletionRetriesOneRoomWithoutBlockingAnother(t *testing.T) {
 			env.login("alice", alicePassword)
 		}
 		hash := sha256.Sum256([]byte(id))
-		voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_completion_" + id, AccountID: account, AuthSessionID: loginSessionOf(t, env, account), RoomID: roomID, ProviderRoomName: "completion-" + id, ParticipantIdentity: id, Purpose: "hardware_control"})
+		voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_completion_" + id, AccountID: account, AuthSessionID: loginSessionOf(t, env, account), RoomID: roomID, ProviderRoomName: "completion-" + id, ParticipantIdentity: id, Purpose: "hardware_control"})
 		if err != nil {
 			t.Fatal(err)
 		}

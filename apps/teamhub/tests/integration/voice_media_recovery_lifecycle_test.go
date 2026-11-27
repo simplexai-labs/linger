@@ -312,7 +312,7 @@ func newVoiceRecoveryLifecycle(t *testing.T) (*testEnv, *store.Queries, store.Ca
 	env, alice, _ := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 1<<20, 1<<30, nil)
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Recovery transaction", "recovery-transaction")
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_recovery_tx", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "recovery-tx", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_recovery_tx", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "recovery-tx", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

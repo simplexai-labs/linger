@@ -124,7 +124,7 @@ func seedVoiceMaterialization(t *testing.T, env *testEnv, alice *http.Client, id
 	t.Helper()
 	q := store.New(env.pool)
 	roomID = env.createRoom(alice, acmeTenant, "Voice materialize "+id, "voice-materialize-"+id)
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_materialize_" + id, AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "materialize-" + id, ParticipantIdentity: id, Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_materialize_" + id, AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "materialize-" + id, ParticipantIdentity: id, Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

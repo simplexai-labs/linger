@@ -68,7 +68,7 @@ func TestCaptureQuickNotesRetryOnceThenSettle(t *testing.T) {
 		t.Fatalf("Direct Room status=%d err=%v", direct.status, direct.err)
 	}
 	for _, id := range []string{"retried", "given_up"} {
-		session, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_notes_" + id, AccountID: "account_alice", RoomID: direct.roomID, ProviderRoomName: "notes-" + id, ParticipantIdentity: id, Purpose: "hardware_control"})
+		session, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_notes_" + id, AccountID: "account_alice", RoomID: direct.roomID, ProviderRoomName: "notes-" + id, ParticipantIdentity: id, Purpose: "hardware_control"})
 		if err != nil {
 			t.Fatal(err)
 		}

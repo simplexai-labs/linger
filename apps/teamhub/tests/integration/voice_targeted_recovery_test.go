@@ -27,7 +27,7 @@ func TestVoiceObservationKeepsAttemptCoverageAndIdempotentUncertainty(t *testing
 	ctx := t.Context()
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Voice coverage", "voice-coverage")
-	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{ID: "voice_coverage", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-coverage", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{Client: "web", ID: "voice_coverage", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-coverage", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,9 +23,7 @@ INSERT INTO voice_sessions(
 )
 SELECT sqlc.arg(id)::text,authority.tenant_id,sqlc.arg(room_id)::text,authority.actor_id,
   'provisioning',sqlc.arg(provider_room_name)::text,sqlc.arg(participant_identity)::text,
-  sqlc.arg(purpose)::text,sqlc.narg(auth_session_id)::text,
-  -- A caller that names no client records the column default.
-  COALESCE(NULLIF(sqlc.arg(client)::text, ''), 'web')
+  sqlc.arg(purpose)::text,sqlc.narg(auth_session_id)::text,sqlc.arg(client)::text
 FROM authority
 RETURNING *;
 

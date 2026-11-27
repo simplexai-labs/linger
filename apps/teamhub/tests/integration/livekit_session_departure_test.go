@@ -22,7 +22,7 @@ func TestLiveKitPublisherDepartureReleasesSessionAfterGrace(t *testing.T) {
 			env, alice, _ := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 1<<20, 1<<30, nil)
 			queries := store.New(env.pool)
 			roomID := env.createRoom(alice, acmeTenant, "Voice departure", "departure-room")
-			session, err := queries.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_departure", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-departure", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+			session, err := queries.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_departure", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-departure", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,7 +157,7 @@ func TestLiveKitPublisherDepartureReleasesSessionAfterGrace(t *testing.T) {
 			if readSession().Status != "closed" || !deleted.Load() {
 				t.Fatal("expired publisher must release both the DB session and LiveKit room")
 			}
-			if _, err := queries.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_after_departure", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-after-departure", ParticipantIdentity: "new-publisher", Purpose: "hardware_control"}); err != nil {
+			if _, err := queries.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_after_departure", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-after-departure", ParticipantIdentity: "new-publisher", Purpose: "hardware_control"}); err != nil {
 				t.Fatalf("old session still blocks a new recording: %v", err)
 			}
 		})

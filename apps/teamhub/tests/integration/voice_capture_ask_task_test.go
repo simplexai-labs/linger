@@ -64,7 +64,7 @@ func TestRecordingAskRequestIsHandedToAnotherMe(t *testing.T) {
 	if direct.err != nil || (direct.status != http.StatusCreated && direct.status != http.StatusOK) {
 		t.Fatalf("Direct Room status=%d err=%v body=%s", direct.status, direct.err, direct.body)
 	}
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_ask_task", AccountID: "account_alice", RoomID: direct.roomID, ProviderRoomName: "ask-task", ParticipantIdentity: "ask-task", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_ask_task", AccountID: "account_alice", RoomID: direct.roomID, ProviderRoomName: "ask-task", ParticipantIdentity: "ask-task", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}
