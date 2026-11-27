@@ -18,6 +18,11 @@ receiver's report id is shown at the end with Copy Report ID; the person gives
 it to support. A failed upload keeps the zip for Try Again; the zip is deleted
 once sent or declined.
 
+When a graceful Node Services shutdown finds Agent file-log records that were
+dropped or never acknowledged by the writer, the collected `node-services.log`
+contains an `agent_log.file_loss_summary` event with a cumulative `count` for
+that file sink. Use the earlier `agent_log.file_loss` events to investigate why.
+
 The receiver is `diagnosticsUploadUrl` in the desktop `config.json` (in the
 app's user data folder). It must be `https`, or `http` to `localhost`,
 `127.0.0.1` or `[::1]` while developing a receiver; any other value is

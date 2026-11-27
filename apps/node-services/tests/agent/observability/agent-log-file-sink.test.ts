@@ -52,6 +52,9 @@ it("bounds queued and in-flight bytes while preserving accepted record order", a
   expect(await draining).toBe(false); // diagnostic file loss is observable
   expect(warning).toHaveBeenCalled();
   await sink.close(10);
+  expect(warning).toHaveBeenCalledWith(
+    '{"event":"agent_log.file_loss_summary","count":17}',
+  );
 });
 
 it("bounds the number of small records and never grows the worker mailbox", async () => {
@@ -70,6 +73,7 @@ it("bounds the number of small records and never grows the worker mailbox", asyn
 });
 
 it("flush waits for the acknowledged write, and timeout never blocks business timers", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   const worker = new ControlledWorker();
   const sink = createAgentLogFileSink(() => worker as unknown as Worker);
   sink.enqueue(record("first"));
@@ -78,6 +82,7 @@ it("flush waits for the acknowledged write, and timeout never blocks business ti
   worker.ack();
   expect(await done).toBe(true);
   expect(await sink.close(10)).toBe(true);
+  expect(warning).not.toHaveBeenCalled();
 });
 
 it.each(["error", "exit"])(
@@ -94,12 +99,15 @@ it.each(["error", "exit"])(
     await next();
     expect(worker.batches).toHaveLength(1);
     expect(JSON.stringify(warning.mock.calls)).not.toContain("private path");
-    await sink.close(10);
+    await Promise.all([sink.close(10), sink.close(10)]);
+    expect(
+      warning.mock.calls.filter(([line]) => line.includes("file_loss_summary")),
+    ).toEqual([['{"event":"agent_log.file_loss_summary","count":2}']]);
   },
 );
 
 it("reports write failures and continues with later batches", async () => {
-  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   const worker = new ControlledWorker();
   const sink = createAgentLogFileSink(() => worker as unknown as Worker);
   sink.enqueue(record("unwritable"));
@@ -113,16 +121,22 @@ it("reports write failures and continues with later batches", async () => {
     "writable",
   ]);
   expect(await sink.close(10)).toBe(false);
+  expect(warning).toHaveBeenCalledWith(
+    '{"event":"agent_log.file_loss_summary","count":1}',
+  );
 });
 
 it("closes within its budget even when a writer never acknowledges", async () => {
-  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   const worker = new ControlledWorker();
   const sink = createAgentLogFileSink(() => worker as unknown as Worker);
   sink.enqueue(record("blocked"));
   const waiting = sink.flush(1000);
   expect(await sink.close(10)).toBe(false);
   expect(await waiting).toBe(false);
+  expect(warning).toHaveBeenCalledWith(
+    '{"event":"agent_log.file_loss_summary","count":1}',
+  );
   sink.enqueue(record("after-close"));
   await next();
   expect(worker.batches).toHaveLength(1);
