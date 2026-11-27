@@ -20,6 +20,10 @@ import {
   runServiceProcess,
   type ProcessControl,
 } from "./process-lifecycle.js";
+import {
+  readTeamHubHealthUrl,
+  waitForTeamHubHealth,
+} from "./teamhub-health.js";
 
 interface RunningRole {
   /** Called once every selected role has started, for background work that
@@ -112,6 +116,24 @@ const HTTP_ROLES: ReadonlySet<RoleName> = new Set([
   "voice",
 ]);
 
+/** Roles that contact TeamHub during startup and wait for it when gated. */
+const TEAMHUB_DEPENDENT_ROLES: ReadonlySet<RoleName> = new Set([
+  "agent",
+  "voice",
+]);
+
+function defaultWaitForTeamHub(signal: AbortSignal): Promise<void> {
+  return waitForTeamHubHealth(readTeamHubHealthUrl(), signal, {
+    retryDelayMs: 100,
+  });
+}
+
+export interface MainOverrides {
+  agentRoomRequestTimeoutMs?: number;
+  waitForTeamHub?: boolean;
+  waitForTeamHubReady?: (signal: AbortSignal) => Promise<void>;
+}
+
 /** An unset or empty NODE_SERVICES_ROLES starts every role. */
 export function selectRoles(value: string | undefined): RoleName[] {
   const names = (value ?? "")
@@ -148,10 +170,15 @@ function requireHttp(host: RoleHost): HttpHost {
 }
 
 /** Runs the selected roles; process tests start it with shorter timeouts. */
-export async function main(
-  overrides: { agentRoomRequestTimeoutMs?: number } = {},
-): Promise<void> {
+export async function main(overrides: MainOverrides = {}): Promise<void> {
   const logger = createJsonLogger({ service: "node-services" });
+  const roleOverrides =
+    overrides.agentRoomRequestTimeoutMs !== undefined
+      ? { agentRoomRequestTimeoutMs: overrides.agentRoomRequestTimeoutMs }
+      : {};
+  const waitForTeamHub = overrides.waitForTeamHub ?? false;
+  const waitForTeamHubReady =
+    overrides.waitForTeamHubReady ?? defaultWaitForTeamHub;
   await runServiceProcess(async (control) => {
     const startupStartedAt = performance.now();
     const selected = selectRoles(process.env.NODE_SERVICES_ROLES);
@@ -170,6 +197,10 @@ export async function main(
     const seams: RoleHost["seams"] = {};
     const running: { name: RoleName; role: RunningRole }[] = [];
     const roleTimingsMs: Partial<Record<RoleName, number>> = {};
+    let documentStartedAt: number | undefined;
+    let documentElapsedMs: number | undefined;
+    let eagerDocument: Promise<RunningRole> | undefined;
+    let eagerDocumentClaimed = false;
     const stopRoles = async (): Promise<void> => {
       const failures: unknown[] = [];
       const stopping = running.splice(0).reverse();
@@ -202,22 +233,88 @@ export async function main(
         );
       }
     };
+    const stopEagerDocument = async (): Promise<void> => {
+      if (!eagerDocument || eagerDocumentClaimed) return;
+      eagerDocumentClaimed = true;
+      const pending = eagerDocument;
+      eagerDocument = undefined;
+      let role: RunningRole;
+      try {
+        role = await pending;
+      } catch {
+        // An eager startup failure is already surfaced or superseded by the
+        // primary startup error; nothing to stop.
+        return;
+      }
+      await role.stop();
+    };
+    let waitedForTeamHub = false;
     try {
+      control.signal.throwIfAborted();
+      if (selected.includes("document")) {
+        const startedAt = performance.now();
+        documentStartedAt = startedAt;
+        eagerDocument = roles
+          .document({
+            ...control,
+            http,
+            logger: logger.child({ role: "document" }),
+            normalizer,
+            seams,
+            ...roleOverrides,
+          })
+          .then((role) => {
+            documentElapsedMs = Math.max(
+              0,
+              Math.round(performance.now() - startedAt),
+            );
+            return role;
+          });
+        // Prevent unhandledRejection when an earlier role fails or aborts
+        // before the startup loop awaits eagerDocument.
+        eagerDocument.catch(() => undefined);
+      }
       for (const name of selected) {
         control.signal.throwIfAborted();
-        const roleStartedAt = performance.now();
-        const role = await roles[name]({
-          ...control,
-          http,
-          logger: logger.child({ role: name }),
-          normalizer,
-          seams,
-          ...overrides,
-        });
-        const ms = Math.max(0, Math.round(performance.now() - roleStartedAt));
+        if (
+          waitForTeamHub &&
+          !waitedForTeamHub &&
+          TEAMHUB_DEPENDENT_ROLES.has(name)
+        ) {
+          waitedForTeamHub = true;
+          await waitForTeamHubReady(control.signal);
+          control.signal.throwIfAborted();
+        }
+        let role: RunningRole;
+        let ms: number;
+        if (name === "document" && eagerDocument) {
+          eagerDocumentClaimed = true;
+          role = await eagerDocument;
+          eagerDocument = undefined;
+          ms =
+            documentElapsedMs ??
+            Math.max(
+              0,
+              Math.round(
+                performance.now() - (documentStartedAt ?? startupStartedAt),
+              ),
+            );
+        } else {
+          const roleStartedAt = performance.now();
+          role = await roles[name]({
+            ...control,
+            http,
+            logger: logger.child({ role: name }),
+            normalizer,
+            seams,
+            ...roleOverrides,
+          });
+          ms = Math.max(0, Math.round(performance.now() - roleStartedAt));
+        }
+        running.push({ name, role });
         roleTimingsMs[name] = ms;
         logger.log("info", "host.role_started", { role: name, ms });
-        running.push({ name, role });
+        control.signal.throwIfAborted();
       }
       for (const { role } of running) role.started?.();
       http?.finishStartup();
@@ -227,9 +324,18 @@ export async function main(
         roles: roleTimingsMs,
       });
     } catch (error) {
-      await stopRoles().catch((stopError: unknown) => {
-        logger.log("error", "host.start_cleanup_failed", { error: stopError });
-      });
+      await Promise.allSettled([
+        stopEagerDocument().catch((stopError: unknown) => {
+          logger.log("error", "host.start_cleanup_failed", {
+            error: stopError,
+          });
+        }),
+        stopRoles().catch((stopError: unknown) => {
+          logger.log("error", "host.start_cleanup_failed", {
+            error: stopError,
+          });
+        }),
+      ]);
       throw error;
     }
     return { close: stopRoles };
@@ -237,5 +343,5 @@ export async function main(
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  void main();
+  void main({ waitForTeamHub: process.argv.includes("--wait-teamhub") });
 }

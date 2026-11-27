@@ -563,8 +563,74 @@ test("passes the resolved download region to every localmodels child", async () 
     string,
     string[],
     { env: NodeJS.ProcessEnv },
-  ][])
+  ][]) {
     expect(call[2].env.SIMPLEX_REGION).toBe("cn");
+    expect(call[2].env.SIMPLEX_REGION_FILE).toBe(regionFile(f.home));
+  }
+});
+test("passes SIMPLEX_REGION=auto and SIMPLEX_REGION_FILE on a cold home without probing npm registries", async () => {
+  const f = await fixture();
+  await rm(regionFile(f.home));
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  vi.stubEnv("SIMPLEX_REGION", "");
+  vi.stubEnv("SIMPLEX_REGION_FILE", "/inherited/region.json");
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+
+  await runLocalmodels(
+    f.home,
+    ["harness", "status", "--json"],
+    {
+      env: {
+        simplex_region: "cn",
+        simplex_region_file: "/override/region.json",
+      },
+    },
+    { run },
+  );
+
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(run).toHaveBeenCalledTimes(1);
+  const env = (
+    run.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ]
+  )[2].env;
+  expect(env.SIMPLEX_REGION).toBe("auto");
+  expect(env.SIMPLEX_REGION_FILE).toBe(regionFile(f.home));
+  expect(
+    Object.keys(env).filter((key) => key.toUpperCase() === "SIMPLEX_REGION"),
+  ).toEqual(["SIMPLEX_REGION"]);
+  expect(
+    Object.keys(env).filter(
+      (key) => key.toUpperCase() === "SIMPLEX_REGION_FILE",
+    ),
+  ).toEqual(["SIMPLEX_REGION_FILE"]);
+});
+test("passes forced SIMPLEX_REGION and SIMPLEX_REGION_FILE to localmodels children", async () => {
+  const f = await fixture();
+  await rm(regionFile(f.home));
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  vi.stubEnv("SIMPLEX_REGION", "cn");
+  const fetcher = vi.fn();
+  vi.stubGlobal("fetch", fetcher);
+  const run = vi.fn(async () => ({ code: 0, stdout: "{}", stderr: "" }));
+
+  await runLocalmodels(f.home, ["harness", "status", "--json"], {}, { run });
+
+  expect(fetcher).not.toHaveBeenCalled();
+  const env = (
+    run.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv },
+    ]
+  )[2].env;
+  expect(env.SIMPLEX_REGION).toBe("cn");
+  expect(env.SIMPLEX_REGION_FILE).toBe(regionFile(f.home));
 });
 // What `library status` prints, cut to the fields the stop reads.
 const libraryStatus = (

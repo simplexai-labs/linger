@@ -48,14 +48,22 @@ syncs as well as failed publication. A failed replacement keeps the previous
 private file available, without leaving partial configuration copies behind.
 
 The account file records provisioning history, not current database readiness
-or a promise that its saved password is still current. On HTTP 401, the existing
-idempotent owner command establishes whether this email owns the deployment and
-can recreate a missing owner without resetting a password. Confirm login after
-it: a provisioned owner whose password was deliberately changed remains ready
-when the owner command succeeded and login still returns 401. This grants no
-session and does not replace saved credentials. A failed owner command, other
-login errors, or an unprovisioned account whose login fails must not be treated
-as a changed password.
+or a promise that its saved password is still current. While collaboration
+services wait for HTTP readiness (strictly after every service spawn settles),
+`preProvisionLocalAccount` creates or loads `local-account.json` and runs the
+local owner command directly against PostgreSQL whenever `provisioned` is
+`false` (never sending passwords over HTTP, never skipping origin verification,
+and never marking `provisioned: true`), draining or aborting on readiness
+failure before rollback stops services; `ensureLocalAccount` then runs under the
+`account` stage, proves the origin, confirms login (hitting HTTP 200 on its
+first request when pre-provisioning succeeded), and marks `provisioned: true`.
+On HTTP 401, the existing idempotent owner command establishes whether this
+email owns the deployment and can recreate a missing owner without resetting a
+password. Confirm login after it: a provisioned owner whose password was
+deliberately changed remains ready when the owner command succeeded and login
+still returns 401. This grants no session and does not replace saved
+credentials. A failed owner command, other login errors, or an unprovisioned
+account whose login fails must not be treated as a changed password.
 
 Each instance directory holds `user.env` (0600), the only file a person edits:
 `COMPOSIO_API_KEY`, `SONIOX_API_KEY`, `XAI_API_KEY` and `TZ`
@@ -182,11 +190,18 @@ containers. The
 cache markers `.simplex-files.json` and `.simplex-model-package.json` keep
 their names.
 
-Native PostgreSQL runs `initdb` in `native/postgres-data.partial` and moves
-it to `native/postgres-data` only once it succeeds, so a killed `initdb`
-never leaves a directory that later attempts treat as initialized. A `postgres-data` with
-`PG_VERSION` but no `postmaster.opts` (which only a started server writes)
-never served a connection, holds no data, and is initialized again.
+Native PostgreSQL runs `initdb --no-sync` in `native/postgres-data.partial` and
+moves it to `native/postgres-data` only once it succeeds, so a killed `initdb`
+never leaves a directory that later attempts treat as initialized. A
+`postgres-data` with `PG_VERSION` but no `postmaster.opts` (which only a started
+server writes) never served a connection, holds no data, and is initialized
+again. On a freshly initialized cluster (`!initialized`), `prepareNativeDatabase`
+starts `postgres` and runs a single `psql` readiness-and-create loop against
+`postgres` (`CREATE DATABASE simplexai ... \gexec`, up to 60 s per attempt
+bounded by the 120 s deadline, retrying only on `psql` exit code `2`,
+`COMMAND_STDIN_UNAVAILABLE`, or `COMMAND_TIMEOUT`, failing immediately on other
+exits or spawn errors with password redaction or if `postgres` stops), skipping
+`pg_isready`, `createdb`, and `preLingerSchema`.
 A running PostgreSQL whose configuration changed restarts like LiveKit and
 TeamHub: a release that repins the PostgreSQL archive unpacks it into a new
 component folder, so the server an earlier release left running differs in
@@ -495,14 +510,23 @@ region proves faster, the transfer resumes there and rewrites the file;
 faster alternate mirror finishing soon completes instead of aborting, and
 keeps slow-mirror comparison enabled until a round measures host throughput.
 `resolveRegion` tracks per-home resolution metadata (`method`, duration `ms`,
-and probe rates) via optional `onResolved`, and `downloadInRegion` /
-`downloadVerified` emit hostname-only diagnostic events (`region_resolved`,
-`slow_switch`, `host_switch`, `region_fallback`) for caller logs. The
-probe is shared per home, but cancellation belongs to each caller: one setup
-leaving does not cancel another, and the last waiter leaving aborts the probe
-so a later caller can retry. Even a cached region respects caller cancellation.
-The resolved region reaches every `localmodels` child and native service as
-`SIMPLEX_REGION`. The contract is in `scripts/installs/README.md`.
+and probe rates) via optional `onResolved`, `cachedRegion` returns a forced,
+settled in-process, or fresh on-disk region without probing npm registries, and
+`downloadInRegion` / `downloadVerified` emit hostname-only diagnostic events
+(`region_resolved`, `slow_switch`, `host_switch`, `region_fallback`) for caller
+logs. The probe is shared per home, but cancellation belongs to each caller: one
+setup leaving does not cancel another, and the last waiter leaving aborts the
+probe so a later caller can retry. Even a cached region respects caller
+cancellation. On cold offline installs where `cachedRegion` returns `undefined`,
+`installNativeSource` kicks off `resolveRegion` in the background (aborted on
+install completion or rollback) without blocking `release`, database prep, or
+migrations, then finalizes `SIMPLEX_REGION` for native services right before
+spawning them (adopting the background probe or a fresh `region.json` if ready,
+else `"global"` without waiting). Every `localmodels` child receives
+`SIMPLEX_REGION` (`cachedRegion` or `"auto"`) and `SIMPLEX_REGION_FILE`
+pointing to `<home>/runtime/region.json` (stripping inherited values), so
+offline `localmodels` commands never block on an npm probe while downloads still
+share the home's region cache. The contract is in `scripts/installs/README.md`.
 
 Verified downloads stop reading on explicit cancellation even when a response
 body ignores the fetch signal. They retain the caller's abort reason, cancel

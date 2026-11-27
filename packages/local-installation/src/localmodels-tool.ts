@@ -8,9 +8,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { sleep } from "@linger/service-kit";
 import { x as extract } from "tar";
 import {
+  cachedRegion,
   downloadInRegion,
   formatRegionDownloadEvent,
-  resolveRegion,
+  regionFile,
 } from "./region.js";
 import {
   atomicPrivate,
@@ -714,6 +715,8 @@ const STRIPPED_LOCALMODELS_ENVIRONMENT = new Set([
   "LOCALMODELS_TOOLS_DIR",
   "LOCALMODELS_BIFROST_DIR",
   "LOCALMODELS_BIFROST_ADDR",
+  "SIMPLEX_REGION",
+  "SIMPLEX_REGION_FILE",
 ]);
 
 const resolvingBifrostAddr = new Map<string, Promise<string>>();
@@ -1345,10 +1348,14 @@ async function localmodelsEnvironment(
   const state = localmodelsStateDirectory(home);
   await privateDirectory(state);
   const isolation = await localmodelsIsolation(home, args, control);
+  const resolvedRegion = await cachedRegion(home, { signal: options.signal });
   const env: NodeJS.ProcessEnv = {
     ...stripInheritedEnvironment({ ...process.env, ...options.env }),
-    // localmodels downloads from the same region and does not probe again.
-    SIMPLEX_REGION: await resolveRegion(home, { signal: options.signal }),
+    // Reuse a forced or cached region without blocking offline startup on a
+    // network probe; localmodels probes lazily and shares region.json via
+    // SIMPLEX_REGION_FILE when it actually downloads.
+    SIMPLEX_REGION: resolvedRegion ?? "auto",
+    SIMPLEX_REGION_FILE: regionFile(home),
     PYTHONPATH: tool.moduleDir,
     LOCALMODELS_STATE: state,
     ...isolation,

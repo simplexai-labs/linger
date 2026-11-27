@@ -225,18 +225,10 @@ async function proveOrigin(instance: Instance, signal: AbortSignal) {
   }
 }
 
-// Called under the instance lock. TeamHub owns deployment-owner creation;
-// its idempotent command never resets an existing account password.
-export async function ensureLocalAccount(
-  instance: Instance,
-  signal: AbortSignal,
-  options: {
-    email?: string;
-    password?: string;
-    // Resolves only when this email owns the deployment; never resets a password.
-    provisionOwner: (email: string, password: string) => Promise<void>;
-  },
-): Promise<{ email: string; file: string; password: string }> {
+async function loadOrInitLocalAccount(
+  instance: Pick<Instance, "root">,
+  options: { email?: string; password?: string },
+): Promise<{ file: string; account: LocalAccount }> {
   const file = path.join(instance.root, "local-account.json");
   let account: LocalAccount;
   try {
@@ -280,6 +272,55 @@ export async function ensureLocalAccount(
     // Persist before creation, allowing a retry after a committed owner transaction.
     await atomicPrivate(file, JSON.stringify(account, null, 2) + "\n");
   }
+  return { file, account };
+}
+
+/**
+ * Best-effort local owner pre-provisioning before HTTP readiness completes.
+ * Loads or creates `local-account.json` and runs the local owner command when
+ * the account is not yet marked provisioned; never sends credentials over HTTP,
+ * never skips origin verification, and never sets `provisioned: true`.
+ */
+export async function preProvisionLocalAccount(
+  instance: Instance,
+  signal: AbortSignal,
+  options: {
+    email?: string;
+    password?: string;
+    provisionOwner: (email: string, password: string) => Promise<void>;
+  },
+): Promise<void> {
+  signal.throwIfAborted();
+  let loaded: { file: string; account: LocalAccount };
+  try {
+    loaded = await loadOrInitLocalAccount(instance, options);
+  } catch {
+    signal.throwIfAborted();
+    return;
+  }
+  signal.throwIfAborted();
+  if (loaded.account.provisioned) return;
+  try {
+    await options.provisionOwner(loaded.account.email, loaded.account.password);
+  } catch (error) {
+    if (signal.aborted) throw error;
+  }
+  signal.throwIfAborted();
+}
+
+// Called under the instance lock. TeamHub owns deployment-owner creation;
+// its idempotent command never resets an existing account password.
+export async function ensureLocalAccount(
+  instance: Instance,
+  signal: AbortSignal,
+  options: {
+    email?: string;
+    password?: string;
+    // Resolves only when this email owns the deployment; never resets a password.
+    provisionOwner: (email: string, password: string) => Promise<void>;
+  },
+): Promise<{ email: string; file: string; password: string }> {
+  const { file, account } = await loadOrInitLocalAccount(instance, options);
   const email = account.email;
   signal.throwIfAborted();
   await proveOrigin(instance, signal);

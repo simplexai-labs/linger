@@ -72,11 +72,18 @@ it("node-services passes the selected root-relative or absolute env file to its 
       'process.kill(process.ppid, "SIGTERM"); setInterval(() => {}, 1000);',
   );
   await mkdir(path.join(appRoot, "scripts"));
-  // The supervisor regenerates the feature catalog before each start.
+  // The supervisor regenerates the feature catalog before each start and
+  // shares TeamHub health polling with src/main.ts.
   for (const script of ["dev-supervisor.ts", "generate-feature-catalog.ts"]) {
     await copyFile(
       path.join(repository, "apps/node-services/scripts", script),
       path.join(appRoot, "scripts", script),
+    );
+  }
+  for (const source of ["teamhub-health.ts", "teamhub-base-url.ts"]) {
+    await copyFile(
+      path.join(repository, "apps/node-services/src", source),
+      path.join(appRoot, "src", source),
     );
   }
   await mkdir(path.join(root, "node_modules/tsx"), { recursive: true });
@@ -84,11 +91,27 @@ it("node-services passes the selected root-relative or absolute env file to its 
     path.join(root, "node_modules/tsx/package.json"),
     '{"type":"module","exports":"./index.mjs"}',
   );
-  // Node 26 strips fixture TypeScript natively. The preload only supplies
-  // local health readiness; the real supervisor must pass env to its child.
+  // Node 26 strips fixture TypeScript natively. The preload supplies local
+  // health readiness and relative .js -> .ts resolution like tsx; the real
+  // supervisor must pass env to its child.
   await writeFile(
     path.join(root, "node_modules/tsx/index.mjs"),
-    "globalThis.fetch = async () => new Response(null, { status: 200 });",
+    [
+      'import { existsSync } from "node:fs";',
+      'import { registerHooks } from "node:module";',
+      'import { fileURLToPath } from "node:url";',
+      "globalThis.fetch = async () => new Response(null, { status: 200 });",
+      "registerHooks({",
+      "  resolve(specifier, context, nextResolve) {",
+      '    if (specifier.startsWith(".") && specifier.endsWith(".js") && context.parentURL) {',
+      "      const candidate = new URL(`${specifier.slice(0, -3)}.ts`, context.parentURL);",
+      '      if (candidate.protocol === "file:" && existsSync(fileURLToPath(candidate)))',
+      "        return nextResolve(candidate.href, context);",
+      "    }",
+      "    return nextResolve(specifier, context);",
+      "  },",
+      "});",
+    ].join("\n"),
   );
   const pkg = JSON.parse(
     await readFile(

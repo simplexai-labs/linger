@@ -39,9 +39,11 @@ import { checkTeamhubBinaries } from "./teamhub-binaries.js";
 import { sourceRegion } from "@linger/service-kit";
 import { npmRegistryEnvironment } from "./npm-registry.js";
 import {
+  cachedRegion,
   formatRegionResolution,
   recordRegionFallback,
   resolveRegion,
+  type Region,
   type RegionResolutionInfo,
 } from "./region.js";
 import { prepareNativeDatabase } from "./native-database.js";
@@ -61,6 +63,7 @@ import {
 import {
   ensureLocalAccount,
   localAccountProvisioned,
+  preProvisionLocalAccount,
   validateLocalCredentials,
 } from "./account.js";
 import {
@@ -705,7 +708,9 @@ async function startupFailure(instance: Instance, ends: Map<string, number>) {
   }
   return undefined;
 }
-const WAIT_HEALTHY_POLL_MS = [100, 200, 300, 500] as const;
+const WAIT_HEALTHY_POLL_MS = [
+  100, 150, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 500,
+] as const;
 
 async function waitHealthy(
   instance: Instance,
@@ -1032,6 +1037,11 @@ async function runNativeSource(
       const controller = new AbortController();
       const signal = AbortSignal.any([options.signal, controller.signal]);
       const started: NativeService[] = [];
+      let regionProbeController: AbortController | undefined;
+      const abortRegionProbe = () => {
+        regionProbeController?.abort();
+        regionProbeController = undefined;
+      };
       let backgroundVoice: BackgroundVoiceToolsHandle | undefined;
       let backgroundVoiceSettled = false;
       let releaseLiveKitReservation: (() => Promise<void>) | undefined;
@@ -1559,21 +1569,51 @@ async function runNativeSource(
           });
         }
         // node-services downloads its voice model packages from the region's
-        // registry first, and nothing it starts probes again.
+        // registry first, and nothing it starts probes again. On a cold offline
+        // install with no cached region, start the probe in the background so
+        // release, database initialization, and migrations never wait on the
+        // network, then finalize the service region right before services start.
         let regionInfo: RegionResolutionInfo | undefined;
-        const region = await resolveRegion(home, {
+        let regionResolved = false;
+        let backgroundRegionInfo: RegionResolutionInfo | undefined;
+        let backgroundRegion: Region | undefined;
+        const immediateRegion = await cachedRegion(home, {
           signal,
           onResolved: (info) => {
             regionInfo = info;
           },
         });
-        emit({
-          kind: "log",
-          stage,
-          message: regionInfo
-            ? `${formatRegionResolution(regionInfo)}\n`
-            : `Download region: ${region}.\n`,
-        });
+        let region: Region;
+        if (immediateRegion) {
+          region = immediateRegion;
+          regionResolved = true;
+          emit({
+            kind: "log",
+            stage,
+            message: regionInfo
+              ? `${formatRegionResolution(regionInfo)}\n`
+              : `Download region: ${region}.\n`,
+          });
+        } else {
+          region = "global";
+          regionProbeController = new AbortController();
+          const regionProbeSignal = AbortSignal.any([
+            signal,
+            regionProbeController.signal,
+          ]);
+          void resolveRegion(home, {
+            signal: regionProbeSignal,
+            onResolved: (info) => {
+              backgroundRegionInfo = info;
+              backgroundRegion = info.region;
+            },
+          }).then(
+            (resolved) => {
+              backgroundRegion ??= resolved;
+            },
+            () => undefined,
+          );
+        }
         const baseEnv: NodeJS.ProcessEnv = {
           ...process.env,
           ...tools.env,
@@ -1611,6 +1651,7 @@ async function runNativeSource(
             sink?: { write(chunk: string): void };
             stage?: InstallStage;
             retried?: boolean;
+            signal?: AbortSignal;
           } = {},
         ): Promise<void> => {
           const {
@@ -1619,6 +1660,7 @@ async function runNativeSource(
             sink,
             retried = false,
             stage: commandStage = stage,
+            signal: commandSignal = signal,
           } = commandOptions;
           const startedAt = Date.now();
           const ownedSink = sink
@@ -1649,7 +1691,7 @@ async function runNativeSource(
               {
                 cwd: current.source!.repo,
                 env: { ...env, ...extraEnv },
-                signal,
+                signal: commandSignal,
                 timeoutMs: 30 * 60_000,
                 input,
                 capture: false,
@@ -1666,7 +1708,10 @@ async function runNativeSource(
           if (code === 0) return;
           // Prebuilt binaries cover every native module, but when one has to
           // compile after all a Mac needs Apple's tools; install them and retry.
-          if (!retried && (await needsAppleDeveloperTools(tail, { signal }))) {
+          if (
+            !retried &&
+            (await needsAppleDeveloperTools(tail, { signal: commandSignal }))
+          ) {
             const installing = "Installing Apple developer tools…";
             emit({
               kind: "stage",
@@ -1675,7 +1720,7 @@ async function runNativeSource(
               message: installing,
             });
             await installAppleDeveloperTools({
-              signal,
+              signal: commandSignal,
               onWaiting: (seconds) =>
                 emit({
                   kind: "log",
@@ -1905,6 +1950,71 @@ async function runNativeSource(
           )
             await stopNativeProcess(current.root, "livekit");
         };
+        const finalizeServiceRegion = async () => {
+          if (regionResolved) return;
+          regionResolved = true;
+          signal.throwIfAborted();
+          if (backgroundRegionInfo) {
+            baseEnv.SIMPLEX_REGION = backgroundRegionInfo.region;
+            env = buildEnv();
+            emit({
+              kind: "log",
+              stage: "services",
+              message: `${formatRegionResolution(backgroundRegionInfo)}\n`,
+            });
+            return;
+          }
+          if (backgroundRegion) {
+            baseEnv.SIMPLEX_REGION = backgroundRegion;
+            env = buildEnv();
+            emit({
+              kind: "log",
+              stage: "services",
+              message: `Download region: ${backgroundRegion}.\n`,
+            });
+            return;
+          }
+          let lateInfo: RegionResolutionInfo | undefined;
+          const lateRegion = await cachedRegion(home, {
+            signal,
+            onResolved: (info) => {
+              lateInfo = info;
+            },
+          });
+          if (lateRegion) {
+            baseEnv.SIMPLEX_REGION = lateRegion;
+            env = buildEnv();
+            emit({
+              kind: "log",
+              stage: "services",
+              message: lateInfo
+                ? `${formatRegionResolution(lateInfo)}\n`
+                : `Download region: ${lateRegion}.\n`,
+            });
+            return;
+          }
+          baseEnv.SIMPLEX_REGION = "global";
+          env = buildEnv();
+          emit({
+            kind: "log",
+            stage: "services",
+            message:
+              "Download region: global (probe pending; continuing offline startup).\n",
+          });
+        };
+        const provisionOwner = async (
+          email: string,
+          password: string,
+          ownerOptions: { signal?: AbortSignal; stage?: InstallStage } = {},
+        ) => {
+          if (!secrets.includes(password)) secrets.push(password);
+          await command("owner", {
+            extraEnv: { OWNER_EMAIL: email },
+            input: `${password}\n`,
+            stage: ownerOptions.stage ?? "account",
+            signal: ownerOptions.signal ?? signal,
+          });
+        };
         const startAndAwaitServices = async (
           ends: Awaited<ReturnType<typeof logEnds>>,
         ) => {
@@ -1989,6 +2099,7 @@ async function runNativeSource(
             )
               started.push(name);
           }
+          await finalizeServiceRegion();
           // Settle every start before rollback so a supervisor still being
           // spawned is recorded and can be stopped.
           const results = await Promise.allSettled(
@@ -1998,24 +2109,53 @@ async function runNativeSource(
           );
           const failed = results.find((result) => result.status === "rejected");
           if (failed) throw failed.reason;
-          return timed(
-            "Waiting for native collaboration services",
-            () => waitHealthy(current, signal, emit, ends),
-            { stage: "services" },
+          // Pre-provision the local owner directly in PostgreSQL while
+          // collaboration services become healthy so ensureLocalAccount hits
+          // HTTP 200 on its first login check. Launched strictly after every
+          // service spawn settles so `started` is complete, and drained before
+          // returning or rethrowing so no owner process races with rollback or
+          // ensureLocalAccount.
+          const preProvisionController = new AbortController();
+          const preProvisionSignal = AbortSignal.any([
+            signal,
+            preProvisionController.signal,
+          ]);
+          const preProvision = preProvisionLocalAccount(
+            current,
+            preProvisionSignal,
+            {
+              email: options.email,
+              password: options.password,
+              provisionOwner: (email, password) =>
+                provisionOwner(email, password, {
+                  signal: preProvisionSignal,
+                  stage: "services",
+                }),
+            },
           );
+          preProvision.catch(() => undefined);
+          let probed: ServiceReadiness[];
+          try {
+            probed = await timed(
+              "Waiting for native collaboration services",
+              () => waitHealthy(current, signal, emit, ends),
+              { stage: "services" },
+            );
+          } catch (error) {
+            preProvisionController.abort();
+            await preProvision.catch(() => undefined);
+            throw error;
+          }
+          await preProvision.catch(() => undefined);
+          signal.throwIfAborted();
+          return probed;
         };
         const provisionAccount = () =>
           ensureLocalAccount(current, signal, {
             email: options.email,
             password: options.password,
-            provisionOwner: async (email, password) => {
-              secrets.push(password);
-              await command("owner", {
-                extraEnv: { OWNER_EMAIL: email },
-                input: `${password}\n`,
-                stage: "account",
-              });
-            },
+            provisionOwner: (email, password) =>
+              provisionOwner(email, password, { signal, stage: "account" }),
           });
         const overlapWithRuntime =
           !switchingCheckout &&
@@ -2382,6 +2522,7 @@ async function runNativeSource(
         // The side that failed first is the cause; the other one only
         // stopped because of it.
         const runtimeFailedFirst = runtimeAborted;
+        abortRegionProbe();
         abortBackgroundVoice();
         await releaseLiveKitPort();
         controller.abort();
@@ -2429,6 +2570,7 @@ async function runNativeSource(
         }
         throw error;
       } finally {
+        abortRegionProbe();
         abortBackgroundVoice();
         await releaseLiveKitPort();
         controller.abort();

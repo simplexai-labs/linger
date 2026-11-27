@@ -25,7 +25,17 @@
   and must not install process globals.
 - `NODE_SERVICES_ROLES` selects roles as a comma-separated list. An unset or
   empty value starts every role; an unknown role fails startup. Selected roles
-  always start in the order `memory`, `llm-wiki`, `agent`, `voice`, `document`. Shutdown starts media draining immediately while other roles stop in reverse.
+  always start in the order `memory`, `llm-wiki`, `agent`, `voice`, `document`,
+  except that when `document` is selected, its worker thread launches eagerly
+  alongside the earlier roles and is awaited in its normal `document` slot (and
+  cleanly stopped if an earlier role fails or startup aborts), preserving the
+  exact `running` order so shutdown starts media draining immediately while
+  other roles stop in reverse (`document` first). Passing `--wait-teamhub` to
+  `src/main.ts` (as `scripts/dev-supervisor.ts --compiled` does so `dist/main.js`
+  boots immediately alongside TeamHub instead of blocking before spawn) waits
+  for TeamHub's `/healthz` (`src/teamhub-health.ts`) once, just before the first
+  TeamHub-dependent role (`agent` or `voice`), while `memory`, `llm-wiki`, and
+  the eager `document` worker start in parallel with TeamHub.
   Background work that uses a later role's seam starts from the role's
   `started()`, which the host calls once every selected role has started, and
   stops from `stopping()`, called before the first role stops: Memory's
@@ -118,8 +128,11 @@ is unchanged. Invalid JSON remains `DOCUMENT_SOURCE_INVALID`.
   one test.
 - `pnpm dev:node-services` (root): start every role through
   `scripts/dev-supervisor.ts`, which waits for TeamHub, regenerates the Agent
-  feature catalog, and restarts the process after a crash. It does not watch
-  files, so a source change never restarts a running Wiki generation.
+  feature catalog, and restarts the process after a crash. In compiled native
+  mode (`--compiled`), it spawns `dist/main.js --wait-teamhub` immediately on
+  first launch (skipping the pre-spawn TeamHub wait) and waits for TeamHub
+  before crash-restarts. It does not watch files, so a source change never
+  restarts a running Wiki generation.
 - `pnpm --filter @linger/node-services dev`: watch every role during
   focused work; `NODE_SERVICES_ROLES=agent` (or another role) narrows it.
 - Memory CLIs: `pnpm --filter @linger/node-services memory:<command>`.

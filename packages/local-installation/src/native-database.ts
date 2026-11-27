@@ -59,6 +59,13 @@ export async function windowsElevated(
 // data-directory fsync past 30 seconds while the server process stays alive.
 const POSTGRES_READY_TIMEOUT_MS = 120_000;
 const POSTGRES_READY_PROGRESS_MS = 15_000;
+const POSTGRES_COLD_POLL_MS = [100, 100, 200] as const;
+
+// Combines cold-start readiness with idempotent database creation in one psql
+// invocation, avoiding separate pg_isready, database-existence, and createdb
+// subprocesses on a newly initialized cluster.
+const COLD_CREATE_DATABASE_SQL =
+  "SELECT 'CREATE DATABASE simplexai' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'simplexai')\\gexec\n";
 
 // Prepares the instance's private PostgreSQL. A database from before Linger
 // is set aside with its data for a fresh one, and `legacyBackup` names the
@@ -89,6 +96,24 @@ export async function prepareNativeDatabase(options: {
   ).LINGER_POSTGRES_PASSWORD!;
   await atomicPrivate(passwordFile, `${password}\n`);
   const env = { ...options.env, PGPASSWORD: password, PGCONNECT_TIMEOUT: "3" };
+  const formatFailure = (name: string, stderr: string) => {
+    // The program's own last lines are what the person and the report need:
+    // "inspect the log" alone sends them looking for a file in a directory
+    // they were never told about. The password never appears here, and the
+    // window is five lines because initdb ends with cleanup lines such as
+    // "removing data directory" that would otherwise push out its FATAL one.
+    const detail = redact(
+      stderr
+        .replaceAll(password, "[redacted]")
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(-5)
+        .map((line) => excerptLine(line))
+        .join(" "),
+    ).replace(/[.;]+$/u, "");
+    return `Native PostgreSQL ${name} failed${detail ? `: ${detail}` : ""}. Inspect the instance log.`;
+  };
   const command = async (name: string, args: string[], timeoutMs = 60_000) => {
     const result = await runProcess(postgresProgram(postgresBin, name), args, {
       env,
@@ -97,24 +122,7 @@ export async function prepareNativeDatabase(options: {
       onOutput: options.onOutput,
     });
     if (result.code !== 0) {
-      // The program's own last lines are what the person and the report need:
-      // "inspect the log" alone sends them looking for a file in a directory
-      // they were never told about. The password never appears here, and the
-      // window is five lines because initdb ends with cleanup lines such as
-      // "removing data directory" that would otherwise push out its FATAL one.
-      const detail = redact(
-        result.stderr
-          .replaceAll(password, "[redacted]")
-          .split(/\r?\n/u)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .slice(-5)
-          .map((line) => excerptLine(line))
-          .join(" "),
-      ).replace(/[.;]+$/u, "");
-      throw new Error(
-        `Native PostgreSQL ${name} failed${detail ? `: ${detail}` : ""}. Inspect the instance log.`,
-      );
+      throw new Error(formatFailure(name, result.stderr));
     }
     return result;
   };
@@ -168,6 +176,7 @@ export async function prepareNativeDatabase(options: {
           "--encoding",
           "UTF8",
           "--no-locale",
+          "--no-sync",
         ],
         // Antivirus scanning of the new files can make it take minutes.
         10 * 60_000,
@@ -210,37 +219,126 @@ export async function prepareNativeDatabase(options: {
       // start, as after any Windows stop.
       restartOnConfigurationChange: true,
     });
-    if (initialized) {
-      // On an already-initialized cluster (updates and resumes), try one
-      // combined psql probe before falling back to the multi-command cold path.
-      let probed: { stdout: string; stderr: string; code: number } | undefined;
-      try {
-        probed = await runProcess(
-          postgresProgram(postgresBin, "psql"),
-          [
-            "--host",
-            "127.0.0.1",
-            "--port",
-            String(port),
-            "--username",
-            "simplexai",
-            "--dbname",
-            "simplexai",
-            "--tuples-only",
-            "--no-align",
-            "--set",
-            "ON_ERROR_STOP=1",
-            "--no-psqlrc",
-          ],
-          { env, signal, timeoutMs: 5_000, input: WARM_DATABASE_PROBE_SQL },
+    if (!initialized) {
+      // A freshly initialized cluster cannot hold a pre-Linger schema, so poll
+      // readiness and create the database in one psql loop, retrying only on
+      // psql's connection/startup exit code (2) or transient startup races
+      // (stdin EPIPE when psql exits before reading stdin, or attempt timeout).
+      const startedAt = Date.now();
+      const deadline = startedAt + POSTGRES_READY_TIMEOUT_MS;
+      let nextProgressAt = startedAt + POSTGRES_READY_PROGRESS_MS;
+      let attempt = 0;
+      for (;;) {
+        signal.throwIfAborted();
+        if (!(await inspectNativeProcess(instance.root, "postgres")).running)
+          throw new Error(
+            "Native PostgreSQL stopped; inspect its instance log.",
+          );
+        const timeoutMs = Math.min(
+          60_000,
+          Math.max(5_000, deadline - Date.now()),
         );
-      } catch (error) {
-        if (signal.aborted) throw error;
+        let result:
+          | { stdout: string; stderr: string; code: number }
+          | undefined;
+        let failureDetail = "";
+        try {
+          result = await runProcess(
+            postgresProgram(postgresBin, "psql"),
+            [
+              "--host",
+              "127.0.0.1",
+              "--port",
+              String(port),
+              "--username",
+              "simplexai",
+              "--dbname",
+              "postgres",
+              "--tuples-only",
+              "--no-align",
+              "--set",
+              "ON_ERROR_STOP=1",
+              "--no-psqlrc",
+            ],
+            {
+              env,
+              signal,
+              timeoutMs,
+              input: COLD_CREATE_DATABASE_SQL,
+            },
+          );
+        } catch (error) {
+          if (signal.aborted) throw error;
+          const errorCode = (error as { code?: unknown } | null)?.code;
+          if (
+            errorCode !== "COMMAND_STDIN_UNAVAILABLE" &&
+            errorCode !== "COMMAND_TIMEOUT"
+          )
+            throw error;
+          if (!(await inspectNativeProcess(instance.root, "postgres")).running)
+            throw new Error(
+              "Native PostgreSQL stopped; inspect its instance log.",
+              { cause: error },
+            );
+          failureDetail =
+            errorCode === "COMMAND_TIMEOUT"
+              ? "psql timed out"
+              : "psql stdin unavailable";
+        }
+        if (result) {
+          if (result.code === 0) return "empty";
+          if (result.code !== 2)
+            throw new Error(formatFailure("psql", result.stderr));
+          failureDetail = `psql exit ${result.code}`;
+        }
+        const now = Date.now();
+        if (now >= deadline)
+          throw new Error(
+            `Native PostgreSQL did not become ready within ${Math.round(POSTGRES_READY_TIMEOUT_MS / 1000)}s (${failureDetail}); inspect its instance log.`,
+          );
+        if (now >= nextProgressAt) {
+          options.onOutput(
+            `Waiting for native PostgreSQL to become ready (${Math.floor((now - startedAt) / 1000)}s elapsed)...\n`,
+          );
+          nextProgressAt = now + POSTGRES_READY_PROGRESS_MS;
+        }
+        const waitMs =
+          POSTGRES_COLD_POLL_MS[
+            Math.min(attempt, POSTGRES_COLD_POLL_MS.length - 1)
+          ]!;
+        attempt += 1;
+        await delay(waitMs, undefined, { signal });
       }
-      if (probed?.code === 0) {
-        const state = parseWarmDatabaseProbe(probed.stdout);
-        if (state) return state;
-      }
+    }
+    // On an already-initialized cluster (updates and resumes), try one
+    // combined psql probe before falling back to the multi-command path.
+    let probed: { stdout: string; stderr: string; code: number } | undefined;
+    try {
+      probed = await runProcess(
+        postgresProgram(postgresBin, "psql"),
+        [
+          "--host",
+          "127.0.0.1",
+          "--port",
+          String(port),
+          "--username",
+          "simplexai",
+          "--dbname",
+          "simplexai",
+          "--tuples-only",
+          "--no-align",
+          "--set",
+          "ON_ERROR_STOP=1",
+          "--no-psqlrc",
+        ],
+        { env, signal, timeoutMs: 5_000, input: WARM_DATABASE_PROBE_SQL },
+      );
+    } catch (error) {
+      if (signal.aborted) throw error;
+    }
+    if (probed?.code === 0) {
+      const state = parseWarmDatabaseProbe(probed.stdout);
+      if (state) return state;
     }
     const connection = [
       "--host",
