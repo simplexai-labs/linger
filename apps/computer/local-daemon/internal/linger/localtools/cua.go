@@ -838,6 +838,17 @@ func (c *cuaSession) sendInput(ctx context.Context, name string, arguments map[s
 	if appKeys {
 		return c.sendKeys(ctx, name, arguments, int(arguments["pid"].(float64)))
 	}
+	if name == "bring_to_front" && isModalPanel(ctx, arguments["pid"], arguments["window_id"]) {
+		// Cua fronts only ordinary windows. The dialog is already above the
+		// app's other windows, so bringing the app forward puts it in front.
+		window := arguments["window_id"]
+		delete(arguments, "window_id")
+		result, err := c.client.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments})
+		if err == nil && !failed(result) {
+			result = withNote(result, fmt.Sprintf("Window %v is this app's open dialog, which stays above its other windows, so the app was brought forward with it in front.", window))
+		}
+		return result, err
+	}
 	result, err := c.client.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments})
 	if err == nil && runtime.GOOS == "darwin" && name == "double_click" && arguments["delivery_mode"] != "foreground" && !agentChrome && strings.Contains(string(result), "AXOpen returned -25205") {
 		// Finder list rows refuse AXOpen, so nothing was sent. Open the
@@ -963,6 +974,11 @@ func (c *cuaSession) finishInput(ctx context.Context, name string, arguments map
 	}
 	if err == nil && inputTools[name] && ctx.Value(cuaInternalInput{}) == nil && (runtime.GOOS != "darwin" || namedWindow) {
 		result = c.withWindowState(ctx, arguments, result)
+	}
+	if err == nil && (name == "get_window_state" || name == "list_windows" || inputTools[name]) && ctx.Value(cuaInternalInput{}) == nil && !failed(result) {
+		if note := modalPanelNote(ctx, arguments["pid"], arguments["window_id"]); note != "" {
+			result = withNote(result, note)
+		}
 	}
 	if err == nil && name == "run_script" {
 		result = compactScriptResult(result)
@@ -1459,6 +1475,11 @@ func lsappPID(ctx context.Context, app string) (int, error) {
 		}
 		return lsappPID(ctx, strings.TrimSuffix(asn, ":"))
 	}
+	if list, listErr := exec.CommandContext(ctx, "/usr/bin/lsappinfo", "list").Output(); listErr == nil {
+		if pid := lsappListPID(string(list), app); pid > 0 {
+			return pid, nil
+		}
+	}
 	return 0, fmt.Errorf("%s is not running", app)
 }
 
@@ -1551,6 +1572,9 @@ func (c *cuaSession) focusApp(ctx context.Context, name string, arguments map[st
 	if window == nil && !keyboardInput(name, arguments) {
 		return fmt.Errorf("COMPUTER_TARGET_REQUIRED: foreground input at an element or point needs pid and window_id: %w", errNotSent)
 	}
+	// A modal dialog is in front of the app's ordinary windows without being
+	// one of them, so the front-window check and bring_to_front do not know it.
+	panel := window != nil && isModalPanel(ctx, pid, window)
 	var fronted any
 	for attempt := range 4 {
 		front, err := c.checkFront(ctx, int(number))
@@ -1573,7 +1597,7 @@ func (c *cuaSession) focusApp(ctx context.Context, name string, arguments map[st
 					c.remember(ctx, front, top.WindowID)
 				}
 			}
-			if window != nil && (top == nil || top.WindowID != window) {
+			if window != nil && !panel && (top == nil || top.WindowID != window) {
 				above := "no window of this app is shown"
 				if top != nil {
 					above = fmt.Sprintf("window %v %q of this app is in front of it and would receive the input", top.WindowID, top.Title)
@@ -1597,7 +1621,9 @@ func (c *cuaSession) focusApp(ctx context.Context, name string, arguments map[st
 		// A window the Agent named, or else the app's key window, comes
 		// forward with the app.
 		fronted = window
-		if fronted == nil {
+		if panel {
+			fronted = nil
+		} else if fronted == nil {
 			c.mu.Lock()
 			named, ok := c.named[int(number)]
 			c.mu.Unlock()
@@ -2051,7 +2077,18 @@ func (c *cuaSession) launchApp(ctx context.Context, arguments map[string]any) (j
 		}
 	}
 	if output, err := exec.CommandContext(ctx, "/usr/bin/open", open...).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		// open -a knows an app by its file name only. A name the bundle
+		// declares, such as "Bambu Studio" for BambuStudio.app, opens by path.
+		path := ""
+		if flag == "-a" && ctx.Err() == nil {
+			path = appPathByName(ctx, app)
+		}
+		if path == "" {
+			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+		if output, err := exec.CommandContext(ctx, "/usr/bin/open", append([]string{"-g", "-a", path}, addresses...)...).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		}
 	}
 	deadline := time.Now().Add(launchAppWait)
 	if running && len(urls) > 0 {

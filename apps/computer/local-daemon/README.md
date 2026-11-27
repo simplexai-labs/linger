@@ -851,7 +851,10 @@ minutes, because CuaDriver refuses to prompt from its tools.
 background through LaunchServices without taking the foreground. With a file or
 URL it waits for a new window or 5 seconds; without one it returns at once if the
 application already has a window. The result lists the application's pid and
-windows, marking new ones.
+windows, marking new ones. A `name` is either the bundle's file name,
+which `open -a` knows, or the name the bundle declares (`CFBundleName` or
+`CFBundleDisplayName`), which the Daemon resolves to the bundle's path; the
+running application is then found by either name or by that path.
 
 On macOS, key input means `press_key`, `hotkey` and `type_text` without an
 `element_token` or coordinates. With only `pid`, keys go to that application's
@@ -876,6 +879,15 @@ one a lower layer than theirs; a new window without a title must have a higher
 layer, because Finder briefly shows untitled windows. When activating a
 background application, the Daemon brings along the window of that application
 the Agent named last.
+
+A modal dialog, a window at `NSModalPanelWindowLevel`, is in none of those
+lists: Cua `list_windows` holds only layer-0 windows, and a screenshot of a
+window shows that window alone. The Daemon asks the window server for an
+application's on-screen modal dialogs and names any other than the addressed
+window in the result of `get_window_state`, `list_windows` with a `pid`, and
+each input. Foreground input and keys addressed to such a dialog pass the
+front-window check, and `bring_to_front` on it brings the application forward
+without a `window_id`, which Cua accepts only for ordinary windows.
 
 The Daemon remembers the application it raised last. When the user brings
 another application forward, key input returns `COMPUTER_USER_TOOK_OVER` and the
