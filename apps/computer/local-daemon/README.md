@@ -567,9 +567,16 @@ A hook that cannot run lets the command through.
   prints it within two seconds. When that read fails or times out, the
   last `PATH` the same shell printed is used. With none, the user's own
   install folders come first. The common install folders are always
-  searched too: Homebrew, `~/.local/bin`, `~/.npm-global/bin`, Volta, Bun,
-  every nvm Node's `bin` (newest first), fnm's default Node and pnpm's
-  global bin.
+  searched too: Homebrew, `~/.local/bin`, `~/.claude/local`,
+  `~/.npm-global/bin`, Volta, Bun, every nvm Node's `bin` (newest first),
+  fnm's default Node, pnpm's global bin, and `%APPDATA%\npm` on Windows.
+- When a CLI is not on `PATH` or in those install folders, discovery also
+  checks platform desktop app bundles: on macOS, `Codex.app` and
+  `ChatGPT.app` (`Contents/Resources/codex-cli/bin/codex`), `Claude.app`
+  (`Contents/Resources/claude`), and Claude Desktop's versioned
+  `~/Library/Application Support/Claude/claude-code/<version>/…` (newest
+  semver first, preferring `.verified` bundles); on Windows, Claude Desktop's
+  `%APPDATA%\Claude\claude-code\<version>\claude.exe`.
 - Every 15 seconds the monitor rechecks sign-in. Every fourth tick it runs a
   full discovery, but not while an Operation runs.
 - On every tick it also searches again for each Runtime that was not
@@ -587,9 +594,16 @@ for a browser sign-in when signed out.
 
 - Discovery runs `agy --version`, then an ACP `initialize`, then an empty
   `session/new` in an isolated temporary directory seeded with the user's
-  `antigravity-oauth-token` and `settings.json`. ACP's authentication-required
-  error (`-32000`) on `session/new` means signed out. No prompt is sent, so a
-  probe stores no conversation.
+  `antigravity-oauth-token` and `settings.json`. The resident Daemon (and the
+  control CLI when a validated private state directory exists) allocates each
+  probe directory under `<state>/operation-tmp` (falling back to the OS
+  temporary directory when no private temp base is configured), and reports
+  local probe environment preparation failures as `RUNTIME_DIAGNOSTIC_FAILED`
+  (logging `runner.runtime_probe.prepare_failed`,
+  `runner.runtime_auth.prepare_failed`, or
+  `runner.runtime_models.prepare_failed`) rather than `RUNTIME_INCOMPATIBLE`.
+  ACP's authentication-required error (`-32000`) on `session/new` means signed
+  out. No prompt is sent, so a probe stores no conversation.
 - When `session/new` needs authentication and the environment carries
   `GEMINI_API_KEY` or `GOOGLE_API_KEY`, the adapter selects the
   `gemini-api-key` method once and retries. A Google sign-in is never

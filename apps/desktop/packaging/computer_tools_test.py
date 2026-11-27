@@ -11,10 +11,12 @@ import os
 import plistlib
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import zipfile
 
 import archive
@@ -521,50 +523,310 @@ class MacSigningTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(out_dir, "Linger-1.2.3-arm64.dmg")))
         self.assertFalse(os.path.exists(os.path.join(out_dir, "Linger-1.2.3-arm64.app.tar.gz")))
 
-    def test_signing_notarize_waits_then_staples_and_handles_failures(self):
-        calls = []
-        should_fail = False
+    def _stub_notarize_calls(self, on_run, on_capture, on_staple):
         orig_run = self.mac.run
+        orig_capture = self.mac.run_capture
         orig_staple = self.mac.Signing.staple
+
+        def restore():
+            self.mac.run = orig_run
+            self.mac.run_capture = orig_capture
+            self.mac.Signing.staple = orig_staple
+
+        self.addCleanup(restore)
+        self.mac.run = on_run
+        self.mac.run_capture = on_capture
+        self.mac.Signing.staple = on_staple
+
+    def test_run_capture_streams_merged_output_and_keeps_log_stdout_clean(self):
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            output = self.mac.run_capture(
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.write('out\\n'); sys.stderr.buffer.write(b'err \\xff\\n')",
+                merge_stderr=True,
+                stream=True,
+            )
+        self.assertIn("out\n", output)
+        self.assertIn("err \ufffd\n", output)
+        self.assertEqual(captured_stderr.getvalue(), output)
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(subprocess.CalledProcessError) as failed:
+                self.mac.run_capture(
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stderr.write('boom\\n'); sys.exit(2)",
+                    merge_stderr=True,
+                    stream=True,
+                )
+        self.assertEqual(failed.exception.returncode, 2)
+        self.assertIn("boom", failed.exception.output)
+
+        # Unmerged capture leaves stderr out of JSON stdout while keeping stderr inherited.
+        with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+            saved_stderr = os.dup(2)
+            try:
+                sys.stderr.flush()
+                os.dup2(stderr_file.fileno(), 2)
+                stdout = self.mac.run_capture(
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stderr.write('warn! ignored\\n'); sys.stdout.write('{\"status\":\"Accepted\"}\\n')",
+                )
+            finally:
+                os.dup2(saved_stderr, 2)
+                os.close(saved_stderr)
+            stderr_file.seek(0)
+            inherited_stderr = stderr_file.read().decode("utf-8")
+        self.assertEqual(json.loads(stdout), {"status": "Accepted"})
+        self.assertIn("warn! ignored", inherited_stderr)
+
+    def test_signing_notarize_waits_then_staples_and_handles_failures(self):
+        submission_id = "12345678-1234-5678-9abc-def012345678"
+        calls = []
 
         def fake_run(*args, **kwargs):
             calls.append(("run", args))
-            if should_fail:
-                raise subprocess.CalledProcessError(1, args)
+
+        def fake_capture(*args, merge_stderr=False, stream=False):
+            calls.append(("capture", args, merge_stderr, stream))
+            if args[1] == "notary-submit":
+                return f"uploading...\ncreated submission ID: {submission_id}\n"
+            if args[1] == "notary-log":
+                return json.dumps({"status": "Accepted", "id": submission_id})
+            raise AssertionError(f"unexpected command: {args}")
 
         def fake_staple(signing_self, path):
             calls.append(("staple", path))
 
-        try:
-            self.mac.run = fake_run
-            self.mac.Signing.staple = fake_staple
+        self._stub_notarize_calls(fake_run, fake_capture, fake_staple)
 
-            # Without a notary key, notarize is a no-op.
-            self.mac.Signing("rcodesign").notarize("/tmp/Linger.app")
-            self.assertEqual(calls, [])
+        # Without a notary key, notarize is a no-op.
+        self.mac.Signing("rcodesign").notarize("/tmp/Linger.app", delay_seconds=0)
+        self.assertEqual(calls, [])
 
-            # With a notary key, submit waits without --staple, then delegates to staple().
-            signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
-            signing.notarize("/tmp/Linger.app")
-            expected_args = (
-                "rcodesign", "notary-submit", "--api-key-file", "notary.json",
-                "--wait", "--max-wait-seconds", "3600", "/tmp/Linger.app",
-            )
-            self.assertNotIn("--staple", expected_args)
-            self.assertEqual(calls, [
-                ("run", expected_args),
-                ("staple", "/tmp/Linger.app"),
-            ])
+        # Happy path: submit (no --wait/--staple) -> wait(uuid) -> log(uuid) -> staple.
+        signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+        signing.notarize("/tmp/Linger.app", delay_seconds=0)
+        self.assertEqual(len(calls), 4)
+        submit_call, wait_call, log_call, staple_call = calls
+        self.assertEqual(
+            submit_call,
+            (
+                "capture",
+                ("rcodesign", "notary-submit", "--api-key-file", "notary.json", "/tmp/Linger.app"),
+                True,
+                True,
+            ),
+        )
+        self.assertNotIn("--wait", submit_call[1])
+        self.assertNotIn("--staple", submit_call[1])
+        self.assertEqual(wait_call[0], "run")
+        self.assertEqual(
+            wait_call[1][:5],
+            ("rcodesign", "notary-wait", "--api-key-file", "notary.json", "--max-wait-seconds"),
+        )
+        self.assertTrue(1 <= int(wait_call[1][5]) <= 3600)
+        self.assertEqual(wait_call[1][6], submission_id)
+        self.assertEqual(
+            log_call,
+            (
+                "capture",
+                ("rcodesign", "notary-log", "--api-key-file", "notary.json", submission_id),
+                False,
+                False,
+            ),
+        )
+        self.assertEqual(staple_call, ("staple", "/tmp/Linger.app"))
 
-            # Failure during notary-submit propagates without stapling.
-            calls.clear()
-            should_fail = True
-            with self.assertRaises(subprocess.CalledProcessError):
-                signing.notarize("/tmp/Linger.app")
-            self.assertEqual(calls, [("run", expected_args)])
-        finally:
-            self.mac.run = orig_run
-            self.mac.Signing.staple = orig_staple
+    def test_signing_notarize_retries_transient_submit_and_propagates_exhaustion(self):
+        submission_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        calls = []
+        submit_failures = 2
+
+        def fake_run(*args, **kwargs):
+            calls.append(args[1])
+
+        def fake_capture(*args, merge_stderr=False, stream=False):
+            nonlocal submit_failures
+            calls.append(args[1])
+            if args[1] == "notary-submit":
+                if submit_failures > 0:
+                    submit_failures -= 1
+                    raise subprocess.CalledProcessError(1, args)
+                return f"created submission ID: {submission_id}\n"
+            return json.dumps({"status": "Accepted"})
+
+        def fake_staple(signing_self, path):
+            calls.append("staple")
+
+        self._stub_notarize_calls(fake_run, fake_capture, fake_staple)
+        signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+
+        signing.notarize("/tmp/Linger.app", submit_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit", "notary-submit", "notary-submit", "notary-wait", "notary-log", "staple"])
+
+        calls.clear()
+        submit_failures = 3
+        with self.assertRaises(subprocess.CalledProcessError):
+            signing.notarize("/tmp/Linger.app", submit_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit", "notary-submit", "notary-submit"])
+
+    def test_signing_notarize_retries_wait_with_same_submission_id(self):
+        submission_id = "11111111-2222-3333-4444-555555555555"
+        calls = []
+        wait_failures = 2
+
+        def fake_run(*args, **kwargs):
+            nonlocal wait_failures
+            calls.append((args[1], args[-1]))
+            if args[1] == "notary-wait" and wait_failures > 0:
+                wait_failures -= 1
+                raise subprocess.CalledProcessError(1, args)
+
+        def fake_capture(*args, merge_stderr=False, stream=False):
+            calls.append((args[1], args[-1]))
+            if args[1] == "notary-submit":
+                return f"created submission ID: {submission_id}\n"
+            return json.dumps({"status": "Accepted"})
+
+        def fake_staple(signing_self, path):
+            calls.append(("staple", path))
+
+        self._stub_notarize_calls(fake_run, fake_capture, fake_staple)
+        signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+
+        signing.notarize("/tmp/Linger.dmg", wait_attempts=4, delay_seconds=0)
+        self.assertEqual(calls, [
+            ("notary-submit", "/tmp/Linger.dmg"),
+            ("notary-wait", submission_id),
+            ("notary-wait", submission_id),
+            ("notary-wait", submission_id),
+            ("notary-log", submission_id),
+            ("staple", "/tmp/Linger.dmg"),
+        ])
+
+        # Exhausted wait retries propagate without calling notary-log or staple.
+        calls.clear()
+        wait_failures = 3
+        with self.assertRaises(subprocess.CalledProcessError):
+            signing.notarize("/tmp/Linger.dmg", wait_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, [
+            ("notary-submit", "/tmp/Linger.dmg"),
+            ("notary-wait", submission_id),
+            ("notary-wait", submission_id),
+            ("notary-wait", submission_id),
+        ])
+
+    def test_signing_notarize_stops_retrying_wait_when_budget_cannot_cover_delay(self):
+        submission_id = "22222222-3333-4444-5555-666666666666"
+        signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+
+        for label, delay_seconds, ticks in (
+            ("remaining_lte_delay", 5, [100.0, 100.0, 106.0]),
+            ("already_exhausted", 0, [100.0, 100.0, 110.0]),
+        ):
+            with self.subTest(case=label):
+                calls = []
+                sleeps = []
+
+                def fake_run(*args, **kwargs):
+                    calls.append(args[1])
+                    raise subprocess.CalledProcessError(1, args)
+
+                def fake_capture(*args, merge_stderr=False, stream=False):
+                    calls.append(args[1])
+                    return f"created submission ID: {submission_id}\n"
+
+                def fake_staple(signing_self, path):
+                    calls.append("staple")
+
+                self._stub_notarize_calls(fake_run, fake_capture, fake_staple)
+                with mock.patch.object(self.mac.time, "monotonic", side_effect=ticks), \
+                        mock.patch.object(self.mac.time, "sleep", side_effect=sleeps.append):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        signing.notarize(
+                            "/tmp/Linger.dmg",
+                            wait_attempts=4,
+                            delay_seconds=delay_seconds,
+                            max_wait_seconds=10,
+                        )
+                self.assertEqual(calls, ["notary-submit", "notary-wait"])
+                self.assertEqual(sleeps, [])
+
+    def test_signing_notarize_fails_closed_without_submission_id(self):
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(args[1])
+
+        def fake_capture(*args, merge_stderr=False, stream=False):
+            calls.append(args[1])
+            return "upload finished with no submission identifier\n"
+
+        def fake_staple(signing_self, path):
+            calls.append("staple")
+
+        self._stub_notarize_calls(fake_run, fake_capture, fake_staple)
+        signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+
+        with self.assertRaisesRegex(RuntimeError, "submission ID"):
+            signing.notarize("/tmp/Linger.app", submit_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit"])
+
+    def test_signing_notarize_fails_closed_on_apple_rejection_and_retries_transient_log_errors(self):
+        submission_id = "99999999-8888-7777-6666-555555555555"
+        calls = []
+        log_responses = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(args[1])
+
+        def fake_capture(*args, merge_stderr=False, stream=False):
+            calls.append(args[1])
+            if args[1] == "notary-submit":
+                return f"created submission ID: {submission_id}\n"
+            response = log_responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        def fake_staple(signing_self, path):
+            calls.append("staple")
+
+        self._stub_notarize_calls(fake_run, fake_capture, fake_staple)
+        signing = self.mac.Signing("rcodesign", "id.p12", "id.password", "notary.json")
+
+        # Apple Invalid verdict fails immediately without retrying notary-log or stapling.
+        log_responses[:] = [json.dumps({"status": "Invalid", "issues": [{"message": "unsigned"}]})]
+        with self.assertRaisesRegex(RuntimeError, "did not accept.*Invalid"):
+            signing.notarize("/tmp/Linger.app", log_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit", "notary-wait", "notary-log"])
+
+        # Transient notary-log errors retry and succeed when Accepted.
+        calls.clear()
+        log_responses[:] = [
+            subprocess.CalledProcessError(1, ("rcodesign", "notary-log")),
+            json.dumps({"status": "Accepted"}),
+        ]
+        signing.notarize("/tmp/Linger.app", log_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit", "notary-wait", "notary-log", "notary-log", "staple"])
+
+        # Invalid JSON fails closed immediately without retrying or stapling.
+        calls.clear()
+        log_responses[:] = ["not-json"]
+        with self.assertRaisesRegex(RuntimeError, "not valid JSON"):
+            signing.notarize("/tmp/Linger.app", log_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit", "notary-wait", "notary-log"])
+
+        # Non-object JSON fails closed without retrying or stapling.
+        calls.clear()
+        log_responses[:] = ["[]"]
+        with self.assertRaisesRegex(RuntimeError, "did not accept"):
+            signing.notarize("/tmp/Linger.app", log_attempts=3, delay_seconds=0)
+        self.assertEqual(calls, ["notary-submit", "notary-wait", "notary-log"])
 
     def test_signing_staple_retries_transient_lookup_errors(self):
         calls = []

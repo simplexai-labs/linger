@@ -6,7 +6,6 @@ import { useSearchParams } from "react-router";
 import { ActionMenu } from "@/components/ui/action-menu";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { cn } from "@/lib/cn";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
@@ -61,7 +60,6 @@ export function ConnectedAppsPage() {
   const apps = useQuery(externalAppsQueryOptions(client));
   const connections = useQuery(externalConnectionsQueryOptions(client));
   const webSearch = useQuery(webSearchBackendsQueryOptions(client));
-  // "all" shows every group; otherwise one group's id.
   const [filter, setFilter] = useState("all");
   const [connectedOnly, setConnectedOnly] = useState(false);
   // TeamHub lists only Connections that are not revoked.
@@ -84,25 +82,40 @@ export function ConnectedAppsPage() {
         ),
       ).length > 0,
   );
+  // One filter row: "all" shows every section, a group id shows that group's
+  // apps, and Web search shows the search backends.
   const filters = [
     { id: "all", label: t(m.filterAll) },
     ...groups.map(({ group }) => ({ id: group.id, label: t(group.title) })),
     { id: WEB_SEARCH_FILTER.id, label: t(WEB_SEARCH_FILTER.label) },
   ];
-  const groupApps = groups.find((entry) => entry.group.id === filter)?.apps;
+  const effectiveFilter = filters.some((item) => item.id === filter)
+    ? filter
+    : "all";
+  const searchFilter = effectiveFilter === WEB_SEARCH_FILTER.id;
+  const selectedGroupApps = groups.find(
+    (entry) => entry.group.id === effectiveFilter,
+  )?.apps;
   // Connected only narrows whichever view is open; with All it is one grid.
-  const filteredApps = connectedOnly
-    ? (groupApps ?? connectedApps).filter((app) => connectedApps.includes(app))
-    : groupApps;
+  const connectedAppSet = new Set(connectedApps);
+  const filteredApps = selectedGroupApps
+    ? connectedOnly
+      ? selectedGroupApps.filter((app) => connectedAppSet.has(app))
+      : selectedGroupApps
+    : connectedOnly
+      ? connectedApps
+      : undefined;
   const allSearchBackends = webSearch.data?.backends ?? [];
   const searchBackends = connectedOnly
     ? connectedWebSearchBackends(allSearchBackends)
     : shownWebSearchBackends(allSearchBackends);
-  const searchFilter = filter === WEB_SEARCH_FILTER.id;
   // DuckDuckGo needs no key, so Connected only always keeps the section.
-  const showSearch = filter === "all" || searchFilter;
+  const showSearch = effectiveFilter === "all" || searchFilter;
   const showApps =
-    !searchFilter && (!showSearch || !filteredApps || filteredApps.length > 0);
+    !searchFilter &&
+    (selectedGroupApps !== undefined ||
+      !filteredApps ||
+      filteredApps.length > 0);
 
   function renderApp(app: TeamHubExternalApp) {
     return (
@@ -171,25 +184,41 @@ export function ConnectedAppsPage() {
           </div>
         ) : (
           <>
-            {/* The toggle is as tall as the tabs and lines up with them; the
-                tab row keeps its own bottom margin. */}
-            <div className="flex items-start gap-3">
-              <UnderlineTabs
-                className="min-w-0 flex-1"
-                items={filters}
-                label={t(m.connectorCategories)}
-                onChange={setFilter}
-                value={filter}
-              />
-              <Button
-                aria-pressed={connectedOnly}
-                className="shrink-0"
-                onClick={() => setConnectedOnly((value) => !value)}
-                size="large"
-                tone={connectedOnly ? "primary" : "secondary"}
+            <div className="mb-5 flex items-start gap-3">
+              <div
+                aria-label={t(m.connectorCategories)}
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                role="group"
               >
-                {t(m.connectedOnly)}
-              </Button>
+                {filters.map((item) => (
+                  <button
+                    aria-pressed={item.id === effectiveFilter}
+                    className="select-pill shrink-0"
+                    key={item.id}
+                    onClick={() => setFilter(item.id)}
+                    type="button"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <label
+                className={cn(
+                  "inline-flex h-7 shrink-0 cursor-pointer select-none items-center gap-2 text-sm transition-colors duration-150 motion-reduce:transition-none",
+                  connectedOnly
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span>{t(m.connectedOnly)}</span>
+                <input
+                  checked={connectedOnly}
+                  className="agent-connector-switch"
+                  onChange={(event) => setConnectedOnly(event.target.checked)}
+                  role="switch"
+                  type="checkbox"
+                />
+              </label>
             </div>
             {!showApps ? null : filteredApps ? (
               filteredApps.length ? (

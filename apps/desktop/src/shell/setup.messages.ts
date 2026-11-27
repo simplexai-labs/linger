@@ -144,6 +144,11 @@ export const setupMessages = defineMessages("setup", {
   reasonUnavailable: "This computer can't run a local model now.",
 
   // BYOK fields.
+  provider: "Provider",
+  providerZhipu: "Zhipu GLM",
+  providerVolcano: "Volcano Engine Ark",
+  providerCustom: "Custom compatible endpoint…",
+  advancedOptions: "Advanced options",
   pathMostProviders: "Most providers",
   pathZhipu: "Zhipu GLM (base https://open.bigmodel.cn)",
   pathVolcano: "Volcano Engine Ark",
@@ -253,12 +258,12 @@ export const setupMessages = defineMessages("setup", {
   signInEnded:
     "Sign-in stopped before it finished. Retry, or choose another way below.",
   signInUnavailable:
-    "This runtime can't be signed in to from here. Use a different runtime or BYOK.",
+    "This Harness can't be signed in to from here. Use a different Harness or BYOK.",
   authorize: "Authorize",
   retry: "Retry",
-  otherRuntime: "Use a different runtime",
-  byokInstead: "Use BYOK instead",
-  continueWithByok: "Continue with BYOK",
+  otherRuntime: "Use a different Harness",
+  byokInstead: "Use API Key instead",
+  continueWithByok: "Continue with API Key",
   cancel: "Cancel",
   havingTrouble: "Having trouble?",
   signInHelpCode: "If the sign-in page shows a code, paste it here.",

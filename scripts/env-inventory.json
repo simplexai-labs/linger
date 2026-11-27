@@ -112,7 +112,7 @@
     },
     "installer": {
       "owner": "out-of-env",
-      "description": "Read by the local installer and @linger/local-installation on user machines: the installer home, the local models tool, the app model gateway passed to natively started services, a package registry and Go module proxy the person configured for native source, the download region (SIMPLEX_REGION: cn, global or auto; the installer passes the resolved one to node-services and localmodels, see scripts/installs/README.md), the system proxy the desktop resolved (LINGER_SYSTEM_HTTPS_PROXY), which the installer passes as HTTPS_PROXY to TeamHub and node-services only, the pre-reserved voice tools bin directory (TEAMHUB_VOICE_TOOLS_BIN) passed to TeamHub while voice tools extract asynchronously, and Python variables cleared before running it. Not part of .env.",
+      "description": "Read by the local installer and @linger/local-installation on user machines: the installer home, the local models tool and its optional pre-bundled kit archive, the app model gateway passed to natively started services, a package registry and Go module proxy the person configured for native source, the download region (SIMPLEX_REGION: cn, global or auto; the installer passes the resolved one to node-services and localmodels, see scripts/installs/README.md), the system proxy the desktop resolved (LINGER_SYSTEM_HTTPS_PROXY), which the installer passes as HTTPS_PROXY to TeamHub and node-services only, the pre-reserved voice tools bin directory (TEAMHUB_VOICE_TOOLS_BIN) passed to TeamHub while voice tools extract asynchronously, and Python variables cleared before running it. Not part of .env.",
       "names": [
         "GOPROXY",
         "LOCAL_ENV_FILE",
@@ -125,6 +125,7 @@
         "LINGER_HOME",
         "LINGER_LOCALMODELS_DEV_MODULE_DIR",
         "LINGER_LOCALMODELS_DEV_PYTHON",
+        "LINGER_LOCALMODELS_TOOL_ARCHIVE",
         "LINGER_LOCALMODELS_TOOL_JSON",
         "LINGER_NATIVE_DEPENDENCIES_JSON",
         "LINGER_NATIVE_VOICE_TOOLS_JSON",

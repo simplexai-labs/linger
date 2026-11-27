@@ -182,6 +182,12 @@ func mergeWindowsSearchPath(machinePath, userPath, inheritedPath string) string 
 	return strings.Join(merged, ";")
 }
 
+// AppendWindowsSearchPath appends dir to the tail of existingPath using the
+// Windows PATH canonicalizer and case-insensitive deduplication.
+func AppendWindowsSearchPath(existingPath, dir string) string {
+	return mergeWindowsSearchPath(existingPath, "", dir)
+}
+
 func (c *TerminalEnvironmentCache) resolveWindows(resolved map[string]string) map[string]string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

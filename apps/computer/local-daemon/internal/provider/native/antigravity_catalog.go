@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +24,14 @@ var (
 	antigravityProbeUsageSettle = 40 * time.Millisecond
 )
 
+// ErrAntigravityProbePrepare marks failures preparing the isolated local
+// temporary environment for an Antigravity probe before launching `agy acp`.
+var ErrAntigravityProbePrepare = errors.New("Antigravity diagnostic environment could not be prepared")
+
+func wrapAntigravityProbePrepareError(err error) error {
+	return fmt.Errorf("%w: %w", ErrAntigravityProbePrepare, err)
+}
+
 // AntigravityProbe is what one ACP session/new tells about the signed-in
 // account: whether a session opens and which models it offers.
 type AntigravityProbe struct {
@@ -30,11 +39,14 @@ type AntigravityProbe struct {
 	Models                 ModelList
 }
 
-// PrepareAntigravityProtocolProbe creates an empty isolated temporary Gemini
-// directory and ACP log path for `agy acp` protocol handshakes without copying
-// any user credentials or settings.
-func PrepareAntigravityProtocolProbe() ([]string, func(), error) {
-	args, _, release, err := prepareAntigravityProbe(nil, false)
+// PrepareAntigravityProtocolProbe creates an empty isolated Gemini directory
+// and ACP log path for `agy acp` protocol handshakes without copying any user
+// credentials or settings. When tempBase is non-empty, it allocates a
+// lock-tracked private directory via localworkspace.PrivateTempRoot under
+// tempBase; when empty, it falls back to the hardened OS temporary directory.
+// Preparation failures wrap ErrAntigravityProbePrepare.
+func PrepareAntigravityProtocolProbe(tempBase string) ([]string, func(), error) {
+	args, _, release, err := prepareAntigravityProbe(tempBase, nil, false)
 	return args, release, err
 }
 
@@ -54,21 +66,21 @@ func prepareAntigravityIsolatedDir(baseDir string, env map[string]string, seedCr
 	return geminiDir, localworkspace.AntigravityACPLogPath(baseDir), nil
 }
 
-func prepareAntigravityProbe(env map[string]string, seedCredentials bool) ([]string, string, func(), error) {
-	root, removeRoot, err := localworkspace.PrivateTempRoot("", "linger-antigravity-probe-")
+func prepareAntigravityProbe(tempBase string, env map[string]string, seedCredentials bool) ([]string, string, func(), error) {
+	root, removeRoot, err := localworkspace.PrivateTempRoot(tempBase, "linger-antigravity-probe-")
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, wrapAntigravityProbePrepareError(err)
 	}
 	release := func() { _ = removeRoot() }
 	geminiDir, logFile, err := prepareAntigravityIsolatedDir(root, env, seedCredentials)
 	if err != nil {
 		release()
-		return nil, "", nil, err
+		return nil, "", nil, wrapAntigravityProbePrepareError(err)
 	}
 	workDir := filepath.Join(root, "workspace")
 	if err := privatefs.EnsureDir(workDir); err != nil {
 		release()
-		return nil, "", nil, err
+		return nil, "", nil, wrapAntigravityProbePrepareError(err)
 	}
 	args := []string{"--gemini-dir", geminiDir, "--log-file", logFile}
 	return args, workDir, release, nil
@@ -77,15 +89,18 @@ func prepareAntigravityProbe(env map[string]string, seedCredentials bool) ([]str
 // ProbeAntigravity opens an empty ACP session inside a temporary isolated
 // Gemini directory and removes that directory after `agy acp` exits, so
 // probing never persists 0-step conversations or ACP logs under the user's
-// ~/.gemini/antigravity-cli store. HOME/USERPROFILE stays unchanged so OS
-// keyring auth and GEMINI_API_KEY continue working alongside the copied
-// file-based OAuth token and settings.
-func ProbeAntigravity(ctx context.Context, inv Invocation) (AntigravityProbe, error) {
+// ~/.gemini/antigravity-cli store. When tempBase is non-empty, it allocates a
+// lock-tracked private directory via localworkspace.PrivateTempRoot under
+// tempBase; when empty, it falls back to the hardened OS temporary directory.
+// Preparation failures wrap ErrAntigravityProbePrepare. HOME/USERPROFILE stays
+// unchanged so OS keyring auth and GEMINI_API_KEY continue working alongside
+// the copied file-based OAuth token and settings.
+func ProbeAntigravity(ctx context.Context, inv Invocation, tempBase string) (AntigravityProbe, error) {
 	env := invocationEnvironment(inv)
 	if localworkspace.AntigravityUserAppDataDir(env) == "" {
 		return AntigravityProbe{}, errors.New("Antigravity probe requires HOME")
 	}
-	probeArgs, workDir, release, err := prepareAntigravityProbe(env, true)
+	probeArgs, workDir, release, err := prepareAntigravityProbe(tempBase, env, true)
 	if err != nil {
 		return AntigravityProbe{}, err
 	}
@@ -117,9 +132,13 @@ func ProbeAntigravity(ctx context.Context, inv Invocation) (AntigravityProbe, er
 	return result, err
 }
 
-// DiscoverAntigravityModels lists the models of the signed-in account.
-func DiscoverAntigravityModels(ctx context.Context, inv Invocation) (ModelList, error) {
-	probe, err := ProbeAntigravity(ctx, inv)
+// DiscoverAntigravityModels lists the models of the signed-in account. When
+// tempBase is non-empty, it allocates a lock-tracked private directory via
+// localworkspace.PrivateTempRoot under tempBase; when empty, it falls back to
+// the hardened OS temporary directory. Preparation failures wrap
+// ErrAntigravityProbePrepare.
+func DiscoverAntigravityModels(ctx context.Context, inv Invocation, tempBase string) (ModelList, error) {
+	probe, err := ProbeAntigravity(ctx, inv, tempBase)
 	if err != nil {
 		return ModelList{}, err
 	}

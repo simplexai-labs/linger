@@ -109,10 +109,10 @@ func unifiedUITools() []tool {
 				"For repeated stages, read changing values from each observation in JavaScript and continue in a bounded loop. Never paste a value from the last model turn when the current UI supplies it. On an unrecognized stage return its observation before writing. " +
 				"Browser: let v=await ui.page(url) opens the page and returns its observation; v=await ui.page() or v=await v.observe() reads the current page again. Read v.text. Use v=await v.click(role,name), v=await v.type(role,name,text) or v=await v.select(role,name,[value]). " +
 				"Fill several named controls from one observation with v=await v.fill([{type,name,value},...]); type is the control role, e.g. textbox or combobox. " +
-				"macOS: when the user names an app and window, discover and read it in one call: const r=await ui.computer.list_windows({app:appName}); const matches=r.structuredContent.windows.filter(w=>w.title===windowTitle); if(matches.length!==1)return r.structuredContent.windows; const w=matches[0]; let v=await ui.window(w.pid,w.window_id).observe(); use v.text for reads. " +
-				"To act, v=await v.click('AXButton',name). Each named action returns the next observation. Use it for the next decision. Observe again for missing or changing state. " +
+				"macOS and Windows: when the user names an app and window, discover and read it in one call: const r=await ui.computer.list_windows({app:appName}); const matches=r.structuredContent.windows.filter(w=>w.title===windowTitle); if(matches.length!==1)return r.structuredContent.windows; const w=matches[0]; let v=await ui.window(w.pid,w.window_id).observe(); use v.text for reads. " +
+				"To act, pass the role and name exactly as shown in v.text: v=await v.click(role,name). Each named action returns the next observation. Use it for the next decision. Observe again for missing or changing state. " +
 				"To see a window, return await ui.computer.get_window_state({pid,window_id,include_screenshot:true}): a returned or emitted screenshot reaches you in this same call. A confirmed click only means the driver sent it, so after a click by coordinates return the next screenshot and check for the change you expected. If nothing changed, read the window again and click from that fresh screenshot before trying another route, and report what the screen shows when the control still does not respond. " +
-				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) to choose which images and text to return, console.log for notes and ui.help(namespace) for unfamiliar methods. Never replay an unknown write. Linger reviews each action before it runs.",
+				"On recovery inspect existing field values first. Raw ui.browser and ui.computer methods return driver results. Use ui.emit(result) to choose which images and text to return, console.log for notes and ui.help('computer'), ui.help('browser'), or ui.help() for unfamiliar methods. Never replay an unknown write. Linger reviews each action before it runs.",
 			InputSchema: schema(map[string]any{
 				"code": map[string]any{"type": "string", "minLength": 1, "maxLength": 65536, "description": "Async JavaScript body. Put repeated decisions in a for loop: inspect v.text, stop on completion or ambiguity, derive values from that view, then assign each awaited action back to v. " +
 					"Return what you read, e.g. return v.text. Do not yield between known stages. Single-step tasks need no loop."},
@@ -396,19 +396,36 @@ func (u *uiExecution) syncImageGeneration(generation uint64) {
 	u.imageBytes = 0
 }
 
+func (u *uiExecution) availableNamespaces() []string {
+	var namespaces []string
+	for _, name := range []string{"computer", "browser"} {
+		if _, ok := u.endpoints[name]; ok {
+			namespaces = append(namespaces, name)
+		}
+	}
+	return namespaces
+}
+
 func (u *uiExecution) help(ctx context.Context, topic string) (json.RawMessage, error) {
 	if topic == "" {
-		var namespaces []string
-		for _, name := range []string{"computer", "browser"} {
-			if _, ok := u.endpoints[name]; ok {
-				namespaces = append(namespaces, name)
-			}
-		}
-		return json.Marshal(map[string]any{"namespaces": namespaces, "state": "Only properties of the global state object persist across calls. Await each method. Use ui.emit(result) for native images and selected output. Read namespace help for unfamiliar methods. Methods return original MCP content and optional structuredContent. Errors throw; unknown effects cannot be retried.", "scope": "This Operation and execution lease only; resets invalidate state and image handles."})
+		return json.Marshal(map[string]any{"namespaces": u.availableNamespaces(), "state": "Only properties of the global state object persist across calls. Await each method. Use ui.emit(result) for native images and selected output. Read namespace help for unfamiliar methods. Methods return original MCP content and optional structuredContent. Errors throw; unknown effects cannot be retried.", "scope": "This Operation and execution lease only; resets invalidate state and image handles."})
 	}
 	endpoint, ok := u.endpoints[topic]
 	if !ok {
-		return nil, errors.New("help topic must be computer or browser")
+		calls := []string{"ui.help()"}
+		for _, name := range u.availableNamespaces() {
+			calls = append(calls, fmt.Sprintf("ui.help(%q)", name))
+		}
+		var hint string
+		switch len(calls) {
+		case 1:
+			hint = calls[0]
+		case 2:
+			hint = calls[0] + " or " + calls[1]
+		default:
+			hint = strings.Join(calls[:len(calls)-1], ", ") + ", or " + calls[len(calls)-1]
+		}
+		return nil, fmt.Errorf("help topic %q is invalid; call %s", topic, hint)
 	}
 	methods, err := u.catalog(ctx, endpoint)
 	if err != nil {

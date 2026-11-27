@@ -41,6 +41,10 @@ scripts/ci/desktop-release.sh publish desktop-v0.16.36 --notes-file notes.md
   `scripts/ci/desktop-release.sh publish` validates the uploaded assets,
   attaches the release notes, marks it as the latest release, and cleans up
   matching `desktop-v<version>-rc.*` prereleases and tags.
+- While the desktop app is in Beta, GitHub Releases carry `(Beta)` in the title
+  (`Linger Desktop <version> (Beta)`) and `notes.md` should open with a short
+  Beta notice to set expectations for new users. Keep stable releases
+  non-prerelease so `releases/latest` and auto-updates continue to work.
 - Before publishing a stable release, upgrade the previous stable release to
   the candidate on each platform following the
   [upgrade recipe](../.agents/skills/verify-linger/features/desktop-and-installer.md#upgrade-from-the-previous-release);
@@ -455,7 +459,12 @@ finds `cli/computer-tools/` (with its frozen `manifest.json`) and
 daemon from `resources/computer/`, so every package carries them as
 `resources/cli/computer-tools/` and `resources/runtime/` (on macOS under
 `Contents/Resources/`). Without them the daemon still starts and logs
-`computer_tools.missing` in `computer-daemon.log`.
+`computer_tools.missing` in `computer-daemon.log`. On Windows,
+`packaging/win/package.py` also downloads, SHA-256-verifies, and unpacks
+portable PowerShell 7.6.10 LTS (`PowerShell-7.6.10-win-x64.zip`, cached in
+`~/.cache/linger-desktop`, optional `PWSH_MIRROR` override) into
+`resources/runtime/pwsh/pwsh.exe`, which the Daemon appends to the end of
+Windows Runtime `PATH` as the default `pwsh` fallback.
 
 `build.mjs` stages them for each daemon target into
 `dist/computer-tools/<target>/` (`scripts/stage-computer-tools.mjs`) with

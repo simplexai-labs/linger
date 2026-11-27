@@ -140,9 +140,9 @@ func newFixture(t *testing.T) *fixture {
 			}
 			return runtimeCheck{}, errors.New("missing fixture")
 		},
-		diagnoseRuntimes: func(_ context.Context, configuredPaths, _ map[string]string, _ []string) ([]runtimeDiagnostic, error) {
-			f.diagnoseInputs = append(f.diagnoseInputs, configuredPaths)
-			return runtimeFixtures(configuredPaths), nil
+		diagnoseRuntimes: func(_ context.Context, request runtimeRequest, _ []string) ([]runtimeDiagnostic, error) {
+			f.diagnoseInputs = append(f.diagnoseInputs, request.configuredPaths)
+			return runtimeFixtures(request.configuredPaths), nil
 		},
 		newClient: func(string) controlClient { return fakeClient{f: f} },
 		inspectDaemon: func(context.Context, string) doctorCheck {

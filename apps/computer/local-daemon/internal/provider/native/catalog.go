@@ -47,8 +47,6 @@ func DiscoverModels(ctx context.Context, kind string, inv Invocation) (ModelList
 		return codexCatalog(ctx, inv)
 	case "pi":
 		return DiscoverPiModels(ctx, inv)
-	case "antigravity":
-		return DiscoverAntigravityModels(ctx, inv)
 	}
 	return ModelList{}, fmt.Errorf("model discovery is unsupported for Runtime %q", kind)
 }

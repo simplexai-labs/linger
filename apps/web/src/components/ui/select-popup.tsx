@@ -31,7 +31,7 @@ export interface AnchoredSelectPopupInput {
     readonly triggerWidth: number;
     readonly viewportWidth: number;
   }) => number;
-  readonly triggerRef: RefObject<HTMLButtonElement | null>;
+  readonly triggerRef: RefObject<HTMLElement | null>;
 }
 
 /**

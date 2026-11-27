@@ -42,7 +42,7 @@ type deps struct {
 	// interruptible derives a context that an interrupt arriving after the
 	// call cancels.
 	interruptible    func(ctx context.Context) (context.Context, context.CancelFunc)
-	diagnoseRuntimes func(ctx context.Context, configuredPaths, environment map[string]string, enabled []string) ([]runtimeDiagnostic, error)
+	diagnoseRuntimes func(ctx context.Context, request runtimeRequest, enabled []string) ([]runtimeDiagnostic, error)
 	newClient        func(stateDirectory string) controlClient
 	inspectDaemon    func(ctx context.Context, stateDirectory string) doctorCheck
 	probeGateway     func(ctx context.Context, gatewayURL string) doctorCheck
@@ -472,7 +472,12 @@ func (c *cli) executeLogin(ctx context.Context, parsed command) (int, error) {
 	if parsed.codexAuthFile != "" {
 		environment = withVariable(environment, "CODEX_HOME", filepath.Dir(parsed.codexAuthFile))
 	}
-	diagnostics, err := c.deps.diagnoseRuntimes(ctx, requested, environment, parsed.enabledRuntimes)
+	tempBase := validatedProbeTempBase(filepath.Join(filepath.Dir(parsed.configPath), "state"))
+	diagnostics, err := c.deps.diagnoseRuntimes(ctx, runtimeRequest{
+		configuredPaths: requested,
+		environment:     environment,
+		tempBase:        tempBase,
+	}, parsed.enabledRuntimes)
 	if err != nil {
 		return 0, wrapError(categoryCapabilityProbe, "Runtime capability probing failed: "+err.Error(), err)
 	}

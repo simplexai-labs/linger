@@ -66,9 +66,9 @@ describe("web search in the language on screen", () => {
       name: connectors.filterWebSearch,
     });
     expect(
-      within(screen.getByRole("tablist")).getByRole("tab", {
-        name: connectors.filterWebSearch,
-      }),
+      within(
+        screen.getByRole("group", { name: connectors.connectorCategories }),
+      ).getByRole("button", { name: connectors.filterWebSearch }),
     ).toBeVisible();
     const tavily = within(section)
       .getByRole("button", { name: "Tavily" })

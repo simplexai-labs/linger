@@ -2446,6 +2446,44 @@ describe("setup page local model plan", () => {
       "NVIDIA driver 621.24 installed. Restart Windows to finish",
     );
   });
+
+  it("marks detected runtimes on the runtime sign-in switcher", async () => {
+    const detectedCheck: SetupLocalModelsCheck = {
+      ...small,
+      recommendation: "claude",
+      runtimes: [
+        {
+          runtime: "claude",
+          installed: true,
+          authenticated: true,
+          ready: true,
+        },
+        {
+          runtime: "codex",
+          installed: false,
+          authenticated: false,
+          ready: false,
+        },
+        { runtime: "pi", installed: true, authenticated: true, ready: true },
+      ],
+    };
+    const base = state("installing");
+    await openPage({
+      ...base,
+      localServer: {
+        ...base.localServer,
+        localModels: detectedCheck,
+        steps: ["prepare", "services", "signin", "connect", "agents"],
+        step: "signin",
+        signIn: { runtime: "claude", state: "required" },
+      },
+    });
+    const switcher = (value: string) =>
+      document.querySelector<HTMLButtonElement>(`[data-switch="${value}"]`)!;
+    expect(switcher("claude").dataset.detected).toBe("true");
+    expect(switcher("codex").dataset.detected).toBe("false");
+    expect(switcher("pi").dataset.detected).toBe("true");
+  });
 });
 
 describe("setup page install location and free space", () => {

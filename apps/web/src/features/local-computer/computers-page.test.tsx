@@ -194,7 +194,7 @@ describe("ComputersPage", () => {
     });
     expect(within(detail).getByRole("status")).toHaveTextContent("Ready");
     expect(
-      within(detail).getByRole("region", { name: "AI apps" }),
+      within(detail).getByRole("region", { name: "Harness" }),
     ).toHaveTextContent("Codex");
     fireEvent.click(within(detail).getByRole("button", { name: "Access" }));
     expect(

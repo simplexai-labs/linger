@@ -293,6 +293,12 @@ export type SetupModelCheck =
       readonly diskFreeBytes?: number;
     };
 
+export interface SetupDetectedRuntime {
+  readonly runtime: "codex" | "claude" | "pi";
+  readonly installed: boolean;
+  readonly authenticated: boolean;
+  readonly ready: boolean;
+}
 export type SetupLocalModelsCheck =
   | { readonly state: "unchecked" | "unavailable" }
   // While the check first downloads the localmodels tool: its bytes.
@@ -334,6 +340,8 @@ export type SetupLocalModelsCheck =
       // The localmodels tool's pick, which Quick Install installs:
       // "local-models" is the model above served by Pi.
       readonly recommendation?: SetupChoice;
+      // Harnesses discovered on this computer by local-daemon during inspect.
+      readonly runtimes?: readonly SetupDetectedRuntime[];
     };
 
 // The AI runtime the installer sets up; "recommended" lets it pick and

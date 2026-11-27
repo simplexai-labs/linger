@@ -2319,11 +2319,6 @@ a[href][aria-disabled="true"],
   width: min(560px, calc(100vw - 32px));
 }
 
-/* Provider key dialogs (Composio, voice) share the search dialog's width. */
-.app-dialog.app-key-dialog {
-  width: min(560px, calc(100vw - 32px));
-}
-
 .global-search-progress {
   position: relative;
   height: 1px;
