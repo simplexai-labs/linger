@@ -892,6 +892,28 @@ describe.skipIf(process.platform === "win32")("spawnDaemon", () => {
     );
   });
 
+  it("forwards power.suspend and power.resume events to a running daemon over stdin", async () => {
+    const { daemon, ctx, children } = setup();
+    await daemon.start(ctx);
+    expect(children).toHaveLength(1);
+    const child = children[0]!;
+
+    ctx.bus.emit("power.suspend");
+    ctx.bus.emit("power.resume", { sleepMs: 300_000 });
+    ctx.bus.emit("power.resume", {});
+
+    expect(child.written).toEqual([
+      { type: "power.event", kind: "suspend" },
+      { type: "power.event", kind: "resume", sleep_ms: 300_000 },
+      { type: "power.event", kind: "resume" },
+    ]);
+
+    await daemon.stop();
+    // Power events after stop are ignored.
+    ctx.bus.emit("power.resume", { sleepMs: 5_000 });
+    expect(child.written).toHaveLength(3);
+  });
+
   it("reports a Go panic by its panic line, not its stack trace", async () => {
     const [code, reason] = await exitOf(
       [

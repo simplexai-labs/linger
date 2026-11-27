@@ -256,6 +256,10 @@ export class ComputerDaemonModule implements Module {
       ctx.bus.on("grants.changed", () => this.#requestRestart(true)),
       ctx.bus.on("computer.renamed", () => this.#requestRestart(true)),
       ctx.bus.on("computer.runtime", () => this.#requestRestart(true)),
+      ctx.bus.on("power.suspend", () => this.#forwardPowerEvent("suspend")),
+      ctx.bus.on("power.resume", (info) =>
+        this.#forwardPowerEvent("resume", info.sleepMs),
+      ),
     );
     const env = this.#options.env ?? {};
     const protect = this.#protect();
@@ -509,6 +513,15 @@ export class ComputerDaemonModule implements Module {
     }
     // The daemon has its answer before the app quits and closes its stdin.
     if (request.op === "relaunch") this.#options.relaunch!();
+  }
+
+  #forwardPowerEvent(kind: "suspend" | "resume", sleepMs?: number): void {
+    if (this.#stopping || !this.#child) return;
+    this.#send(this.#child, {
+      type: "power.event",
+      kind,
+      ...(sleepMs !== undefined ? { sleep_ms: sleepMs } : {}),
+    });
   }
 
   #send(child: DaemonChild, message: object): void {
