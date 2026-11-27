@@ -59,6 +59,9 @@ export interface ReleaseOrchestratorHooks {
     release: LocalReleaseDescriptor | undefined,
     changed: readonly BundleModuleId[],
   ) => readonly HealthProbe[];
+  readonly readFailedServiceLogs?: (
+    failedProbes: readonly string[],
+  ) => Promise<Record<string, string>>;
   readonly onProgress?: (progress: ReleaseProgressUpdate) => void;
   readonly onComplete?: (
     release: LocalReleaseDescriptor,
@@ -301,6 +304,31 @@ export class ReleaseOrchestratorModule implements Module {
         intervalMs: this.#hooks.healthGateIntervalMs,
       });
       if (!health.ok) {
+        let serviceLogTails: Record<string, string> | undefined;
+        if (this.#hooks.readFailedServiceLogs) {
+          try {
+            const tails = await this.#hooks.readFailedServiceLogs(
+              health.failedProbes,
+            );
+            if (Object.keys(tails).length > 0) {
+              serviceLogTails = tails;
+            }
+          } catch (logReadError) {
+            ctx.log.warn("release_orchestrator.service_log_read_failed", {
+              appVersion: version,
+              failedProbes: health.failedProbes,
+              error:
+                logReadError instanceof Error
+                  ? logReadError.message
+                  : String(logReadError),
+            });
+          }
+        }
+        ctx.log.warn("release_orchestrator.health_probe_failed", {
+          appVersion: version,
+          failedProbes: health.failedProbes,
+          ...(serviceLogTails ? { serviceLogTails } : {}),
+        });
         throw new Error(
           `Health probes failed: ${health.failedProbes.join(", ")}`,
         );

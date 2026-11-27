@@ -15,6 +15,7 @@ import {
   type ReleaseProgressUpdate,
 } from "./release-orchestrator.js";
 import { createV2DatabaseBackupHooks } from "./v2-db-backup.js";
+import { createFailedServiceLogReader } from "./v2-service-logs.js";
 
 const tempDirs: string[] = [];
 
@@ -926,6 +927,137 @@ describe("ReleaseOrchestratorModule & HealthWatchdogModule", () => {
       expect(restarted).toEqual(["0.1.11-v2test.3", "0.1.11-v2test.2"]);
       expect(restored).toEqual([]);
       expect(await store.isDenylisted("0.1.11-v2test.3")).toBe(true);
+    } finally {
+      await host.stop("quit");
+    }
+  });
+
+  it("logs sanitized failed service log tails on health probe failure and still rolls back if reading logs throws", async () => {
+    const home = await makeTempDir("linger-orch-logtails-");
+    const logsDir = path.join(home, "instances", "desktop", "native", "logs");
+    await mkdir(logsDir, { recursive: true });
+    await writeFile(
+      path.join(logsDir, "teamhub.log"),
+      [
+        "starting teamhub with TEAMHUB_LOCAL_IDENTITY_KEY=super_secret_identity_99",
+        "postgres://simplexai:db_pass_123@127.0.0.1:5432/simplexai",
+        "[V2-TEST-FAULTY-0.1.11-v2test.3] simulated startup failure for rollback verification",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const store = new BundleStoreModule({ home, target: "darwin-arm64" });
+    const watchdog = new HealthWatchdogModule();
+    const config = new ConfigStore(path.join(home, "config.json"));
+    const bus = new EventBus();
+
+    const warnings: Array<{ event: string; fields: Record<string, unknown> }> =
+      [];
+    const testLog = {
+      info: () => {},
+      warn: (event: string, fields: Record<string, unknown>) =>
+        warnings.push({ event, fields }),
+      error: () => {},
+    };
+
+    const readLogs = createFailedServiceLogReader({ getHome: () => home });
+    let shouldThrowOnLogRead = false;
+
+    const orch = new ReleaseOrchestratorModule({
+      activeOperations: () => 0,
+      restartServices: async () => {},
+      buildHealthProbes: (rel) => [
+        {
+          name: "teamhub-healthz",
+          check: async () => rel?.appVersion === "0.1.11-v2test.2",
+        },
+      ],
+      readFailedServiceLogs: async (failedProbes) => {
+        if (shouldThrowOnLogRead) {
+          throw new Error("disk read failed");
+        }
+        return readLogs(failedProbes);
+      },
+      completePauseMs: 0,
+      rollbackPauseMs: 0,
+      healthGateTimeoutMs: 60,
+      healthGateIntervalMs: 15,
+    });
+
+    const host = new ModuleHost(
+      [
+        {
+          name: "Config",
+          dependsOn: [],
+          start: async () => {},
+          stop: async () => {},
+        },
+        store,
+        watchdog,
+        orch,
+      ],
+      { config, log: testLog, bus },
+    );
+    await host.start();
+    try {
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.2", { backend: "2" }),
+      );
+      await store.beginPending({
+        appVersion: "0.1.11-v2test.2",
+        releaseFile: "releases/0.1.11-v2test.2/release.json",
+        updatedAt: new Date().toISOString(),
+      });
+      await store.commitPending();
+
+      // 1. Logs sanitized serviceLogTails while keeping rollbackNotice.reason free of raw log tails.
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.3", { backend: "3" }),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.3");
+      expect(await orch.applyStaged()).toBe(false);
+
+      const probeFailed = warnings.find(
+        (w) => w.event === "release_orchestrator.health_probe_failed",
+      );
+      expect(probeFailed).toBeDefined();
+      expect(probeFailed?.fields.appVersion).toBe("0.1.11-v2test.3");
+      expect(probeFailed?.fields.failedProbes).toEqual(["teamhub-healthz"]);
+      const tails = probeFailed?.fields.serviceLogTails as Record<
+        string,
+        string
+      >;
+      expect(tails.teamhub).toContain(
+        "[V2-TEST-FAULTY-0.1.11-v2test.3] simulated startup failure for rollback verification",
+      );
+      expect(tails.teamhub).not.toContain("super_secret_identity_99");
+      expect(tails.teamhub).not.toContain("db_pass_123");
+      expect(orch.rollbackNotice()?.reason).toBe(
+        "Health probes failed: teamhub-healthz",
+      );
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
+
+      // 2. If readFailedServiceLogs throws, rollback still completes cleanly.
+      warnings.length = 0;
+      shouldThrowOnLogRead = true;
+      await store.writeReleaseDescriptor(
+        makeRelease("0.1.11-v2test.4", { backend: "4" }),
+      );
+      await orch.onBundleStaged("0.1.11-v2test.4");
+      expect(await orch.applyStaged()).toBe(false);
+
+      expect(
+        warnings.some(
+          (w) => w.event === "release_orchestrator.service_log_read_failed",
+        ),
+      ).toBe(true);
+      expect(
+        warnings.some(
+          (w) => w.event === "release_orchestrator.health_probe_failed",
+        ),
+      ).toBe(true);
+      expect((await store.readCurrent())?.appVersion).toBe("0.1.11-v2test.2");
+      expect(await store.isDenylisted("0.1.11-v2test.4")).toBe(true);
     } finally {
       await host.stop("quit");
     }

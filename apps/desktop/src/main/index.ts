@@ -46,6 +46,7 @@ import {
   resolveToolsNodePath,
 } from "./v2-runtime-helpers.js";
 import { createV2DatabaseBackupHooks } from "./v2-db-backup.js";
+import { createFailedServiceLogReader } from "./v2-service-logs.js";
 import {
   LocalServerModule,
   signInWithPassword,
@@ -481,6 +482,9 @@ async function main(): Promise<void> {
       : {}),
     backupDatabase: dbBackupHooks.backupDatabase,
     restoreDatabase: dbBackupHooks.restoreDatabase,
+    readFailedServiceLogs: createFailedServiceLogReader({
+      getHome: () => bundleStore.home,
+    }),
     onProgress: (progress) => {
       const detailByStage = {
         preparing: offlineMessages.updatingPrepare,
