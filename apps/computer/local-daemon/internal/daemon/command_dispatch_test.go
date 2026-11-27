@@ -237,6 +237,11 @@ func (fx *dispatchFixture) send(command protocol.Command) {
 
 // stop ends the connection and waits for it to return and its workers to exit.
 func (fx *dispatchFixture) stop() {
+	if fx.t.Failed() {
+		// Cancel active Operations on test failure so blocking backends do not
+		// stall WaitForOperations until the Go test timeout.
+		fx.daemon.Drain()
+	}
 	fx.gate.release()
 	_ = fx.stream.Close()
 	select {
@@ -414,7 +419,7 @@ func TestOperationCancelIsNotBlockedBySlowInputView(t *testing.T) {
 	fx.awaitEvent("operation accepted", operationEvent(protocol.EventOperationAccepted, start.OperationID))
 	// The cancelled Provider's cleanup is what this test waits on, so the input
 	// and cancel arrive only after the Provider has started.
-	awaitOperationStarted(t, fx.daemon)
+	awaitOperationIDStarted(t, fx.daemon, start.OperationID)
 	input := start
 	input.Type, input.CommandID, input.ExpectedTurnID = protocol.CommandOperationInput, "input-a", "turn-1"
 	input.Input = json.RawMessage(`{"type":"text","text":"more"}`)
@@ -426,6 +431,96 @@ func TestOperationCancelIsNotBlockedBySlowInputView(t *testing.T) {
 	fx.awaitEvent("operation cancelled while the input View is held", operationEvent(protocol.EventOperationCancelled, start.OperationID))
 	gate.release()
 	<-cleaned
+}
+
+type sendHookStream struct {
+	*fakeStream
+	onSend func(protocol.Event)
+}
+
+func (s *sendHookStream) Send(ctx context.Context, event protocol.Event) error {
+	if err := s.fakeStream.Send(ctx, event); err != nil {
+		return err
+	}
+	if s.onSend != nil {
+		s.onSend(event)
+	}
+	return nil
+}
+
+func TestOperationCancelOnAcceptedSendCancelsRegisteredOperation(t *testing.T) {
+	d, err := newTestDaemon(t, Options{
+		ComputerID:        "computer-1",
+		ControlPlane:      fakeControlPlane{stream: &fakeStream{}},
+		IdentityStore:     fakeStore{},
+		OperationResolver: fakeOperationResolver{},
+		Executor: provider.Executor{NewBackend: func(string, native.Profile) (native.Runtime, error) {
+			return completingBackend{}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := daemonOperationStart("operation-cancel-on-accept", "agent-1")
+	var (
+		sawAccepted bool
+		registered  bool
+		cancelErr   error
+	)
+	stream := &sendHookStream{
+		fakeStream: &fakeStream{},
+		onSend: func(event protocol.Event) {
+			if event.Type != protocol.EventOperationAccepted || event.OperationID != start.OperationID {
+				return
+			}
+			sawAccepted = true
+			d.activeMu.Lock()
+			_, registered = d.activeOperations[start.OperationID]
+			d.activeMu.Unlock()
+			cancelErr = d.handleOperationCancel(operationCancelCommand(start))
+		},
+	}
+	d.operationStream = stream
+	if err := d.handleOperationStart(context.Background(), stream, start); err != nil {
+		t.Fatal(err)
+	}
+	d.WaitForOperations()
+	if !sawAccepted {
+		t.Fatal("operation.accepted was not sent")
+	}
+	if !registered {
+		t.Fatal("Operation was not registered in activeOperations when operation.accepted was sent")
+	}
+	if cancelErr != nil {
+		t.Fatalf("handleOperationCancel() error = %v", cancelErr)
+	}
+	if active := d.ActiveOperationCount(); active != 0 {
+		t.Fatalf("active Operations = %d, want 0", active)
+	}
+	events := stream.snapshotEvents()
+	acceptedIndex, cancelledIndex := -1, -1
+	for index, event := range events {
+		if event.OperationID != start.OperationID {
+			continue
+		}
+		switch event.Type {
+		case protocol.EventOperationAccepted:
+			acceptedIndex = index
+		case protocol.EventOperationCancelled:
+			cancelledIndex = index
+			var payload struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Reason != "Gateway cancel" {
+				t.Fatalf("cancelled payload = %s err=%v, want Gateway cancel", event.Payload, err)
+			}
+		case protocol.EventOperationCompleted, protocol.EventOperationFailed:
+			t.Fatalf("unexpected terminal event %s after immediate cancel; events=%s", event.Type, describeEvents(events))
+		}
+	}
+	if acceptedIndex < 0 || cancelledIndex <= acceptedIndex {
+		t.Fatalf("expected accepted before cancelled, got events=%s", describeEvents(events))
+	}
 }
 
 func TestOperationCancelDuringBlockedViewIsAppliedAfterStart(t *testing.T) {

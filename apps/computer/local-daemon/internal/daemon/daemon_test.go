@@ -2254,6 +2254,26 @@ func awaitOperationStarted(t *testing.T, d *Daemon) {
 	}
 }
 
+// awaitOperationIDStarted waits until operationID is registered as active and
+// has started its Provider, without returning early on an empty map.
+func awaitOperationIDStarted(t *testing.T, d *Daemon, operationID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		d.activeMu.Lock()
+		active := d.activeOperations[operationID]
+		started := active != nil && active.execution != nil
+		d.activeMu.Unlock()
+		if started {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Operation %q did not start its Provider", operationID)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // gateInputUntilStarted holds operation.input and operation.cancel until the
 // queued start was admitted and its Provider has started, as a real Agent sends
 // them only after run.started.

@@ -28,19 +28,23 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 const FAKE_DAEMON = `#!${process.execPath}
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 const dir = process.env.FAKE_DAEMON_DIR;
 const runtime = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
   stdio: "ignore",
 });
-writeFileSync(dir + "/pids.json", JSON.stringify({ daemon: process.pid, runtime: runtime.pid }));
-process.stdout.write(JSON.stringify({ type: "status", connection: "connected" }) + "\\n");
 process.stdin.on("data", (chunk) => process.stdout.write(chunk));
 process.stdin.on("end", () => {
   runtime.kill("SIGTERM");
   writeFileSync(dir + "/shutdown", "stdin closed");
   process.exit(0);
 });
+writeFileSync(
+  dir + "/pids.json.tmp",
+  JSON.stringify({ daemon: process.pid, runtime: runtime.pid }),
+);
+renameSync(dir + "/pids.json.tmp", dir + "/pids.json");
+process.stdout.write(JSON.stringify({ type: "status", connection: "connected" }) + "\\n");
 `;
 
 // The app side: the real spawnDaemon, in a process the test can kill.
@@ -63,6 +67,14 @@ function alive(pid: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+function killQuietly(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Already exited.
   }
 }
 
@@ -154,8 +166,7 @@ describe.skipIf(process.platform === "win32")(
       const { daemon, runtime } = await pids();
       expect(alive(daemon) && alive(runtime)).toBe(true);
       cleanup.push(() => {
-        for (const pid of [daemon, runtime])
-          if (alive(pid)) process.kill(pid, "SIGKILL");
+        for (const pid of [daemon, runtime]) killQuietly(pid);
       });
 
       // A crash or force quit: no before-quit, no stop(). The OS closes the
@@ -170,36 +181,49 @@ describe.skipIf(process.platform === "win32")(
       expect(readFileSync(path.join(directory, "shutdown"), "utf8")).toBe(
         "stdin closed",
       );
-    });
+    }, 15_000);
 
     it("stops a daemon that was frozen and thawed, as across system sleep", async () => {
       setUp();
       const child = startDaemon();
-      const { daemon, runtime } = await pids();
       cleanup.push(() => child.kill());
       const lines: string[] = [];
       child.onLine((line) => lines.push(line));
+      const { daemon, runtime } = await pids();
+      cleanup.push(() => {
+        for (const pid of [daemon, runtime]) killQuietly(pid);
+      });
+
+      // Consume the startup status line before freezing so SIGCONT cannot
+      // deliver it alongside the queued probe.
+      await until(() => lines.length >= 1, 5_000, "the initial status line");
+      expect(JSON.parse(lines[0]!) as unknown).toEqual({
+        type: "status",
+        connection: "connected",
+      });
+      lines.length = 0;
 
       process.kill(daemon, "SIGSTOP");
-      child.write(JSON.stringify({ type: "probe", n: 1 }));
+      const probe = JSON.stringify({ type: "probe", n: 1 });
+      child.write(probe);
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(lines).toEqual([]);
       process.kill(daemon, "SIGCONT");
-      await until(() => lines.length === 1, 5_000, "the queued line");
+      await until(() => lines.length >= 1, 5_000, "the queued line");
+      expect(lines).toEqual([probe]);
 
       const code = exited(child);
       child.stop();
       expect(await code).toBe(0);
       await until(() => !alive(runtime), 5_000, "the runtime to exit");
-    });
+    }, 15_000);
 
     it("kills a daemon still frozen at quit together with its runtimes", async () => {
       setUp();
       const child = startDaemon();
       const { daemon, runtime } = await pids();
       cleanup.push(() => {
-        for (const pid of [daemon, runtime])
-          if (alive(pid)) process.kill(pid, "SIGKILL");
+        for (const pid of [daemon, runtime]) killQuietly(pid);
       });
 
       // Frozen: stdin EOF cannot be read, so the graceful stop does nothing
@@ -214,6 +238,6 @@ describe.skipIf(process.platform === "win32")(
       expect(await code).toBeNull();
       await until(() => !alive(runtime), 5_000, "the runtime to exit");
       expect(existsSync(path.join(directory, "shutdown"))).toBe(false);
-    });
+    }, 15_000);
   },
 );
