@@ -4,7 +4,15 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { INSTANCE_BUSY } from "@linger/local-installation/instance";
-import { withLocalModelsLock } from "@linger/local-installation/local-models";
+import {
+  hasPendingLocalModelsStop,
+  markLocalModelsStopPending,
+  withLocalModelsLock,
+} from "@linger/local-installation/local-models";
+import {
+  stopLocalmodels,
+  type runLocalmodels,
+} from "@linger/local-installation/localmodels-tool";
 
 import { parseInstallerArguments } from "../main.js";
 import { launchInstaller } from "./launch.js";
@@ -345,4 +353,141 @@ test("passes options.log to stopInstance and logs durations for manager, service
   expect(logs.at(-1)).toMatch(
     /^Stop timings \(s\): manager [\d.]+, services [\d.]+, localmodels [\d.]+\.$/,
   );
+});
+
+test("a quit records a stop-pending marker while stopping and keeps it when the stop fails", async () => {
+  const value = await home();
+  await mkdir(path.join(value, "runtime/localmodels"), { recursive: true });
+  let pendingDuringStop = false;
+  const okOutcome = await stopDesktopLocalModels(
+    { ...options(value), budgetMs: 135_000 },
+    {
+      stopModels: async (at, opts) => {
+        pendingDuringStop = await hasPendingLocalModelsStop(at);
+        expect(opts.budgetMs).toBeGreaterThan(0);
+        expect(opts.budgetMs).toBeLessThanOrEqual(135_000);
+      },
+    },
+  );
+  expect(okOutcome.failed).toEqual([]);
+  expect(pendingDuringStop).toBe(true);
+  expect(await hasPendingLocalModelsStop(value)).toBe(false);
+
+  const failedOutcome = await stopDesktopLocalModels(options(value), {
+    stopModels: async () => {
+      throw new Error("localmodels stack down: Command timed out");
+    },
+  });
+  expect(failedOutcome.failed).toHaveLength(1);
+  expect(await hasPendingLocalModelsStop(value)).toBe(true);
+});
+
+test("a full uninstall stop clears any lingering stop-pending marker on success", async () => {
+  const value = await home();
+  await markLocalModelsStopPending(value);
+  const outcome = await stopDesktopInstallation(
+    { ...options(value), budgetMs: 120_000 },
+    {
+      load: async () => undefined,
+      stopModels: async (_at, opts) => {
+        expect(opts.budgetMs).toBeGreaterThan(0);
+        expect(opts.budgetMs).toBeLessThanOrEqual(120_000);
+      },
+    },
+  );
+  expect(outcome.failed).toEqual([]);
+  expect(await hasPendingLocalModelsStop(value)).toBe(false);
+});
+
+test("after a slow services stage, uninstall scales localmodels reserves within the outer signal deadline so foundations stop and stack down still run", async () => {
+  const value = await home();
+  const runUninstall = async (hangLibraryStatus: boolean) => {
+    let now = 0;
+    const outerDeadline = 120_000;
+    const outerController = new AbortController();
+    const advance = (ms: number) => {
+      now += ms;
+      if (now >= outerDeadline && !outerController.signal.aborted)
+        outerController.abort(new Error("outer stop deadline reached"));
+    };
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const commands: [string, number | undefined][] = [];
+    const run = vi.fn<typeof runLocalmodels>(async (_home, args, opts) => {
+      const key = args.slice(0, 2).join(" ");
+      commands.push([key, opts?.timeoutMs]);
+      if (key === "library status") {
+        if (hangLibraryStatus) {
+          advance(opts?.timeoutMs ?? 0);
+          opts?.signal?.throwIfAborted();
+          throw Object.assign(new Error("Command timed out"), {
+            code: "COMMAND_TIMEOUT",
+          });
+        }
+        advance(2_000);
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            schema: "localmodels.library-status/v1",
+            models: [{ id: "qwen3-8b:Q4_K_M", state: "loaded" }],
+          }),
+          stderr: "",
+        };
+      }
+      advance(2_000);
+      opts?.signal?.throwIfAborted();
+      return { code: 0, stdout: "{}", stderr: "" };
+    });
+    try {
+      const outcome = await stopDesktopInstallation(
+        {
+          ...options(value),
+          signal: outerController.signal,
+          budgetMs: outerDeadline,
+        },
+        {
+          load: async ({ home: at }) =>
+            instance(path.join(at!, "instances/desktop")),
+          stopInstance: async () => {
+            // Simulate stopping native services taking 80 s of the 120 s budget.
+            advance(80_000);
+          },
+          stopModels: (at, opts) =>
+            stopLocalmodels(at, opts, {
+              run,
+              installed: async () => true,
+              now: () => now,
+            }),
+        },
+      );
+      return { outcome, commands, aborted: outerController.signal.aborted };
+    } finally {
+      nowSpy.mockRestore();
+    }
+  };
+
+  // Case 1: slow services (80 s) + healthy localmodels -> every step runs and
+  // succeeds within the remaining 40 s without skipping anything.
+  const healthy = await runUninstall(false);
+  expect(healthy.outcome.failed).toEqual([]);
+  expect(healthy.aborted).toBe(false);
+  expect(healthy.commands).toEqual([
+    ["library status", 20_000],
+    ["library unload", 18_000],
+    ["foundations stop", 21_000],
+    ["stack down", 34_000],
+  ]);
+
+  // Case 2: slow services (80 s) + hanging library status -> status times out
+  // at its scaled 20 s cap before the 120 s outer signal fires, so foundations
+  // stop and stack down still run with their protected tails.
+  const hung = await runUninstall(true);
+  expect(hung.aborted).toBe(false);
+  expect(hung.outcome.failed).toEqual([
+    { home: value, message: "localmodels library status: Command timed out" },
+  ]);
+  expect(hung.commands).toEqual([
+    ["library status", 20_000],
+    ["foundations stop", 5_000],
+    ["stack down", 18_000],
+  ]);
 });

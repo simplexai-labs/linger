@@ -12,13 +12,18 @@ import path from "node:path";
 import os from "node:os";
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  clearLocalModelsStopPending,
+  hasPendingLocalModelsStop,
   isLocalRuntimeModel,
   localModelsDegradedFromError,
   localModelsDegradedFromOutcome,
+  localModelsStopPendingFile,
+  markLocalModelsStopPending,
   prepareLocalModels,
   localModelsEnvironment,
   reasonCodeList,
   restoreLocalModels,
+  retryPendingLocalModelsStop,
   stackProgress,
   localModelsLockFile,
   withLocalModelsLock,
@@ -2442,4 +2447,171 @@ test("extracts degraded local model details with valid reason codes only", () =>
     code: "LOCAL_MODELS_RECOVERY_REQUIRED",
     message: "Invalid upstream local model binding.",
   });
+});
+
+test("retryPendingLocalModelsStop is a no-op when no stop-pending marker exists", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "local-models-stop-none-"));
+  roots.push(home);
+  const stopModels = vi.fn(async () => {});
+  let lockCalled = false;
+  const withLock: typeof withLocalModelsLock = (at, callback, timing) => {
+    lockCalled = true;
+    return withLocalModelsLock(at, callback, timing);
+  };
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000) },
+      { stopModels, withLock },
+    ),
+  ).toEqual({ retried: false });
+  expect(lockCalled).toBe(false);
+  expect(stopModels).not.toHaveBeenCalled();
+});
+
+test("retryPendingLocalModelsStop retries once and clears the marker on success", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "local-models-stop-ok-"));
+  roots.push(home);
+  await markLocalModelsStopPending(home);
+  expect(await hasPendingLocalModelsStop(home)).toBe(true);
+  await expectPrivate(localModelsStopPendingFile(home), "file");
+  const stopModels = vi.fn(async () => {});
+  const logs: string[] = [];
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000), log: (line) => logs.push(line) },
+      { stopModels },
+    ),
+  ).toEqual({ retried: true });
+  expect(stopModels).toHaveBeenCalledWith(
+    home,
+    expect.objectContaining({ keepController: true }),
+  );
+  expect(await hasPendingLocalModelsStop(home)).toBe(false);
+  expect(logs.join("\n")).toContain("retrying before resume");
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000) },
+      { stopModels },
+    ),
+  ).toEqual({ retried: false });
+  expect(stopModels).toHaveBeenCalledTimes(1);
+});
+
+test("retryPendingLocalModelsStop waits for an in-flight quit stop and skips retrying when it finishes", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "local-models-stop-race-"));
+  roots.push(home);
+  await mkdir(path.join(home, "runtime/localmodels"), { recursive: true });
+  let release!: () => void;
+  let acquired!: () => void;
+  const locked = new Promise<void>((resolve) => (acquired = resolve));
+  const inFlight = withLocalModelsLock(home, async () => {
+    await markLocalModelsStopPending(home);
+    acquired();
+    await new Promise<void>((resolve) => (release = resolve));
+    await clearLocalModelsStopPending(home);
+  });
+  await locked;
+  const stopModels = vi.fn(async () => {});
+  const retry = retryPendingLocalModelsStop(
+    home,
+    { signal: AbortSignal.timeout(5000) },
+    { stopModels, lockRetryMs: 5 },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(stopModels).not.toHaveBeenCalled();
+  release();
+  await inFlight;
+  expect(await retry).toEqual({ retried: false });
+  expect(stopModels).not.toHaveBeenCalled();
+});
+
+test("retryPendingLocalModelsStop retires the marker after a failed retry so subsequent launches do not block", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "local-models-stop-fail-"));
+  roots.push(home);
+  await markLocalModelsStopPending(home);
+  const logs: string[] = [];
+  const stopModels = vi.fn(async () => {
+    throw new Error("localmodels stack down: Command timed out");
+  });
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000), log: (line) => logs.push(line) },
+      { stopModels },
+    ),
+  ).toEqual({
+    retried: true,
+    failed: "localmodels stack down: Command timed out",
+  });
+  expect(await hasPendingLocalModelsStop(home)).toBe(false);
+  expect(logs.join("\n")).toContain("Command timed out");
+
+  // A second launch sees the retired marker and skips without acquiring the lock.
+  let lockCalled = false;
+  const withLock: typeof withLocalModelsLock = (at, callback, timing) => {
+    lockCalled = true;
+    return withLocalModelsLock(at, callback, timing);
+  };
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000) },
+      { stopModels, withLock },
+    ),
+  ).toEqual({ retried: false });
+  expect(lockCalled).toBe(false);
+  expect(stopModels).toHaveBeenCalledTimes(1);
+
+  // Another failed quit in the same unbroken failure streak preserves the
+  // retired state instead of re-arming blocking 120 s launch retries.
+  await markLocalModelsStopPending(home);
+  expect(await hasPendingLocalModelsStop(home)).toBe(false);
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000) },
+      { stopModels, withLock },
+    ),
+  ).toEqual({ retried: false });
+  expect(stopModels).toHaveBeenCalledTimes(1);
+
+  // Once a later stop succeeds and clears the marker, a future failed quit is
+  // eligible for a launch-time retry again.
+  await clearLocalModelsStopPending(home);
+  await markLocalModelsStopPending(home);
+  expect(await hasPendingLocalModelsStop(home)).toBe(true);
+  const recoverStop = vi.fn(async () => {});
+  expect(
+    await retryPendingLocalModelsStop(
+      home,
+      { signal: AbortSignal.timeout(5000) },
+      { stopModels: recoverStop },
+    ),
+  ).toEqual({ retried: true });
+  expect(recoverStop).toHaveBeenCalledTimes(1);
+  expect(await hasPendingLocalModelsStop(home)).toBe(false);
+});
+
+test("retryPendingLocalModelsStop keeps the marker retryable when the caller aborts mid-retry", async () => {
+  const home = await mkdtemp(
+    path.join(os.tmpdir(), "local-models-stop-abort-"),
+  );
+  roots.push(home);
+  await markLocalModelsStopPending(home);
+  const controller = new AbortController();
+  const stopModels = vi.fn(async () => {
+    controller.abort(new Error("caller aborted"));
+    throw controller.signal.reason;
+  });
+  await expect(
+    retryPendingLocalModelsStop(
+      home,
+      { signal: controller.signal },
+      { stopModels },
+    ),
+  ).rejects.toThrow("caller aborted");
+  expect(await hasPendingLocalModelsStop(home)).toBe(true);
 });
