@@ -5,6 +5,11 @@
  */
 
 import { voiceWindowSelector } from "./voice-window-selector";
+import { spokenLabel } from "./spoken-label";
+
+/** How much of a control's name the voice interface reads. */
+const MAX_SPOKEN_LABEL = 120;
+const MAX_SPOKEN_GROUP_LABEL = 60;
 
 export interface VoiceSearchResult {
   id: string;
@@ -282,7 +287,7 @@ function accessibleName(element: HTMLElement) {
   return clean(name);
 }
 
-const clean = (text: string) => text.replace(/\s+/g, " ").trim().slice(0, 120);
+const clean = (text: string) => spokenLabel(text, MAX_SPOKEN_LABEL);
 
 function elementArea(element: HTMLElement, rect: DOMRect): VoiceElementArea {
   if (element.closest('[role="dialog"], dialog[open]')) return "dialog";
@@ -308,7 +313,9 @@ function labelOf(node: Element) {
       ?.split(/\s+/)
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-  return label?.replace(/\s+/g, " ").trim().slice(0, 60) || undefined;
+  return label
+    ? spokenLabel(label, MAX_SPOKEN_GROUP_LABEL) || undefined
+    : undefined;
 }
 
 function groupLabel(group: Element | null) {

@@ -15,6 +15,7 @@ import {
   type VoiceElementArea,
 } from "../voice-ui-bridge";
 import type { VoiceCommandContext } from "./voice-command";
+import { spokenLabel } from "../spoken-label";
 /** The Rooms the classifier is offered; the live model may match all of them. */
 export function conversations(context: VoiceCommandContext, limit = 40) {
   return (
@@ -129,7 +130,7 @@ export function sectionOptions() {
     offeredSections.set(id, heading);
     return {
       id,
-      name: `${heading.textContent.trim().slice(0, 100)} (section ${index + 1})`,
+      name: `${spokenLabel(heading.textContent ?? "", 100)} (section ${index + 1})`,
     };
   });
 }

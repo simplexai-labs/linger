@@ -5,6 +5,7 @@
  */
 
 import { voiceWindowSelector as voiceWindow } from "../voice-window-selector";
+import { spokenLabel } from "../spoken-label";
 
 const outsideContent = `${voiceWindow}, [data-voice-area], aside[aria-label$=" sidebar"], [aria-hidden="true"], [inert]`;
 // The Human's unsent draft and secrets are never read.
@@ -59,14 +60,17 @@ function selectedText() {
   const anchor = selection?.anchorNode?.parentElement;
   if (!selection || selection.isCollapsed || !anchor) return "";
   if (anchor.closest(`${voiceWindow}, ${privateInput}`)) return "";
-  return clean(selection.toString()).slice(0, selectionChars);
+  return spokenLabel(selection.toString(), selectionChars);
 }
 
 function heading(root: ParentNode) {
   for (const element of root.querySelectorAll<HTMLElement>("h1, h2")) {
     if (element.closest(outsideContent) || !onScreen(element)) continue;
-    const text = clean(element.innerText || element.textContent || "");
-    if (text) return text.slice(0, 120);
+    const text = spokenLabel(
+      element.innerText || element.textContent || "",
+      120,
+    );
+    if (text) return text;
   }
   return "";
 }
@@ -125,7 +129,7 @@ export function readVoicePage(): string {
       continue;
     const text = blockText(element);
     if (!text) continue;
-    const line = `[${taken.length + 1}] ${text.slice(0, blockChars)}`;
+    const line = `[${taken.length + 1}] ${spokenLabel(text, blockChars)}`;
     if (length + line.length > pageChars) {
       // A shorter block further down may still fit.
       truncated = true;
