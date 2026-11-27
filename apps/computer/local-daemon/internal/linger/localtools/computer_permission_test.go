@@ -313,3 +313,12 @@ func TestComputerPermissionsReportAFailedCuaGrantFlow(t *testing.T) {
 		t.Fatalf("opened = %v", fixture.opened)
 	}
 }
+
+func TestEmbeddedComputerUsePromptsOnlyLinger(t *testing.T) {
+	fixture := newPermissionFixture("darwin", true, true)
+	fixture.service.options.EmbeddedCua = true
+	status, err := fixture.service.ComputerPermission(t.Context(), "prompt", "computer_use", "accessibility")
+	if err != nil || len(status.Subjects) != 1 || status.Subjects[0].Subject != "linger" || !slices.Equal(fixture.linger.calls, []string{"prompt/accessibility"}) || fixture.cua.reads+fixture.cua.requests+fixture.cua.restarts != 0 {
+		t.Fatalf("unexpected embedded permission route: %+v, %v, calls %v", status, err, fixture.linger.calls)
+	}
+}

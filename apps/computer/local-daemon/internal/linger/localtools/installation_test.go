@@ -300,7 +300,7 @@ func TestInstalledToolsSupportSharedNodeAndExternalToolsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	externalTools := filepath.Join(root, "store", "computer-tools-abc123")
+	externalTools := filepath.Join(root, "resources", "cli", "computer-tools")
 	entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", "bin/pi"}, quickJSAssets...)
 	assets := make([]map[string]any, 0, len(entries))
 	for _, name := range entries {
@@ -347,5 +347,90 @@ func TestInstalledToolsSupportSharedNodeAndExternalToolsEnv(t *testing.T) {
 	}
 	if result.PlaywrightEntry != filepath.Join(externalTools, filepath.FromSlash(entries[0])) {
 		t.Fatalf("PlaywrightEntry = %s", result.PlaywrightEntry)
+	}
+}
+
+func TestInstalledToolsDetectsBundledWindowsPowerShell(t *testing.T) {
+	resources, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageFixture := func(daemonName, piName, nodeName string) string {
+		tools := filepath.Join(resources, daemonName+"-root", "cli", "computer-tools")
+		entries := append([]string{"node_modules/@playwright/mcp/cli.js", "extensions/pi-mcp.mjs", piName}, quickJSAssets...)
+		assets := make([]map[string]any, 0, len(entries))
+		for _, name := range entries {
+			file := filepath.Join(tools, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, []byte("fixture"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			assets = append(assets, map[string]any{"path": name, "size_bytes": 7})
+		}
+		manifest, err := json.Marshal(map[string]any{
+			"schema_version":   1,
+			"versions":         map[string]string{"playwright": "0.0.83", "pi": "1.5.2", "cua": "0.35.4", "quickjs": "3.6.2"},
+			"playwright_entry": entries[0], "pi_extension": entries[1], "pi_entry": entries[2], "assets": assets,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tools, "manifest.json"), manifest, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		node := filepath.Join(resources, daemonName+"-root", "runtime", "bin", nodeName)
+		if err := os.MkdirAll(filepath.Dir(node), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(node, []byte("fixture"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Join(resources, daemonName+"-root", "computer", daemonName)
+	}
+
+	winExecutable := stageFixture("linger-computer-daemon.exe", "bin/pi.exe", "node.exe")
+	result, err := Installed(winExecutable)
+	if err != nil || result == nil || result.PowerShellPath != "" {
+		t.Fatalf("without bundled pwsh = %+v, err=%v", result, err)
+	}
+	pwsh := filepath.Join(filepath.Dir(filepath.Dir(winExecutable)), "runtime", "pwsh", "pwsh.exe")
+	if err := os.MkdirAll(filepath.Dir(pwsh), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pwsh, []byte("MZ"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err = Installed(winExecutable)
+	if err != nil || result == nil || result.PowerShellPath != pwsh {
+		t.Fatalf("with bundled pwsh = %+v, want %q, err=%v", result, pwsh, err)
+	}
+
+	// Externalized V2 Windows daemon still resolves Shell-bundled PowerShell 7
+	// via LINGER_COMPUTER_TOOLS_DIR (resources/cli/computer-tools -> resources/runtime/pwsh).
+	t.Run("externalized V2 Windows daemon resolves Shell pwsh via LINGER_COMPUTER_TOOLS_DIR", func(t *testing.T) {
+		shellTools := filepath.Join(filepath.Dir(filepath.Dir(winExecutable)), "cli", "computer-tools")
+		shellNode := filepath.Join(filepath.Dir(filepath.Dir(winExecutable)), "runtime", "bin", "node.exe")
+		t.Setenv("LINGER_COMPUTER_TOOLS_DIR", shellTools)
+		t.Setenv("LINGER_TOOLS_NODE_PATH", shellNode)
+		storeExe := filepath.Join(resources, "store", "backend", "abc123", "computer-daemon", "linger-computer-daemon.exe")
+		got, err := Installed(storeExe)
+		if err != nil || got == nil || got.PowerShellPath != pwsh {
+			t.Fatalf("externalized Windows pwsh = %+v, want %q, err=%v", got, pwsh, err)
+		}
+	})
+
+	posixExecutable := stageFixture("linger-computer-daemon", "bin/pi", "node")
+	posixPwsh := filepath.Join(filepath.Dir(filepath.Dir(posixExecutable)), "runtime", "pwsh", "pwsh.exe")
+	if err := os.MkdirAll(filepath.Dir(posixPwsh), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(posixPwsh, []byte("MZ"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err = Installed(posixExecutable)
+	if err != nil || result == nil || result.PowerShellPath != "" {
+		t.Fatalf("non-Windows daemon unexpectedly set PowerShellPath: %+v, err=%v", result, err)
 	}
 }

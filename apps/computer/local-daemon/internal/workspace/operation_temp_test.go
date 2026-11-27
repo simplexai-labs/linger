@@ -2,7 +2,11 @@ package workspace
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 func TestOperationTempLeasesKeepSweepLockUntilLastRelease(t *testing.T) {
@@ -41,5 +45,43 @@ func TestOperationTempLeasesKeepSweepLockUntilLastRelease(t *testing.T) {
 	}
 	if _, err := temp.Retain(); err == nil {
 		t.Fatal("a released directory acquired a new lease")
+	}
+}
+
+func TestPrepareOperationTempProtectsBaseAndDirectoryWithPrivateFS(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "operation-tmp")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(base, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	temp, err := PrepareOperationTemp(base)
+	if err != nil {
+		t.Fatalf("PrepareOperationTemp(%q): %v", base, err)
+	}
+	defer func() {
+		if err := temp.Close(); err != nil {
+			t.Fatalf("Close(): %v", err)
+		}
+	}()
+
+	if err := privatefs.CheckPath(base, "directory", true); err != nil {
+		t.Fatalf("base failed privatefs check: %v", err)
+	}
+	if err := privatefs.CheckPath(temp.Path, "directory", true); err != nil {
+		t.Fatalf("operation temp dir failed privatefs check: %v", err)
+	}
+
+	fileBase := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(fileBase, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareOperationTemp(fileBase); err == nil {
+		t.Fatal("PrepareOperationTemp succeeded on a regular file base")
 	}
 }

@@ -16,6 +16,8 @@ import {
 } from "./agent-runner-desired-state.js";
 import {
   findRuntimeModel,
+  FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION,
+  isComputerVersionAtLeast,
   LocalComputerOfflineError,
   resolveRuntimeModel,
 } from "./local-computer-management.js";
@@ -136,6 +138,15 @@ export class RunnerDebugInspection {
   ): boolean {
     const connection = this.owners.connections().getConnection(computerId);
     if (!isServingConnection(connection)) return false;
+    if (
+      runtimeType === "antigravity" &&
+      !isComputerVersionAtLeast(
+        connection.hello.daemon_version,
+        FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION,
+      )
+    ) {
+      return false;
+    }
     return (
       connection.hello.runtime_diagnostics?.find(
         ({ type }) => type === runtimeType,

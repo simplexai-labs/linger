@@ -57,7 +57,7 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == "stop-hook" {
 		os.Exit(permission.CodexRunStopHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
-	// Antigravity runs this for managed PreInvocation and Stop hooks.
+	// Antigravity runs this for managed PreInvocation, PreToolUse, and Stop hooks.
 	if len(os.Args) == 3 && os.Args[1] == "antigravity-hook" {
 		os.Exit(native.AntigravityRunHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
@@ -175,6 +175,8 @@ func run(args []string) (resultErr error) {
 		// Agents on this computer then have no browser or computer-control
 		// tools; say so instead of leaving them silently missing.
 		slog.Warn("computer_tools.missing: browser and computer-control tools are disabled", "expected", localtools.ToolsDirectory(executable))
+	} else if toolInstallation.PowerShellPath != "" {
+		baseProviderEnvironment = withBundledPowerShellPath(baseProviderEnvironment, toolInstallation.PowerShellPath, runtime.GOOS)
 	}
 	currentDiscoveryOptions := func() provider.DiscoveryOptions {
 		var managedPi string
@@ -289,10 +291,11 @@ func run(args []string) (resultErr error) {
 		teamhubCLINodePath = ""
 	}
 	resolver := lingercontext.ExecutionResolver{
-		ServiceCommand:     serviceCommand,
-		TeamHubCLIBin:      teamhubBin,
-		TeamHubCLINodePath: teamhubCLINodePath,
-		ProviderLookup:     providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
+		ServiceCommand:       serviceCommand,
+		TeamHubCLIBin:        teamhubBin,
+		TeamHubCLINodePath:   teamhubCLINodePath,
+		HostEnvironmentGuide: hostEnvironmentGuide(runtime.GOOS),
+		ProviderLookup:       providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
 		CLICredentials: cliCredentials,
 		RegistrationLookup: func(ctx context.Context, registrationID string) (lingercontext.RegistrationBinding, bool, error) {
 			items, err := registrationStore.List(ctx)
@@ -324,9 +327,14 @@ func run(args []string) (resultErr error) {
 		if override := os.Getenv("LINGER_COMPUTER_CUA_PATH"); override != "" {
 			cuaPath = override
 		}
+		var cuaSocket string
+		if computer.Desktop != nil {
+			cuaSocket = computer.Desktop.CuaSocket
+		}
 		toolManager, err = localtools.New(localtools.Options{
 			StateDirectory: computer.StateDirectory, Environment: providerEnvironment,
 			NodePath: toolInstallation.NodePath, PlaywrightEntry: toolInstallation.PlaywrightEntry, CuaPath: cuaPath,
+			CuaEmbedded: cuaSocket != "", CuaSocket: cuaSocket,
 		})
 		if err != nil {
 			return err
@@ -351,6 +359,7 @@ func run(args []string) (resultErr error) {
 	if computer.Desktop != nil {
 		desktop = newDesktopChannel(os.Stdout)
 		permissionOptions.Linger = desktop
+		permissionOptions.EmbeddedCua = computer.Desktop.CuaSocket != ""
 	}
 	if toolManager != nil {
 		permissionOptions.Cua = toolManager
@@ -454,6 +463,7 @@ func run(args []string) (resultErr error) {
 		},
 	})
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
+	antigravityHome, _ := localworkspace.AntigravitySourceHome(providerEnvironment)
 	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
 		Runtimes:           runtimes,
@@ -461,6 +471,7 @@ func run(args []string) (resultErr error) {
 		RuntimeDiagnostics: diagnostics, WorkspaceGrants: encodedGrants,
 		StateDirectory:      computer.StateDirectory,
 		RuntimeHomeRoot:     filepath.Join(computer.StateDirectory, "runtime-homes"),
+		AntigravityHome:     antigravityHome,
 		RuntimeObservations: runtimeObservations(computer, provider.GatewayDiagnostics(discovered.Diagnostics), runtimeObservationRevision),
 		OnModelUnavailable:  inventory.reject,
 		ModelInvokeUnready: func(runtimeType string) bool {
@@ -965,6 +976,13 @@ func providerInstallations(discovered provider.DiscoveryResult, environment map[
 	return providers, runtimes
 }
 
+func hostEnvironmentGuide(goos string) string {
+	if goos == "windows" {
+		return lingercontext.WindowsHostEnvironmentGuide
+	}
+	return ""
+}
+
 func installedTeamHubCLIBin() string {
 	executable, err := os.Executable()
 	if err != nil {
@@ -1049,6 +1067,34 @@ func withManagedPiPath(paths map[string]string, managed string) map[string]strin
 		cloned = make(map[string]string, 1)
 	}
 	cloned["pi"] = managed
+	return cloned
+}
+
+func withBundledPowerShellPath(env map[string]string, powerShellPath, goos string) map[string]string {
+	if goos != "windows" || strings.TrimSpace(powerShellPath) == "" {
+		return env
+	}
+	cloned := maps.Clone(env)
+	if cloned == nil {
+		cloned = make(map[string]string, 1)
+	}
+	var existing string
+	if value, ok := cloned["PATH"]; ok {
+		existing = value
+		delete(cloned, "PATH")
+	}
+	var variantKeys []string
+	for key := range cloned {
+		if strings.EqualFold(key, "PATH") {
+			variantKeys = append(variantKeys, key)
+		}
+	}
+	sort.Strings(variantKeys)
+	for _, key := range variantKeys {
+		existing = provider.AppendWindowsSearchPath(existing, cloned[key])
+		delete(cloned, key)
+	}
+	cloned["PATH"] = provider.AppendWindowsSearchPath(existing, filepath.Dir(powerShellPath))
 	return cloned
 }
 

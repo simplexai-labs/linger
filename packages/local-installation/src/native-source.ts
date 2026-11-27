@@ -63,11 +63,13 @@ import { prepareNativeDatabase } from "./native-database.js";
 import {
   inspectNativeListeners,
   inspectNativeProcess,
+  inspectNativeProcesses,
   nativeConfigurationChanged,
   reclaimNativeOrphans,
   SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
+  stopNativeProcesses,
   type NativeListenerState,
   type NativeService,
 } from "./native-process.js";
@@ -560,20 +562,19 @@ export async function prepareVoiceToolsAndStartLiveKit(
             await log("LiveKit settings are missing; skipping LiveKit.");
             return;
           }
-          const [postgresState, teamhubState, livekitState] = await Promise.all(
-            [
-              inspectNativeProcess(instance.root, "postgres"),
-              inspectNativeProcess(instance.root, "teamhub"),
-              inspectNativeProcess(instance.root, "livekit"),
-            ],
-          );
-          if (!postgresState.running || !teamhubState.running) {
+          const [postgresState, teamhubState, livekitState] =
+            await inspectNativeProcesses(instance.root, [
+              "postgres",
+              "teamhub",
+              "livekit",
+            ]);
+          if (!postgresState?.running || !teamhubState?.running) {
             await log(
               "Instance core services are not running; skipping background LiveKit startup.",
             );
             return;
           }
-          if (livekitState.running) {
+          if (livekitState?.running) {
             await log(
               "Native LiveKit is already running; skipping duplicate startup.",
             );
@@ -1380,6 +1381,26 @@ async function runNativeSource(
       let localModelsDegraded: LocalModelsDegraded | undefined;
       let localModelsRestored = false;
       const restoredLocalModels = new Set<string>();
+      let runtimeRecovery: Promise<void> | undefined;
+      let runtimeRecoveryError: unknown;
+      let runtimeRecoveryFailed = false;
+      const startRuntimeRecovery = (work: () => Promise<void>) => {
+        runtimeRecovery = (async () => {
+          try {
+            signal.throwIfAborted();
+            await work();
+          } catch (error) {
+            runtimeRecoveryFailed = true;
+            runtimeRecoveryError = error;
+          }
+        })();
+      };
+      const awaitRuntimeRecovery = async () => {
+        if (!runtimeRecovery) return;
+        await runtimeRecovery;
+        if (runtimeRecoveryFailed) throw runtimeRecoveryError;
+        signal.throwIfAborted();
+      };
       const resumeLocalModels =
         Boolean(options.resume || options.degradeLocalModels) &&
         !options.setupChoice &&
@@ -1394,6 +1415,7 @@ async function runNativeSource(
       };
       const restoreSavedLocalModel = async () => {
         try {
+          signal.throwIfAborted();
           const restored = await restoreLocalModels(current, {
             signal,
             onEvent: emit,
@@ -1402,6 +1424,7 @@ async function runNativeSource(
               for (const id of models) restoredLocalModels.add(id);
             },
           });
+          signal.throwIfAborted();
           if (restored) {
             localModelsDegraded = localModelsDegradedFromOutcome(restored);
             logLocalModelsDegraded(localModelsDegraded);
@@ -1431,16 +1454,20 @@ async function runNativeSource(
               },
             );
             // A gateway that does not come back leaves the services usable,
-            // so the outcome only reports it. Mount BYOK first because
-            // `source apply --mode byok` unloads local models, then restore
-            // any previously loaded library models afterwards.
+            // so start mounting it eagerly in the background without blocking
+            // migrations, then restore any previously loaded library models
+            // afterwards because `source apply --mode byok` unloads local models
+            // before mounting BYOK.
             if (!runtimeOutcome) {
-              byokGateway = await restoreByokSource(home, {
-                signal,
-                onEvent: emit,
+              startRuntimeRecovery(async () => {
+                byokGateway = await restoreByokSource(home, {
+                  signal,
+                  onEvent: emit,
+                });
+                signal.throwIfAborted();
+                if (await hasPendingLibraryModelsToRestore(home))
+                  await restoreSavedLocalModel();
               });
-              if (await hasPendingLibraryModelsToRestore(home))
-                await restoreSavedLocalModel();
             }
           } else if (options.byok) {
             const byokRuntime =
@@ -1462,7 +1489,8 @@ async function runNativeSource(
             // Keep the saved subscription source without re-running
             // `source apply --mode subscription` (which unloads loaded local
             // library models during updates and restarts), and restore any
-            // library models that were loaded before stop or crash.
+            // library models that were loaded before stop or crash in the
+            // background without blocking migrations.
             runtimeOutcome = await prepareRuntime(
               restoredSubscription.runtime,
               {
@@ -1479,12 +1507,15 @@ async function runNativeSource(
               },
             );
             if (
-              (runtimeOutcome.code === 0 ||
-                (runtimeOutcome.details as { code?: string } | undefined)
-                  ?.code === "RUNTIME_AUTH_REQUIRED") &&
-              (await hasPendingLibraryModelsToRestore(home))
-            )
-              await restoreSavedLocalModel();
+              runtimeOutcome.code === 0 ||
+              (runtimeOutcome.details as { code?: string } | undefined)
+                ?.code === "RUNTIME_AUTH_REQUIRED"
+            ) {
+              startRuntimeRecovery(async () => {
+                if (await hasPendingLibraryModelsToRestore(home))
+                  await restoreSavedLocalModel();
+              });
+            }
           } else if (choice === "local-models") {
             // A restart or app upgrade from the saved setup choice keeps a
             // model source the person switched to on the Models page (BYOK or
@@ -1493,52 +1524,69 @@ async function runNativeSource(
             const switchedAway =
               !explicitLocal && (saved?.mode ?? "local") !== "local";
             if (!switchedAway) {
-              let prepared: InstallOutcome | undefined;
-              try {
-                prepared = await prepareLocalModels(current, {
-                  shareGpu: options.shareGpu,
-                  signal,
-                  onEvent: emit,
-                  localModelsApproval: options.localModelsApproval,
-                  localModelsReplan: options.localModelsReplan,
-                });
-              } catch (error) {
-                if (!resumeLocalModels || signal.aborted) throw error;
-                localModelsDegraded = localModelsDegradedFromError(error);
-              }
-              if (prepared && resumeLocalModels) {
-                // Failing a resume for local models would lock the person out
-                // of the workspace and the Models page that switches runtimes.
-                localModelsDegraded = localModelsDegradedFromOutcome(prepared);
+              const runLocalModelsPrep = async () => {
+                let prepared: InstallOutcome | undefined;
+                try {
+                  prepared = await prepareLocalModels(current, {
+                    shareGpu: options.shareGpu,
+                    signal,
+                    onEvent: emit,
+                    localModelsApproval: options.localModelsApproval,
+                    localModelsReplan: options.localModelsReplan,
+                  });
+                  signal.throwIfAborted();
+                } catch (error) {
+                  if (!resumeLocalModels || signal.aborted) throw error;
+                  localModelsDegraded = localModelsDegradedFromError(error);
+                }
+                if (prepared && resumeLocalModels) {
+                  // Failing a resume for local models would lock the person out
+                  // of the workspace and the Models page that switches runtimes.
+                  localModelsDegraded =
+                    localModelsDegradedFromOutcome(prepared);
+                } else {
+                  runtimeOutcome = prepared;
+                }
+                if (localModelsDegraded) {
+                  logLocalModelsDegraded(localModelsDegraded);
+                }
+                // A person who chose local models just now makes them the
+                // source, replacing one an earlier setup left. A restart reads
+                // the choice from setup-choice.json and passes no approval, so a
+                // source the person switched since on the Models page stays.
+                if (
+                  !runtimeOutcome &&
+                  !localModelsDegraded &&
+                  (options.setupChoice === "local-models" ||
+                    options.localModelsApproval)
+                )
+                  runtimeOutcome = await applyNativeSource(
+                    home,
+                    "local",
+                    "pi",
+                    {
+                      signal,
+                      onEvent: emit,
+                    },
+                  );
+                else if (
+                  !runtimeOutcome &&
+                  !localModelsDegraded &&
+                  !options.localModelsReplan &&
+                  ((restoredLocal &&
+                    isLocalRuntimeModel(restoredLocal.runtimeModel)) ||
+                    (await hasPendingLibraryModelsToRestore(home)))
+                )
+                  await restoreSavedLocalModel();
+              };
+              // Degraded-tolerant resumes convert local-model failures into
+              // warnings rather than aborting migrations, so start them eagerly
+              // in the background without blocking migrations or service startup.
+              if (resumeLocalModels && !explicitLocal) {
+                startRuntimeRecovery(runLocalModelsPrep);
               } else {
-                runtimeOutcome = prepared;
+                await runLocalModelsPrep();
               }
-              if (localModelsDegraded) {
-                logLocalModelsDegraded(localModelsDegraded);
-              }
-              // A person who chose local models just now makes them the
-              // source, replacing one an earlier setup left. A restart reads
-              // the choice from setup-choice.json and passes no approval, so a
-              // source the person switched since on the Models page stays.
-              if (
-                !runtimeOutcome &&
-                !localModelsDegraded &&
-                (options.setupChoice === "local-models" ||
-                  options.localModelsApproval)
-              )
-                runtimeOutcome = await applyNativeSource(home, "local", "pi", {
-                  signal,
-                  onEvent: emit,
-                });
-              else if (
-                !runtimeOutcome &&
-                !localModelsDegraded &&
-                !options.localModelsReplan &&
-                ((restoredLocal &&
-                  isLocalRuntimeModel(restoredLocal.runtimeModel)) ||
-                  (await hasPendingLibraryModelsToRestore(home)))
-              )
-                await restoreSavedLocalModel();
             }
           } else if (restoredLocal) {
             // Setup originally chose a subscription runtime, then the person
@@ -1560,7 +1608,11 @@ async function runNativeSource(
                   options.onRuntimeDescriptors?.([descriptor]),
               },
             );
-            if (!runtimeOutcome) await restoreSavedLocalModel();
+            if (!runtimeOutcome) {
+              startRuntimeRecovery(async () => {
+                await restoreSavedLocalModel();
+              });
+            }
           } else {
             runtimeOutcome = await prepareRuntime(choice, {
               home,
@@ -1578,25 +1630,38 @@ async function runNativeSource(
                 (runtimeOutcome.details as { code?: string } | undefined)
                   ?.code === "RUNTIME_AUTH_REQUIRED")
             ) {
-              const hasPendingLocal =
-                options.setupChoice === undefined &&
-                (await hasPendingLibraryModelsToRestore(home));
-              if (options.setupChoice !== undefined || !hasPendingLocal)
+              if (options.setupChoice !== undefined) {
                 runtimeOutcome =
                   (await applyNativeSource(home, "subscription", choice, {
                     signal,
                     onEvent: emit,
                   })) ?? runtimeOutcome;
-              else await restoreSavedLocalModel();
+              } else {
+                const hasPendingLocal =
+                  await hasPendingLibraryModelsToRestore(home);
+                if (!hasPendingLocal) {
+                  runtimeOutcome =
+                    (await applyNativeSource(home, "subscription", choice, {
+                      signal,
+                      onEvent: emit,
+                    })) ?? runtimeOutcome;
+                } else {
+                  startRuntimeRecovery(async () => {
+                    await restoreSavedLocalModel();
+                  });
+                }
+              }
             } else if (
               choice === "pi" &&
               options.setupChoice === undefined &&
               (runtimeOutcome.code === 0 ||
                 (runtimeOutcome.details as { code?: string } | undefined)
-                  ?.code === "RUNTIME_AUTH_REQUIRED") &&
-              (await hasPendingLibraryModelsToRestore(home))
+                  ?.code === "RUNTIME_AUTH_REQUIRED")
             ) {
-              await restoreSavedLocalModel();
+              startRuntimeRecovery(async () => {
+                if (await hasPendingLibraryModelsToRestore(home))
+                  await restoreSavedLocalModel();
+              });
             }
           }
           if (
@@ -2038,16 +2103,19 @@ async function runNativeSource(
           storedBefore?.source &&
           storedBefore.releaseDir !== current.releaseDir,
         );
-        const anyServiceRunning = (
-          await Promise.all(
-            (["teamhub", "node-services", "web"] as const).map((name) =>
-              inspectNativeProcess(current.root, name),
-            ),
-          )
-        ).some((state) => state.running);
-        const postgresWasRunning = (
-          await inspectNativeProcess(current.root, "postgres")
-        ).running;
+        const [teamhubState, nodeServicesState, webState, postgresState] =
+          await inspectNativeProcesses(current.root, [
+            "teamhub",
+            "node-services",
+            "web",
+            "postgres",
+          ]);
+        const anyServiceRunning = Boolean(
+          teamhubState?.running ||
+          nodeServicesState?.running ||
+          webState?.running,
+        );
+        const postgresWasRunning = Boolean(postgresState?.running);
         // Mark before startup so a failed init/readiness step can stop a process
         // it managed to create without touching a previously running cluster.
         if (!postgresWasRunning) started.push("postgres");
@@ -2238,27 +2306,45 @@ async function runNativeSource(
           };
           // Stop the Agent Service before TeamHub restarts for a changed
           // configuration, so it can requeue in-flight Runs while TeamHub is
-          // still up. All three services then start concurrently via
-          // Promise.allSettled (unchanged web stays up, changed web restarts
-          // concurrently); pre-stopped node-services, like pre-existing web and
-          // teamhub, stays untracked in `started` so rollback does not stop
-          // previously running services. When TeamHub is not running or not
-          // changing, node-services is left alone so it can reconnect.
+          // still up. When web's configuration also changed, stop it
+          // concurrently alongside node-services so all three services then
+          // start concurrently via Promise.allSettled (unchanged web stays up).
+          // Pre-stopped node-services and web, like pre-existing teamhub, stay
+          // untracked in `started` so rollback does not stop previously running
+          // services. When TeamHub is not running or not changing,
+          // node-services is left alone so it can reconnect.
           const preStopped =
             (await nativeConfigurationChanged(serviceOptions("teamhub"))) &&
             (await inspectNativeProcess(current.root, "node-services")).running;
-          if (preStopped)
-            await stopNativeProcess(current.root, "node-services");
+          const webPreStop =
+            preStopped &&
+            (await nativeConfigurationChanged(serviceOptions("web"))) &&
+            (await inspectNativeProcess(current.root, "web")).running;
+          signal.throwIfAborted();
+          if (preStopped) {
+            if (webPreStop) {
+              const stopped = await Promise.allSettled([
+                stopNativeProcess(current.root, "node-services"),
+                stopNativeProcess(current.root, "web"),
+              ]);
+              const stopFailed = stopped.find(
+                (result) => result.status === "rejected",
+              );
+              if (stopFailed) throw stopFailed.reason;
+            } else {
+              await stopNativeProcess(current.root, "node-services");
+            }
+          }
           const serviceNames = ["teamhub", "node-services", "web"] as const;
-          const states = await Promise.all(
-            serviceNames.map((name) =>
-              inspectNativeProcess(current.root, name),
-            ),
+          const states = await inspectNativeProcesses(
+            current.root,
+            serviceNames,
           );
           for (const [index, name] of serviceNames.entries()) {
             if (
               !states[index]!.running &&
-              !(preStopped && name === "node-services")
+              !(preStopped && name === "node-services") &&
+              !(webPreStop && name === "web")
             )
               started.push(name);
           }
@@ -2359,12 +2445,18 @@ async function runNativeSource(
             await runLocalStack();
           }
         };
+        const prepareLocalStackWithRecovery = async (
+          stageForLogs?: InstallStage,
+        ) => {
+          await awaitRuntimeRecovery();
+          await prepareLocalStackServices(stageForLogs);
+        };
         const prepareRuntimeSide = async (stageForLogs?: InstallStage) => {
           await timed("Waiting for runtime preparation", () => runtime, {
             stage: stageForLogs,
           });
           signal.throwIfAborted();
-          await prepareLocalStackServices(stageForLogs);
+          await prepareLocalStackWithRecovery(stageForLogs);
         };
         const migrate = (stageForLogs?: InstallStage) =>
           timed(
@@ -2484,11 +2576,12 @@ async function runNativeSource(
           await migrate();
           const ends = await beginServices();
           await bindLiveKit();
-          // LiveKit has bound its port and migrations have succeeded; foundation
-          // and gateway preparation can now overlap with service startup and
-          // account verification.
+          // LiveKit has bound its port and migrations have succeeded; await any
+          // eager background runtime recovery, then run foundation and gateway
+          // preparation in parallel with service startup and account
+          // verification.
           checks = await runParallelTail(
-            () => prepareLocalStackServices("runtime"),
+            () => prepareLocalStackWithRecovery("runtime"),
             async (setStage) => {
               const probed = await startAndAwaitServices(ends);
               setStage("account");
@@ -2652,6 +2745,7 @@ async function runNativeSource(
         await releaseLiveKitPort();
         controller.abort();
         await runtime;
+        await runtimeRecovery;
         for (const name of started.reverse()) {
           try {
             await stopNativeProcess(current.root, name);
@@ -2698,6 +2792,7 @@ async function runNativeSource(
         await releaseLiveKitPort();
         controller.abort();
         await runtime;
+        await runtimeRecovery;
       }
     });
   } catch (error) {
@@ -2800,24 +2895,38 @@ export async function stopNativeSource(
       await timedStep("computer", "native computer", () =>
         stopComputer(instance, { signal }),
       );
-      for (const name of nativeServices) {
-        signal?.throwIfAborted();
-        await timedStep(name, `native ${name}`, async () => {
-          try {
-            await stopNativeProcess(instance.root, name);
-          } catch (error) {
-            const code = (error as NodeJS.ErrnoException | null)?.code;
-            throw Object.assign(
-              new Error(
-                error instanceof Error
-                  ? error.message
-                  : `Could not stop ${name}.`,
-                { cause: error },
-              ),
-              { code: code ?? NATIVE_SERVICE_STOP_FAILED, nativeService: name },
-            );
-          }
+      let failedService: NativeService | undefined;
+      try {
+        await stopNativeProcesses(instance.root, nativeServices, {
+          signal,
+          onServiceDone: (name, durationMs, error) => {
+            const elapsed = seconds(durationMs);
+            timings.push([name, elapsed]);
+            if (error !== undefined) {
+              failedService = name;
+              options.log?.(
+                `Stopping native ${name} failed after ${elapsed}s.`,
+              );
+            } else {
+              options.log?.(`Stopped native ${name} in ${elapsed}s.`);
+            }
+          },
         });
+      } catch (error) {
+        if (!failedService) throw error;
+        const code = (error as NodeJS.ErrnoException | null)?.code;
+        throw Object.assign(
+          new Error(
+            error instanceof Error
+              ? error.message
+              : `Could not stop ${failedService}.`,
+            { cause: error },
+          ),
+          {
+            code: code ?? NATIVE_SERVICE_STOP_FAILED,
+            nativeService: failedService,
+          },
+        );
       }
       await timedStep("orphans", "native orphans", () =>
         reclaimEarlierProcesses(instance, path.resolve(instance.root, "../..")),

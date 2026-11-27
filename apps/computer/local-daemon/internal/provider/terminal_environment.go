@@ -120,7 +120,7 @@ func (c *TerminalEnvironmentCache) Resolve(ctx context.Context, source map[strin
 		resolved = make(map[string]string)
 	}
 	if runtime.GOOS == "windows" {
-		return resolved
+		return c.resolveWindows(resolved)
 	}
 	home := resolved["HOME"]
 	shell := resolved["SHELL"]

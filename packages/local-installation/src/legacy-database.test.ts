@@ -7,9 +7,11 @@ import { readLocalLogin } from "./account.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   latestLegacyBackup,
+  parseWarmDatabaseProbe,
   preLingerSchema,
   setAsideLegacyData,
   TEAMHUB_BASELINE_VERSION,
+  WARM_DATABASE_PROBE_SQL,
 } from "./legacy-database.js";
 
 const roots: string[] = [];
@@ -84,6 +86,42 @@ describe("preLingerSchema", () => {
       ),
     );
     expect(existsSync(baseline)).toBe(true);
+  });
+});
+
+describe("warm database probe", () => {
+  it("parses valid warm probe tokens and rejects empty or unexpected output", () => {
+    expect(parseWarmDatabaseProbe("linger\n")).toBe("linger");
+    expect(parseWarmDatabaseProbe("  empty \r\n")).toBe("empty");
+    expect(parseWarmDatabaseProbe("legacy")).toBe("legacy");
+    expect(parseWarmDatabaseProbe("")).toBeUndefined();
+    expect(parseWarmDatabaseProbe("   \n")).toBeUndefined();
+    expect(parseWarmDatabaseProbe("unexpected\n")).toBeUndefined();
+    expect(parseWarmDatabaseProbe("linger\nlegacy\n")).toBeUndefined();
+  });
+
+  it("uses the exact same schema and baseline predicates as preLingerSchema", async () => {
+    const { query, asked } = database(
+      ["accounts", "goose_db_version"],
+      [0, TEAMHUB_BASELINE_VERSION],
+    );
+    expect(await preLingerSchema(query)).toBe(false);
+    expect(asked).toHaveLength(2);
+    const [tablesQuery, baselineQuery] = asked;
+    // Extract the predicate expressions from preLingerSchema's queries so any
+    // divergence between preLingerSchema and WARM_DATABASE_PROBE_SQL fails here.
+    const tablePredicates = tablesQuery!
+      .replace(/^SELECT\s+/u, "")
+      .split(",")
+      .map((predicate) => predicate.trim());
+    const baselinePredicate = baselineQuery!.replace(/^SELECT\s+/u, "").trim();
+    for (const predicate of tablePredicates) {
+      expect(WARM_DATABASE_PROBE_SQL).toContain(predicate);
+    }
+    expect(WARM_DATABASE_PROBE_SQL).toContain(baselinePredicate);
+    expect(WARM_DATABASE_PROBE_SQL).toContain(
+      `version_id = ${TEAMHUB_BASELINE_VERSION}`,
+    );
   });
 });
 

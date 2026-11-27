@@ -143,7 +143,16 @@ No second time needed. Name the kind and it changes whether you are told; name t
 
 ## Quick start
 
-### Option 1: the desktop app
+### Option 1: the desktop app (Beta)
+
+> [!NOTE]
+> The desktop app is currently in **Beta** and under active development. You may
+> run into rough edges during installation or updates (for example, Windows
+> SmartScreen warnings while the Windows installer is unsigned, or a longer
+> first-run setup while local runtimes and models download). If something fails,
+> see [Install the desktop app](https://docs.heylinger.com/install/desktop-app),
+> ask in [Discord](https://discord.gg/bmgnw6pdZ7), or
+> [open an issue](https://github.com/simplexai-labs/linger/issues).
 
 For one person on one computer. Choose your platform below. The app
 opens Linger, connects this computer and runs its agents. **Quick Install** on its
@@ -224,7 +233,7 @@ The full documentation lives at **[docs.heylinger.com](https://docs.heylinger.co
     <th width="520" align="left">What it covers</th>
   </tr>
   <tr>
-    <td><a href="https://docs.heylinger.com/install/desktop-app">Desktop app</a></td>
+    <td><a href="https://docs.heylinger.com/install/desktop-app">Desktop app (Beta)</a></td>
     <td>Install the app, or build it from source.</td>
   </tr>
   <tr>

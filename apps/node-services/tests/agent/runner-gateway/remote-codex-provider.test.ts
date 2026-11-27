@@ -1797,7 +1797,6 @@ describe("RemoteCodexProvider session compaction", () => {
         { instructions: "Keep decisions", signal: signal() },
       ),
     ).resolves.toEqual({ status: "compacted", preTokens: 32_100 });
-
     dispatcher.outcome = { outcome: "compacted", pre_tokens: 12_345 };
     const agyProvider = createProvider(dispatcher, "antigravity");
     expect(agyProvider.compactSession).toBeTypeOf("function");
@@ -1840,6 +1839,45 @@ describe("RemoteCodexProvider session compaction", () => {
     expect(createProvider(new ScriptedDispatcher()).compactSession).toBe(
       undefined,
     );
+  });
+
+  it("returns unavailable antigravity_transcript without a Daemon round trip before the first Antigravity Run", async () => {
+    const inspectLocalContext = vi.fn();
+    const view = { view_digest: "a".repeat(64) };
+    const provider = new RemoteCodexProvider({
+      dispatcher: { startOperation: vi.fn() },
+      runtime: { type: "antigravity" },
+      target: {
+        tenantId: "tenant-acme",
+        runnerId: "runner-local",
+        agentId: "agent-reviewer",
+        workspaceGrantId: "grant-repo",
+        executionContextKey: "context-main",
+        runtimeInstanceId: "runtime-main",
+        contextViewRef: view,
+      },
+      contextRunResources: {
+        currentContextViewRef: () => view,
+        async resolve() {
+          return { mcp_servers: [] };
+        },
+      },
+      debugRunnerRevision: 1,
+      debugInspector: { inspectLocalContext },
+    });
+    const page = await provider.inspectHistory!({ threadId: "" }, {});
+    expect(page).toMatchObject({
+      status: "unavailable",
+      providerKind: "antigravity",
+      records: [],
+      instructions: {
+        status: "unavailable",
+        source: "antigravity_transcript",
+        blocks: [],
+      },
+    });
+    expect(inspectLocalContext).not.toHaveBeenCalled();
+    await provider.close();
   });
 
   it("maps run.background_waiting and run.background_resumed to working status transitions", async () => {

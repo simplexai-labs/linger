@@ -118,9 +118,10 @@ type ComputerPermissionOptions struct {
 	// Platform is runtime.GOOS.
 	Platform string
 	// Desktop is set when the Desktop app launched this Daemon.
-	Desktop bool
-	Linger  LingerBridge
-	Cua     CuaPermissionChecker
+	Desktop     bool
+	EmbeddedCua bool
+	Linger      LingerBridge
+	Cua         CuaPermissionChecker
 	// Open opens a URL with /usr/bin/open; nil uses openURL.
 	Open func(ctx context.Context, url string) error
 }
@@ -176,7 +177,7 @@ func (p *ComputerPermissions) ComputerPermission(ctx context.Context, action, su
 	var err error
 	switch {
 	case action == PermissionActionStatus:
-	case subject == PermissionSubjectLinger:
+	case subject == PermissionSubjectLinger || p.options.EmbeddedCua:
 		linger, answered, err = p.lingerAction(ctx, action, permission)
 	default:
 		cua, err = p.cuaAction(ctx, action, permission)
@@ -190,6 +191,9 @@ func (p *ComputerPermissions) ComputerPermission(ctx context.Context, action, su
 		}
 	}
 	status.Subjects = append(status.Subjects, lingerGroup(linger, answered))
+	if p.options.EmbeddedCua {
+		return status, nil
+	}
 	if cua == nil {
 		cua = p.cuaStatus(ctx)
 	}

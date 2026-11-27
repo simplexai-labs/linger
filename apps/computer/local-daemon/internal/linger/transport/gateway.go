@@ -599,8 +599,18 @@ var replyShapes = map[string]func(protocol.Event) (wire.Shape, error){
 	},
 	protocol.EventDebugInspected: func(event protocol.Event) (wire.Shape, error) {
 		frame := &wire.DebugInspected{
+			CommandID: event.CommandID, TenantID: event.TenantID, RunnerID: event.RunnerID,
+			AgentID: event.AgentID, ConnectionEpoch: event.ConnectionEpoch,
 			WorkspaceGrantID: event.WorkspaceGrantID, ExecutionContextKey: event.ExecutionContextKey,
 			RuntimeInstanceID: event.RuntimeInstanceID, ViewDigest: event.ViewDigest,
+		}
+		if event.RegistrationID != "" {
+			revision := event.AssignmentRevision
+			frame.RegistrationID, frame.AssignmentRevision = event.RegistrationID, &revision
+		}
+		if event.RunnerRevision > 0 {
+			runnerRevision := event.RunnerRevision
+			frame.RunnerRevision = &runnerRevision
 		}
 		if event.ViewDigest == "" {
 			detached := true
@@ -609,7 +619,7 @@ var replyShapes = map[string]func(protocol.Event) (wire.Shape, error){
 		if err := unmarshalPayload(event.Payload, &frame.Result); err != nil {
 			return nil, err
 		}
-		return agentRunnerFrame(frame, event, nil)
+		return frame, composeFrame(frame, struct{}{}, nil)
 	},
 }
 

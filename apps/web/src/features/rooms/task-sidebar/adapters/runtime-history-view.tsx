@@ -43,7 +43,10 @@ export function RuntimeHistoryView({
 }) {
   const t = useT();
   const orderedRecords = useMemo(
-    () => [...records].sort((left, right) => left.ordinal - right.ordinal),
+    () =>
+      [...records]
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .flatMap(contentBlockRecords),
     [records],
   );
   const callPairs = useMemo(
@@ -99,7 +102,7 @@ function activityTimelineItems(
   const thinkingTitles = new Set<string>();
   // Later steps name a Task only by id; reuse the name it was created with.
   const taskNames = new Map<string, string>();
-  for (const source of records.flatMap(contentBlockRecords)) {
+  for (const source of records) {
     let record = source;
     if (record.native_type === "event_msg.mcp_tool_call_end") {
       const invocation = asObject(nativePayload(record)?.invocation);

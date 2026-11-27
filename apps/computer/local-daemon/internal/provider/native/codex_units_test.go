@@ -646,6 +646,16 @@ func TestCodexExecutionArgsDisableWebSearchLast(t *testing.T) {
 	}
 }
 
+func TestCodexMismatchDetectsPathChange(t *testing.T) {
+	process := &codexProcess{pathEnv: `C:\Windows\system32`}
+	if fields := codexMismatch(Profile{Env: map[string]string{"PATH": `C:\Windows\system32;C:\Program Files\nodejs`}}, RunSpec{}, "")(process); !slices.Contains(fields, "path") {
+		t.Fatalf("expected path mismatch, got %v", fields)
+	}
+	if fields := codexMismatch(Profile{Env: map[string]string{"PATH": `C:\Windows\system32`}}, RunSpec{}, "")(process); slices.Contains(fields, "path") {
+		t.Fatalf("unexpected path mismatch for identical PATH: %v", fields)
+	}
+}
+
 func TestCodexDetachedNoticesFeedTracker(t *testing.T) {
 	proc := &codexProcess{}
 	proc.trackTurnStart("thread-1")

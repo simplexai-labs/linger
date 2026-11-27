@@ -300,9 +300,9 @@ func appendBundledPiPath(effective map[string]string, stateDir, bundledBinDir, b
 	}
 
 	candidates := append([]string(nil), existing...)
-	userHome := envLookup(effective, "HOME")
+	userHome := workspace.EnvLookup(effective, "HOME")
 	if userHome == "" {
-		userHome = envLookup(effective, "USERPROFILE")
+		userHome = workspace.EnvLookup(effective, "USERPROFILE")
 	}
 	if userHome == "" {
 		userHome, _ = os.UserHomeDir()
@@ -313,7 +313,7 @@ func appendBundledPiPath(effective map[string]string, stateDir, bundledBinDir, b
 		}
 	}
 	if runtime.GOOS == "windows" {
-		if appData := envLookup(effective, "APPDATA"); appData != "" {
+		if appData := workspace.EnvLookup(effective, "APPDATA"); appData != "" {
 			if npmBin := filepath.Join(appData, "npm"); dirExists(npmBin) {
 				candidates = append(candidates, npmBin)
 			}
@@ -611,7 +611,7 @@ func defaultLegacyToolsDir(baseEnv map[string]string) string {
 	if runtime.GOOS == "windows" {
 		homeKey = "USERPROFILE"
 	}
-	home := envLookup(baseEnv, homeKey)
+	home := workspace.EnvLookup(baseEnv, homeKey)
 	if home == "" || !filepath.IsAbs(home) {
 		return ""
 	}

@@ -2143,6 +2143,381 @@ describe("generative media connectors", () => {
       });
     },
   );
+
+  it("reads image-gen and video-gen prompts and nested parameters from --prompt-file and --params-file", async () => {
+    const seen: { slug: string; args: Json }[] = [];
+    const videoOpenapi = {
+      paths: {
+        "/fal-ai/kling/v2": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["prompt"],
+                    properties: {
+                      prompt: { type: "string" },
+                      duration: { type: "integer" },
+                      camera: {
+                        type: "object",
+                        properties: { pan: { type: "string" } },
+                      },
+                      loras: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            path: { type: "string" },
+                            scale: { type: "number" },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const falVideoModel = {
+      endpoint_id: "fal-ai/kling/v2",
+      metadata: { display_name: "Kling v2", category: "text-to-video" },
+      openapi: videoOpenapi,
+    };
+    const f = await fixture(
+      "fal",
+      (slug, args) => {
+        seen.push({ slug, args });
+        return { request_id: "req_files" };
+      },
+      {},
+      falCatalog(falModel, falVideoModel),
+    );
+    await writeFile(
+      path.join(f.cwd, "prompt.txt"),
+      'A "fox" in snow\nwith soft lighting',
+      "utf8",
+    );
+    await writeFile(
+      path.join(f.cwd, "params.json"),
+      JSON.stringify({
+        image_size: { width: 1024, height: 768 },
+      }),
+      "utf8",
+    );
+    const fromFiles = await f.run([
+      "image-gen",
+      "--provider",
+      "fal",
+      "--model",
+      "fal-ai/flux/dev",
+      "--prompt-file",
+      "prompt.txt",
+      "--params-file",
+      "params.json",
+      "--set",
+      "num_images=2",
+    ]);
+    expect(fromFiles.code, JSON.stringify(fromFiles.error)).toBe(0);
+    expect(seen.at(-1)?.args).toMatchObject({
+      model_id: "fal-ai/flux/dev",
+      input: {
+        prompt: 'A "fox" in snow\nwith soft lighting',
+        image_size: { width: 1024, height: 768 },
+        num_images: 2,
+      },
+    });
+
+    const out: string[] = [];
+    const err: string[] = [];
+    const promptStdinCode = await runCli(
+      [
+        "video-gen",
+        "--provider",
+        "fal",
+        "--model",
+        "fal-ai/kling/v2",
+        "--prompt-file",
+        "-",
+        "--json",
+      ],
+      {
+        ...f.deps,
+        readInput: async (source) => {
+          expect(source).toBe("-");
+          return 'Slow pan over "mountains"';
+        },
+        stdout: (s) => {
+          out.push(s);
+        },
+        stderr: (s) => {
+          err.push(s);
+        },
+      },
+    );
+    expect(promptStdinCode, err.join("")).toBe(0);
+    expect(seen.at(-1)?.args).toMatchObject({
+      model_id: "fal-ai/kling/v2",
+      input: { prompt: 'Slow pan over "mountains"' },
+    });
+
+    out.length = 0;
+    err.length = 0;
+    const paramsStdinCode = await runCli(
+      [
+        "video-gen",
+        "--provider",
+        "fal",
+        "--model",
+        "fal-ai/kling/v2",
+        "--prompt",
+        "orbit",
+        "--params-file",
+        "-",
+        "--json",
+      ],
+      {
+        ...f.deps,
+        readInput: async (source) => {
+          expect(source).toBe("-");
+          return JSON.stringify({
+            duration: 5,
+            camera: { pan: "left" },
+            loras: [{ path: "style-a", scale: 0.75 }],
+          });
+        },
+        stdout: (s) => {
+          out.push(s);
+        },
+        stderr: (s) => {
+          err.push(s);
+        },
+      },
+    );
+    expect(paramsStdinCode, err.join("")).toBe(0);
+    expect(seen.at(-1)?.args).toMatchObject({
+      model_id: "fal-ai/kling/v2",
+      input: {
+        prompt: "orbit",
+        duration: 5,
+        camera: { pan: "left" },
+        loras: [{ path: "style-a", scale: 0.75 }],
+      },
+    });
+  });
+
+  it("rejects invalid --prompt-file and --params-file combinations before account resolution", async () => {
+    const f = await fixture("fal", () => {
+      throw new Error("Must not execute");
+    });
+    await writeFile(path.join(f.cwd, "prompt.txt"), "fox", "utf8");
+    await writeFile(path.join(f.cwd, "ref.png"), "png", "utf8");
+    await writeFile(path.join(f.cwd, "array.json"), "[1,2]", "utf8");
+    await writeFile(path.join(f.cwd, "string.json"), '"hello"', "utf8");
+    await writeFile(path.join(f.cwd, "null.json"), "null", "utf8");
+    await writeFile(path.join(f.cwd, "bad-key.json"), '{"bad-key":1}', "utf8");
+    await writeFile(
+      path.join(f.cwd, "params.json"),
+      '{"seed":7,"image_url":"https://example.com/a.png"}',
+      "utf8",
+    );
+
+    const nonObjectCases = ["array.json", "string.json", "null.json"];
+    for (const file of nonObjectCases) {
+      const result = await f.run([
+        "image-gen",
+        "--provider",
+        "fal",
+        "--model",
+        "fal-ai/flux/dev",
+        "--prompt",
+        "fox",
+        "--params-file",
+        file,
+      ]);
+      expect(result.code).toBe(2);
+      expect(result.error.error).toMatchObject({
+        code: "invalid_input",
+        message: "--params-file must be one JSON object.",
+        details: {
+          issues: [
+            {
+              path: "--params-file",
+              code: "invalid_type",
+              message: "must be a JSON object.",
+            },
+          ],
+        },
+      });
+    }
+
+    for (const reserved of [
+      "prompt",
+      "model",
+      "get_cost",
+      "__proto__",
+      "constructor",
+      "prototype",
+    ]) {
+      const file = `reserved-${reserved}.json`;
+      await writeFile(path.join(f.cwd, file), `{"${reserved}": "x"}`, "utf8");
+      const result = await f.run([
+        "image-gen",
+        "--provider",
+        "fal",
+        "--model",
+        "fal-ai/flux/dev",
+        "--prompt",
+        "fox",
+        "--params-file",
+        file,
+      ]);
+      expect(result.code).toBe(2);
+      expect(result.error.error).toMatchObject({
+        code: "usage",
+        message: `Use the dedicated flags instead of --params-file ${reserved}.`,
+      });
+    }
+
+    const usageCases: [string[], string][] = [
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/flux/dev",
+          "--prompt",
+          "fox",
+          "--prompt-file",
+          "prompt.txt",
+        ],
+        "--prompt, --prompt-file cannot be used together.",
+      ],
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/flux/dev",
+          "--prompt",
+          "fox",
+          "--params-file",
+          "bad-key.json",
+        ],
+        "--params-file keys must be plain field names.",
+      ],
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/flux/dev",
+          "--prompt",
+          "fox",
+          "--params-file",
+          "params.json",
+          "--set",
+          "seed=9",
+        ],
+        "seed is set by more than one flag.",
+      ],
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/flux/dev",
+          "--prompt",
+          "fox",
+          "--params-file",
+          "params.json",
+          "--file",
+          "image_url=ref.png",
+        ],
+        "image_url is set by more than one flag.",
+      ],
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/flux/dev",
+          "--prompt-file",
+          "-",
+          "--params-file",
+          "-",
+        ],
+        "Only one input may read stdin.",
+      ],
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--price",
+          "--prompt-file",
+          "prompt.txt",
+        ],
+        "--prompt-file is only available for generation.",
+      ],
+      [
+        [
+          "image-gen",
+          "--provider",
+          "fal",
+          "--price",
+          "--params-file",
+          "params.json",
+        ],
+        "--params-file is only available for generation.",
+      ],
+      [
+        [
+          "video-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/kling/v2",
+          "--job",
+          "req_1",
+          "--prompt-file",
+          "prompt.txt",
+        ],
+        "--prompt-file is only available for generation.",
+      ],
+      [
+        [
+          "video-gen",
+          "--provider",
+          "fal",
+          "--model",
+          "fal-ai/kling/v2",
+          "--job",
+          "req_1",
+          "--params-file",
+          "params.json",
+        ],
+        "--params-file is only available for generation.",
+      ],
+    ];
+    for (const [args, message] of usageCases) {
+      const result = await f.run(args);
+      expect(result.code, JSON.stringify(args)).toBe(2);
+      expect(result.error.error).toMatchObject({
+        code: "usage",
+        message,
+      });
+    }
+    expect(f.calls).toEqual([]);
+  });
 });
 describe("GitHub commands", () => {
   const issue = {

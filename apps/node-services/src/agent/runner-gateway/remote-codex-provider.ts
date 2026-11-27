@@ -313,19 +313,24 @@ export class RemoteRuntimeProvider implements AgentProvider {
       );
     }
     if (
-      this.#runtime.type === "codex" &&
+      (this.#runtime.type === "codex" ||
+        this.#runtime.type === "antigravity") &&
       requireOpaqueObject(session, "session").threadId === ""
     ) {
-      // The first run has not created the Codex thread, so there is no
-      // rollout to read yet.
+      const antigravity = this.#runtime.type === "antigravity";
+      const reason = antigravity
+        ? "Antigravity session has not started yet"
+        : "Codex thread has not started yet";
+      // The first run has not created the native session, so there is no
+      // rollout or transcript to read yet.
       return {
         status: "unavailable",
-        providerKind: "codex",
-        reason: "Codex thread has not started yet",
+        providerKind: this.#runtime.type,
+        reason,
         instructions: {
           status: "unavailable",
-          source: "codex_rollout",
-          reason: "Codex thread has not started yet",
+          source: antigravity ? "antigravity_transcript" : "codex_rollout",
+          reason,
           blocks: [],
         },
         records: [],

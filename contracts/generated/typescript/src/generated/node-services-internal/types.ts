@@ -710,7 +710,11 @@ export interface components {
       provider_kind: string;
       reason?: string;
       /** @enum {string} */
-      source?: "codex_rollout" | "claude_transcript";
+      source?:
+        | "codex_rollout"
+        | "claude_transcript"
+        | "pi_session"
+        | "antigravity_transcript";
       snapshot?: components["schemas"]["AgentDebugHistorySnapshot"];
       instructions: components["schemas"]["AgentDebugHistoryInstructions"];
       records: components["schemas"]["AgentDebugHistoryRecord"][];
@@ -1406,7 +1410,11 @@ export interface components {
       /** @enum {string} */
       status: "available" | "unavailable";
       /** @enum {string} */
-      source: "codex_rollout" | "claude_transcript" | "pi_session";
+      source:
+        | "codex_rollout"
+        | "claude_transcript"
+        | "pi_session"
+        | "antigravity_transcript";
       reason?: string;
       blocks: components["schemas"]["AgentDebugHistoryInstructionBlock"][];
     };

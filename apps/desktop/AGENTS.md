@@ -18,6 +18,13 @@ Gateway and runs Agents. The daemon exits with the app.
   binary; pnpm does not run its install script. Set `ELECTRON_MIRROR` when the
   default host is unreachable.
 - `pnpm --filter @linger/desktop start`: build and run from source.
+- `pnpm --filter @linger/desktop dev -- [options]`: watch desktop main/preload,
+  installer, `teamhub-cli`, and Go daemon sources, rebuild incrementally, and
+  auto-restart Electron in an isolated `.linger-runtime/desktop-dev/<profile>`
+  directory (`--server http://127.0.0.1:3000` for Web HMR, `--quick-install`
+  for local checkout installation, `--localmodels <llm-inference-lab-dir>` for
+  live Python edits without restarts, `--debug simulate|tiny`, `--reset`,
+  `--skip-daemon`, `--no-watch`, `--dry-run`).
 - `python3 packaging/mac/package.py [--arch arm64|x64]`: build
   `out/Linger-<version>-<arch>.dmg` for Apple silicon and Intel on Linux
   after `node build.mjs` with the darwin daemon targets. The daemon is signed
@@ -85,9 +92,10 @@ Gateway and runs Agents. The daemon exits with the app.
 - `src/main/local-server.ts`: LocalServer, the setup page's Quick Install
   path. On Windows, install preflight checks both the install home and the
   Computer daemon directory (`<userData>/computer`) non-destructively via
-  `windowsPrivateLocation` before fetching Node or unpacking, so ancestor ACL
-  refusals fail immediately with the offending ancestor path and SID instead of
-  after enrollment. It reuses the pinned Node.js binary shipped with Computer
+  `windowsPrivateLocation` before fetching Node or unpacking, so private-path
+  validation failures (such as symlink/junction ancestors or foreign target
+  ownership) fail immediately with the offending ancestor path or SID instead
+  of after enrollment. It reuses the pinned Node.js binary shipped with Computer
   tools (`resources/runtime/bin/node(.exe)` via `bundledNodePath`, copied and
   SHA-256 verified into `<home>/desktop/node/v<version>/`, falling back to
   legacy bundled manifests or downloading in the download region's order,
@@ -323,12 +331,14 @@ Gateway and runs Agents. The daemon exits with the app.
   `com.apple.quarantine` before running recursive `xattr -dr`. Before
   `UpdaterModule` announces an unpacked macOS bundle `ready`,
   `prepareUpdateTool` best-effort pre-fetches that bundle's pinned `localmodels`
-  tool into the enrolled local installation's tool cache and pre-stages the
+  tool into the enrolled local installation's tool cache, pre-stages the
   staged bundle's packed source checkout, TeamHub binaries, and offline runtime
-  directory (when present) into the enrolled home's versioned source directory
-  without mutating setup/resume progress or getting deleted by background
-  pruning (failures warn as `update.prepare_failed` without blocking the app
-  update). A prune never removes a folder a running process
+  directory (when present) into the enrolled home's versioned source directory,
+  and pre-stages its shared bundled Node.js binary (`runtime/bin/node`)
+  into `<defaultHome>/desktop/node/v<version>/` (logged as
+  `local_server.update_node_prepared`) without mutating setup/resume progress or
+  getting deleted by background pruning (failures warn as
+  `update.prepare_failed` without blocking the app update). A prune never removes a folder a running process
   still starts from (`foldersInUse`; when processes cannot be listed, it
   removes nothing) and logs `local_server.source_in_use` instead. An app older than the recorded version
   (a downgrade) leaves the services on their newer source and logs
@@ -628,9 +638,24 @@ Gateway and runs Agents. The daemon exits with the app.
   are attributed to); a `relaunch` request is answered, then quits and
   relaunches the app. The permission card in the SPA running this
   computer's own Computer takes Linger's steps (prompt, System Settings,
-  relaunch) and opens CuaDriver's System Settings pane through
-  `lingerDesktop.permissions.act` instead; CuaDriver's prompt and restart,
-  and every step from another page, go through TeamHub to the daemon.
+  relaunch) through `lingerDesktop.permissions.act`. The permission subject
+  selects the settings action. Linger registers its own screen capture before
+  opening Screen Recording settings. A `computer_use` settings action opens
+  the system pane directly. Other pages send steps through TeamHub to the daemon.
+- A packaged macOS app starts the signed embedded driver for each enrolled
+  Computer daemon with a matching credential. The first daemon config already
+  contains its private socket. Window startup proceeds during driver startup.
+  Enrollment uses its normal identity request. Driver selection needs no
+  TeamHub capability, session cookie, or extra network request. A driver crash
+  retries within the same daemon lifetime. Daemon exit, unenrollment, and app
+  quit retire that driver and its retries. A new daemon gets a fresh socket.
+  Standalone Computers and unpackaged clients retain their existing mode.
+  Verify the test build on a fresh macOS account: grant only Linger Screen
+  Recording and Accessibility, then capture a test window, click its text
+  field, and type into it. Linger owns both grants in embedded mode.
+  A settings visit alone does not request a relaunch. If the owner enables
+  Screen Recording there and defers the macOS restart, they must quit and
+  reopen Linger to apply the grant.
 - `src/main/computer-credential.ts`: the Gateway credential in
   `<userData>/computer/credential.json` (0600).
 - Installs from before the product was renamed Linger move once on start.
@@ -736,6 +761,12 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   root `scripts/computer-tool-bundle.mjs`; `packaging/computer_tools.py` puts
   them in `resources/cli/` and `resources/runtime/` and checks every package
   for them (see [Computer Tools](../../docs/desktop-release.md#computer-tools)).
+  On Windows, `packaging/win/package.py` also stages a pinned portable PowerShell
+  7 LTS runtime (`PowerShell-7.6.10-win-x64.zip`, verified by SHA-256 and
+  reused from `~/.cache/linger-desktop` or `PWSH_MIRROR`) into
+  `resources/runtime/pwsh/`; the Daemon appends that directory to the end of
+  Windows Runtime `PATH` so Agents resolve `pwsh.exe` without overriding user
+  installs or system DLLs.
   `scripts/build-native-runtime.mjs` pins that shared `resources/runtime/bin/node(.exe)`
   digest in `manifest.json` (`node.shared: true`) instead of duplicating Node.js
   inside `dist/installer/native/runtime-<target>/`, and `packaging/mac/package.py`
@@ -772,7 +803,10 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
    `AGENT_RUNNER_PUBLIC_GATEWAY_URL` and `TEAMHUB_CLI_BASE_URL` to origins the
    computer can reach.
 4. The computer needs Codex or Claude Code installed and signed in; the
-   daemon finds them through the login shell PATH. On Windows, the teamhub CLI
+   daemon finds them through the login shell PATH (`src/main/shell-env.ts`
+   probes `-ilc` and `-lc` concurrently, returns as soon as `-ilc` succeeds with
+   a valid `PATH` while cleaning up `-lc`'s `fnm_multishells` probe symlink in
+   the background, and falls back to `-lc` when `-ilc` fails). On Windows, the teamhub CLI
    runs through the native `dist/teamhub-cli/teamhub.exe` launcher (preferring
    `resources/runtime/bin/node.exe`, then `Linger.exe` with
    `ELECTRON_RUN_AS_NODE=1`, then `LINGER_NODE` or `node` on PATH from source)
@@ -823,10 +857,21 @@ building a package.
   `runtimeEnvironment`, the desktop logs `local_server.local_models_restored`
   and emits `computer.runtime` once so an already-running daemon refreshes its
   library snapshot and Pi model catalog.
+- `LINGER_BUNDLED_LOCALMODELS_KIT_DIR`: optional packaging-time directory
+  holding `<target>.tgz` matching `distribution/<target>.json`'s
+  `localmodelsTool` byte size and SHA-256; when set, `build.mjs` and
+  `scripts/ci/desktop-release.sh` fail closed on missing, linked, or mismatched
+  archives and stage it as `dist/installer/bundled-localmodels-kit.tgz` beside
+  `distribution.json`. When unset, any stale copy is removed so official
+  releases never embed a kit archive.
 - `LINGER_LOCALMODELS_DEV_PYTHON`, `LINGER_LOCALMODELS_DEV_MODULE_DIR`:
   absolute Python and module directory for running a local `localmodels`
   checkout in Quick Install and the Desktop Computer without fetching the
-  published kit. `LOCALMODELS_DEBUG` (`simulate` or `tiny`) or
+  published kit. Both variables also configure `ComputerDaemonModule`'s
+  `local_models` block directly (preserving custom install state/model paths
+  when present, or deriving them under `LINGER_HOME`), so connecting Desktop to
+  `pnpm dev` via `LINGER_SERVER_URL` works without Quick Install and Python
+  edits apply on the next call. `LOCALMODELS_DEBUG` (`simulate` or `tiny`) or
   `~/.config/localmodels/debug.json` enables fast local-model testing in both
   source and packaged builds.
 - Without a display, run with `--ozone-platform=headless --disable-gpu`. The

@@ -115,16 +115,26 @@ func positional(name string) bool {
 }
 
 // ShellTextHook is the shell-text-hook command, Codex's PreToolUse hook for
-// shell commands and the check behind the Pi extension. It reads the hook
-// input on stdin and refuses a rewritten TeamHub command by exiting 2 with
-// the reason on stderr. Any other input passes.
+// shell commands and the check behind the Pi extension for both POSIX bash and
+// Windows PowerShell calls. It reads the hook input on stdin and refuses a
+// corrupted TeamHub command by exiting 2 with the reason on stderr. Any other
+// input passes.
 func ShellTextHook(stdin io.Reader, stderr io.Writer) int {
 	var input struct {
-		ToolInput struct {
+		ToolName     string `json:"tool_name"`
+		PowerShell51 bool   `json:"powershell_51"`
+		ToolInput    struct {
 			Command string `json:"command"`
 		} `json:"tool_input"`
 	}
 	if json.NewDecoder(io.LimitReader(stdin, maxHookEventBytes)).Decode(&input) != nil {
+		return 0
+	}
+	if strings.EqualFold(input.ToolName, "powershell") {
+		if msg := PowerShellTextProblem(input.ToolInput.Command, input.PowerShell51); msg != "" {
+			_, _ = fmt.Fprintln(stderr, msg)
+			return 2
+		}
 		return 0
 	}
 	if ShellTextRewritten(input.ToolInput.Command) {

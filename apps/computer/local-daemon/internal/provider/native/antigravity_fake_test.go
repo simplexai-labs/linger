@@ -33,6 +33,13 @@ const (
 	agyFakeCompactModeEnv         = "AGY_FAKE_COMPACT_MODE"
 	agyFakeCompactGateEnv         = "AGY_FAKE_COMPACT_GATE"
 	agyFakeCompactPermOutEnv      = "AGY_FAKE_COMPACT_PERM_OUT"
+	agyFakeUsageWindowsEnv        = "AGY_FAKE_USAGE_WINDOWS"
+	agyFakeExtraModelsEnv         = "AGY_FAKE_EXTRA_MODELS"
+	agyFakeFailModelEnv           = "AGY_FAKE_FAIL_MODEL"
+	agyFakeSilentModelEnv         = "AGY_FAKE_SILENT_MODEL"
+	agyFakeInitialUsageDelayEnv   = "AGY_FAKE_INITIAL_USAGE_DELAY_MS"
+	agyFakeDelayedUsageEnv        = "AGY_FAKE_DELAYED_USAGE_MS"
+	agyFakeTranscriptAppendEnv    = "AGY_FAKE_TRANSCRIPT_APPEND"
 	// agyFakeCommandEnv names the command a permission request asks for.
 	agyFakeCommandEnv = "AGY_FAKE_COMMAND"
 )
@@ -63,13 +70,17 @@ type agyFakeProcess struct {
 	mcpMu     sync.Mutex
 	mcpList   []agyFakeMCPTarget
 	// answers carries the client's responses to the fake's own requests.
-	answers     chan map[string]any
-	closed      chan struct{}
-	promptMu    sync.Mutex
-	promptCount int
-	p1ID        json.RawMessage
-	p1Done      bool
-	toolDone    chan struct{}
+	answers        chan map[string]any
+	closed         chan struct{}
+	promptMu       sync.Mutex
+	promptCount    int
+	p1ID           json.RawMessage
+	p1Done         bool
+	toolDone       chan struct{}
+	sessionSeq     int
+	usageMu        sync.Mutex
+	usageWindows   map[string]json.RawMessage
+	lastUsageSizes map[string]string
 }
 
 func (f *agyFakeProcess) send(value any) {
@@ -92,11 +103,19 @@ func (f *agyFakeProcess) update(sessionID string, update map[string]any) {
 }
 
 func agyFakeSession(id string) map[string]any {
+	modelOptions := []any{
+		map[string]any{"value": "gemini-pro", "name": "Gemini Pro"},
+		map[string]any{"value": "gemini-flash", "name": "Gemini Flash"},
+	}
+	if extra := strings.TrimSpace(os.Getenv(agyFakeExtraModelsEnv)); extra != "" {
+		for _, item := range strings.Split(extra, ",") {
+			if name := strings.TrimSpace(item); name != "" {
+				modelOptions = append(modelOptions, map[string]any{"value": name, "name": name})
+			}
+		}
+	}
 	configOptions := []any{
-		map[string]any{"id": "model", "category": "model", "currentValue": "gemini-pro", "options": []any{
-			map[string]any{"value": "gemini-pro", "name": "Gemini Pro"},
-			map[string]any{"value": "gemini-flash", "name": "Gemini Flash"},
-		}},
+		map[string]any{"id": "model", "category": "model", "currentValue": "gemini-pro", "options": modelOptions},
 		map[string]any{"id": "thought_level", "category": "thought_level", "currentValue": "low", "options": []any{}},
 	}
 	if os.Getenv(agyFakeNoDefaultsEnv) == "1" {
@@ -156,7 +175,11 @@ func agyFake(mode string, args []string) int {
 		return 2
 	}
 	var geminiDir, logFile, addDir string
-	for i := 1; i < len(args); i += 2 {
+	for i := 1; i < len(args); {
+		if args[i] == "--include-default-customizations=false" {
+			i++
+			continue
+		}
 		if i+1 >= len(args) {
 			fmt.Fprintln(os.Stderr, "missing flag value")
 			return 2
@@ -184,15 +207,23 @@ func agyFake(mode string, args []string) int {
 			fmt.Fprintln(os.Stderr, "unexpected flag:", args[i])
 			return 2
 		}
+		i += 2
 	}
 	f := &agyFakeProcess{
-		mode:      mode,
-		geminiDir: geminiDir,
-		logFile:   logFile,
-		addDir:    addDir,
-		answers:   make(chan map[string]any, 1),
-		closed:    make(chan struct{}),
-		toolDone:  make(chan struct{}),
+		mode:           mode,
+		geminiDir:      geminiDir,
+		logFile:        logFile,
+		addDir:         addDir,
+		answers:        make(chan map[string]any, 1),
+		closed:         make(chan struct{}),
+		toolDone:       make(chan struct{}),
+		lastUsageSizes: map[string]string{},
+	}
+	if rawWindows := strings.TrimSpace(os.Getenv(agyFakeUsageWindowsEnv)); rawWindows != "" {
+		var parsed map[string]json.RawMessage
+		if json.Unmarshal([]byte(rawWindows), &parsed) == nil {
+			f.usageWindows = parsed
+		}
 	}
 	f.writeStartupFiles(args)
 	if pidFile := os.Getenv(agyFakePIDFileEnv); pidFile != "" {
@@ -276,23 +307,53 @@ func (f *agyFakeProcess) callHook(payload map[string]any) AntigravityHookRespons
 	if json.Unmarshal(raw, &doc) != nil {
 		return AntigravityHookResponse{}
 	}
-	cmdStr, _ := doc["linger-steer"]["PreInvocation"][0]["command"].(string)
-	idx := strings.Index(cmdStr, "http://127.0.0.1:")
-	if idx < 0 {
+	eventName, _ := payload["hookEventName"].(string)
+	cmdStr := agyFakeHookCommand(doc, eventName)
+	if cmdStr == "" {
 		return AntigravityHookResponse{}
 	}
-	urlPart := cmdStr[idx:]
-	if end := strings.IndexAny(urlPart, "'\" "); end >= 0 {
-		urlPart = urlPart[:end]
+	arg := ""
+	if strings.Contains(cmdStr, antigravityHookDenyToolsArg) {
+		arg = antigravityHookDenyToolsArg
+	} else if idx := strings.Index(cmdStr, "http://127.0.0.1:"); idx >= 0 {
+		urlPart := cmdStr[idx:]
+		if end := strings.IndexAny(urlPart, "'\" "); end >= 0 {
+			urlPart = urlPart[:end]
+		}
+		arg = urlPart
+	}
+	if arg == "" {
+		return AntigravityHookResponse{}
 	}
 	encoded, _ := json.Marshal(payload)
 	var out, errBuf bytes.Buffer
-	if AntigravityRunHook(bytes.NewReader(encoded), &out, &errBuf, urlPart) != 0 {
+	if AntigravityRunHook(bytes.NewReader(encoded), &out, &errBuf, arg) != 0 {
 		return AntigravityHookResponse{}
 	}
 	var resp AntigravityHookResponse
 	_ = json.Unmarshal(out.Bytes(), &resp)
 	return resp
+}
+
+func agyFakeHookCommand(doc map[string]map[string][]map[string]any, eventName string) string {
+	for _, group := range doc {
+		entries := group[eventName]
+		for _, entry := range entries {
+			if cmd, ok := entry["command"].(string); ok && cmd != "" {
+				return cmd
+			}
+			if nested, ok := entry["hooks"].([]any); ok {
+				for _, item := range nested {
+					if m, ok := item.(map[string]any); ok {
+						if cmd, ok := m["command"].(string); ok && cmd != "" {
+							return cmd
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (f *agyFakeProcess) checkAuth(id json.RawMessage) bool {
@@ -370,6 +431,10 @@ func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[st
 			sessionID = "fake-session"
 		}
 		if method == "session/new" {
+			f.sessionSeq++
+			if f.sessionSeq > 1 {
+				sessionID = fmt.Sprintf("%s-%d", sessionID, f.sessionSeq)
+			}
 			convDir := filepath.Join(f.appDataDir(), "conversations")
 			_ = os.MkdirAll(convDir, 0o700)
 			_ = os.WriteFile(filepath.Join(convDir, sessionID+".db"), []byte("sqlite"), 0o600)
@@ -402,12 +467,63 @@ func (f *agyFakeProcess) handle(id json.RawMessage, method string, params map[st
 		}
 		f.rememberMCPServers(params["mcpServers"])
 		f.result(id, agyFakeSession(sessionID))
+		if method == "session/new" && len(f.usageWindows) > 0 {
+			f.update(sessionID, map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{}})
+			if rawDelay := strings.TrimSpace(os.Getenv(agyFakeInitialUsageDelayEnv)); rawDelay != "" {
+				if ms, err := strconv.Atoi(rawDelay); err == nil && ms > 0 {
+					time.Sleep(time.Duration(ms) * time.Millisecond)
+				}
+			}
+			if rawSize, ok := f.usageWindows["gemini-pro"]; ok {
+				f.usageMu.Lock()
+				f.lastUsageSizes[sessionID] = string(bytes.TrimSpace(rawSize))
+				f.usageMu.Unlock()
+				f.update(sessionID, map[string]any{"sessionUpdate": "usage_update", "used": 0, "size": rawSize})
+			}
+		}
 	case "session/set_config_option":
-		if params["value"] == "unknown-model" {
-			f.fail(id, -32602, "Unknown model ID: unknown-model")
+		val, _ := params["value"].(string)
+		if val == "unknown-model" || (val != "" && val == os.Getenv(agyFakeFailModelEnv)) {
+			f.fail(id, -32602, "Unknown model ID: "+val)
 			return
 		}
 		f.result(id, map[string]any{"configOptions": []any{}})
+		if params["configId"] == "model" && len(f.usageWindows) > 0 {
+			sessionID, _ := params["sessionId"].(string)
+			if val != "" && val == os.Getenv(agyFakeSilentModelEnv) {
+				if rawSize, ok := f.usageWindows[val]; ok {
+					f.usageMu.Lock()
+					f.lastUsageSizes[sessionID] = string(bytes.TrimSpace(rawSize))
+					f.usageMu.Unlock()
+				}
+				return
+			}
+			f.update(sessionID, map[string]any{"sessionUpdate": "config_option_update", "configOptions": []any{}})
+			f.update(sessionID, map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{}})
+			if rawSize, ok := f.usageWindows[val]; ok {
+				trimmed := string(bytes.TrimSpace(rawSize))
+				f.usageMu.Lock()
+				changed := trimmed != f.lastUsageSizes[sessionID]
+				if changed {
+					f.lastUsageSizes[sessionID] = trimmed
+				}
+				f.usageMu.Unlock()
+				if changed {
+					if delay := agyFakeModelDelay(val); delay > 0 {
+						sizeCopy := append(json.RawMessage(nil), rawSize...)
+						go func(sid string, sz json.RawMessage) {
+							select {
+							case <-time.After(delay):
+								f.update(sid, map[string]any{"sessionUpdate": "usage_update", "used": 0, "size": sz})
+							case <-f.closed:
+							}
+						}(sessionID, sizeCopy)
+					} else {
+						f.update(sessionID, map[string]any{"sessionUpdate": "usage_update", "used": 0, "size": rawSize})
+					}
+				}
+			}
+		}
 	case "session/prompt":
 		promptText := ""
 		if blocks, ok := params["prompt"].([]any); ok && len(blocks) > 0 {
@@ -498,6 +614,132 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string
 
 	if f.mode == "compact" {
 		f.promptCompactMode(id, sessionID, promptText)
+		return
+	}
+
+	if f.mode == "stop-hook" || f.mode == "stop-hook-error" {
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Initial answer."}})
+		if f.mode == "stop-hook-error" {
+			f.callHook(map[string]any{
+				"hookEventName":      "Stop",
+				"conversationId":     sessionID,
+				"executionNum":       0,
+				"continuationActive": false,
+				"terminationReason":  "ERROR",
+				"error":              "upstream failure",
+				"fullyIdle":          true,
+			})
+			f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 5, "outputTokens": 3}})
+			return
+		}
+		resp0 := f.callHook(map[string]any{
+			"hookEventName":      "Stop",
+			"conversationId":     sessionID,
+			"executionNum":       0,
+			"continuationActive": false,
+			"terminationReason":  "NO_TOOL_CALL",
+			"fullyIdle":          true,
+		})
+		if resp0.Decision == "continue" {
+			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "Continued:" + resp0.Reason}})
+			// agy empirically sends continuationActive: false even on re-entry.
+			resp1 := f.callHook(map[string]any{
+				"hookEventName":      "Stop",
+				"conversationId":     sessionID,
+				"executionNum":       1,
+				"continuationActive": false,
+				"terminationReason":  "NO_TOOL_CALL",
+				"fullyIdle":          true,
+			})
+			if resp1.Decision == "continue" {
+				f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "UNEXPECTED_SECOND_CONTINUE"}})
+			}
+		}
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 12, "outputTokens": 6}})
+		return
+	}
+
+	if f.mode == "pretooluse-shell" {
+		command := os.Getenv(agyFakeCommandEnv)
+		if command == "" {
+			command = "ls"
+		}
+		hookResp := f.callHook(map[string]any{
+			"hookEventName":  "PreToolUse",
+			"conversationId": sessionID,
+			"toolCall": map[string]any{
+				"id":   "tc-1",
+				"name": "run_command",
+				"args": map[string]any{"CommandLine": command},
+			},
+		})
+		if hookResp.Decision != "allow" {
+			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "DENIED:" + hookResp.Reason}})
+			f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 5, "outputTokens": 4}})
+			return
+		}
+		f.send(map[string]any{"jsonrpc": "2.0", "id": 901, "method": "session/request_permission", "params": map[string]any{
+			"sessionId": sessionID,
+			"toolCall":  map[string]any{"toolCallId": "tc-1", "name": "run_command", "title": command, "kind": "execute", "rawInput": map[string]any{"CommandLine": command}},
+			"options": []any{
+				map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+				map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+			},
+		}})
+		ans := <-f.answers
+		selected := ""
+		if outcome, ok := ans["outcome"].(map[string]any); ok {
+			selected, _ = outcome["optionId"].(string)
+		}
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "ALLOWED:" + selected}})
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 5, "outputTokens": 4}})
+		return
+	}
+
+	if f.mode == "model-invoke" || f.mode == "model-invoke-tool" || f.mode == "model-invoke-overflow" || f.mode == "model-invoke-hang" {
+		if f.mode == "model-invoke-hang" {
+			<-f.closed
+			return
+		}
+		if f.mode == "model-invoke-overflow" {
+			chunk := strings.Repeat("x", 64*1024)
+			for range 20 {
+				f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": chunk}})
+			}
+			f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 10, "outputTokens": 100}})
+			return
+		}
+		if f.mode == "model-invoke-tool" {
+			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "pre-tool scratch"}})
+			hookResp := f.callHook(map[string]any{
+				"hookEventName":  "PreToolUse",
+				"conversationId": sessionID,
+				"toolCall":       map[string]any{"id": "tc-m1", "name": "run_command", "args": map[string]any{"CommandLine": "cat /etc/passwd"}},
+			})
+			f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tc-m1", "name": "run_command", "kind": "execute", "status": "pending"})
+			f.send(map[string]any{"jsonrpc": "2.0", "id": 902, "method": "session/request_permission", "params": map[string]any{
+				"sessionId": sessionID,
+				"toolCall":  map[string]any{"toolCallId": "tc-m1", "name": "run_command", "kind": "execute"},
+				"options": []any{
+					map[string]any{"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+					map[string]any{"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+				},
+			}})
+			ans := <-f.answers
+			permSelected := ""
+			if outcome, ok := ans["outcome"].(map[string]any); ok {
+				permSelected, _ = outcome["optionId"].(string)
+			}
+			f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": fmt.Sprintf("hook=%s perm=%s", hookResp.Decision, permSelected)}})
+			f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 12, "outputTokens": 6, "cachedReadTokens": 4}})
+			return
+		}
+		reply := "Antigravity answer: " + promptText
+		if strings.Contains(promptText, "json") {
+			reply = `{"ok":true}`
+		}
+		f.update(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": reply}})
+		f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 20, "outputTokens": 8, "cachedReadTokens": 5, "cachedWriteTokens": 3}})
 		return
 	}
 
@@ -648,6 +890,14 @@ func (f *agyFakeProcess) prompt(id json.RawMessage, sessionID, promptText string
 		// A turn may end on a tool call; the reply stays the last message.
 		f.update(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call-2", "name": "run_command", "title": "true", "kind": "execute", "status": "completed", "rawInput": map[string]any{"CommandLine": "true"}})
 		return
+	}
+	if lines := os.Getenv(agyFakeTranscriptAppendEnv); lines != "" {
+		transcriptPath := filepath.Join(f.appDataDir(), "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")
+		_ = os.MkdirAll(filepath.Dir(transcriptPath), 0o700)
+		if file, err := os.OpenFile(transcriptPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			_, _ = file.WriteString(lines)
+			_ = file.Close()
+		}
 	}
 	f.result(id, map[string]any{"stopReason": "end_turn", "usage": map[string]any{"inputTokens": 10, "outputTokens": 4, "thoughtTokens": 2, "cachedReadTokens": 3}})
 }
@@ -813,4 +1063,21 @@ func (f *agyFakeProcess) promptCompactMode(id json.RawMessage, sessionID, prompt
 		})
 	}
 	f.result(id, map[string]any{"stopReason": "end_turn"})
+}
+
+func agyFakeModelDelay(model string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(agyFakeDelayedUsageEnv))
+	if raw == "" || model == "" {
+		return 0
+	}
+	for _, entry := range strings.Split(raw, ",") {
+		name, msStr, ok := strings.Cut(strings.TrimSpace(entry), ":")
+		if !ok || strings.TrimSpace(name) != model {
+			continue
+		}
+		if ms, err := strconv.Atoi(strings.TrimSpace(msStr)); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 0
 }

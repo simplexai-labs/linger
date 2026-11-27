@@ -235,6 +235,77 @@ describe("RunnerGateway model invocation", () => {
     },
   );
 
+  it("runs Memory on Antigravity on 0.67.0+ and gates older Computers to fallback or upgrade guidance", async () => {
+    const current = await connect(
+      {
+        ...invokingHello(),
+        daemon_version: "0.67.0",
+        runtimes: ["antigravity"],
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["antigravity"],
+          link: "api",
+        }),
+      },
+      defaultAgentPlacement({
+        agentId: "agent-another-me",
+        runtime: { type: "antigravity" },
+      }),
+    );
+    try {
+      expect(
+        current.gateway.supportsModelInvoke("runner-local", "antigravity"),
+      ).toBe(true);
+      const pending = current.gateway.invokeModel(
+        "runner-local",
+        request({ runtimeType: "antigravity" }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(current.peer)).toHaveLength(1),
+      );
+      expect(sentInvocations(current.peer)[0]).toMatchObject({
+        runtime_type: "antigravity",
+        mode: "structured",
+      });
+      await invoked(current.connection, sentInvocations(current.peer)[0]!);
+      await expect(pending).resolves.toMatchObject({
+        outcome: "completed",
+        text: '{"summary":"ok"}',
+      });
+    } finally {
+      current.connection.disconnect();
+    }
+
+    const legacy = await connect(
+      {
+        ...invokingHello(),
+        daemon_version: "0.66.0",
+        runtimes: ["antigravity"],
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["antigravity"],
+          link: "api",
+        }),
+      },
+      defaultAgentPlacement({
+        agentId: "agent-another-me",
+        runtime: { type: "antigravity" },
+      }),
+    );
+    try {
+      expect(
+        legacy.gateway.supportsModelInvoke("runner-local", "antigravity"),
+      ).toBe(false);
+      await expect(
+        legacy.gateway.invokeModel(
+          "runner-local",
+          request({ runtimeType: "antigravity" }),
+        ),
+      ).rejects.toThrow(/Antigravity/);
+      expect(sentInvocations(legacy.peer)).toEqual([]);
+    } finally {
+      legacy.connection.disconnect();
+    }
+  });
+
   it("sends model.invoke and resolves with the Daemon's outcome", async () => {
     const { gateway, peer, connection } = await connect();
     try {

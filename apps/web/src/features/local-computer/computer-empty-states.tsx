@@ -2,7 +2,6 @@ import {
   Add01Icon,
   AlertCircleIcon,
   ComputerTerminal01Icon,
-  LaptopIcon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -10,6 +9,7 @@ import { ModalDialog } from "@/components/ui/modal-dialog";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
+import { ComputerDeviceIcon } from "./computer-app-brand-icon";
 import { computerSetupMessages } from "./computer-setup.messages";
 import { ComputerSetupInstructions } from "./computer-setup-instructions";
 import { computersMessages } from "./computers.messages";
@@ -24,18 +24,18 @@ export function UnavailableComputer({
 }) {
   const t = useT();
   return (
-    <div className="flex min-h-full items-center justify-center px-6 py-12 text-center">
+    <div className="flex flex-col items-center rounded-xl border border-border bg-card px-6 py-14 text-center">
       <div className="max-w-md">
-        <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-          <Icon icon={AlertCircleIcon} size={20} />
+        <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
+          <Icon icon={AlertCircleIcon} size={22} />
         </span>
-        <h1 className="mt-4 text-lg">
+        <h2 className="mt-4 text-lg font-medium text-foreground">
           {t(computersMessages.unavailableTitle)}
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+        </h2>
+        <p className="mt-1.5 text-sm text-muted-foreground">
           {t(computersMessages.unavailableBody)}
         </p>
-        <div className="mt-5 flex justify-center gap-2">
+        <div className="mt-6 flex justify-center gap-2">
           <Button onClick={onBack} tone="primary">
             {t(computersMessages.backToComputers)}
           </Button>
@@ -89,12 +89,12 @@ export function ConnectComputerDialog({
 export function NoComputers({ onConnect }: { onConnect?: () => void }) {
   const t = useT();
   return (
-    <div className="flex flex-col items-center pt-16 text-center">
-      <span className="flex size-16 items-center justify-center rounded-[20%] bg-muted text-foreground">
-        <Icon icon={LaptopIcon} size={28} />
-      </span>
-      <h2 className="mt-6 text-xl">{t(computersMessages.noComputersTitle)}</h2>
-      <p className="mt-1.5 text-sm text-muted-foreground">
+    <div className="flex flex-col items-center rounded-2xl bg-card px-6 py-14 text-center shadow-outline">
+      <ComputerDeviceIcon online size={56} />
+      <h2 className="mt-4 text-lg font-medium text-foreground">
+        {t(computersMessages.noComputersTitle)}
+      </h2>
+      <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
         {t(computersMessages.noComputersBody)}
       </p>
       {onConnect ? (

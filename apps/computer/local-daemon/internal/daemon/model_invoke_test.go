@@ -112,7 +112,7 @@ func waitForModelInvoked(t *testing.T, stream *fakeStream, invokeID string) map[
 }
 
 func TestModelInvokeRunsTheCallAndReportsItsResult(t *testing.T) {
-	for _, runtime := range []string{"codex", "pi"} {
+	for _, runtime := range []string{"codex", "pi", "antigravity"} {
 		t.Run(runtime, func(t *testing.T) {
 			invoker := newFakeModelInvoker()
 			d, stream := modelInvokeFixture(t, invoker)
@@ -797,5 +797,53 @@ func TestModelInvokeNormalizesEffortForRequestedModel(t *testing.T) {
 	}
 	if got := invoker.lastRequest(); got.Model != "gpt-high-only" || got.ReasoningEffort != "high" {
 		t.Fatalf("request = %+v; want model gpt-high-only and effort high", got)
+	}
+}
+
+func TestModelInvokeAntigravityEffortValidationAndClamping(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	d.runtimeDiagnostics = mustJSON([]provider.RuntimeDiagnostic{{
+		Type: "antigravity", Status: "ready",
+		Models: []provider.RuntimeModel{
+			{ID: "gemini-pro", IsDefault: true, AllowedReasoningEffort: []string{"high", "xhigh"}, DefaultReasoningEffort: "high"},
+			{ID: "gemini-xhigh", AllowedReasoningEffort: []string{"xhigh"}, DefaultReasoningEffort: "xhigh"},
+		},
+	}})
+
+	cmd := modelInvokeCommand("invoke-agy-clamp", map[string]any{"reasoning_effort": "low"})
+	cmd.RuntimeType = "antigravity"
+	if err := d.handleModelInvoke(context.Background(), stream, cmd); err != nil {
+		t.Fatal(err)
+	}
+	<-invoker.started
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-agy-clamp"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if got := invoker.lastRequest().ReasoningEffort; got != "high" {
+		t.Fatalf("clamped antigravity effort = %q, want high", got)
+	}
+
+	xhighCmd := modelInvokeCommand("invoke-agy-xhigh-model", map[string]any{"model": "gemini-xhigh", "reasoning_effort": "high"})
+	xhighCmd.RuntimeType = "antigravity"
+	if err := d.handleModelInvoke(context.Background(), stream, xhighCmd); err != nil {
+		t.Fatal(err)
+	}
+	<-invoker.started
+	if payload := waitForModelInvoked(t, stream, "invoke-agy-xhigh-model"); payload["outcome"] != "completed" {
+		t.Fatalf("payload = %v", payload)
+	}
+	if got := invoker.lastRequest().ReasoningEffort; got != "xhigh" {
+		t.Fatalf("clamped antigravity xhigh effort = %q, want xhigh", got)
+	}
+
+	invalid := modelInvokeCommand("invoke-agy-bad-effort", map[string]any{"reasoning_effort": "minimal"})
+	invalid.RuntimeType = "antigravity"
+	if err := d.handleModelInvoke(context.Background(), stream, invalid); err != nil {
+		t.Fatal(err)
+	}
+	if payload := waitForModelInvoked(t, stream, "invoke-agy-bad-effort"); payload["outcome"] != "failed" {
+		t.Fatalf("invalid effort payload = %v, want failed", payload)
 	}
 }

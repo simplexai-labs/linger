@@ -232,6 +232,17 @@ func TestBoundComputerServiceCommandCannotSelectAnotherConfig(t *testing.T) {
 	}
 }
 
+func TestHostEnvironmentGuideByOS(t *testing.T) {
+	if got := hostEnvironmentGuide("windows"); got != lingercontext.WindowsHostEnvironmentGuide {
+		t.Fatalf("hostEnvironmentGuide(windows) = %q, want %q", got, lingercontext.WindowsHostEnvironmentGuide)
+	}
+	for _, goos := range []string{"darwin", "linux"} {
+		if got := hostEnvironmentGuide(goos); got != "" {
+			t.Fatalf("hostEnvironmentGuide(%q) = %q, want empty", goos, got)
+		}
+	}
+}
+
 func TestProviderInstallationsPreserveTerminalExecutionPath(t *testing.T) {
 	environment := map[string]string{"PATH": "daemon-path", "HOME": "/home/user"}
 	discovered := provider.DiscoveryResult{Installations: map[string]provider.RuntimeDiagnostic{"pi": {Type: "pi", ExecutablePath: "/mise/pi", EntryPath: "/mise/latest/pi", ExecutionPath: "terminal-node:daemon-path"}}}
@@ -2160,4 +2171,34 @@ exit 1
 			t.Fatalf("unexpected harness call after Pi was found on backfill: %s", string(rawCalls))
 		}
 	})
+}
+
+func TestWithBundledPowerShellPath(t *testing.T) {
+	pwshDir := filepath.Join(t.TempDir(), "runtime", "pwsh")
+	pwshPath := filepath.Join(pwshDir, "pwsh.exe")
+
+	env := map[string]string{"Path": `C:\Windows\System32;C:\Users\alice\bin`}
+	updated := withBundledPowerShellPath(env, pwshPath, "windows")
+	if got, want := updated["PATH"], `C:\Windows\System32;C:\Users\alice\bin;`+pwshDir; got != want {
+		t.Fatalf("updated Windows PATH = %q, want %q", got, want)
+	}
+	if _, duplicate := updated["Path"]; duplicate {
+		t.Fatalf("unexpected duplicate Path key: %+v", updated)
+	}
+	if env["Path"] != `C:\Windows\System32;C:\Users\alice\bin` || env["PATH"] != "" {
+		t.Fatalf("caller environment map mutated: %+v", env)
+	}
+
+	existingEntry := strings.ToUpper(pwshDir) + `\`
+	alreadyPresent := withBundledPowerShellPath(map[string]string{"PATH": `C:\Windows\System32;` + existingEntry}, pwshPath, "windows")
+	if got, want := alreadyPresent["PATH"], `C:\Windows\System32;`+existingEntry; got != want {
+		t.Fatalf("deduplicated Windows PATH = %q, want %q", got, want)
+	}
+
+	if got := withBundledPowerShellPath(env, pwshPath, "linux"); !reflect.DeepEqual(got, env) {
+		t.Fatalf("non-Windows modified env: %+v", got)
+	}
+	if got := withBundledPowerShellPath(env, "", "windows"); !reflect.DeepEqual(got, env) {
+		t.Fatalf("empty pwsh path modified env: %+v", got)
+	}
 }

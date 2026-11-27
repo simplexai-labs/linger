@@ -40,14 +40,13 @@ func TestCuaServiceFixtureProcess(t *testing.T) {
 
 // startCuaServiceFixture runs a separate process listening on the
 // installation's service socket, so the socket peer pid is not this test.
-func startCuaServiceFixture(t *testing.T, m *Manager) (string, <-chan error) {
+func startCuaServiceFixture(t *testing.T, socket string) (string, <-chan error) {
 	t.Helper()
-	directory := m.cuaServiceDirectory()
+	directory := filepath.Dir(socket)
 	t.Cleanup(func() { _ = os.RemoveAll(directory) })
 	if err := privatefs.EnsureDir(directory); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(directory, "driver.sock")
 	service := exec.Command(os.Args[0], "-test.run=^TestCuaServiceFixtureProcess$")
 	service.Env = append(os.Environ(), "LINGER_TEST_CUA_SERVICE_SOCKET="+socket)
 	if err := service.Start(); err != nil {
@@ -72,7 +71,7 @@ func TestManagerCloseStopsTheInstallationCuaService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, exited := startCuaServiceFixture(t, m)
+	directory, exited := startCuaServiceFixture(t, filepath.Join(m.cuaServiceDirectory(), "driver.sock"))
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +86,32 @@ func TestManagerCloseStopsTheInstallationCuaService(t *testing.T) {
 }
 
 func TestManagerCloseLeavesAnEmbeddedHostCuaServiceRunning(t *testing.T) {
-	m, err := New(Options{StateDirectory: t.TempDir(), CuaPath: filepath.Join(t.TempDir(), "cua-driver"), CuaEmbedded: true})
+	root, err := os.MkdirTemp("/tmp", "linger-host-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, exited := startCuaServiceFixture(t, m)
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	socket := filepath.Join(root, "host.sock")
+	m, err := New(Options{StateDirectory: t.TempDir(), CuaPath: filepath.Join(t.TempDir(), "cua-driver"), CuaEmbedded: true, CuaSocket: socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ensureCuaService(t.Context()); err == nil {
+		t.Fatal("accepted missing host socket")
+	}
+	directory, exited := startCuaServiceFixture(t, socket)
+	if got, err := m.ensureCuaService(t.Context()); got != socket || err != nil {
+		t.Fatalf("host socket = %q, %v", got, err)
+	}
+	if err := os.Chmod(directory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ensureCuaService(t.Context()); err == nil {
+		t.Fatal("accepted non-private host directory")
+	}
+	if err := m.RestartCua(); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -86,6 +86,8 @@ request:
                 status:
                   type: string
                   enum: [ready, permission_requested]
+                subject:
+                  $ref: "../components/computer-permissions.yaml#/components/schemas/ComputerPermissionSubject"
                 computer_id: { type: string }
                 permissions:
                   $ref: "../components/computer-permissions.yaml#/components/schemas/ComputerPermissionStatus"

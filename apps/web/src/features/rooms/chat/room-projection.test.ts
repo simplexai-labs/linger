@@ -200,6 +200,58 @@ describe("Room projection", () => {
     ).toEqual([]);
   });
 
+  it("does not fire onMessageCreated when replaying a Message already in cached pages", async () => {
+    const queryClient = new QueryClient();
+    const queryKey = roomMessagesQueryKey("tenant-1", "room-1");
+    const cachedMessage: TeamHubMessage = {
+      ...messageCreatedEvent().payload.message,
+      id: "message-cached",
+    };
+    queryClient.setQueryData(queryKey, {
+      pageParams: [undefined, "older"],
+      pages: [
+        { items: [], page: { has_more: true, next_cursor: "older" } },
+        { items: [cachedMessage], page: { has_more: false } },
+      ],
+    });
+    const onMessageCreated = vi.fn();
+    const projection = createRoomProjection({
+      onMessageCreated,
+      queryClient,
+      roomId: "room-1",
+      tenantId: "tenant-1",
+    });
+
+    await projection.applyEvent({
+      ...messageCreatedEvent(),
+      event_id: "event-replay-1",
+      room_seq: 1,
+      payload: {
+        kind: "message.created",
+        message: cachedMessage,
+      },
+    });
+    expect(onMessageCreated).not.toHaveBeenCalled();
+
+    const freshMessage: TeamHubMessage = {
+      ...messageCreatedEvent().payload.message,
+      id: "message-fresh",
+    };
+    await projection.applyEvent({
+      ...messageCreatedEvent(),
+      event_id: "event-fresh-2",
+      room_seq: 2,
+      payload: {
+        kind: "message.created",
+        message: freshMessage,
+      },
+    });
+    expect(onMessageCreated).toHaveBeenCalledOnce();
+    expect(onMessageCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "message-fresh" }),
+    );
+  });
+
   it("presents a managed Task result as a live Document target", () => {
     const message = {
       ...messageCreatedEvent().payload.message,

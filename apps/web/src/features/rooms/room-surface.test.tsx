@@ -20,8 +20,10 @@ import {
   createTestTeamHubRuntime,
   type TestTeamHubRuntime,
 } from "@/test/teamhub-test-runtime";
+import { seedRoomUpload } from "@/test/document-scenarios";
 import type { RoomRealtimeStatus } from "@/features/teamhub/event-transport";
 import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
+import type { TeamHubMessage } from "@/features/teamhub/teamhub-types";
 import type {
   TestRouteHandler,
   TestRouteRequest,
@@ -48,20 +50,29 @@ import {
 import { panelTabKey } from "./task-sidebar/panel-tab-types";
 
 const realtimeFixture = vi.hoisted(
-  (): { status: RoomRealtimeStatus; onTeamMdPublished?: () => void } => ({
+  (): {
+    status: RoomRealtimeStatus;
+    onMessageCreated?: (message: TeamHubMessage) => void;
+    onTeamMdPublished?: () => void;
+  } => ({
     status: "connected",
   }),
 );
 
 vi.mock("./chat/room-realtime-sync", () => ({
   RoomRealtimeSync: ({
+    onMessageCreated,
     onStatusChange,
     onTeamMdPublished,
   }: {
+    onMessageCreated?: (message: TeamHubMessage) => void;
     onStatusChange?: (status: RoomRealtimeStatus) => void;
     onTeamMdPublished?: () => void;
   }) => {
     useEffect(() => onStatusChange?.(realtimeFixture.status), [onStatusChange]);
+    useEffect(() => {
+      realtimeFixture.onMessageCreated = onMessageCreated;
+    }, [onMessageCreated]);
     useEffect(() => {
       realtimeFixture.onTeamMdPublished = onTeamMdPublished;
     }, [onTeamMdPublished]);
@@ -74,6 +85,8 @@ vi.mock("./chat/room-realtime-sync", () => ({
 describe("RoomSurface command availability", () => {
   beforeEach(() => {
     realtimeFixture.status = "connected";
+    realtimeFixture.onMessageCreated = undefined;
+    realtimeFixture.onTeamMdPublished = undefined;
     const store = new Map<string, string>();
     Object.defineProperty(globalThis, "localStorage", {
       configurable: true,
@@ -415,6 +428,222 @@ describe("RoomSurface command availability", () => {
         "Review the launch plan against implementation evidence.",
       ),
     ).toBeVisible();
+  });
+
+  it("auto-opens a previewable Agent file in the sidebar and switches to it while keeping earlier tabs", async () => {
+    const runtime = surfaceRuntime();
+    const htmlDoc = await seedRoomUpload(runtime, "bike-html", {
+      file: new File(["<h1>Bike</h1>"], "bike.html", { type: "text/html" }),
+      representationFormat: "html",
+    });
+    const htmlVersion = htmlDoc.current_version!;
+    const secondHtmlDoc = await seedRoomUpload(runtime, "summary-html", {
+      file: new File(["<h1>Summary</h1>"], "summary.html", {
+        type: "text/html",
+      }),
+      representationFormat: "html",
+    });
+    const secondHtmlVersion = secondHtmlDoc.current_version!;
+
+    await renderRoomSurface("room-all", "", runtime);
+    expect(
+      await screen.findByRole("button", { name: "Show sidebar" }),
+    ).toBeVisible();
+
+    act(() =>
+      realtimeFixture.onMessageCreated?.({
+        id: "message-agent-html",
+        tenant_id: "tenant-northstar",
+        room_id: "room-all",
+        author: {
+          id: "actor-codex",
+          kind: "agent",
+          display_name: "Codex",
+          tenant_id: "tenant-northstar",
+        },
+        message_kind: "conversation",
+        raw_message: "bike.html",
+        segments: [
+          {
+            type: "file",
+            content: "bike.html",
+            document_id: htmlDoc.id,
+            document_version_id: htmlVersion.id,
+            filename: "bike.html",
+            media_type: "text/html",
+          },
+        ],
+        attachments: [
+          {
+            id: "att-bike-html",
+            document_id: htmlDoc.id,
+            document_version_id: htmlVersion.id,
+            filename: "bike.html",
+            media_type: "text/html",
+            size_bytes: 13,
+            sha256: htmlVersion.sha256,
+            available: true,
+          },
+        ],
+        created_at: "2026-11-27T10:00:00Z",
+      }),
+    );
+
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Panel sidebar",
+    });
+    expect(
+      await within(sidebar).findByRole("tab", { name: "bike.html" }),
+    ).toHaveAttribute("aria-selected", "true");
+
+    // A second delivered file switches the active tab without closing the first.
+    act(() =>
+      realtimeFixture.onMessageCreated?.({
+        id: "message-agent-html-2",
+        tenant_id: "tenant-northstar",
+        room_id: "room-all",
+        author: {
+          id: "actor-codex",
+          kind: "agent",
+          display_name: "Codex",
+          tenant_id: "tenant-northstar",
+        },
+        message_kind: "conversation",
+        raw_message: "summary.html",
+        segments: [
+          {
+            type: "file",
+            content: "summary.html",
+            document_id: secondHtmlDoc.id,
+            document_version_id: secondHtmlVersion.id,
+            filename: "summary.html",
+            media_type: "text/html",
+          },
+        ],
+        attachments: [
+          {
+            id: "att-summary-html",
+            document_id: secondHtmlDoc.id,
+            document_version_id: secondHtmlVersion.id,
+            filename: "summary.html",
+            media_type: "text/html",
+            size_bytes: 16,
+            sha256: secondHtmlVersion.sha256,
+            available: true,
+          },
+        ],
+        created_at: "2026-11-27T10:01:00Z",
+      }),
+    );
+
+    expect(
+      await within(sidebar).findByRole("tab", { name: "summary.html" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      within(sidebar).getByRole("tab", { name: "bike.html" }),
+    ).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("does not auto-open the sidebar for a non-previewable Agent zip or a Human html file", async () => {
+    const runtime = surfaceRuntime();
+    const htmlDoc = await seedRoomUpload(runtime, "human-html", {
+      file: new File(["<p>Hi</p>"], "human.html", { type: "text/html" }),
+      representationFormat: "html",
+    });
+    const htmlVersion = htmlDoc.current_version!;
+
+    await renderRoomSurface("room-all", "", runtime);
+    expect(
+      await screen.findByRole("button", { name: "Show sidebar" }),
+    ).toBeVisible();
+
+    act(() =>
+      realtimeFixture.onMessageCreated?.({
+        id: "message-agent-zip",
+        tenant_id: "tenant-northstar",
+        room_id: "room-all",
+        author: {
+          id: "actor-codex",
+          kind: "agent",
+          display_name: "Codex",
+          tenant_id: "tenant-northstar",
+        },
+        message_kind: "conversation",
+        raw_message: "lev8-gtm-assets.zip",
+        segments: [
+          {
+            type: "file",
+            content: "lev8-gtm-assets.zip",
+            document_id: "document-lev8-gtm-assets",
+            document_version_id: "document-lev8-gtm-assets-version-1",
+            filename: "lev8-gtm-assets.zip",
+            media_type: "application/zip",
+          },
+        ],
+        attachments: [
+          {
+            id: "att-zip",
+            document_id: "document-lev8-gtm-assets",
+            document_version_id: "document-lev8-gtm-assets-version-1",
+            filename: "lev8-gtm-assets.zip",
+            media_type: "application/zip",
+            size_bytes: 45,
+            sha256:
+              "70b1f586b40a29afa751fe326d68367257655aa296caca0c9a29c52c10c70021",
+            available: true,
+          },
+        ],
+        created_at: "2026-11-27T10:00:00Z",
+      }),
+    );
+
+    expect(
+      screen.queryByRole("complementary", { name: "Panel sidebar" }),
+    ).not.toBeInTheDocument();
+
+    act(() =>
+      realtimeFixture.onMessageCreated?.({
+        id: "message-human-html",
+        tenant_id: "tenant-northstar",
+        room_id: "room-all",
+        author: {
+          id: "actor-jenny",
+          kind: "human",
+          display_name: "Jenny",
+          tenant_id: "tenant-northstar",
+        },
+        message_kind: "conversation",
+        raw_message: "human.html",
+        segments: [
+          {
+            type: "file",
+            content: "human.html",
+            document_id: htmlDoc.id,
+            document_version_id: htmlVersion.id,
+            filename: "human.html",
+            media_type: "text/html",
+          },
+        ],
+        attachments: [
+          {
+            id: "att-human-html",
+            document_id: htmlDoc.id,
+            document_version_id: htmlVersion.id,
+            filename: "human.html",
+            media_type: "text/html",
+            size_bytes: 9,
+            sha256: htmlVersion.sha256,
+            available: true,
+          },
+        ],
+        created_at: "2026-11-27T10:01:00Z",
+      }),
+    );
+
+    expect(
+      screen.queryByRole("complementary", { name: "Panel sidebar" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toBeVisible();
   });
 
   it("opens Agent editing from the Direct Room header avatar", async () => {

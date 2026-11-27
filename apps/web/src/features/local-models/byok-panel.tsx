@@ -4,30 +4,21 @@ import {
   CheckmarkCircle02Icon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
-import {
-  byokProtocolFor,
-  DEFAULT_BYOK_PATH,
-  defaultByokEndpoint,
-  normalizeByokBaseUrl,
-  normalizeByokPath,
-  validByokPath,
-} from "@linger/service-kit/byok-endpoint";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  type CSSProperties,
   type FormEvent,
   type ReactNode,
   useEffect,
   useEffectEvent,
   useId,
+  useReducer,
   useRef,
   useState,
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fieldControlClassName } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
-import { Select, SelectItem } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { commonMessages } from "@/i18n/common.messages";
@@ -38,14 +29,11 @@ import { cn } from "@/lib/cn";
 import { ByokCombobox } from "./byok-combobox";
 import {
   byokContextLabel,
-  byokEndpointSuggestions,
-  byokPathSuggestions,
+  formatByokFullUrl,
+  normalizeByokFullUrl,
+  parseByokFullUrl,
 } from "./byok-endpoint";
-import {
-  byokFailureCopy,
-  byokProtocolLabels,
-  modelSourceRuntimeLabels,
-} from "./local-models-copy";
+import { byokFailureCopy, byokProtocolLabels } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
 import { invalidateOfflineComputer } from "./local-models-queries";
 import type { ModelSourceSwitcher } from "./model-source-panel";
@@ -54,32 +42,35 @@ import {
   type ByokInput,
   type ByokTestRequest,
   listByokModels,
-  type ModelSourceRuntime,
   type ModelSourceStatus,
   testByokEndpoint,
 } from "./model-source-queries";
 
-const byokRuntimes: readonly ModelSourceRuntime[] = ["claude", "codex", "pi"];
+const byokInputClassName =
+  "h-10 w-full rounded-xl border border-transparent bg-muted/50 px-3.5 text-sm text-foreground transition-[background-color,border-color,box-shadow] duration-150 placeholder:text-muted-foreground/55 hover:bg-muted/75 focus:border-foreground/15 focus:bg-card focus:shadow-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none";
 
-type ByokMenu = "endpoint" | "model" | "path";
+const byokFieldButtonClassName =
+  "inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-transparent bg-muted/55 text-sm font-medium text-foreground transition-[color,background-color,border-color,transform] duration-150 hover:bg-muted/85 active:scale-(--chat-press-scale) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45 motion-reduce:transition-none motion-reduce:active:scale-100";
 
-function sameEndpointOrigin(savedUrl: string | undefined, nextUrl: string) {
+function sameEndpointOrigin(
+  savedUrl: string | undefined,
+  nextOrigin: string | undefined,
+) {
   const trimmedSaved = savedUrl?.trim();
-  const trimmedNext = nextUrl.trim();
-  if (!trimmedSaved || !trimmedNext) return false;
-  if (trimmedSaved === trimmedNext) return true;
+  if (!trimmedSaved || !nextOrigin) return false;
   try {
-    return new URL(trimmedSaved).origin === new URL(trimmedNext).origin;
+    return new URL(trimmedSaved).origin === nextOrigin;
   } catch {
     return false;
   }
 }
 
-/** A path or endpoint box sized to its value, at full width when stacked. */
-function fittedWidth(value: string): CSSProperties {
-  return {
-    "--byok-fit": `${Math.max(value.length, 1) + 1}ch`,
-  } as CSSProperties;
+function endpointHostLabel(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return rawUrl;
+  }
 }
 
 const failureCopy = (error: unknown, t: Translate) =>
@@ -92,10 +83,55 @@ function abortController(ref: { current: AbortController | null }) {
   ref.current = null;
 }
 
+interface ByokDraftState {
+  apiKey: string;
+  editing: boolean;
+  modelId: string;
+  replacingKey: boolean;
+  urlValue: string;
+}
+
+type ByokDraftAction =
+  | { type: "cancel"; initial: ByokDraftState }
+  | { type: "keepSavedKey" }
+  | { type: "normalizeUrl" }
+  | { type: "replaceKey" }
+  | { type: "setApiKey"; value: string }
+  | { type: "setModelId"; value: string }
+  | { type: "setUrl"; value: string }
+  | { type: "startEditing" }
+  | { type: "trimModelId" };
+
+function byokDraftReducer(
+  state: ByokDraftState,
+  action: ByokDraftAction,
+): ByokDraftState {
+  switch (action.type) {
+    case "startEditing":
+      return { ...state, editing: true };
+    case "cancel":
+      return action.initial;
+    case "setUrl":
+      return { ...state, urlValue: action.value };
+    case "normalizeUrl":
+      return { ...state, urlValue: normalizeByokFullUrl(state.urlValue) };
+    case "setApiKey":
+      return { ...state, apiKey: action.value };
+    case "replaceKey":
+      return { ...state, replacingKey: true };
+    case "keepSavedKey":
+      return { ...state, apiKey: "", replacingKey: false };
+    case "setModelId":
+      return { ...state, modelId: action.value };
+    case "trimModelId":
+      return { ...state, modelId: state.modelId.trim() };
+  }
+}
+
 /**
- * The person's own endpoint, addressed as base URL + path + endpoint. The API
- * key goes to the Computer, which keeps it private; Linger never shows it
- * again.
+ * The person's own endpoint, shown as a clean summary card once configured
+ * and editable via one full URL, an API key, and a model ID. The API key goes
+ * to the Computer, which keeps it private; Linger never shows it again.
  */
 export function ByokPanel({
   computerId,
@@ -114,50 +150,58 @@ export function ByokPanel({
   const { client } = useTeamHubRuntime();
   const queryClient = useQueryClient();
   const saved = status.byok;
-  const savedRuntime = status.mode === "byok" ? status.runtime : "claude";
-  const [runtime, setRuntime] = useState<ModelSourceRuntime>(savedRuntime);
-  const [baseUrl, setBaseUrl] = useState(saved.base_url ?? "");
-  // A saved endpoint reports an empty path or endpoint by leaving it out.
-  const [path, setPath] = useState(
-    saved.configured ? (saved.path ?? "") : DEFAULT_BYOK_PATH,
+  const initialUrl = formatByokFullUrl(saved);
+  const initialModelId = saved.model_id ?? "";
+  const hasSavedConfig = Boolean(
+    saved.configured && initialUrl && initialModelId,
   );
-  // null follows the Runtime's default endpoint.
-  const [endpoint, setEndpoint] = useState<string | null>(() => {
-    const value = saved.configured ? (saved.endpoint ?? "") : null;
-    return value === defaultByokEndpoint(savedRuntime) ? null : value;
-  });
-  const [apiKey, setApiKey] = useState("");
-  const [modelId, setModelId] = useState(saved.model_id ?? "");
-  const [menu, setMenu] = useState<ByokMenu | null>(null);
+  const initialDraft: ByokDraftState = {
+    apiKey: "",
+    editing: !hasSavedConfig,
+    modelId: initialModelId,
+    replacingKey: !saved.key_saved,
+    urlValue: initialUrl,
+  };
+  const [draft, dispatchDraft] = useReducer(byokDraftReducer, initialDraft);
+  const { apiKey, editing, modelId, replacingKey, urlValue } = draft;
+  const [menuOpen, setMenuOpen] = useState(false);
   const [toastShown, setToastShown] = useState(false);
   const ids = useId();
+  const keyInputRef = useRef<HTMLInputElement>(null);
 
-  const base = normalizeByokBaseUrl(baseUrl);
-  const pathValue = normalizeByokPath(path);
-  const runtimeEndpoint = defaultByokEndpoint(runtime);
-  const endpointValue = normalizeByokPath(endpoint ?? runtimeEndpoint);
-  const requestUrl = `${base}${pathValue}${endpointValue}`;
-  const format = byokProtocolFor(requestUrl, runtime);
-  const addressValid = validByokPath(pathValue) && validByokPath(endpointValue);
+  const parsedUrl = parseByokFullUrl(urlValue, {
+    preserveEmptyEndpointForUrl:
+      saved.configured && !saved.endpoint ? initialUrl : undefined,
+    preserveRuntime: status.mode === "byok" ? status.runtime : undefined,
+    preserveRuntimeForUrl: status.mode === "byok" ? initialUrl : undefined,
+  });
+  const urlInvalid = urlValue.trim() !== "" && !parsedUrl;
   // Never reuse a saved key when the owner points BYOK at a different host.
   const canReuseSavedKey =
     saved.key_saved &&
-    (!saved.base_url || sameEndpointOrigin(saved.base_url, base));
-  const address: ByokEndpointInput = {
-    base_url: base,
-    endpoint: endpointValue,
-    path: pathValue,
-    protocol: format.protocol,
-    ...(apiKey
-      ? { api_key: apiKey }
-      : canReuseSavedKey
-        ? { reuse_saved_key: true }
-        : {}),
-  };
-  const input: ByokInput = { ...address, model_id: modelId.trim() };
+    (!saved.base_url || sameEndpointOrigin(saved.base_url, parsedUrl?.origin));
+  const showMaskedSavedKey = canReuseSavedKey && !replacingKey && !apiKey;
+
+  const address: ByokEndpointInput | null = parsedUrl
+    ? {
+        base_url: parsedUrl.baseUrl,
+        endpoint: parsedUrl.endpoint,
+        path: parsedUrl.path,
+        protocol: parsedUrl.protocol,
+        ...(apiKey
+          ? { api_key: apiKey }
+          : canReuseSavedKey
+            ? { reuse_saved_key: true }
+            : {}),
+      }
+    : null;
+  const trimmedModelId = modelId.trim();
+  const input: ByokInput | null = address
+    ? { ...address, model_id: trimmedModelId }
+    : null;
   // The Computer decides whether the endpoint needs a key: one on this
   // computer or the local network may have none.
-  const complete = base !== "" && input.model_id !== "" && addressValid;
+  const complete = Boolean(input && trimmedModelId !== "");
   const active = status.mode === "byok";
 
   const modelsAbortRef = useRef<AbortController | null>(null);
@@ -240,8 +284,6 @@ export function ByokPanel({
     value: model.id,
   }));
 
-  // Changing the address or key makes listed models and a test result stale;
-  // changing only the endpoint, model or Runtime keeps the listed models.
   function resetTest() {
     abortController(testAbortRef);
     test.reset();
@@ -250,257 +292,339 @@ export function ByokPanel({
   function resetAll() {
     abortController(modelsAbortRef);
     models.reset();
+    setMenuOpen(false);
     resetTest();
   }
 
-  function save(event: FormEvent) {
-    event.preventDefault();
+  function submitByok() {
+    if (!input || !parsedUrl) return;
     abortController(modelsAbortRef);
     if (models.isPending) models.reset();
     abortController(testAbortRef);
     if (test.isPending) test.reset();
-    switcher.request({ byok: input, mode: "byok", runtime });
+    switcher.request({ byok: input, mode: "byok", runtime: parsedUrl.runtime });
   }
 
-  const addressHintId = `${ids}-address-hint`;
+  function save(event: FormEvent) {
+    event.preventDefault();
+    submitByok();
+  }
+
+  function runTest() {
+    if (!input) return;
+    setToastShown(false);
+    test.mutate({ byok: input }, { onSettled: () => setToastShown(true) });
+  }
+
+  function cancelEditing() {
+    dispatchDraft({ initial: initialDraft, type: "cancel" });
+    resetAll();
+  }
+
+  const testToastNode =
+    toastShown && test.isSuccess ? (
+      <TestToast
+        onDismiss={() => setToastShown(false)}
+        title={t(m.byokConnected)}
+        tone="success"
+      >
+        {test.data.model_id} · {byokContextLabel(test.data.context_window, t)} ·{" "}
+        {byokProtocolLabels[test.data.protocol]}
+        <br />
+        <span className="font-mono text-xs [overflow-wrap:anywhere]">
+          {test.data.url}
+        </span>
+      </TestToast>
+    ) : toastShown && test.isError ? (
+      <TestToast
+        onDismiss={() => setToastShown(false)}
+        title={t(m.byokCouldNotConnect)}
+        tone="danger"
+      >
+        {failureCopy(test.error, t)}
+      </TestToast>
+    ) : null;
+
+  if (hasSavedConfig && !editing) {
+    const host = endpointHostLabel(initialUrl);
+    const protocolLabel = parsedUrl
+      ? byokProtocolLabels[parsedUrl.protocol]
+      : undefined;
+
+    return (
+      <section
+        aria-label={t(m.modeByok)}
+        className="mt-5 rounded-2xl bg-card shadow-sm"
+      >
+        <div className="px-6 py-5">
+          <div className="relative flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate font-mono text-[15px] font-semibold tracking-[-0.015em] text-foreground">
+                  {initialModelId}
+                </h2>
+                {active ? (
+                  <span className="inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full bg-[var(--app-status-success-surface)] px-2 text-[11px] font-medium text-app-success">
+                    <span
+                      aria-hidden
+                      className="size-1.5 shrink-0 rounded-full bg-app-success"
+                    />
+                    {t(m.selectedModel)}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                {[host, protocolLabel].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                disabled={disabled || !complete}
+                loading={test.isPending}
+                onClick={runTest}
+                size="compact"
+                tone="subtle"
+              >
+                {t(m.byokTest)}
+              </Button>
+              <Button
+                disabled={disabled}
+                onClick={() => {
+                  resetTest();
+                  dispatchDraft({ type: "startEditing" });
+                }}
+                size="compact"
+                tone="subtle"
+              >
+                {t(m.byokEdit)}
+              </Button>
+              {!active ? (
+                <Button
+                  disabled={disabled || !complete}
+                  loading={switcher.pending?.mode === "byok"}
+                  onClick={submitByok}
+                  size="compact"
+                  tone="primary"
+                >
+                  {t(m.switchModel)}
+                </Button>
+              ) : null}
+            </div>
+            {testToastNode}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-x-8 gap-y-3 rounded-b-2xl border-t border-border/40 bg-muted/20 px-6 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0">
+            <span className="block text-[11px] font-medium text-muted-foreground">
+              {t(m.byokUrl)}
+            </span>
+            <span
+              className="mt-0.5 block truncate font-mono text-xs text-foreground/85"
+              title={initialUrl}
+            >
+              {initialUrl}
+            </span>
+          </div>
+          <div className="shrink-0">
+            <span className="block text-[11px] font-medium text-muted-foreground">
+              {t(m.apiKey)}
+            </span>
+            {saved.key_saved ? (
+              <span className="mt-0.5 flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="font-mono text-xs tracking-widest text-foreground/65"
+                >
+                  ••••••••••••
+                </span>
+                <span className="inline-flex h-5 items-center rounded-full bg-[var(--app-status-success-surface)] px-2 text-[11px] font-medium text-app-success">
+                  {t(m.byokKeySavedBadge)}
+                </span>
+              </span>
+            ) : (
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {t(m.byokKeyNotSet)}
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const urlHintId = `${ids}-url-hint`;
   const modelHintId = `${ids}-model-hint`;
 
   return (
     <form
       aria-label={t(m.modeByok)}
-      className="mt-5 rounded-xl border border-border bg-card"
+      className="mt-5 rounded-2xl bg-card shadow-sm"
       onSubmit={save}
     >
-      <div className="grid grid-cols-1 gap-5 px-5 py-5">
-        <div>
-          <p className="mb-1.5 text-sm font-medium text-foreground">
-            {t(m.aiRuntime)}
-          </p>
-          <Select
-            aria-label={t(m.aiRuntime)}
-            className="w-full"
-            disabled={disabled}
-            onValueChange={(value) => {
-              setRuntime(value as ModelSourceRuntime);
-              resetTest();
-            }}
-            value={runtime}
-          >
-            {byokRuntimes.map((item) => (
-              <SelectItem key={item} value={item}>
-                {modelSourceRuntimeLabels[item]}
-              </SelectItem>
-            ))}
-          </Select>
-        </div>
-        <fieldset className="min-w-0">
-          <legend className="mb-1.5 text-sm font-medium text-foreground">
-            {t(m.byokApiAddress)}
-          </legend>
-          <div className="grid grid-cols-[minmax(5.5rem,2fr)_minmax(0,3fr)] gap-x-2 gap-y-2.5 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <div className="col-span-2 min-w-0 sm:col-span-1">
-              <AddressLabel htmlFor={`${ids}-base`}>
-                {t(m.baseUrl)}
-              </AddressLabel>
-              <input
-                aria-describedby={addressHintId}
-                autoComplete="off"
-                className={fieldControlClassName}
-                disabled={disabled}
-                id={`${ids}-base`}
-                onBlur={() => setBaseUrl(normalizeByokBaseUrl)}
-                onChange={(event) => {
-                  setBaseUrl(event.target.value);
-                  resetAll();
-                }}
-                placeholder="https://api.example.com"
-                inputMode="url"
-                spellCheck={false}
-                value={baseUrl}
-              />
-            </div>
-            <div className="min-w-0">
-              <AddressLabel htmlFor={`${ids}-path`}>
-                {t(m.byokPath)}
-              </AddressLabel>
-              <ByokCombobox
-                aria-describedby={addressHintId}
-                aria-invalid={!validByokPath(pathValue)}
-                className="sm:w-max"
-                disabled={disabled}
-                filled={path === DEFAULT_BYOK_PATH}
-                heading={t(m.byokPathHeading)}
-                menuClassName="-left-px sm:left-auto sm:-right-px"
-                id={`${ids}-path`}
-                inputClassName="font-mono text-xs sm:w-(--byok-fit) sm:flex-none"
-                inputStyle={fittedWidth(path)}
-                label={t(m.byokPath)}
-                onCommit={() => setPath(normalizeByokPath)}
-                onOpenChange={(open) => setMenu(open ? "path" : null)}
-                onValueChange={(value) => {
-                  setPath(value);
-                  resetAll();
-                }}
-                open={menu === "path"}
-                options={byokPathSuggestions(t).map((option) => ({
-                  detail:
-                    option.value === DEFAULT_BYOK_PATH
-                      ? t(m.byokDefaultOption, { label: option.label })
-                      : option.label,
-                  value: option.value,
-                }))}
-                placeholder="-"
-                value={path}
-              />
-            </div>
-            <div className="min-w-0">
-              <AddressLabel htmlFor={`${ids}-endpoint`}>
-                {t(m.byokEndpoint)}
-              </AddressLabel>
-              <ByokCombobox
-                aria-describedby={addressHintId}
-                aria-invalid={!validByokPath(endpointValue)}
-                className="sm:w-max"
-                disabled={disabled}
-                filled={endpoint === null}
-                heading={t(m.byokEndpointHeading)}
-                menuClassName="-right-px"
-                id={`${ids}-endpoint`}
-                inputClassName="font-mono text-xs sm:w-(--byok-fit) sm:flex-none"
-                inputStyle={fittedWidth(endpoint ?? runtimeEndpoint)}
-                label={t(m.byokEndpoint)}
-                onCommit={() =>
-                  setEndpoint((current) => {
-                    if (current === null) return null;
-                    const value = normalizeByokPath(current);
-                    return value === runtimeEndpoint ? null : value;
-                  })
-                }
-                onOpenChange={(open) => setMenu(open ? "endpoint" : null)}
-                onValueChange={(value) => {
-                  setEndpoint(value === runtimeEndpoint ? null : value);
-                  resetTest();
-                }}
-                open={menu === "endpoint"}
-                options={byokEndpointSuggestions.map((option) => ({
-                  detail: option.protocol
-                    ? option.value === runtimeEndpoint
-                      ? t(m.byokEndpointRuntimeDefault, {
-                          protocol: byokProtocolLabels[option.protocol],
-                          runtime: modelSourceRuntimeLabels[runtime],
-                        })
-                      : byokProtocolLabels[option.protocol]
-                    : t(m.byokEndpointNone),
-                  value: option.value,
-                }))}
-                placeholder="-"
-                value={endpoint ?? runtimeEndpoint}
-              />
-            </div>
-          </div>
-          <div
-            className="mt-2 grid gap-1 text-xs text-muted-foreground"
-            id={addressHintId}
-          >
-            {!addressValid ? (
-              <p className="text-destructive">{t(m.byokAddressInvalid)}</p>
-            ) : null}
-          </div>
-        </fieldset>
+      <div className="space-y-5 p-6">
         <div>
           <label
-            className="mb-1.5 block text-sm font-medium text-foreground"
-            htmlFor={`${ids}-key`}
+            className="mb-2 block text-[13px] font-medium tracking-[-0.01em] text-foreground"
+            htmlFor={`${ids}-url`}
           >
-            {t(m.apiKey)}
+            {t(m.byokUrl)}
           </label>
           <input
-            autoComplete="new-password"
-            className={fieldControlClassName}
+            aria-describedby={urlInvalid ? urlHintId : undefined}
+            aria-invalid={urlInvalid || undefined}
+            autoComplete="off"
+            className={cn(
+              byokInputClassName,
+              "font-mono text-[13px]",
+              urlInvalid && "border-destructive/40 focus:border-destructive/60",
+            )}
             disabled={disabled}
-            id={`${ids}-key`}
+            id={`${ids}-url`}
+            inputMode="url"
+            onBlur={() => dispatchDraft({ type: "normalizeUrl" })}
             onChange={(event) => {
-              setApiKey(event.target.value);
+              dispatchDraft({ type: "setUrl", value: event.target.value });
               resetAll();
             }}
-            placeholder={canReuseSavedKey ? t(m.keySavedHint) : undefined}
-            type="password"
-            value={apiKey}
+            placeholder="https://api.openai.com/v1/chat/completions"
+            spellCheck={false}
+            value={urlValue}
           />
+          {urlInvalid ? (
+            <p className="mt-1.5 text-xs text-destructive" id={urlHintId}>
+              {t(m.byokUrlInvalid)}
+            </p>
+          ) : null}
         </div>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            {showMaskedSavedKey ? (
+              <span className="block text-[13px] font-medium tracking-[-0.01em] text-foreground">
+                {t(m.apiKey)}
+              </span>
+            ) : (
+              <label
+                className="block text-[13px] font-medium tracking-[-0.01em] text-foreground"
+                htmlFor={`${ids}-key`}
+              >
+                {t(m.apiKey)}
+              </label>
+            )}
+            {canReuseSavedKey && replacingKey ? (
+              <button
+                className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                disabled={disabled}
+                onClick={() => {
+                  dispatchDraft({ type: "keepSavedKey" });
+                  resetAll();
+                }}
+                type="button"
+              >
+                {t(m.byokKeepSavedKey)}
+              </button>
+            ) : null}
+          </div>
+          {showMaskedSavedKey ? (
+            <div className="flex h-10 items-center justify-between gap-3 rounded-xl bg-muted/50 px-3.5">
+              <span className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="font-mono text-xs tracking-widest text-foreground/65"
+                >
+                  ••••••••••••
+                </span>
+                <span className="inline-flex h-5 items-center rounded-full bg-[var(--app-status-success-surface)] px-2 text-[11px] font-medium text-app-success">
+                  {t(m.byokKeySavedBadge)}
+                </span>
+              </span>
+              <button
+                className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                disabled={disabled}
+                onClick={() => {
+                  dispatchDraft({ type: "replaceKey" });
+                  requestAnimationFrame(() => keyInputRef.current?.focus());
+                }}
+                type="button"
+              >
+                {t(m.byokChangeKey)}
+              </button>
+            </div>
+          ) : (
+            <input
+              autoComplete="new-password"
+              className={byokInputClassName}
+              disabled={disabled}
+              id={`${ids}-key`}
+              onChange={(event) => {
+                dispatchDraft({ type: "setApiKey", value: event.target.value });
+                resetAll();
+              }}
+              placeholder={canReuseSavedKey ? t(m.keySavedHint) : undefined}
+              ref={keyInputRef}
+              type="password"
+              value={apiKey}
+            />
+          )}
+        </div>
+
         <div>
           <label
-            className="mb-1.5 block text-sm font-medium text-foreground"
+            className="mb-2 block text-[13px] font-medium tracking-[-0.01em] text-foreground"
             htmlFor={`${ids}-model`}
           >
             {t(m.model)}
           </label>
-          <div className="relative flex gap-2">
+          <div className="relative flex items-center gap-2">
             <ByokCombobox
               aria-describedby={models.isError ? modelHintId : undefined}
               className="min-w-0 flex-1"
               disabled={disabled}
               id={`${ids}-model`}
               label={t(m.model)}
-              onCommit={() => setModelId((current) => current.trim())}
-              onOpenChange={(open) => setMenu(open ? "model" : null)}
+              onCommit={() => dispatchDraft({ type: "trimModelId" })}
+              onOpenChange={setMenuOpen}
               onValueChange={(value) => {
-                setModelId(value);
+                dispatchDraft({ type: "setModelId", value });
                 resetTest();
               }}
-              open={menu === "model"}
+              open={menuOpen}
               options={modelOptions}
               placeholder="provider/model-name"
               value={modelId}
             />
-            <Button
+            <button
+              aria-busy={models.isPending || undefined}
               aria-label={t(m.listModels)}
-              disabled={disabled || base === "" || !addressValid}
-              loading={models.isPending}
-              onClick={() =>
-                models.mutate(address, { onSuccess: () => setMenu("model") })
-              }
-              size="large"
-              title={t(m.listModels)}
-            >
-              {models.isPending ? null : <Icon icon={RefreshIcon} size={16} />}
-            </Button>
-            <Button
-              disabled={disabled || !complete}
-              loading={test.isPending}
+              className={cn(
+                byokFieldButtonClassName,
+                "w-10 text-muted-foreground hover:text-foreground",
+              )}
+              disabled={disabled || !address || models.isPending}
               onClick={() => {
-                setToastShown(false);
-                test.mutate(
-                  { byok: input },
-                  { onSettled: () => setToastShown(true) },
-                );
+                if (!address) return;
+                models.mutate(address, { onSuccess: () => setMenuOpen(true) });
               }}
-              size="large"
+              title={t(m.listModels)}
+              type="button"
             >
+              {models.isPending ? (
+                <Spinner size={16} />
+              ) : (
+                <Icon icon={RefreshIcon} size={16} />
+              )}
+            </button>
+            <button
+              aria-busy={test.isPending || undefined}
+              className={cn(byokFieldButtonClassName, "gap-2 px-4")}
+              disabled={disabled || !complete || test.isPending}
+              onClick={runTest}
+              type="button"
+            >
+              {test.isPending ? <Spinner size={16} /> : null}
               {t(m.byokTest)}
-            </Button>
-            {toastShown && test.isSuccess ? (
-              <TestToast
-                onDismiss={() => setToastShown(false)}
-                title={t(m.byokConnected)}
-                tone="success"
-              >
-                {test.data.model_id} ·{" "}
-                {byokContextLabel(test.data.context_window, t)} ·{" "}
-                {byokProtocolLabels[test.data.protocol]}
-                <br />
-                <Url>{test.data.url}</Url>
-              </TestToast>
-            ) : null}
-            {toastShown && test.isError ? (
-              <TestToast
-                onDismiss={() => setToastShown(false)}
-                title={t(m.byokCouldNotConnect)}
-                tone="danger"
-              >
-                {failureCopy(test.error, t)}
-              </TestToast>
-            ) : null}
+            </button>
+            {testToastNode}
           </div>
           {models.isError ? (
             <p
@@ -512,53 +636,45 @@ export function ByokPanel({
           ) : null}
         </div>
       </div>
-      <footer className="flex flex-wrap items-center justify-end gap-2 rounded-b-xl bg-muted/35 px-5 py-3">
-        <Button
-          disabled={disabled || !complete}
-          loading={switcher.pending?.mode === "byok"}
-          size="large"
-          tone="primary"
-          type="submit"
-        >
-          {t(active ? commonMessages.save : m.saveAndSwitch)}
-        </Button>
+
+      <footer className="flex flex-wrap items-center justify-between gap-3 rounded-b-2xl border-t border-border/40 bg-muted/20 px-6 py-3.5">
+        <span className="min-w-0 truncate text-xs text-muted-foreground">
+          {parsedUrl ? (
+            <>
+              {byokProtocolLabels[parsedUrl.protocol]}
+              {!parsedUrl.explicitEndpoint ? (
+                <span className="ml-1.5 font-mono text-[11px] text-muted-foreground/75">
+                  · {parsedUrl.endpoint}
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </span>
+        <div className="flex items-center gap-2">
+          {hasSavedConfig ? (
+            <Button
+              disabled={disabled}
+              onClick={cancelEditing}
+              size="default"
+              tone="ghost"
+            >
+              {t(commonMessages.cancel)}
+            </Button>
+          ) : null}
+          <Button
+            className="rounded-xl px-4"
+            disabled={disabled || !complete}
+            loading={switcher.pending?.mode === "byok"}
+            size="default"
+            tone="primary"
+            type="submit"
+          >
+            {t(active ? commonMessages.save : m.saveAndSwitch)}
+          </Button>
+        </div>
       </footer>
     </form>
   );
-}
-
-function AddressLabel({
-  children,
-  htmlFor,
-}: {
-  children: ReactNode;
-  htmlFor: string;
-}) {
-  return (
-    <label
-      className="mb-1 block text-xs font-medium text-muted-foreground"
-      htmlFor={htmlFor}
-    >
-      {children}
-    </label>
-  );
-}
-
-function Url({ children, chip = false }: { children: string; chip?: boolean }) {
-  const baseClassName = "font-mono text-xs [overflow-wrap:anywhere]";
-  if (chip) {
-    return (
-      <code
-        className={cn(
-          baseClassName,
-          "rounded-sm bg-muted px-1.5 py-0.5 text-foreground",
-        )}
-      >
-        {children}
-      </code>
-    );
-  }
-  return <span className={baseClassName}>{children}</span>;
 }
 
 /**
@@ -606,7 +722,7 @@ function TestToast({
   return (
     <div
       className={cn(
-        "absolute right-0 bottom-full z-40 mb-2 grid w-[min(22rem,100%)] grid-cols-[16px_minmax(0,1fr)_20px] items-start gap-2 rounded-lg bg-primary py-2.5 pr-2 pl-3 text-left text-xs text-primary-foreground/80 shadow-lg before:absolute before:right-6 before:-bottom-1 before:size-2.5 before:rotate-45 before:bg-primary before:content-[''] motion-reduce:animate-none",
+        "absolute right-0 bottom-full z-40 mb-2 grid w-[min(22rem,100%)] grid-cols-[16px_minmax(0,1fr)_20px] items-start gap-2 rounded-xl bg-primary py-2.5 pr-2 pl-3 text-left text-xs text-primary-foreground/80 shadow-lg before:absolute before:right-6 before:-bottom-1 before:size-2.5 before:rotate-45 before:bg-primary before:content-[''] motion-reduce:animate-none",
         leaving
           ? "animate-[town-dropdown-out_200ms_ease_both]"
           : "animate-[town-dropdown-in_var(--app-floating-duration)_ease_both]",
@@ -632,9 +748,9 @@ function TestToast({
         <p className="mt-0.5 [overflow-wrap:anywhere]">{children}</p>
       </div>
       <button
-        data-voice-close
         aria-label={t(m.byokDismiss)}
         className="grid size-5 place-items-center rounded-sm text-primary-foreground/60 transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground"
+        data-voice-close
         onClick={() => setLeaving(true)}
         type="button"
       >

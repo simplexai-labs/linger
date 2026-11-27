@@ -82,9 +82,12 @@ export const createFlashbackFeature = (
             const runtime = context.runtime as {
               readonly placement?: { readonly runtimeType?: string };
             };
-            // Claude steers by interrupting the reply, so it only gets
-            // follow-ups.
-            const steers = runtime.placement?.runtimeType === "codex";
+            const runtimeType = runtime.placement?.runtimeType;
+            // Codex and Antigravity inject steers into an active turn without
+            // interrupting the reply; Claude steers by interrupting it, so
+            // non-steering runtimes only get follow-ups.
+            const steers =
+              runtimeType === "codex" || runtimeType === "antigravity";
             deps.trackBackground(
               session.recall({
                 signal: bound.signal,

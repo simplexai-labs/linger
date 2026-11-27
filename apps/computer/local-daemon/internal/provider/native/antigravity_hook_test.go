@@ -5,16 +5,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T) {
+	if AntigravityHookTimeout != 15*time.Second {
+		t.Fatalf("AntigravityHookTimeout = %v, want 15s", AntigravityHookTimeout)
+	}
 	ep, err := newAntigravityHookEndpoint("/opt/linger/daemon's-bin", "")
 	if err != nil {
 		t.Fatal(err)
@@ -34,19 +41,49 @@ func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T
 	if len(entry["PreInvocation"]) != 1 || len(entry["Stop"]) != 1 {
 		t.Fatalf("unexpected hooks.json structure: %s", raw)
 	}
+	if runtime.GOOS == "windows" {
+		if len(entry["PreToolUse"]) != 0 {
+			t.Fatalf("expected resident PreToolUse omitted on Windows: %s", raw)
+		}
+	} else {
+		if len(entry["PreToolUse"]) != 1 {
+			t.Fatalf("unexpected PreToolUse structure: %s", raw)
+		}
+		if entry["PreToolUse"][0]["matcher"] != "run_command" {
+			t.Fatalf("unexpected PreToolUse matcher: %v", entry["PreToolUse"][0])
+		}
+		nestedPreToolUse, _ := entry["PreToolUse"][0]["hooks"].([]any)
+		if len(nestedPreToolUse) != 1 {
+			t.Fatalf("unexpected PreToolUse hooks: %v", entry["PreToolUse"][0])
+		}
+		preToolUseCmd, _ := nestedPreToolUse[0].(map[string]any)["command"].(string)
+		if !strings.Contains(preToolUseCmd, ep.URL()+"?event=PreToolUse") {
+			t.Fatalf("PreToolUse hook command=%q missing ?event=PreToolUse", preToolUseCmd)
+		}
+	}
 	cmd, _ := entry["PreInvocation"][0]["command"].(string)
-	if !strings.Contains(cmd, "antigravity-hook") || !strings.Contains(cmd, ep.URL()) {
-		t.Fatalf("hook command=%q missing antigravity-hook or URL %q", cmd, ep.URL())
+	if !strings.Contains(cmd, "antigravity-hook") || !strings.Contains(cmd, ep.URL()) || strings.Contains(cmd, "?event=PreToolUse") {
+		t.Fatalf("hook command=%q unexpected for PreInvocation URL %q", cmd, ep.URL())
 	}
 
-	// Unregistered sessions fail open with {}.
+	// Unregistered sessions fail open with {} for PreInvocation and {"decision":"allow"} for PreToolUse.
 	var out, errBuf bytes.Buffer
 	code := AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreInvocation","conversationId":"unknown","invocationNum":1}`), &out, &errBuf, ep.URL())
 	if code != 0 || strings.TrimSpace(out.String()) != "{}" {
-		t.Fatalf("unregistered hook code=%d out=%q", code, out.String())
+		t.Fatalf("unregistered PreInvocation code=%d out=%q", code, out.String())
+	}
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreToolUse","conversationId":"unknown","toolCall":{"name":"run_command"}}`), &out, &errBuf, ep.URL())
+	if code != 0 || strings.TrimSpace(out.String()) != `{"decision":"allow"}` {
+		t.Fatalf("unregistered PreToolUse code=%d out=%q", code, out.String())
+	}
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreToolUse"}`), &out, &errBuf, ep.URL())
+	if code != 0 || strings.TrimSpace(out.String()) != `{"decision":"allow"}` {
+		t.Fatalf("missing conversationId PreToolUse code=%d out=%q", code, out.String())
 	}
 
-	// Registered session receives the event and returns injectSteps.
+	// Registered session receives the event and returns injectSteps; empty PreToolUse decision defaults to allow.
 	var seenReq AntigravityHookRequest
 	unreg := ep.Register("sess-1", func(_ context.Context, req AntigravityHookRequest) AntigravityHookResponse {
 		seenReq = req
@@ -75,6 +112,12 @@ func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T
 		t.Fatalf("resp=%+v", resp)
 	}
 
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreToolUse","conversationId":"sess-1","toolCall":{"name":"run_command"}}`), &out, &errBuf, ep.URL())
+	if code != 0 || strings.TrimSpace(out.String()) != `{"decision":"allow"}` {
+		t.Fatalf("empty PreToolUse response should default to allow: code=%d out=%q", code, out.String())
+	}
+
 	// After unregistering, the session fails open again.
 	unreg()
 	out.Reset()
@@ -84,7 +127,7 @@ func TestAntigravityHookEndpointWritesHooksConfigAndRoutesBySession(t *testing.T
 	}
 }
 
-func TestAntigravityRunHookFailsOpenWhenEndpointUnreachable(t *testing.T) {
+func TestAntigravityRunHookFailsOpenAndSupportsDenyTools(t *testing.T) {
 	ep, err := newAntigravityHookEndpoint("/bin/daemon", "")
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +138,19 @@ func TestAntigravityRunHookFailsOpenWhenEndpointUnreachable(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	code := AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreInvocation","conversationId":"sess-1"}`), &out, &errBuf, url)
 	if code != 0 || out.String() != "{}\n" {
-		t.Fatalf("unreachable hook code=%d out=%q", code, out.String())
+		t.Fatalf("unreachable PreInvocation hook code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreToolUse","conversationId":"sess-1"}`), &out, &errBuf, url)
+	if code != 0 || out.String() != "{\"decision\":\"allow\"}\n" {
+		t.Fatalf("unreachable PreToolUse hook code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreToolUse"}`), &out, &errBuf, "https://example.com/not-loopback")
+	if code != 0 || out.String() != "{\"decision\":\"allow\"}\n" {
+		t.Fatalf("non-loopback PreToolUse hook code=%d out=%q", code, out.String())
 	}
 
 	out.Reset()
@@ -108,6 +163,46 @@ func TestAntigravityRunHookFailsOpenWhenEndpointUnreachable(t *testing.T) {
 	code = AntigravityRunHook(strings.NewReader(`{}`), &out, &errBuf, "https://example.com/not-loopback")
 	if code != 0 || out.String() != "{}\n" {
 		t.Fatalf("non-loopback hook code=%d out=%q", code, out.String())
+	}
+
+	out.Reset()
+	code = AntigravityRunHook(strings.NewReader(`{"hookEventName":"PreToolUse","toolCall":{"name":"run_command"}}`), &out, &errBuf, antigravityHookDenyToolsArg)
+	var denyResp AntigravityHookResponse
+	if code != 0 || json.Unmarshal(out.Bytes(), &denyResp) != nil || denyResp.Decision != "deny" || denyResp.Reason == "" {
+		t.Fatalf("deny-tools hook code=%d out=%q", code, out.String())
+	}
+
+	// PreToolUse URL fails open with {"decision":"allow"} even when stdin exceeds 1 MiB or is invalid JSON.
+	liveEP, err := newAntigravityHookEndpoint("/bin/daemon", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = liveEP.Close() })
+	preToolUseURL := liveEP.URL() + "?event=PreToolUse"
+	oversized := strings.Repeat("x", maxAntigravityHookBytes+16)
+
+	for name, body := range map[string]string{
+		"oversized":    oversized,
+		"invalid_json": "{not-json",
+	} {
+		t.Run("run_hook_pretooluse_"+name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := AntigravityRunHook(strings.NewReader(body), &stdout, &stderr, preToolUseURL)
+			if code != 0 || stdout.String() != "{\"decision\":\"allow\"}\n" {
+				t.Fatalf("PreToolUse %s code=%d out=%q, want allow", name, code, stdout.String())
+			}
+		})
+		t.Run("endpoint_serve_pretooluse_"+name, func(t *testing.T) {
+			resp, postErr := http.Post(preToolUseURL, "application/json", strings.NewReader(body))
+			if postErr != nil {
+				t.Fatal(postErr)
+			}
+			defer resp.Body.Close()
+			respBody, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK || strings.TrimSpace(string(respBody)) != `{"decision":"allow"}` {
+				t.Fatalf("serve PreToolUse %s status=%d body=%q, want allow", name, resp.StatusCode, string(respBody))
+			}
+		})
 	}
 }
 
@@ -253,5 +348,35 @@ func TestAntigravityHookEndpointCloseJoinsRemoveRootError(t *testing.T) {
 	}
 	if err := ep.Close(); !errors.Is(err, sentinel) {
 		t.Fatalf("Close() = %v, want joined %v", err, sentinel)
+	}
+}
+
+func TestAntigravityHooksDocumentOmitsPreToolUseOnWindows(t *testing.T) {
+	exe := `C:\Program Files (x86)\Linger\linger-computer-daemon.exe`
+
+	winDoc := antigravityHooksDocument("windows", exe, "http://127.0.0.1:12345/hook")
+	winGroup := winDoc["linger-steer"].(map[string]any)
+	if _, ok := winGroup["PreInvocation"]; !ok {
+		t.Fatal("windows hooks document missing PreInvocation")
+	}
+	if _, ok := winGroup["Stop"]; !ok {
+		t.Fatal("windows hooks document missing Stop")
+	}
+	if _, ok := winGroup["PreToolUse"]; ok {
+		t.Fatalf("windows hooks document must omit PreToolUse: %v", winGroup)
+	}
+
+	for _, goos := range []string{"darwin", "linux"} {
+		posixDoc := antigravityHooksDocument(goos, "/opt/linger/daemon", "http://127.0.0.1:12345/hook")
+		group := posixDoc["linger-steer"].(map[string]any)
+		preToolUse, ok := group["PreToolUse"].([]any)
+		if !ok || len(preToolUse) != 1 {
+			t.Fatalf("%s hooks document missing PreToolUse: %v", goos, group)
+		}
+		nested := preToolUse[0].(map[string]any)["hooks"].([]any)
+		cmd, _ := nested[0].(map[string]any)["command"].(string)
+		if !strings.Contains(cmd, "http://127.0.0.1:12345/hook?event=PreToolUse") {
+			t.Fatalf("%s PreToolUse command = %q", goos, cmd)
+		}
 	}
 }

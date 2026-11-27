@@ -44,16 +44,6 @@
   letter-spacing: -0.01em;
   color: var(--app-ink);
 }
-.section-count {
-  margin-left: 8px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--app-surface-soft);
-  color: var(--app-muted);
-  font-size: 12px;
-  font-weight: 500;
-  vertical-align: middle;
-}
 .landing-view-all {
   display: inline-flex;
   flex-shrink: 0;

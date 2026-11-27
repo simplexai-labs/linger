@@ -43,7 +43,8 @@ func (c *cli) runDoctor(ctx context.Context, parsed command) (doctorReport, erro
 	if config.configCheck.Status == "fail" {
 		return doctorReport{Version: 1, OK: false, Checks: checks}, nil
 	}
-	checks = append(checks, inspectStateDirectory(config.stateDirectory))
+	stateCheck := inspectStateDirectory(config.stateDirectory)
+	checks = append(checks, stateCheck)
 	checks = append(checks, c.deps.probeGateway(ctx, config.gatewayURL))
 	checks = append(checks, c.deps.inspectDaemon(ctx, config.stateDirectory))
 	configuredPaths := parsed.runtimePaths
@@ -54,7 +55,15 @@ func (c *cli) runDoctor(ctx context.Context, parsed command) (doctorReport, erro
 	if config.codexHome != "" {
 		environment = withVariable(environment, "CODEX_HOME", config.codexHome)
 	}
-	diagnostics, err := c.deps.diagnoseRuntimes(ctx, configuredPaths, environment, config.enabledRuntimes)
+	tempBase := ""
+	if stateCheck.Status == "pass" {
+		tempBase = filepath.Join(config.stateDirectory, "operation-tmp")
+	}
+	diagnostics, err := c.deps.diagnoseRuntimes(ctx, runtimeRequest{
+		configuredPaths: configuredPaths,
+		environment:     environment,
+		tempBase:        tempBase,
+	}, config.enabledRuntimes)
 	if err != nil {
 		return doctorReport{}, err
 	}

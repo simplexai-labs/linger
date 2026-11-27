@@ -71,3 +71,57 @@ func TestShellTextHookRefusesWithTheReasonOnStderr(t *testing.T) {
 		}
 	}
 }
+
+func TestShellTextHookPowerShellAndPosixRouting(t *testing.T) {
+	var stderr bytes.Buffer
+
+	// PowerShell 5.1 embedded quotes are refused with PowerShell51QuotesMessage.
+	ps51Blocked := `{"tool_name":"powershell","powershell_51":true,"tool_input":{"command":"teamhub message ask-user --title \"Pick\" --questions '[{\"question\":\"Where?\"}]'"}}`
+	if code := ShellTextHook(strings.NewReader(ps51Blocked), &stderr); code != 2 {
+		t.Fatalf("ps51 blocked exit = %d, want 2", code)
+	}
+	if strings.TrimSpace(stderr.String()) != PowerShell51QuotesMessage {
+		t.Fatalf("ps51 blocked stderr = %q, want %q", stderr.String(), PowerShell51QuotesMessage)
+	}
+
+	// PowerShell 5.1 allows clean commands and here-strings.
+	for _, allowed := range []string{
+		`{"tool_name":"powershell","powershell_51":true,"tool_input":{"command":"teamhub message send --content \"Done.\""}}`,
+		`{"tool_name":"powershell","powershell_51":true,"tool_input":{"command":"@'\n[{\"question\":\"Where?\"}]\n'@ | teamhub message ask-user --title \"Pick\" --questions-file -"}}`,
+	} {
+		stderr.Reset()
+		if code := ShellTextHook(strings.NewReader(allowed), &stderr); code != 0 || stderr.Len() != 0 {
+			t.Errorf("ShellTextHook(%q) = %d with %q, want 0", allowed, code, stderr.String())
+		}
+	}
+
+	// PowerShell 7 refuses POSIX heredocs but allows embedded double quotes.
+	stderr.Reset()
+	ps7Heredoc := `{"tool_name":"powershell","powershell_51":false,"tool_input":{"command":"teamhub message send --file - <<'EOF'\nHello\nEOF"}}`
+	if code := ShellTextHook(strings.NewReader(ps7Heredoc), &stderr); code != 2 {
+		t.Fatalf("ps7 heredoc exit = %d, want 2", code)
+	}
+	if strings.TrimSpace(stderr.String()) != PowerShellHeredocMessage {
+		t.Fatalf("ps7 heredoc stderr = %q, want %q", stderr.String(), PowerShellHeredocMessage)
+	}
+
+	stderr.Reset()
+	ps7Quotes := `{"tool_name":"powershell","powershell_51":false,"tool_input":{"command":"teamhub message ask-user --title \"Pick\" --questions '[{\"question\":\"Where?\"}]'"}}`
+	if code := ShellTextHook(strings.NewReader(ps7Quotes), &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("ps7 quotes = %d with %q, want 0", code, stderr.String())
+	}
+
+	// Bash and omitted tool_name remain routed to POSIX ShellTextRewritten.
+	for _, posix := range []string{
+		`{"tool_name":"bash","tool_input":{"command":"teamhub message send --content \"$180\""}}`,
+		`{"tool_input":{"command":"teamhub message send --content \"$180\""}}`,
+	} {
+		stderr.Reset()
+		if code := ShellTextHook(strings.NewReader(posix), &stderr); code != 2 {
+			t.Errorf("ShellTextHook(%q) = %d, want 2", posix, code)
+		}
+		if strings.TrimSpace(stderr.String()) != ShellTextMessage {
+			t.Errorf("ShellTextHook(%q) stderr = %q, want ShellTextMessage", posix, stderr.String())
+		}
+	}
+}

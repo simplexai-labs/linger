@@ -192,18 +192,6 @@ func isManagedProfilePath(stateDir, candidate string, homes ...string) bool {
 	return hasManagedProfileSuffix(cleaned, homes...)
 }
 
-func envLookup(environment map[string]string, key string) string {
-	if value, ok := environment[key]; ok {
-		return strings.TrimSpace(value)
-	}
-	for k, value := range environment {
-		if strings.EqualFold(k, key) {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
 // localGatewayPiProfile resolves the existing managed gateway-home Pi profile
 // shared by both localmodels tool invocations (when model-source.json exists)
 // and local-mode Runtime discovery. It keeps the verified legacy profile
@@ -227,7 +215,7 @@ func localGatewayPiProfile(base map[string]string, stateDir string, overlay *Ove
 			candidates = append(candidates, filepath.Clean(configured))
 		}
 	}
-	if existing := envLookup(base, "PI_CODING_AGENT_DIR"); existing != "" && filepath.IsAbs(existing) &&
+	if existing := localworkspace.EnvLookup(base, "PI_CODING_AGENT_DIR"); existing != "" && filepath.IsAbs(existing) &&
 		isManagedProfilePath(stateDir, existing, "gateway-home") {
 		candidates = append(candidates, filepath.Clean(existing))
 	}
@@ -252,7 +240,7 @@ func GatewayRuntime(environment map[string]string, stateDir, runtimeType string)
 		return false
 	}
 	key, ok := runtimeProfileKeys[runtimeType]
-	return ok && isManagedProfilePath(stateDir, envLookup(environment, key), "gateway-home", "byok-home")
+	return ok && isManagedProfilePath(stateDir, localworkspace.EnvLookup(environment, key), "gateway-home", "byok-home")
 }
 
 // OverlayEnvironment computes the effective Runtime discovery/execution

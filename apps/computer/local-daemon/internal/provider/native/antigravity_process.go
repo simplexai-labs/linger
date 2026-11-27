@@ -49,8 +49,10 @@ type acpProcess struct {
 	cancel      context.CancelFunc
 	caps        acpCapabilities
 	shape       *antigravityShape
+	runtimeHome string
 	front       *mcpFront
 	hookEP      *AntigravityHookEndpoint
+	storeRoot   string
 	releaseTemp func() error
 	releaseOnce sync.Once
 	fixedHandle func(acpFrame)

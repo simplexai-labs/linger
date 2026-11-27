@@ -44,7 +44,9 @@ export type ServiceFeature =
   | "local_models_external_holders"
   | "runtime_failure_detail"
   | "operation_background_wait"
-  | "dynamic_reasoning_efforts";
+  | "dynamic_reasoning_efforts"
+  | "antigravity_history"
+  | "antigravity_usage_provider";
 export type JsonValue =
   | null
   | boolean
@@ -803,7 +805,7 @@ export type RunUsage = [
     output: NonNegativeInteger;
     reasoning?: NonNegativeInteger;
     model: string;
-    provider: "openai" | "anthropic" | "unknown";
+    provider: "openai" | "anthropic" | "antigravity" | "unknown";
     last?: RunTokenCounts;
     compaction_count?: NonNegativeInteger;
   },
@@ -814,7 +816,7 @@ export type RunUsage = [
     output: NonNegativeInteger;
     reasoning?: NonNegativeInteger;
     model: string;
-    provider: "openai" | "anthropic" | "unknown";
+    provider: "openai" | "anthropic" | "antigravity" | "unknown";
     last?: RunTokenCounts;
     compaction_count?: NonNegativeInteger;
   }[],
@@ -1054,7 +1056,7 @@ export interface SessionCompact {
   kind: "session_compact";
 }
 /**
- * Runs one model call on the Computer's signed-in Codex or Claude CLI in a fresh temporary directory, outside the Operation ledger and without a Context. Only structured carries output_schema, which it requires; only workspace carries workspace_files, the input files of the temporary directory, and gets its tree back. A workspace file may not be AGENTS.md, AGENTS.override.md or CLAUDE.md at the root or lie under a .codex or .claude directory. Codex cannot read files in workspace mode, so the Daemon also inlines the workspace files into the prompt and Codex writes only through apply_patch. The Daemon answers failed for a request that breaks these rules, and for a reply whose encoded model.invoked would exceed the frame limit.
+ * Runs one model call on the Computer's signed-in Codex, Claude, Pi, or Antigravity CLI in a fresh temporary directory, outside the Operation ledger and without a Context. Only structured carries output_schema, which it requires; only workspace carries workspace_files, the input files of the temporary directory, and gets its tree back. A workspace file may not be AGENTS.md, AGENTS.override.md or CLAUDE.md at the root or lie under a .codex or .claude directory. Codex cannot read files in workspace mode, so the Daemon also inlines the workspace files into the prompt and Codex writes only through apply_patch. Pi and Antigravity do not support workspace mode. The Daemon answers failed for a request that breaks these rules, and for a reply whose encoded model.invoked would exceed the frame limit.
  */
 export interface ModelInvoke {
   type: "execute";
@@ -1066,7 +1068,7 @@ export interface ModelInvoke {
   tenant_id: Id;
   owner_actor_id: Id;
   agent_id: Id;
-  runtime_type: "codex" | "claude" | "pi";
+  runtime_type: "codex" | "claude" | "pi" | "antigravity";
   /**
    * Explicit provider model to run on this Runtime. Omitted leaves selection to the Runtime's own default; sent only to a Computer release that decodes it.
    */
@@ -1773,7 +1775,11 @@ export interface DebugHistoryInspectionResult {
   status: DebugInspectionStatus;
   provider_kind: string;
   reason?: string;
-  source?: "codex_rollout" | "claude_transcript" | "pi_session";
+  source?:
+    | "codex_rollout"
+    | "claude_transcript"
+    | "pi_session"
+    | "antigravity_transcript";
   snapshot?: DebugHistorySnapshot;
   instructions: DebugHistoryInstructions;
   /**
@@ -1791,7 +1797,11 @@ export interface DebugHistorySnapshot {
 }
 export interface DebugHistoryInstructions {
   status: "available" | "unavailable";
-  source: "codex_rollout" | "claude_transcript" | "pi_session";
+  source:
+    | "codex_rollout"
+    | "claude_transcript"
+    | "pi_session"
+    | "antigravity_transcript";
   reason?: string;
   /**
    * @maxItems 512

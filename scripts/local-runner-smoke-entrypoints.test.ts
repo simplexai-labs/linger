@@ -14,6 +14,24 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import WebSocket, { WebSocketServer } from "ws";
+
+import {
+  activeRunOwners,
+  assertNoEnsureSince,
+  assertTerminalSummary,
+  buildOperationLedger,
+  checkActiveOperation,
+  checkLiveReceipt,
+  checkReceiptCount,
+  checkReceiptTerminal,
+  checkUnacknowledgedCancel,
+  countRunStarts,
+  parseProxyEvents,
+  unacknowledgedRuns,
+  verifyReplayedAcks,
+  verifySoakLedger,
+} from "./local-runner-proxy-ledger.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -266,6 +284,8 @@ printf 'restart-allowed\\n'
     expect(bundleBuilder).not.toContain("operation-child");
     expect(deterministicSmoke).toContain("./cmd/linger-computer-daemon");
     expect(deterministicSmoke).not.toContain("local-runner-daemon.mjs");
+    expect(deterministicSmoke).not.toContain("operations.sqlite");
+    expect(deterministicSmoke).toContain("local-runner-proxy-ledger.mjs");
     for (const source of [installer, releaseBuilder]) {
       expect(source).toContain("daemon/linger-computer-daemon");
     }
@@ -346,10 +366,18 @@ printf 'restart-allowed\\n'
     expect(fixture).not.toContain("\\/skill-packages\\/");
     expect(fixture).not.toContain("has_external_mcp_servers");
     expect(fixture).not.toContain("mcp_id:");
+    const proxyLedger = await readFile(
+      path.join(root, "scripts/local-runner-proxy-ledger.mjs"),
+      "utf8",
+    );
+
+    expect(liveSmoke).not.toContain("operations.sqlite");
+    expect(liveSmoke).toContain("local-runner-proxy-ledger.mjs");
+    expect(liveSmoke).toContain("verify-soak-ledger");
+    expect(proxyLedger).toContain("Unsettled daemon ledger rows");
     expect(liveSmoke).toContain("runtime_state_to_file");
     expect(liveSmoke).toContain("LINGER_LOCAL_RUNNER_SOAK_ONLY");
     expect(liveSmoke).toContain("for iteration in {1..20}");
-    expect(liveSmoke).toContain("Unsettled daemon ledger rows");
     expect(liveSmoke).toContain("mcp_ctx_[A-Za-z0-9_-]{43}");
     expect(fixture).not.toContain(
       "\\/skills\\/([^/]+)\\/versions\\/([^/]+)\\/package",
@@ -977,6 +1005,657 @@ printf 'hold-stopped\\n'
         child.kill("SIGTERM");
         await once(child, "exit");
       }
+      await rm(home, { force: true, recursive: true });
+    }
+  }, 15_000);
+
+  it("parses partial proxy NDJSON and verifies unacknowledged runs, cross-connection replay, and terminal summary", () => {
+    const raw = [
+      JSON.stringify({ type: "connection", connection_id: 2, at: 1 }),
+      "",
+      JSON.stringify({
+        type: "daemon_to_agent",
+        connection_id: 2,
+        message_type: "operation.prepared",
+        operation_id: "op-prepare-only",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+      }),
+      JSON.stringify({
+        type: "agent_to_daemon",
+        connection_id: 2,
+        message_type: "operation.start",
+        operation_id: "op-b",
+        agent_id: "agent-b",
+        connection_epoch: 2,
+        request_kind: "run.start",
+        run_id: "run-b",
+      }),
+      JSON.stringify({
+        type: "agent_to_daemon",
+        connection_id: 2,
+        message_type: "operation.start",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+        request_kind: "run.start",
+        run_id: "run-a",
+      }),
+      JSON.stringify({
+        type: "daemon_to_agent",
+        connection_id: 2,
+        message_type: "operation.accepted",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+        seq: 1,
+      }),
+      JSON.stringify({
+        type: "agent_to_daemon",
+        connection_id: 2,
+        message_type: "operation.ack",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+        through_seq: 1,
+      }),
+      JSON.stringify({
+        type: "daemon_to_agent",
+        connection_id: 2,
+        message_type: "operation.event",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+        seq: 2,
+        event_type: "run.started",
+      }),
+      JSON.stringify({
+        type: "blocked_agent_to_daemon",
+        connection_id: 2,
+        message_type: "operation.ack",
+        operation_id: "op-a",
+        through_seq: 2,
+      }),
+      JSON.stringify({
+        type: "daemon_to_agent",
+        connection_id: 2,
+        message_type: "operation.event",
+        operation_id: "op-b",
+        agent_id: "agent-b",
+        connection_epoch: 2,
+        seq: 2,
+        event_type: "run.started",
+      }),
+      JSON.stringify({
+        type: "blocked_agent_to_daemon",
+        connection_id: 2,
+        message_type: "operation.ack",
+        operation_id: "op-b",
+        through_seq: 2,
+      }),
+      '{"type":"daemon_to_agent","connection_id":2,"truncated',
+    ].join("\n");
+
+    const events = parseProxyEvents(raw);
+    const ledger = buildOperationLedger(events);
+    expect(ledger.has("op-prepare-only")).toBe(false);
+    expect(countRunStarts(ledger)).toBe(2);
+    expect(countRunStarts(ledger, "agent-a")).toBe(1);
+    expect(activeRunOwners(ledger, 2)).toEqual([
+      { agent_id: "agent-a", operation_id: "op-a" },
+      { agent_id: "agent-b", operation_id: "op-b" },
+    ]);
+
+    const unacked = unacknowledgedRuns(ledger, 2);
+    expect(unacked).toEqual([
+      {
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        last_emitted_seq: 2,
+        connection_id: 2,
+      },
+      {
+        operation_id: "op-b",
+        agent_id: "agent-b",
+        last_emitted_seq: 2,
+        connection_id: 2,
+      },
+    ]);
+    // Not yet replayed on connection 3 or ACKed.
+    expect(verifyReplayedAcks(ledger, unacked!, 3)).toBe(false);
+
+    // An unsequenced operation.input_result on connection 3 must not count as
+    // a sequenced replay even if cumulative ACKs are forwarded.
+    const unsequencedReceiptOnly = buildOperationLedger([
+      ...events,
+      {
+        type: "daemon_to_agent",
+        connection_id: 3,
+        message_type: "operation.input_result",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+      },
+      {
+        type: "agent_to_daemon",
+        connection_id: 3,
+        message_type: "operation.ack",
+        operation_id: "op-a",
+        through_seq: 2,
+      },
+      {
+        type: "daemon_to_agent",
+        connection_id: 3,
+        message_type: "operation.input_result",
+        operation_id: "op-b",
+        agent_id: "agent-b",
+        connection_epoch: 2,
+      },
+      {
+        type: "agent_to_daemon",
+        connection_id: 3,
+        message_type: "operation.ack",
+        operation_id: "op-b",
+        through_seq: 2,
+      },
+    ]);
+    expect(verifyReplayedAcks(unsequencedReceiptOnly, unacked!, 3)).toBe(false);
+
+    // Emit replay on connection 3 without forwarding ACKs yet -> still false.
+    const replayedWithoutAck = buildOperationLedger([
+      ...events,
+      {
+        type: "daemon_to_agent",
+        connection_id: 3,
+        message_type: "operation.completed",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+        seq: 3,
+      },
+      {
+        type: "daemon_to_agent",
+        connection_id: 3,
+        message_type: "operation.completed",
+        operation_id: "op-b",
+        agent_id: "agent-b",
+        connection_epoch: 2,
+        seq: 3,
+      },
+    ]);
+    expect(verifyReplayedAcks(replayedWithoutAck, unacked!, 3)).toBe(false);
+
+    // Forwarding ACKs on connection 3 settles both operations.
+    const settled = buildOperationLedger([
+      ...events,
+      {
+        type: "daemon_to_agent",
+        connection_id: 3,
+        message_type: "operation.completed",
+        operation_id: "op-a",
+        agent_id: "agent-a",
+        connection_epoch: 2,
+        seq: 3,
+      },
+      {
+        type: "agent_to_daemon",
+        connection_id: 3,
+        message_type: "operation.ack",
+        operation_id: "op-a",
+        through_seq: 3,
+      },
+      {
+        type: "daemon_to_agent",
+        connection_id: 3,
+        message_type: "operation.completed",
+        operation_id: "op-b",
+        agent_id: "agent-b",
+        connection_epoch: 2,
+        seq: 3,
+      },
+      {
+        type: "agent_to_daemon",
+        connection_id: 3,
+        message_type: "operation.ack",
+        operation_id: "op-b",
+        through_seq: 3,
+      },
+    ]);
+    expect(verifyReplayedAcks(settled, unacked!, 3)).toBe(true);
+    expect(assertTerminalSummary(settled, 2)).toEqual({
+      run_start_count: 2,
+      total_operations: 2,
+    });
+
+    const runtimeState = {
+      runs: [
+        {
+          agent_id: "agent-a",
+          context_kind: "meta",
+          run_id: "run-a",
+          status: "succeeded",
+          terminal_type: "succeeded",
+        },
+      ],
+      operation_receipts: [
+        { operation_id: "op-a", agent_id: "agent-a", run_id: "run-a" },
+      ],
+    };
+    expect(checkReceiptCount(runtimeState, settled, "agent-a", 1, 2)).toBe(
+      true,
+    );
+    expect(checkReceiptCount(runtimeState, settled, "agent-a", 1, 1)).toBe(
+      false,
+    );
+    expect(checkReceiptTerminal(runtimeState, settled, "agent-a", 1, 2)).toBe(
+      true,
+    );
+    expect(
+      checkLiveReceipt(runtimeState, settled, "meta", "agent-a", 1, 1),
+    ).toEqual({ operation_id: "op-a", run_id: "run-a", connection_epoch: 2 });
+    expect(
+      checkActiveOperation(runtimeState, ledger, "meta", "agent-a", 1),
+    ).toEqual({
+      operation_id: "op-a",
+      run_id: "run-a",
+      connection_epoch: 2,
+    });
+  });
+
+  it("verifies unacknowledged cancellation, soak ledger settlement, and offline removal ensure fence", () => {
+    const cancelEvents = [
+      {
+        type: "agent_to_daemon",
+        connection_id: 1,
+        message_type: "operation.start",
+        operation_id: "op-cancel",
+        agent_id: "agent-live",
+        connection_epoch: 1,
+        request_kind: "run.start",
+        run_id: "run-cancel",
+      },
+      {
+        type: "daemon_to_agent",
+        connection_id: 1,
+        message_type: "operation.accepted",
+        operation_id: "op-cancel",
+        seq: 1,
+      },
+      {
+        type: "agent_to_daemon",
+        connection_id: 1,
+        message_type: "operation.ack",
+        operation_id: "op-cancel",
+        through_seq: 1,
+      },
+      {
+        type: "daemon_to_agent",
+        connection_id: 1,
+        message_type: "operation.cancelled",
+        operation_id: "op-cancel",
+        seq: 2,
+      },
+      {
+        type: "blocked_agent_to_daemon",
+        connection_id: 1,
+        message_type: "operation.ack",
+        operation_id: "op-cancel",
+        through_seq: 2,
+      },
+    ];
+    expect(
+      checkUnacknowledgedCancel(
+        buildOperationLedger(cancelEvents),
+        "op-cancel",
+      ),
+    ).toEqual({ operation_id: "op-cancel", through_seq: 2 });
+    expect(
+      checkUnacknowledgedCancel(
+        buildOperationLedger([
+          ...cancelEvents,
+          {
+            type: "agent_to_daemon",
+            connection_id: 2,
+            message_type: "operation.ack",
+            operation_id: "op-cancel",
+            through_seq: 2,
+          },
+        ]),
+        "op-cancel",
+      ),
+    ).toBeNull();
+
+    const soakEvents: Record<string, unknown>[] = [];
+    const soakRuns = [];
+    const soakReceipts = [];
+    for (let index = 1; index <= 20; index += 1) {
+      const runId = `run-${index}`;
+      const operationId = `op-${index}`;
+      soakRuns.push({
+        agent_id: "agent-live",
+        context_kind: "meta",
+        run_id: runId,
+        status: "succeeded",
+        terminal_type: "succeeded",
+      });
+      soakReceipts.push({
+        operation_id: operationId,
+        agent_id: "agent-live",
+        run_id: runId,
+      });
+      soakEvents.push(
+        {
+          type: "agent_to_daemon",
+          connection_id: 1,
+          message_type: "operation.start",
+          operation_id: operationId,
+          agent_id: "agent-live",
+          connection_epoch: 1,
+          request_kind: "run.start",
+          run_id: runId,
+        },
+        {
+          type: "daemon_to_agent",
+          connection_id: 1,
+          message_type: "operation.completed",
+          operation_id: operationId,
+          seq: 2,
+        },
+        {
+          type: "agent_to_daemon",
+          connection_id: 1,
+          message_type: "operation.ack",
+          operation_id: operationId,
+          through_seq: 2,
+        },
+      );
+    }
+    const soakState = { runs: soakRuns, operation_receipts: soakReceipts };
+    expect(() =>
+      verifySoakLedger(
+        soakState,
+        buildOperationLedger(soakEvents),
+        "agent-live",
+        20,
+      ),
+    ).not.toThrow();
+
+    const unsettledLedger = buildOperationLedger([
+      ...soakEvents,
+      {
+        type: "agent_to_daemon",
+        connection_id: 2,
+        message_type: "operation.start",
+        operation_id: "op-stray",
+        agent_id: "agent-live",
+        connection_epoch: 2,
+        request_kind: "run.start",
+        run_id: "run-stray",
+      },
+    ]);
+    expect(() =>
+      verifySoakLedger(soakState, unsettledLedger, "agent-live", 20),
+    ).toThrow("Unsettled daemon ledger rows");
+
+    const ensureEvents = [
+      {
+        type: "agent_to_daemon",
+        connection_id: 1,
+        message_type: "agent_runner.ensure",
+        agent_id: "agent-revoked",
+      },
+      {
+        type: "agent_to_daemon",
+        connection_id: 2,
+        message_type: "agent_runner.ensure",
+        agent_id: "agent-active",
+      },
+    ];
+    expect(() =>
+      assertNoEnsureSince(ensureEvents, "agent-revoked", 2),
+    ).not.toThrow();
+    expect(() =>
+      assertNoEnsureSince(
+        [
+          ...ensureEvents,
+          {
+            type: "agent_to_daemon",
+            connection_id: 2,
+            message_type: "agent_runner.ensure",
+            agent_id: "agent-revoked",
+          },
+        ],
+        "agent-revoked",
+        2,
+      ),
+    ).toThrow("Unexpected agent_runner.ensure");
+  });
+
+  it("passively records bidirectional wire-frame summaries with connection_id in runner-gateway-proxy", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "sx-proxy-wire-"));
+    const readyFile = path.join(home, "ready.json");
+    const eventsFile = path.join(home, "events.ndjson");
+    const target = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await once(target, "listening");
+    const targetAddress = target.address();
+    if (!targetAddress || typeof targetAddress === "string") {
+      throw new Error("Expected TCP address");
+    }
+    const upstreams: WebSocket[] = [];
+    const upstreamMessages: string[] = [];
+    const downstreamMessages: string[] = [];
+    target.on("connection", (socket) => {
+      upstreams.push(socket);
+      socket.on("message", (data, binary) => {
+        upstreamMessages.push(
+          binary ? `binary:${(data as Buffer).length}` : data.toString(),
+        );
+      });
+    });
+    const proxy = spawn(
+      process.execPath,
+      [
+        path.join(
+          root,
+          "apps/node-services/tests/agent/fixtures/runner-gateway-proxy.mjs",
+        ),
+        "--listen-port",
+        "0",
+        "--target-port",
+        String(targetAddress.port),
+        "--ready-file",
+        readyFile,
+        "--events-file",
+        eventsFile,
+      ],
+      { cwd: root, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    proxy.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const clients: WebSocket[] = [];
+    try {
+      let listenPort = 0;
+      await expect
+        .poll(
+          async () => {
+            if (proxy.exitCode !== null || proxy.signalCode !== null) {
+              throw new Error(`Proxy exited before ready: ${stderr}`);
+            }
+            try {
+              listenPort = JSON.parse(await readFile(readyFile, "utf8")).port;
+              return listenPort > 0;
+            } catch {
+              return false;
+            }
+          },
+          { timeout: FIXTURE_STARTUP_TIMEOUT_MS },
+        )
+        .toBe(true);
+
+      const client = new WebSocket(
+        `ws://127.0.0.1:${listenPort}/v1/runner-gateway`,
+      );
+      clients.push(client);
+      client.on("message", (data, binary) => {
+        downstreamMessages.push(
+          binary ? `binary:${(data as Buffer).length}` : data.toString(),
+        );
+      });
+      await once(client, "open");
+      await expect.poll(() => upstreams.length).toBe(1);
+
+      // Upstream (Agent Service -> Daemon) frames.
+      upstreams[0]!.send(
+        JSON.stringify({
+          type: "agent_runner.ensure",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+        }),
+      );
+      upstreams[0]!.send(
+        JSON.stringify({
+          type: "operation.start",
+          operation_id: "op-wire",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+          request: {
+            kind: "run.start",
+            run_context: { execution_run_ref: "run-wire" },
+          },
+        }),
+      );
+      upstreams[0]!.send(
+        JSON.stringify({
+          type: "operation.ack",
+          operation_id: "op-wire",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+          through_seq: 1,
+        }),
+      );
+      // Downstream (Daemon -> Agent Service) frames, plus binary and invalid JSON.
+      client.send(
+        JSON.stringify({
+          type: "agent_runner.state",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+          state: "ready",
+        }),
+      );
+      client.send(
+        JSON.stringify({
+          type: "operation.event",
+          operation_id: "op-wire",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+          seq: 2,
+          event: { type: "run.started" },
+        }),
+      );
+      client.send(Buffer.from([1, 2, 3]), { binary: true });
+      client.send("not-json");
+
+      await expect.poll(() => downstreamMessages.length).toBe(3);
+      await expect.poll(() => upstreamMessages.length).toBe(4);
+
+      proxy.kill("SIGUSR2");
+      await expect
+        .poll(async () =>
+          parseProxyEvents(await readFile(eventsFile, "utf8")).some(
+            (event) => event.type === "block_agent_to_daemon",
+          ),
+        )
+        .toBe(true);
+      upstreams[0]!.send(
+        JSON.stringify({
+          type: "operation.ack",
+          operation_id: "op-wire",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+          through_seq: 2,
+        }),
+      );
+      await expect
+        .poll(async () =>
+          parseProxyEvents(await readFile(eventsFile, "utf8")).some(
+            (event) => event.type === "blocked_agent_to_daemon",
+          ),
+        )
+        .toBe(true);
+
+      const recorded = parseProxyEvents(await readFile(eventsFile, "utf8"));
+      expect(recorded).toContainEqual(
+        expect.objectContaining({ type: "connection", connection_id: 1 }),
+      );
+      expect(recorded).toContainEqual(
+        expect.objectContaining({
+          type: "agent_to_daemon",
+          connection_id: 1,
+          message_type: "agent_runner.ensure",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+        }),
+      );
+      expect(recorded).toContainEqual(
+        expect.objectContaining({
+          type: "agent_to_daemon",
+          connection_id: 1,
+          message_type: "operation.start",
+          operation_id: "op-wire",
+          agent_id: "agent-wire",
+          connection_epoch: 1,
+          request_kind: "run.start",
+          run_id: "run-wire",
+        }),
+      );
+      expect(recorded).toContainEqual(
+        expect.objectContaining({
+          type: "agent_to_daemon",
+          connection_id: 1,
+          message_type: "operation.ack",
+          operation_id: "op-wire",
+          through_seq: 1,
+        }),
+      );
+      expect(recorded).toContainEqual(
+        expect.objectContaining({
+          type: "daemon_to_agent",
+          connection_id: 1,
+          message_type: "agent_runner.state",
+          agent_id: "agent-wire",
+          state: "ready",
+        }),
+      );
+      expect(recorded).toContainEqual(
+        expect.objectContaining({
+          type: "daemon_to_agent",
+          connection_id: 1,
+          message_type: "operation.event",
+          operation_id: "op-wire",
+          seq: 2,
+          event_type: "run.started",
+        }),
+      );
+      expect(recorded).toContainEqual(
+        expect.objectContaining({
+          type: "blocked_agent_to_daemon",
+          connection_id: 1,
+          message_type: "operation.ack",
+          operation_id: "op-wire",
+          through_seq: 2,
+        }),
+      );
+      expect(stderr).toBe("");
+    } finally {
+      for (const client of clients) client.terminate();
+      for (const upstream of upstreams) upstream.terminate();
+      if (proxy.exitCode === null && proxy.signalCode === null) {
+        proxy.kill("SIGTERM");
+        await once(proxy, "exit");
+      }
+      await new Promise<void>((resolve) => target.close(() => resolve()));
       await rm(home, { force: true, recursive: true });
     }
   }, 15_000);

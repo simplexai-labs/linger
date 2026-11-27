@@ -228,7 +228,11 @@ func TestDownloadIsAcceptedAtItsFirstProgressAndThrottlesProgress(t *testing.T) 
 	fake.write("status.json", status(model(testModel, "absent")))
 	lines := []fakeLine{{Line: progressLine(testModel, "download", 0, 3000)}}
 	for done := 100; done <= 3000; done += 100 {
-		lines = append(lines, fakeLine{Line: progressLine(testModel, "download", done, 3000), DelayMS: 20})
+		line := fakeLine{Line: progressLine(testModel, "download", done, 3000), DelayMS: 20}
+		if done == 100 {
+			line.WaitFile = "release-download"
+		}
+		lines = append(lines, line)
 	}
 	lines = append(lines, fakeLine{Line: progressLine(testModel, "verify", 3000, 3000)}, fakeLine{Line: resultLine(testModel), DelayMS: 50})
 	loaded := status(model(testModel, "loaded"))
@@ -239,12 +243,30 @@ func TestDownloadIsAcceptedAtItsFirstProgressAndThrottlesProgress(t *testing.T) 
 	library := newLibrary(t, fake, record, interval)
 	library.Refresh(context.Background())
 
-	started := time.Now()
-	if refusal, _ := library.Act(context.Background(), Action{Name: ActionDownload, Model: testModel}, soon()); refusal != nil {
-		t.Fatalf("download refused: %+v", refusal)
+	// Hold the second progress line behind a gate so acceptance proves Act
+	// returned on the first event rather than waiting for the download to end.
+	gatePath := filepath.Join(fake.state, "release-download")
+	if err := os.WriteFile(gatePath, []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
-		t.Fatalf("the answer waited %s for the job instead of its first event", elapsed)
+	t.Cleanup(func() { _ = os.Remove(gatePath) })
+
+	if refusal, answered := library.Act(context.Background(), Action{Name: ActionDownload, Model: testModel}, soon()); refusal != nil || !answered {
+		t.Fatalf("download refused=%+v answered=%v", refusal, answered)
+	}
+	library.mu.Lock()
+	_, running := library.jobs[testModel]
+	library.mu.Unlock()
+	if !running {
+		t.Fatal("download job was not active when Act returned")
+	}
+	if model := modelState(record.last(), testModel); model != nil && model.State == "loaded" {
+		t.Fatalf("download already reached loaded before the remaining lines were released: %+v", model)
+	}
+
+	releasedAt := time.Now()
+	if err := os.Remove(gatePath); err != nil {
+		t.Fatal(err)
 	}
 	waitFor(t, "the loaded snapshot", func() bool {
 		record.mu.Lock()
@@ -253,6 +275,7 @@ func TestDownloadIsAcceptedAtItsFirstProgressAndThrottlesProgress(t *testing.T) 
 		model := modelState(last, testModel)
 		return model != nil && model.State == "loaded"
 	})
+	downloadElapsed := time.Since(releasedAt)
 	record.mu.Lock()
 	defer record.mu.Unlock()
 	var progressTimes []time.Time
@@ -261,9 +284,12 @@ func TestDownloadIsAcceptedAtItsFirstProgressAndThrottlesProgress(t *testing.T) 
 			progressTimes = append(progressTimes, record.at[index])
 		}
 	}
-	// About 30 lines over 600 ms publish at most every 200 ms.
-	if len(progressTimes) < 2 || len(progressTimes) > 6 {
-		t.Fatalf("published %d progress snapshots", len(progressTimes))
+	// 31 download lines publish at most once per progress interval; bound the
+	// count by elapsed wall time so coarser OS timers (such as Windows) do not
+	// cause false failures while staying well below the unthrottled line count.
+	maxSnapshots := min(int(downloadElapsed/interval)+3, 15)
+	if len(progressTimes) < 2 || len(progressTimes) > maxSnapshots {
+		t.Fatalf("published %d progress snapshots over %s (want 2..%d)", len(progressTimes), downloadElapsed, maxSnapshots)
 	}
 	for index := 1; index < len(progressTimes); index++ {
 		if gap := progressTimes[index].Sub(progressTimes[index-1]); gap < interval-20*time.Millisecond {

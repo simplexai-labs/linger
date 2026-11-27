@@ -138,7 +138,7 @@ function renderCompactTeamHubCommands(
 Use the thread ID from this input: teamhub docs comment get <thread-id> reads it, teamhub docs comment reply <thread-id> --content "..." replies, and teamhub docs comment replace <thread-id> --content "..." applies an explicitly requested text change. Don't send Room messages.
 </teamhub-commands>`;
   return `<teamhub-commands>\n${common}
-In a Task you can't send messages or create Documents, Rooms, or Tasks. Read with teamhub message read, teamhub docs get, and teamhub docs list; edit an existing Document only when the Task asks. Write outputs under ./playground/<current-task-id>/ and describe them in your final reply.
+In a Task you can't send messages or create Documents, Rooms, or Tasks, though authorization and connection cards are allowed. Read with teamhub message read, teamhub docs get, and teamhub docs list; edit an existing Document only when the Task asks. Write outputs under ./playground/<current-task-id>/ and describe them in your final reply.
 </teamhub-commands>`;
 }
 
@@ -157,6 +157,6 @@ Use the exact thread ID supplied in this input. Read with teamhub docs comment g
 teamhub docs comment reply <current-thread-id> --operation-id <unique-reply-id> --content "Your reply" --json
 </teamhub-commands>`;
   return `<teamhub-commands>\n${common}
-In a Task you don't send messages or create Documents, Rooms, or Tasks; TeamHub refuses them. Read with teamhub message read, teamhub docs get, and teamhub docs list; edit an existing Document only when the Task asks for it. Write outputs under ./playground/<current-task-id>/ and describe them in your final reply.
+In a Task you don't send messages or create Documents, Rooms, or Tasks; TeamHub refuses them. Posting authorization or connection cards (such as teamhub browser connect or teamhub computer permissions request) is allowed and is separate from sending chat messages. Read with teamhub message read, teamhub docs get, and teamhub docs list; edit an existing Document only when the Task asks for it. Write outputs under ./playground/<current-task-id>/ and describe them in your final reply.
 </teamhub-commands>`;
 }

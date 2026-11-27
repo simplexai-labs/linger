@@ -55,7 +55,7 @@ func diagnosticFailureCode(diagnostics native.RuntimeFailureDiagnostics) string 
 		switch *status {
 		case 401, 403:
 			return "authentication_required"
-		case 429:
+		case 402, 429:
 			return "rate_limited"
 		}
 		if *status >= 500 {

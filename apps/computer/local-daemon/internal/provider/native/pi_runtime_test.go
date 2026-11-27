@@ -748,9 +748,20 @@ func TestPiPlatformLaunchArgumentsAndEnvironment(t *testing.T) {
 		}
 		h.runtime = rt
 
+		defaultSpec := RunSpec{Model: piDefaultModel}
+		if rt.guardsShellText(defaultSpec) {
+			t.Fatal("Windows Pi enabled shell-text-hook without ShellTextHook")
+		}
+		if _, outcome := piCollect(t, h.start(t.Context(), "go", defaultSpec)); outcome.Status != statusCompleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); len(hook) != 0 {
+			t.Fatalf("windows default %s = %q, want empty", piShellTextHookEnvKey, hook)
+		}
+
 		spec := RunSpec{Model: piDefaultModel, ShellTextHook: "/opt/linger/linger-computer-daemon"}
-		if rt.guardsShellText(spec) {
-			t.Fatal("Windows Pi unexpectedly enabled POSIX shell-text-hook")
+		if !rt.guardsShellText(spec) {
+			t.Fatal("Windows Pi did not enable shell-text-hook")
 		}
 		if _, outcome := piCollect(t, h.start(t.Context(), "go", spec)); outcome.Status != statusCompleted {
 			t.Fatalf("outcome = %+v", outcome)
@@ -762,8 +773,8 @@ func TestPiPlatformLaunchArgumentsAndEnvironment(t *testing.T) {
 		if nodePath, _ := os.ReadFile(argv + ".node_path"); string(nodePath) != wantNodePath {
 			t.Fatalf("windows NODE_PATH = %q, want %q", nodePath, wantNodePath)
 		}
-		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); len(hook) != 0 {
-			t.Fatalf("windows %s = %q, want empty", piShellTextHookEnvKey, hook)
+		if hook, _ := os.ReadFile(argv + ".shell_text_hook"); string(hook) != "/opt/linger/linger-computer-daemon" {
+			t.Fatalf("windows %s = %q, want /opt/linger/linger-computer-daemon", piShellTextHookEnvKey, hook)
 		}
 
 		// prestart and Start produce identical piShapeFor argv when ManagedMCPExtension is set on Windows.

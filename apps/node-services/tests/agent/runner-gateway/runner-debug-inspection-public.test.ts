@@ -4,6 +4,7 @@ import {
   RunnerGatewayProtocolError,
 } from "../../../src/agent/runner-gateway/runner-gateway.js";
 import { createTestRunnerGateway } from "../test-support/runner-gateway.js";
+import { runtimeDiagnostics } from "./runtime-diagnostics-fixture.js";
 
 import {
   hello,
@@ -336,5 +337,115 @@ describe("RunnerGateway", () => {
       },
       records: [],
     });
+  });
+
+  it("gates detached Antigravity history on 0.67.0+ and accepts antigravity_transcript responses", async () => {
+    const legacyGateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const legacyPeer = new RecordingPeer();
+    const legacyConnection = await acceptReadyConnection(
+      legacyGateway,
+      legacyPeer,
+      {
+        ...hello(),
+        daemon_version: "0.66.0",
+        runtimes: ["codex", "antigravity"],
+        runtime_diagnostics: runtimeDiagnostics({
+          ready: ["codex", "antigravity"],
+        }),
+      },
+    );
+    try {
+      expect(
+        legacyGateway.canReadDetachedHistory("runner-local", "antigravity"),
+      ).toBe(false);
+    } finally {
+      legacyConnection.disconnect();
+    }
+
+    const gateway = createTestRunnerGateway({ createId: sequenceIds() });
+    const peer = new RecordingPeer();
+    const connection = await acceptReadyConnection(gateway, peer, {
+      ...hello(),
+      daemon_version: "0.67.0",
+      runtimes: ["codex", "antigravity"],
+      runtime_diagnostics: runtimeDiagnostics({
+        ready: ["codex", "antigravity"],
+      }),
+    });
+    try {
+      expect(
+        gateway.canReadDetachedHistory("runner-local", "antigravity"),
+      ).toBe(true);
+      const history = gateway.inspectDetachedLocalHistory({
+        placement: {
+          type: "local",
+          tenantId: "tenant-acme",
+          ownerActorId: "actor-alice",
+          computerId: "runner-local",
+          runtimeType: "antigravity",
+          workspaceGrantId: "grant-repo",
+          assignmentRevision: 1,
+        },
+        agentId: "agent-reviewer",
+        executionContextKey: "context-agy",
+        runtimeInstanceId: "context-agy",
+        request: {
+          runtime: { type: "antigravity" },
+          session: { threadId: "conv-agy-1" },
+        },
+      });
+      await vi.waitFor(() =>
+        expect(peer.sent.at(-1)).toMatchObject({
+          type: "execute",
+          kind: "debug_history",
+        }),
+      );
+      const command = peer.sent.at(-1);
+      if (command?.type !== "execute" || command?.kind !== "debug_history")
+        throw new Error("Missing debug command");
+      const { request: _request, ...identity } = command;
+      await connection.receive({
+        ...identity,
+        type: "executed",
+        kind: "debug_history",
+        result: {
+          status: "available",
+          provider_kind: "antigravity",
+          source: "antigravity_transcript",
+          snapshot: {
+            id: "snapshot-agy",
+            thread_id: "conv-agy-1",
+            captured_at: "2026-11-20T10:00:00.000Z",
+            record_count: 1,
+            tail_state: "clean",
+          },
+          instructions: {
+            status: "unavailable",
+            source: "antigravity_transcript",
+            reason: "instructions_unavailable",
+            blocks: [],
+          },
+          records: [
+            {
+              ordinal: 0,
+              turn_id: "step-0",
+              category: "message",
+              native_type: "USER_INPUT",
+              role: "user",
+              native_record: { type: "USER_INPUT", content: "hello" },
+              redacted_fields: [],
+            },
+          ],
+        },
+      });
+      await expect(history).resolves.toMatchObject({
+        status: "available",
+        provider_kind: "antigravity",
+        source: "antigravity_transcript",
+        records: [{ ordinal: 0, native_type: "USER_INPUT" }],
+      });
+    } finally {
+      connection.disconnect();
+    }
   });
 });

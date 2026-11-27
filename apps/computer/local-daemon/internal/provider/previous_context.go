@@ -41,38 +41,46 @@ func exportPreviousContext(ctx context.Context, runtimeHomeRoot string, spec Ope
 	if spec.OperationKind != "run.start" || spec.ResumeSessionID != "" || spec.PreviousSession == nil {
 		return "", false
 	}
-	if runtimeHomeRoot == "" || spec.WorkingDirectory == "" {
+	if spec.WorkingDirectory == "" {
 		return "", false
 	}
 	prev := spec.PreviousSession
-	var inspect func(context.Context, runtimehistory.Request) runtimehistory.Page
-	switch prev.ProviderType {
-	case "codex":
-		inspect = runtimehistory.Inspect
-	case "claude":
-		inspect = runtimehistory.InspectClaude
-	case "pi":
-		inspect = runtimehistory.InspectPi
-	default:
-		removeStalePreviousContext(spec.WorkingDirectory)
+	if prev.ProviderType != "antigravity" && runtimeHomeRoot == "" {
 		return "", false
 	}
-	home, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
-		TenantID:     spec.TenantID,
-		OwnerActorID: spec.OwnerActorID,
-		AgentID:      spec.AgentID,
-		ScopeID:      spec.ScopeID,
-		ProviderType: prev.ProviderType,
-	})
-	if err != nil {
-		removeStalePreviousContext(spec.WorkingDirectory)
-		return "", false
+	var page runtimehistory.Page
+	if prev.ProviderType == "antigravity" {
+		page = inspectAntigravityPreviousContext(ctx, runtimeHomeRoot, spec, prev.SessionID)
+	} else {
+		var inspect func(context.Context, runtimehistory.Request) runtimehistory.Page
+		switch prev.ProviderType {
+		case "codex":
+			inspect = runtimehistory.Inspect
+		case "claude":
+			inspect = runtimehistory.InspectClaude
+		case "pi":
+			inspect = runtimehistory.InspectPi
+		default:
+			removeStalePreviousContext(spec.WorkingDirectory)
+			return "", false
+		}
+		home, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+			TenantID:     spec.TenantID,
+			OwnerActorID: spec.OwnerActorID,
+			AgentID:      spec.AgentID,
+			ScopeID:      spec.ScopeID,
+			ProviderType: prev.ProviderType,
+		})
+		if err != nil {
+			removeStalePreviousContext(spec.WorkingDirectory)
+			return "", false
+		}
+		page = inspect(ctx, runtimehistory.Request{
+			CodexHome: home,
+			ThreadID:  prev.SessionID,
+			Limit:     previousContextHistoryLimit,
+		})
 	}
-	page := inspect(ctx, runtimehistory.Request{
-		CodexHome: home,
-		ThreadID:  prev.SessionID,
-		Limit:     previousContextHistoryLimit,
-	})
 	if page.Status != "available" || len(page.Records) == 0 {
 		removeStalePreviousContext(spec.WorkingDirectory)
 		return "", false
@@ -86,6 +94,43 @@ func exportPreviousContext(ctx context.Context, runtimeHomeRoot string, spec Ope
 		return "", false
 	}
 	return previousContextRelPath, true
+}
+
+func inspectAntigravityPreviousContext(
+	ctx context.Context,
+	runtimeHomeRoot string,
+	spec OperationSpec,
+	sessionID string,
+) runtimehistory.Page {
+	if runtimeHomeRoot != "" {
+		isolatedHome, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+			TenantID:     spec.TenantID,
+			OwnerActorID: spec.OwnerActorID,
+			AgentID:      spec.AgentID,
+			ScopeID:      spec.ScopeID,
+			ProviderType: "antigravity",
+		})
+		if err != nil {
+			return runtimehistory.Page{Status: "unavailable"}
+		}
+		page := runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+			CodexHome: localworkspace.AntigravityAppDataDir(isolatedHome),
+			ThreadID:  sessionID,
+			Limit:     previousContextHistoryLimit,
+		})
+		if page.Status != "unavailable" || page.Reason != "transcript_unavailable" {
+			return page
+		}
+	}
+	legacyHome, err := localworkspace.AntigravitySourceHome(spec.Environment)
+	if err != nil {
+		return runtimehistory.Page{Status: "unavailable"}
+	}
+	return runtimehistory.InspectAntigravity(ctx, runtimehistory.Request{
+		CodexHome: legacyHome,
+		ThreadID:  sessionID,
+		Limit:     previousContextHistoryLimit,
+	})
 }
 
 // injectPreviousContextHint tells the Agent where the exported transcript lives,
@@ -239,6 +284,8 @@ func renderHistoryRecordSections(providerType string, record runtimehistory.Reco
 		return renderClaudeRecordSections(record, raw, ts)
 	case "pi":
 		return renderPiRecordSections(record, raw, ts)
+	case "antigravity":
+		return renderAntigravityRecordSections(record, raw, ts)
 	default:
 		return nil
 	}
@@ -350,6 +397,62 @@ func renderPiRecordSections(record runtimehistory.Record, raw map[string]any, ts
 			heading += ": " + name
 		}
 		return []string{heading + ts + "\n```\n" + clipRunes(text, previousContextToolOutRunes) + "\n```"}
+	}
+	return nil
+}
+
+func renderAntigravityRecordSections(_ runtimehistory.Record, raw map[string]any, ts string) []string {
+	kind, _ := raw["type"].(string)
+	switch kind {
+	case "USER_INPUT":
+		text, _ := raw["content"].(string)
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil
+		}
+		return []string{"### User" + ts + "\n" + clipRunes(text, previousContextMessageRunes)}
+	case "PLANNER_RESPONSE":
+		var sections []string
+		if text, _ := raw["content"].(string); strings.TrimSpace(text) != "" {
+			sections = append(sections, "### Assistant"+ts+"\n"+clipRunes(text, previousContextMessageRunes))
+		}
+		if toolCalls, ok := raw["tool_calls"].([]any); ok {
+			for _, item := range toolCalls {
+				call, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				name, _ := call["name"].(string)
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
+				entry := "### Tool Call: " + name + ts
+				if args := stringifyCompact(call["args"]); args != "" {
+					entry += "\n```\n" + clipRunes(args, previousContextToolArgRunes) + "\n```"
+				}
+				sections = append(sections, entry)
+			}
+		}
+		return sections
+	case "GENERIC":
+		out, _ := raw["content"].(string)
+		out = strings.TrimSpace(out)
+		if out == "" {
+			out, _ = raw["error"].(string)
+			out = strings.TrimSpace(out)
+		}
+		if out == "" {
+			return nil
+		}
+		return []string{"### Tool Output" + ts + "\n```\n" + clipRunes(out, previousContextToolOutRunes) + "\n```"}
+	case "CHECKPOINT":
+		summary, _ := raw["content"].(string)
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			return nil
+		}
+		return []string{"### Compaction Summary" + ts + "\n" + clipRunes(summary, previousContextMessageRunes)}
 	}
 	return nil
 }

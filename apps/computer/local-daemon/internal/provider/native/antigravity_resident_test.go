@@ -917,3 +917,92 @@ func TestAntigravityResidentReleaseAndCredentialInvalidation(t *testing.T) {
 		}
 	})
 }
+
+func TestAntigravityResidentRuntimeHomePrestartRecycleAndTargetedStop(t *testing.T) {
+	t.Run("prestart_passes_runtime_home_and_recycles_on_mismatch", func(t *testing.T) {
+		metaFile := filepath.Join(t.TempDir(), "prestart-meta.json")
+		homeA := filepath.Join(t.TempDir(), "home-a")
+		homeB := filepath.Join(t.TempDir(), "home-b")
+		for _, dir := range []string{homeA, homeB} {
+			if err := os.MkdirAll(filepath.Join(dir, "gemini", "antigravity-cli"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		h := newAgyResidentHarness(t, "turn", map[string]string{agyFakeMetaEnv: metaFile})
+		pre, err := h.runtime().Start(t.Context(), "", RunSpec{Dir: h.dir, PrepareOnly: true, RuntimeHome: homeA})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, out := drainAgy(t, pre); out.Status != statusCompleted || !out.Parked {
+			t.Fatalf("prestart=%+v", out)
+		}
+		rawMeta, err := os.ReadFile(metaFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var meta struct {
+			GeminiDir string `json:"geminiDir"`
+			LogFile   string `json:"logFile"`
+		}
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			t.Fatal(err)
+		}
+		if meta.GeminiDir != filepath.Join(homeA, "gemini") || meta.LogFile != filepath.Join(homeA, "acp.log") {
+			t.Fatalf("prestart meta=%+v, want homeA gemini/log", meta)
+		}
+
+		// Switching to a different RuntimeHome recycles the parked resident with mismatch "runtime_home".
+		c := &ReadinessCounters{}
+		run, err := h.runtime().Start(t.Context(), "go", RunSpec{Dir: h.dir, RuntimeHome: homeB, Readiness: c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, out := drainAgy(t, run); out.Status != statusCompleted {
+			t.Fatalf("run=%+v", out)
+		}
+		if c.spawns != 1 || c.recycles["incompatible:runtime_home"] != 1 {
+			t.Fatalf("counters=%+v, want spawn=1 incompatible:runtime_home=1", c)
+		}
+		if pids := h.pids(); len(pids) != 2 || pids[0] == pids[1] {
+			t.Fatalf("pids=%v, want 2 distinct PIDs", pids)
+		}
+	})
+
+	t.Run("stop_for_home_stops_only_matching_resident", func(t *testing.T) {
+		homeA := filepath.Join(t.TempDir(), "home-a")
+		homeB := filepath.Join(t.TempDir(), "home-b")
+		for _, dir := range []string{homeA, homeB} {
+			if err := os.MkdirAll(filepath.Join(dir, "gemini", "antigravity-cli"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		hA := newAgyResidentHarness(t, "turn", nil)
+		hB := newAgyResidentHarness(t, "turn", nil)
+
+		rA, err := hA.runtime().Start(t.Context(), "a", RunSpec{Dir: hA.dir, RuntimeHome: homeA})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, out := drainAgy(t, rA); out.Status != statusCompleted || out.ExitConfirmed {
+			t.Fatalf("turnA=%+v", out)
+		}
+		rB, err := hB.runtime().Start(t.Context(), "b", RunSpec{Dir: hB.dir, RuntimeHome: homeB})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, out := drainAgy(t, rB); out.Status != statusCompleted || out.ExitConfirmed {
+			t.Fatalf("turnB=%+v", out)
+		}
+
+		if err := StopParkedAntigravityResidentForHome(homeA); err != nil {
+			t.Fatal(err)
+		}
+		if ContextHasParkedResident(hA.profile.ContextKey) {
+			t.Fatal("homeA resident survived StopParkedAntigravityResidentForHome")
+		}
+		if !ContextHasParkedResident(hB.profile.ContextKey) {
+			t.Fatal("homeB resident was stopped by StopParkedAntigravityResidentForHome(homeA)")
+		}
+	})
+}

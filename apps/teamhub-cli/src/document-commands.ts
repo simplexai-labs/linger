@@ -23,6 +23,7 @@ import {
   fileSystemError,
   inputIssue,
   invalidInput,
+  missingFlag,
 } from "./input-issues.js";
 import { parseActorReferences } from "./content-segments.js";
 import { displayText } from "./display-text.js";
@@ -182,7 +183,13 @@ const actions = [
 ];
 const actionFields: Record<string, readonly string[]> = {
   append: ["--content", "--file"],
-  str_replace: ["--content", "--file", "--pattern", "--block-id"],
+  str_replace: [
+    "--content",
+    "--file",
+    "--pattern",
+    "--pattern-file",
+    "--block-id",
+  ],
   block_insert_before: ["--content", "--file", "--block-id"],
   block_insert_after: ["--content", "--file", "--block-id"],
   block_replace: [
@@ -487,6 +494,10 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
       "--pattern": {
         description: "Exact nonempty single-line text for str_replace.",
       },
+      "--pattern-file": {
+        description:
+          "Read the exact single-line str_replace pattern from a UTF-8 file or - for stdin. Exclusive with --pattern.",
+      },
       "--block-id": { description: "One real block target or anchor." },
       "--start-block-id": {
         description: "First block of a contiguous sibling range.",
@@ -547,6 +558,17 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
         blockId === undefined
       )
         throw new CliError("usage", "Provide --block-id.");
+      const pattern = option(args, "--pattern"),
+        patternFile = option(args, "--pattern-file");
+      if (pattern !== undefined && patternFile !== undefined)
+        throw conflictingFlags(["--pattern", "--pattern-file"]);
+      if (allowed.includes("--content")) {
+        const hasContent = option(args, "--content") !== undefined;
+        const hasFile = option(args, "--file") !== undefined;
+        if (hasContent && hasFile)
+          throw conflictingFlags(["--content", "--file"]);
+        if (!hasContent && !hasFile) throw missingFlag(["--content", "--file"]);
+      }
       const input: Record<string, unknown> = {
         document_id: resource(args.positionals[0], "Document"),
         command: action,
@@ -563,6 +585,10 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
         const value = option(args, flag);
         if (value !== undefined) input[key] = value;
       }
+      if (patternFile !== undefined)
+        input.pattern = (
+          await reader.text(patternFile, "--pattern-file")
+        ).replace(/\r?\n$/u, "");
       if (allowed.includes("--content"))
         input.content =
           action === "str_replace"

@@ -7,23 +7,23 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 
+import { Add01Icon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { modelSourceQueryOptions } from "@/features/local-models/model-source-queries";
 import {
-  tenantRoomsQueryOptions,
   tenantAgentAvailabilityQueryOptions,
   tenantAgentsQueryOptions,
+  tenantRoomsQueryOptions,
 } from "@/features/rooms/room-queries";
 import { requireRoomRouteParam } from "@/features/rooms/room-route-params";
 import { teamHubData, teamHubDone } from "@/features/teamhub/teamhub-api";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
-import { Add01Icon, ArrowLeft01Icon } from "@hugeicons/core-free-icons";
-import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import { useT } from "@/i18n/use-translation";
 
+import { projectAgentAvailabilitySnapshots } from "./agent-availability";
 import { ComputerBrowserConnection } from "./browser-connection/computer-browser-connection";
 import { ComputerDetail } from "./computer-detail";
-import { projectAgentAvailabilitySnapshots } from "./agent-availability";
 import { ComputerDirectory } from "./computer-directory";
 import {
   ConnectComputerDialog,
@@ -33,11 +33,11 @@ import {
 import { computerSetupMessages } from "./computer-setup.messages";
 import { computersMessages } from "./computers.messages";
 import { useCliInstallAvailable } from "./desktop-computer";
+import { subscribeLocalComputerEnrollment } from "./local-computer-enrollment-events";
 import {
   localComputersQueryKey,
   localComputersQueryOptions,
 } from "./local-computer-queries";
-import { subscribeLocalComputerEnrollment } from "./local-computer-enrollment-events";
 import { RemoveComputerDialog } from "./remove-computer-dialog";
 
 export function ComputersPage() {
@@ -197,41 +197,52 @@ export function ComputersPage() {
     );
   }
 
+  const showBackButton = Boolean(
+    requestedComputerId && inventory.items.length > 1,
+  );
+
   return (
     <>
       <main
         aria-hidden={setupOpen ? true : undefined}
         // Settings owns the scrolling, so this page never nests a second bar.
-        className="mx-auto flex min-h-0 w-full max-w-(--app-settings-width) flex-col pb-4"
+        className="mx-auto flex min-h-0 w-full max-w-(--app-settings-width) flex-col pb-10"
       >
-        <header className="flex items-center justify-between gap-4">
-          <h1 className="flex items-center gap-1 text-2xl text-foreground">
-            {requestedComputerId && inventory.items.length > 1 ? (
+        <header className="space-y-1.5">
+          {showBackButton ? (
+            <button
+              aria-label={t(computersMessages.allComputers)}
+              className="-ml-2 inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+              onClick={showDirectory}
+              type="button"
+            >
+              <Icon icon={ArrowLeft01Icon} size={14} />
+              {t(computersMessages.allComputers)}
+            </button>
+          ) : null}
+          <div className="flex items-center justify-between gap-4">
+            <h1 className="text-2xl text-foreground">
+              {t(computersMessages.pageTitle)}
+            </h1>
+            {cliInstallAvailable && inventory.items.length ? (
               <Button
-                aria-label={t(computersMessages.allComputers)}
-                onClick={showDirectory}
-                size="icon"
-                tone="ghost"
+                aria-label={t(computerSetupMessages.label)}
+                onClick={openSetup}
+                size="compact"
               >
-                <Icon icon={ArrowLeft01Icon} size={16} />
+                <Icon icon={Add01Icon} size={14} />
+                {t(computersMessages.connect)}
               </Button>
             ) : null}
-            {t(computersMessages.pageTitle)}
-          </h1>
-          {cliInstallAvailable && inventory.items.length ? (
-            <Button
-              aria-label={t(computerSetupMessages.label)}
-              onClick={openSetup}
-              size="compact"
-            >
-              <Icon icon={Add01Icon} size={14} />
-              {t(computersMessages.connect)}
-            </Button>
-          ) : null}
+          </div>
         </header>
+
         <div className="mt-6 min-w-0">
           {openAgent.error ? (
-            <p role="alert" className="px-2 py-3 text-sm text-app-danger">
+            <p
+              role="alert"
+              className="mb-4 rounded-xl border border-[var(--app-status-danger-border)] bg-[var(--app-status-danger-surface)] px-4 py-3 text-sm text-app-danger"
+            >
               {openAgent.error.message}
             </p>
           ) : null}

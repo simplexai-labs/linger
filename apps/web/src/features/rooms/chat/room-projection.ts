@@ -122,13 +122,20 @@ async function projectEvent(
         payload.version,
       );
       return;
-    case "message.created":
-      appendRoomMessage(
-        queryClient,
-        roomMessagesQueryKey(tenantId, roomId),
-        payload.message,
-      );
-      access.onMessageCreated?.(payload.message);
+    case "message.created": {
+      const messagesQueryKey = roomMessagesQueryKey(tenantId, roomId);
+      const alreadyLoaded =
+        queryClient
+          .getQueryData<InfiniteData<TeamHubMessagePage>>(messagesQueryKey)
+          ?.pages.some((page) =>
+            page.items.some((item) => item.id === payload.message.id),
+          ) ?? false;
+      appendRoomMessage(queryClient, messagesQueryKey, payload.message);
+      // Returning to a cached Room replays events from the stale snapshot_room_seq;
+      // only notify UI callbacks for messages that were not already loaded.
+      if (!alreadyLoaded) {
+        access.onMessageCreated?.(payload.message);
+      }
       // A created or renamed Agent must resolve before its notice links open
       // its profile; the directory delivery can arrive after the notice.
       if (
@@ -159,10 +166,11 @@ async function projectEvent(
             ),
           () =>
             refreshQueriesInBackground(queryClient, {
-              queryKey: roomMessagesQueryKey(tenantId, roomId),
+              queryKey: messagesQueryKey,
             }),
         );
       return;
+    }
     case "message.reactions.changed": {
       // The event carries the complete aggregate, so it replaces local state.
       const reactions = payload.reactions.length

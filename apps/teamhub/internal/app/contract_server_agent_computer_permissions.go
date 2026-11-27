@@ -56,8 +56,12 @@ func (a *App) requestAgentComputerPermissions(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if decision.Subject == typedcard.ComputerPermissionSubjectComputerUse && status.Platform == "darwin" && status.Host == "desktop" &&
+		len(status.Subjects) == 1 && status.Subjects[0].Subject == typedcard.ComputerPermissionSubjectLinger {
+		decision.Subject = typedcard.ComputerPermissionSubjectLinger
+	}
 	if status.Granted(decision.Subject, decision.Permissions) {
-		c.JSON(http.StatusOK, gin.H{"status": "ready", "computer_id": computerID, "permissions": status})
+		c.JSON(http.StatusOK, gin.H{"status": "ready", "subject": decision.Subject, "computer_id": computerID, "permissions": status})
 		return
 	}
 	roomID, err := a.humanConfirmationRoom(ctx, auth, ownerID)
@@ -86,8 +90,7 @@ func (a *App) requestAgentComputerPermissions(c *gin.Context) {
 		a.writeAgentAPIError(c, http.StatusServiceUnavailable, api.AgentApiErrorCodeDependencyUnavailable, "Computer permissions are temporarily unavailable")
 		return
 	}
-	// The owner may have granted while the card was posted. Settle it now; the
-	// settled card wakes the Agent like any other grant.
+	// The owner may have granted while the card was posted. Settle it now.
 	if after, err := a.localComputers.LocalComputerPermissions(ctx, roomagent.LocalComputerPermissionCommand{
 		Action: roomagent.LocalComputerPermissionStatusAction, TenantID: auth.TenantID, OwnerActorID: ownerID, ComputerID: computerID,
 	}); err == nil {
@@ -95,7 +98,7 @@ func (a *App) requestAgentComputerPermissions(c *gin.Context) {
 		a.settleComputerPermissionCards(ctx, auth.TenantID, ownerID, computerID, after)
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"status": "permission_requested", "computer_id": computerID, "permissions": status,
+		"status": "permission_requested", "subject": decision.Subject, "computer_id": computerID, "permissions": status,
 		"room_id": roomID, "message_id": result.MessageID, "interaction_id": result.DecisionID,
 	})
 }
