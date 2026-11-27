@@ -38,4 +38,42 @@ describe("redactSensitiveText", () => {
       "Basic authentication failed",
     );
   });
+
+  it("preserves trailing prose after mid-sentence Bearer and Basic auth headers", () => {
+    expect(
+      redactSensitiveText(
+        "401 with Authorization: Bearer tok-secret-12345 while calling upstream",
+      ),
+    ).toBe("401 with Authorization: Bearer [Redacted] while calling upstream");
+
+    expect(
+      redactSensitiveText(
+        "407 with Proxy-Authorization: Basic dXNlcjpwYXNz while calling proxy",
+      ),
+    ).toBe(
+      "407 with Proxy-Authorization: Basic [Redacted] while calling proxy",
+    );
+
+    expect(
+      redactSensitiveText(
+        "Authorization: Basic dXNlcjpwYXNz after retry succeeded",
+      ),
+    ).toBe("Authorization: Basic [Redacted] after retry succeeded");
+  });
+
+  it("redacts both auth and cookie headers on the same line without exempting Bearer inside cookies", () => {
+    expect(
+      redactSensitiveText(
+        "Authorization: Bearer tok-secret-12345; Cookie: a=1; session=secret",
+      ),
+    ).toBe("Authorization: Bearer [Redacted]; Cookie: [Redacted]");
+
+    expect(redactSensitiveText("Cookie: Bearer foo; session=secret")).toBe(
+      "Cookie: [Redacted]",
+    );
+
+    expect(redactSensitiveText("Set-Cookie: Basic bar; HttpOnly")).toBe(
+      "Set-Cookie: [Redacted]",
+    );
+  });
 });
