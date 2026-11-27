@@ -93,10 +93,18 @@ export async function normalizeDocumentContent(
       markdown = await extractOfficeMarkdown(input.source, "html");
       break;
     case "csv":
-      markdown = delimitedToMarkdown(decodeUtf8Text(input.source), ",");
+      markdown = delimitedToMarkdown(
+        decodeUtf8Text(input.source),
+        ",",
+        maxOutputBytes,
+      );
       break;
     case "tsv":
-      markdown = delimitedToMarkdown(decodeUtf8Text(input.source), "\t");
+      markdown = delimitedToMarkdown(
+        decodeUtf8Text(input.source),
+        "\t",
+        maxOutputBytes,
+      );
       break;
     case "json":
       markdown = jsonToMarkdown(decodeUtf8Text(input.source));
@@ -200,24 +208,42 @@ function decodeUtf8Text(source: Uint8Array): string {
   return decoded;
 }
 
-function delimitedToMarkdown(text: string, delimiter: string): string {
+function delimitedToMarkdown(
+  text: string,
+  delimiter: string,
+  maxOutputBytes: number,
+): string {
   const rows = parseDelimitedRows(text, delimiter);
   if (rows.length === 0) {
     throw new DocumentNormalizationError("DOCUMENT_SOURCE_EMPTY");
   }
   const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
-  const padded = rows.map((row) =>
-    Array.from({ length: width }, (_, index) =>
-      escapeMarkdownTableCell(row[index] ?? ""),
-    ),
-  );
-  const header = padded[0] ?? [];
-  const body = padded.slice(1);
-  return [
-    `| ${header.join(" | ")} |`,
-    `| ${header.map(() => "---").join(" | ")} |`,
-    ...body.map((row) => `| ${row.join(" | ")} |`),
-  ].join("\n");
+  // Even empty cells need separators. Reject sparse inputs before padding their
+  // rows into a potentially much larger table.
+  if ((rows.length + 1) * width > maxOutputBytes) {
+    throw new DocumentNormalizationError("DOCUMENT_MARKDOWN_TOO_LARGE");
+  }
+  const lines: string[] = [];
+  let bytes = 0;
+  const append = (cells: string[]) => {
+    // Match canonicalization before counting: decomposed Unicode may fit after
+    // NFC, and each complete line contributes its eventual trailing newline.
+    const line = `| ${cells.join(" | ")} |`.normalize("NFC");
+    bytes += Buffer.byteLength(line, "utf8") + 1;
+    if (bytes > maxOutputBytes) {
+      throw new DocumentNormalizationError("DOCUMENT_MARKDOWN_TOO_LARGE");
+    }
+    lines.push(line);
+  };
+  for (const [index, row] of rows.entries()) {
+    append(
+      Array.from({ length: width }, (_, column) =>
+        escapeMarkdownTableCell(row[column] ?? ""),
+      ),
+    );
+    if (index === 0) append(Array<string>(width).fill("---"));
+  }
+  return lines.join("\n");
 }
 
 function parseDelimitedRows(text: string, delimiter: string): string[][] {
