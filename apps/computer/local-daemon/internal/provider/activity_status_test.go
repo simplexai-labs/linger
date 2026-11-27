@@ -140,6 +140,50 @@ func TestPowerShellToolActivityAndTaskCreation(t *testing.T) {
 	}
 }
 
+// A comment line is not part of any step, even with a quote, a link or a
+// heredoc operator in it. A # later in a line stays text.
+func TestShellCommentsAreSkipped(t *testing.T) {
+	for _, test := range []struct {
+		command, kind string
+		steps         []string
+	}{
+		{"# Let's check what changed\ngit status --short\nnpm test", "command", []string{"Checking changes", "Running tests"}},
+		{"uv sync\n  # see https://docs.astral.sh/uv/", "command", []string{"Installing dependencies"}},
+		{"# use cat <<EOF to write it\ngit status\nnpm test", "command", []string{"Checking changes", "Running tests"}},
+		{"teamhub github read octo/api#42", "tool", []string{"Checking GitHub"}},
+		{`git commit -m "$(echo "fix #42")" && git push`, "command", []string{"Committing changes", "Pushing changes"}},
+	} {
+		kind, _, status := activityPresentation(native.Event{ActivityKind: native.ActivityCommand, Input: map[string]any{"command": test.command}})
+		if kind != test.kind || !slices.Equal(status.steps, test.steps) {
+			t.Errorf("%q: got %q %q, want %q %q", test.command, kind, status.steps, test.kind, test.steps)
+		}
+	}
+	// PowerShell also reads a line that starts with # as a comment.
+	kind, _, status := activityPresentation(native.Event{ToolName: "powershell", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": "# Let's tell the Room\r\nteamhub message send --content done"}})
+	if kind != native.ActivityMessage || status.steps != nil {
+		t.Errorf("powershell comment line: got %q %q, want %q nil", kind, status.steps, native.ActivityMessage)
+	}
+	// A carriage return before the # is a blank, as elsewhere in the reader,
+	// so the line is still a comment.
+	kind, _, status = activityPresentation(native.Event{ToolName: "powershell", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": "git status\r\n\r# Let's go\r\nnpm test"}})
+	if kind != native.ActivityCommand || !slices.Equal(status.steps, []string{"Checking changes", "Running tests"}) {
+		t.Errorf("powershell comment line after a carriage return: got %q %q", kind, status.steps)
+	}
+	// None of these is one Task creation: bash runs another command after
+	// the call, which a misread comment could hide.
+	for _, script := range []string{
+		"# Delegate the fare check\nteamhub task create --name Rivals --requirement Compare # it's urgent\ncat notes.md",
+		"teamhub task create --name Rivals$()\\\n#1; cat notes.md",
+		"teamhub task create --name Rivals --requirement ${REQ:-Compare fares\n# across airlines} && cat notes.md",
+		`teamhub task create --name "$(echo "Fare #1")"; cat notes.md`,
+		"teamhub task create --name Rivals --requirement \"$(printf \"%s\\n\" \"Compare fares ->\n# Output: a table\")\" && cat notes.md",
+	} {
+		if createsTaskFor(script, false) {
+			t.Errorf("%q counted as one Task creation", script)
+		}
+	}
+}
+
 func TestShellWrappersAreUnwrapped(t *testing.T) {
 	_, input, status := activityPresentation(native.Event{ActivityKind: native.ActivityCommand, Input: map[string]any{"command": "/bin/zsh -lc 'python3 compare_fares.py'"}})
 	if input["command"] != "python3 compare_fares.py" || !slices.Equal(status.steps, []string{"Running a script"}) {
