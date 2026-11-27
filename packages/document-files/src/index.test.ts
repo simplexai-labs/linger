@@ -3,7 +3,33 @@ import {
   extractDocumentImages,
   bundleDocumentImages,
   prepareDocumentSource,
+  rewriteMarkdownLinkSources,
 } from "./index.js";
+
+it("preserves a leading BOM while rewriting exact link source ranges", () => {
+  const markdown = '\uFEFF# T\n\n[a](t.md) x [b](u.md "Title")\n';
+  const sources: string[] = [];
+  const rewritten = rewriteMarkdownLinkSources(markdown, (source) => {
+    sources.push(source);
+    return source.replace(".md", ".txt");
+  });
+  expect(sources).toEqual(["[a](t.md)", '[b](u.md "Title")']);
+  expect(rewritten).toBe('\uFEFF# T\n\n[a](t.txt) x [b](u.txt "Title")\n');
+});
+
+it.each(["a", "`a ](b`", ""])(
+  "provides the parsed target and source label boundary for %j",
+  (label) => {
+    const markdown = `\uFEFF[${label}](t.md "x ](y")`;
+    const rewritten = rewriteMarkdownLinkSources(markdown, (source, link) => {
+      expect(link.url).toBe("t.md");
+      expect(source.slice(0, link.labelEnd)).toBe(`[${label}`);
+      expect(source.slice(link.labelEnd)).toBe('](t.md "x ](y")');
+      return source;
+    });
+    expect(rewritten).toBe(markdown);
+  },
+);
 
 it.each([
   [

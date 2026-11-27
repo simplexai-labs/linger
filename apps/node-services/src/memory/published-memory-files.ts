@@ -1,3 +1,4 @@
+import { rewriteMarkdownLinkSources } from "@linger/document-files";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -83,15 +84,21 @@ function memoryWikiFiles(
   for (const { page, content } of pages) {
     const dest = paths.get(page.path);
     if (!dest) continue;
-    const body = content.replace(
-      /(?<!!)(\[[^\]\n]*\]\()(<[^>]+>|[^\s)]+)(\s+["'][^)]*["'])?\)/gu,
-      (whole, start: string, href: string, title: string | undefined) => {
-        const url = href.replace(/^<|>$/gu, "");
-        if (/^(?:#|[a-z][a-z\d+.-]*:|\/\/)/iu.test(url)) return whole;
+    const body = rewriteMarkdownLinkSources(
+      content,
+      (link, { url, labelEnd }) => {
+        const destination =
+          /^\]\((<[^>]+>|[^\s)]+)(\s+["'][^)]*["'])?\)$/u.exec(
+            link.slice(labelEnd),
+          );
+        if (!link.startsWith("[") || !destination) return link;
+        const start = link.slice(0, labelEnd + 2);
+        const title = destination[2];
+        if (/^(?:#|[a-z][a-z\d+.-]*:|\/\/)/iu.test(url)) return link;
         const split = url.search(/[?#]/u);
         const name = split < 0 ? url : url.slice(0, split);
         const suffix = split < 0 ? "" : url.slice(split);
-        if (!name) return whole;
+        if (!name) return link;
         const key = path.posix.normalize(
           name.startsWith("/")
             ? name.slice(1)
@@ -105,7 +112,7 @@ function memoryWikiFiles(
           directories.get(path.posix.join(key, "index.md"));
         if (!other) {
           // An unavailable capture has no readable local meeting page.
-          return key.startsWith("sessions/") ? start.slice(1, -2) : whole;
+          return key.startsWith("sessions/") ? start.slice(1, -2) : link;
         }
         const relative =
           path.posix.relative(path.posix.dirname(dest), other) || ".";
