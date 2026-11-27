@@ -38,8 +38,11 @@ type ModelInvoker interface {
 // Context, takes no Operation slot and is never written to the ledger: a lost
 // connection or a drain kills its process and nobody replays it.
 type modelInvoke struct {
-	id     string
-	cancel context.CancelFunc
+	id          string
+	runtimeType string
+	model       string
+	startedAt   time.Time
+	cancel      context.CancelFunc
 }
 
 type modelInvokeRequest struct {
@@ -81,7 +84,13 @@ func (d *Daemon) handleModelInvoke(ctx context.Context, stream transport.Stream,
 		} else {
 			var cancel context.CancelFunc
 			invokeCtx, cancel = context.WithCancel(ctx)
-			entry = &modelInvoke{id: request.InvokeID, cancel: cancel}
+			entry = &modelInvoke{
+				id:          request.InvokeID,
+				runtimeType: command.RuntimeType,
+				model:       request.Model,
+				startedAt:   d.now(),
+				cancel:      cancel,
+			}
 			d.modelInvokes[request.InvokeID] = entry
 		}
 		d.modelInvokeMu.Unlock()

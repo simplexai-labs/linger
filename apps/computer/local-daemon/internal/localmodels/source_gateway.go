@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/awaketime"
 )
 
 // gatewayHealthTimeout bounds the loopback health check that runs before a
@@ -27,6 +29,47 @@ func (m *ModelSource) GatewayMode(runtimeType string) string {
 	return overlay.Mode
 }
 
+func (m *ModelSource) checkGatewayHealth(ctx context.Context, healthURL string) bool {
+	if m.healthCheck != nil {
+		return m.healthCheck(ctx, healthURL)
+	}
+	return gatewayAnswers(ctx, healthURL)
+}
+
+// RecoverGatewayAfterWake probes the saved BYOK Bifrost gateway after system
+// wake and remounts it when unreachable. It is a no-op when the active model
+// source is not BYOK or the gateway already answers /health. When the gateway
+// is unhealthy, onUnhealthy is called with the configured runtime before
+// remounting so in-flight Runs can settle cleanly.
+func (m *ModelSource) RecoverGatewayAfterWake(ctx context.Context, onUnhealthy func(runtimeType string)) error {
+	if m.tool == nil || !m.tool.installed() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	overlay := ReadOverlay(m.tool.StateDirectory)
+	if overlay == nil || overlay.Mode != "byok" || overlay.Runtime == "" {
+		return nil
+	}
+	runtime, healthURL := byokGateway(m.tool.StateDirectory, overlay.Runtime)
+	if healthURL == "" {
+		return nil
+	}
+	if m.checkGatewayHealth(ctx, healthURL) {
+		slog.Info("model_source.wake_check", "mode", "byok", "runtime_type", runtime, "outcome", "healthy")
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	slog.Warn("model_source.wake_check", "mode", "byok", "runtime_type", runtime, "outcome", "unhealthy")
+	if onUnhealthy != nil {
+		onUnhealthy(runtime)
+	}
+	return m.EnsureGateway(ctx, runtime)
+}
+
 // EnsureGateway brings back the Bifrost gateway of the saved BYOK source
 // before runtimeType runs on it. A source applied while its endpoint was
 // down, or a gateway a quit stopped, otherwise leaves every Run refused at
@@ -38,7 +81,7 @@ func (m *ModelSource) EnsureGateway(ctx context.Context, runtimeType string) err
 	if m.tool == nil || !m.tool.installed() {
 		return nil
 	}
-	if _, healthURL := byokGateway(m.tool.StateDirectory, runtimeType); healthURL == "" || gatewayAnswers(ctx, healthURL) {
+	if _, healthURL := byokGateway(m.tool.StateDirectory, runtimeType); healthURL == "" || m.checkGatewayHealth(ctx, healthURL) {
 		return nil
 	}
 	waitedFrom := time.Now()
@@ -50,7 +93,7 @@ func (m *ModelSource) EnsureGateway(ctx context.Context, runtimeType string) err
 	// Another Run or an Apply may have mounted the gateway, or switched the
 	// source away from BYOK, while this one waited.
 	runtime, healthURL := byokGateway(m.tool.StateDirectory, runtimeType)
-	if healthURL == "" || gatewayAnswers(ctx, healthURL) {
+	if healthURL == "" || m.checkGatewayHealth(ctx, healthURL) {
 		return nil
 	}
 	// A remount that finished while this Run waited failed just now; running
@@ -78,7 +121,7 @@ func (m *ModelSource) EnsureGateway(ctx context.Context, runtimeType string) err
 // remount mounts the saved BYOK source on Bifrost again. The caller holds mu.
 func (m *ModelSource) remount(ctx context.Context, runtime string) error {
 	previousPaths := m.readExecutableRuntimePaths()
-	runCtx, cancel := context.WithTimeout(ctx, m.applyTimeout)
+	runCtx, cancel := awaketime.WithTimeoutClockCause(ctx, m.applyTimeout, nil, m.awakeClock)
 	defer cancel()
 	stdout, exitCode, err := m.runTool(runCtx, "source_remount", m.applyArgs("byok", runtime, "", false), nil)
 	if err != nil {

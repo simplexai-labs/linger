@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/awaketime"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
@@ -114,6 +115,7 @@ type Library struct {
 	ensurePiRetryInterval time.Duration
 	ensureLoadTimeout     time.Duration
 	now                   func() time.Time
+	awakeClock            awaketime.Clock
 	healthCheck           func(ctx context.Context, healthURL string) bool
 	ctx                   context.Context
 	stop                  context.CancelFunc
@@ -129,6 +131,9 @@ type Library struct {
 	mu      sync.Mutex
 	closed  bool
 	current *wire.LocalModelsSnapshot
+	// userStopped records models explicitly unloaded or removed by the user
+	// so post-wake recovery never reloads intentionally stopped models.
+	userStopped map[string]bool
 	// loaded identifies the loaded models of the last status read; nil
 	// before the first one.
 	loaded *string
@@ -193,6 +198,7 @@ func New(options Options) *Library {
 		ensureLoadTimeout: options.EnsureLoadTimeout,
 		now:               time.Now, healthCheck: gatewayAnswers, ctx: ctx, stop: stop, jobs: make(map[string]*job), probes: make(map[string]*activeProbe), probeUnknown: make(map[string]probeFingerprint),
 		causes:            make(map[string]*wire.LocalModelError),
+		userStopped:       make(map[string]bool),
 		installerLockWait: defaultInstallerLockWait, installerLockRetry: defaultInstallerLockRetry, settledCh: make(chan struct{}),
 		changed: make(chan struct{}), jobEnded: make(map[string]uint64), ensures: make(map[string]*ensureLoad),
 	}
@@ -319,7 +325,7 @@ func (l *Library) scheduleEnsurePi() {
 
 	go func() {
 		defer l.wg.Done()
-		ctx, cancel := context.WithTimeout(l.ctx, l.ensurePiTimeout)
+		ctx, cancel := l.withAwakeTimeout(l.ctx, l.ensurePiTimeout)
 		executable, err := l.tool.EnsurePi(ctx, l.environment, harnessDir, l.nodePath)
 		cancel()
 
@@ -371,6 +377,11 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 	hasLoaded := false
 	l.mu.Lock()
 	if snapshot.Available {
+		for _, model := range snapshot.Models {
+			if model.State == "loaded" {
+				delete(l.userStopped, model.ID)
+			}
+		}
 		key := loadedKey(snapshot)
 		hasLoaded = key != ""
 		changed = l.loaded != nil && *l.loaded != key
@@ -407,7 +418,7 @@ func (l *Library) read(ctx context.Context) wire.LocalModelsSnapshot {
 	if l.tool == nil || !l.tool.installed() {
 		return unavailable(CodeToolNotInstalled, "", l.now())
 	}
-	ctx, cancel := context.WithTimeout(ctx, l.statusTimeout)
+	ctx, cancel := l.withAwakeTimeout(ctx, l.statusTimeout)
 	defer cancel()
 	stdout, exitCode, err := l.runOnce(ctx, Action{Name: ActionRefresh})
 	if err != nil || exitCode != 0 {
@@ -484,6 +495,7 @@ func (l *Library) Act(ctx context.Context, action Action, deadline time.Time) (r
 		}
 		return nil, true
 	case ActionDownload, ActionLoad:
+		l.markUserStopped(action.Model, false)
 		l.mu.Lock()
 		known := l.current != nil
 		l.mu.Unlock()
@@ -496,6 +508,9 @@ func (l *Library) Act(ctx context.Context, action Action, deadline time.Time) (r
 		}
 		return l.startJob(ctx, action, deadline)
 	case ActionUnload, ActionRemove, ActionCancel:
+		if action.Name == ActionUnload || action.Name == ActionRemove {
+			l.markUserStopped(action.Model, true)
+		}
 		return l.runAction(ctx, action, deadline)
 	}
 	return &wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "unknown local model action"}, true
@@ -536,7 +551,7 @@ func (l *Library) runAction(ctx context.Context, action Action, deadline time.Ti
 		if action.Name == ActionUnload || action.Name == ActionRemove {
 			cancelledProbe = l.cancelProbe(action.Model)
 		}
-		runCtx, cancel := context.WithTimeout(l.ctx, l.actionTimeout)
+		runCtx, cancel := l.withAwakeTimeout(l.ctx, l.actionTimeout)
 		defer cancel()
 		stdout, exitCode, err := l.runOnce(runCtx, action)
 		refusal := documentRefusal(stdout, exitCode, err)
@@ -592,12 +607,16 @@ func (p *pendingAnswer) give(refusal *wire.LocalModelActionRefusal) { p.answer <
 func (p *pendingAnswer) missed() bool { return p.late.Load() }
 
 func (p *pendingAnswer) await(ctx context.Context, deadline time.Time) (*wire.LocalModelActionRefusal, bool) {
-	timer := time.NewTimer(time.Until(deadline))
-	defer timer.Stop()
+	var timeout <-chan time.Time
+	if !deadline.IsZero() {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		timeout = timer.C
+	}
 	select {
 	case refusal := <-p.answer:
 		return refusal, true
-	case <-timer.C:
+	case <-timeout:
 	case <-ctx.Done():
 	}
 	p.late.Store(true)
@@ -621,7 +640,7 @@ func (l *Library) unloadAndStartJob(ctx context.Context, action Action, deadline
 	answer := newPendingAnswer()
 	go func() {
 		defer l.wg.Done()
-		unloadCtx, cancel := context.WithTimeout(l.ctx, l.actionTimeout)
+		unloadCtx, cancel := l.withAwakeTimeout(l.ctx, l.actionTimeout)
 		stdout, exitCode, err := l.runOnce(unloadCtx, Action{Name: ActionUnload, Model: action.Model})
 		cancel()
 		refusal := documentRefusal(stdout, exitCode, err)
@@ -1276,7 +1295,7 @@ func (l *Library) ensureByID(ctx context.Context, id, state string, waitedFrom t
 // load starts a load of id unless one runs, and waits for its outcome. The
 // caller holds id's turn.
 func (l *Library) load(ctx context.Context, id, state string) error {
-	budget, cancel := context.WithTimeout(ctx, l.ensureLoadTimeout)
+	budget, cancel := l.withAwakeTimeout(ctx, l.ensureLoadTimeout)
 	defer cancel()
 	// Read before the load starts: a job that ends before Act returns is
 	// still observed, and jobs and jobEnded keep earlier changes out.
@@ -1286,7 +1305,9 @@ func (l *Library) load(ctx context.Context, id, state string) error {
 	startedJob := false
 	switch state {
 	case "idle", "failed":
-		refusal, answered := l.Act(budget, Action{Name: ActionLoad, Model: id}, l.now().Add(l.actionTimeout))
+		// budget already bounds the wait in awake time, so pass a zero wall
+		// deadline to avoid spurious wake-time expiry on Windows.
+		refusal, answered := l.Act(budget, Action{Name: ActionLoad, Model: id}, time.Time{})
 		if !answered {
 			if err := ctx.Err(); err != nil {
 				return err
