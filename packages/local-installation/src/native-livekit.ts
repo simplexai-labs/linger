@@ -7,6 +7,7 @@ import { freePort, portFree } from "./ports.js";
 import {
   inspectNativeListeners,
   inspectNativeProcess,
+  SERVICE_RESTART_POLICY,
   startNativeProcess,
 } from "./native-process.js";
 
@@ -204,6 +205,7 @@ export async function startNativeLiveKit(options: {
     },
     signal: options.signal,
     redactions: [settings.apiSecret],
+    restartOnExit: SERVICE_RESTART_POLICY,
     restartOnConfigurationChange: true,
   });
   const deadline = Date.now() + (options.timeoutMs ?? 60_000);

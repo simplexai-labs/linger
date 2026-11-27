@@ -1,4 +1,5 @@
 import { Message01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { useEffect, useRef } from "react";
 import {
   isRouteErrorResponse,
   NavLink,
@@ -8,7 +9,10 @@ import {
   useRouteError,
 } from "react-router";
 
-import { TeamHubError } from "@/features/teamhub/teamhub-client";
+import {
+  TeamHubError,
+  TeamHubTransportError,
+} from "@/features/teamhub/teamhub-client";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { Icon } from "@/components/ui/icon";
@@ -57,12 +61,205 @@ function PanelRouteErrorContent() {
   );
 }
 
+const TRANSIENT_UNAVAILABLE_STATUSES = new Set([502, 503, 504]);
+const RECOVERY_BACKOFF_MS = [2_000, 3_000, 5_000, 5_000, 10_000] as const;
+const RECOVERY_PROBE_TIMEOUT_MS = 5_000;
+const AUTO_RELOAD_STORAGE_KEY = "linger:route-error-auto-reload";
+const AUTO_RELOAD_WINDOW_MS = 60_000;
+const AUTO_RELOAD_MAX_ATTEMPTS = 2;
+
+interface AutoReloadRecord {
+  at: number;
+  count: number;
+  path: string;
+}
+
+function readAutoReloadRecord(pathname: string): AutoReloadRecord | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(AUTO_RELOAD_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Partial<AutoReloadRecord>;
+    if (
+      parsed.path !== pathname ||
+      typeof parsed.count !== "number" ||
+      typeof parsed.at !== "number" ||
+      Date.now() - parsed.at >= AUTO_RELOAD_WINDOW_MS
+    ) {
+      return undefined;
+    }
+    return { path: parsed.path, count: parsed.count, at: parsed.at };
+  } catch {
+    return undefined;
+  }
+}
+
+function autoReloadBudgetExhausted(pathname: string): boolean {
+  const record = readAutoReloadRecord(pathname);
+  return record !== undefined && record.count >= AUTO_RELOAD_MAX_ATTEMPTS;
+}
+
+function recordAutoReload(pathname: string): void {
+  try {
+    const previous = readAutoReloadRecord(pathname);
+    const next: AutoReloadRecord = {
+      path: pathname,
+      count: (previous?.count ?? 0) + 1,
+      at: Date.now(),
+    };
+    window.sessionStorage.setItem(
+      AUTO_RELOAD_STORAGE_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    // Ignore storage failures in restricted browsing contexts.
+  }
+}
+
+function clearAutoReloadRecord(): void {
+  try {
+    window.sessionStorage.removeItem(AUTO_RELOAD_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures in restricted browsing contexts.
+  }
+}
+
+function isTransientUnavailableError(error: unknown): boolean {
+  if (error instanceof TeamHubTransportError) return true;
+  if (error instanceof TeamHubError) {
+    return TRANSIENT_UNAVAILABLE_STATUSES.has(error.status);
+  }
+  if (isRouteErrorResponse(error)) {
+    return TRANSIENT_UNAVAILABLE_STATUSES.has(error.status);
+  }
+  return false;
+}
+
+async function probeBackendReady(signal: AbortSignal): Promise<boolean> {
+  const timeout = new AbortController();
+  const timerId = window.setTimeout(() => {
+    timeout.abort();
+  }, RECOVERY_PROBE_TIMEOUT_MS);
+  const probeSignal = AbortSignal.any([signal, timeout.signal]);
+  try {
+    const response = await fetch("/readyz", {
+      method: "HEAD",
+      cache: "no-store",
+      signal: probeSignal,
+    });
+    await response.body?.cancel().catch(() => {});
+    if (response.ok) return true;
+    if (response.status !== 404) return false;
+    // Older servers without /readyz fall back to /v0/me; any non-5xx reply
+    // (such as 200 or 401) confirms TeamHub is reachable again.
+    const fallback = await fetch("/v0/me", {
+      method: "GET",
+      cache: "no-store",
+      signal: probeSignal,
+    });
+    await fallback.body?.cancel().catch(() => {});
+    return fallback.status < 500;
+  } finally {
+    window.clearTimeout(timerId);
+  }
+}
+
 function ApplicationRouteErrorSurface({ tenantId }: { tenantId?: string }) {
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
   const { roomId } = useParams();
   const content = useRouteErrorContent(true);
+  const cancelRecoveryRef = useRef<(() => void) | null>(null);
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
+
+  useEffect(() => {
+    if (
+      !content.transientUnavailable ||
+      autoReloadBudgetExhausted(location.pathname)
+    ) {
+      return;
+    }
+
+    let stopped = false;
+    let attempt = 0;
+    let timerId: number | undefined;
+    let controller: AbortController | undefined;
+    let waitingForVisibility = false;
+
+    const onVisibilityChange = () => {
+      if (stopped || document.visibilityState === "hidden") return;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      waitingForVisibility = false;
+      void probe();
+    };
+
+    const cleanup = () => {
+      stopped = true;
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+        timerId = undefined;
+      }
+      if (waitingForVisibility) {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        waitingForVisibility = false;
+      }
+      controller?.abort();
+      controller = undefined;
+    };
+
+    const scheduleNext = () => {
+      if (stopped) return;
+      const delayMs =
+        RECOVERY_BACKOFF_MS[
+          Math.min(attempt, RECOVERY_BACKOFF_MS.length - 1)
+        ] ?? 10_000;
+      attempt += 1;
+      timerId = window.setTimeout(() => {
+        timerId = undefined;
+        if (stopped) return;
+        if (document.visibilityState === "hidden") {
+          waitingForVisibility = true;
+          document.addEventListener("visibilitychange", onVisibilityChange);
+          return;
+        }
+        void probe();
+      }, delayMs);
+    };
+
+    const probe = async () => {
+      if (stopped) return;
+      controller = new AbortController();
+      try {
+        const ready = await probeBackendReady(controller.signal);
+        if (stopped) return;
+        if (ready) {
+          cleanup();
+          recordAutoReload(location.pathname);
+          void navigateRef.current(0);
+          return;
+        }
+      } catch {
+        if (stopped) return;
+      } finally {
+        controller = undefined;
+      }
+      scheduleNext();
+    };
+
+    cancelRecoveryRef.current = cleanup;
+    scheduleNext();
+
+    return () => {
+      if (cancelRecoveryRef.current === cleanup) {
+        cancelRecoveryRef.current = null;
+      }
+      cleanup();
+    };
+  }, [content.transientUnavailable, location.pathname]);
+
   const roomsPath = tenantId
     ? roomId
       ? `/t/${tenantId}/rooms/${roomId}/chat`
@@ -130,6 +327,8 @@ function ApplicationRouteErrorSurface({ tenantId }: { tenantId?: string }) {
             detail={content.detail}
             message={content.message}
             onRetry={() => {
+              cancelRecoveryRef.current?.();
+              clearAutoReloadRecord();
               void (content.restricted ? navigate("/") : navigate(0));
             }}
             title={content.title}
@@ -222,6 +421,7 @@ function useRouteErrorContent(fullPage: boolean) {
   if (restricted)
     return {
       restricted: true,
+      transientUnavailable: false,
       title: t(
         pathname.includes("/rooms/")
           ? routePagesMessages.roomRestrictedTitle
@@ -238,6 +438,7 @@ function useRouteErrorContent(fullPage: boolean) {
 
   return {
     restricted: false,
+    transientUnavailable: isTransientUnavailableError(error),
     detail,
     message: t(routePagesMessages.loadFailedBody),
     title: t(

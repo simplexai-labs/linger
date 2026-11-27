@@ -501,10 +501,13 @@ Gateway and runs Agents. The daemon exits with the app.
   (`app-window.ts`), the main window after. The main window's server form
   without a server says Back to Setup instead of Cancel.
   Main window loading policy (`windowLoadDecision` in `src/main/navigation.ts`):
-  all server loads (`boot`, `local_ready`, `resume_ready`, `server_changed`,
-  `port_moved`, `retry`, `prewarm`) pass through one decision helper so
-  duplicate `loadURL` calls on hot start are skipped when the target origin is
-  already loaded or pending without a shell page or load failure. `BaseWindow`
+  all server loads (`boot`, `local_ready`, `resume_ready`, `resume_revived`,
+  `server_changed`, `port_moved`, `retry`, `prewarm`) pass through one decision
+  helper so duplicate `loadURL` calls on hot start are skipped when the target
+  origin is already loaded or pending without a shell page or load failure,
+  while `resume_revived` (emitted when `--resume` reports a cold start or
+  restored local models) reloads the same origin without hijacking a window
+  viewing another server. `BaseWindow`
   is created with `show: false` and revealed on the first `did-finish-load` or
   `did-fail-load` after `show()`, with a short 1500 ms timeout fallback so a
   stalled load still reveals the window; `preloadAuthenticated` loads the
@@ -534,7 +537,10 @@ Gateway and runs Agents. The daemon exits with the app.
   `local-server.retry`, and after `UNREACHABLE_GRACE_MS` (longer than the
   supervisor's restart delays) on `local-server.unreachable` (WindowManager
   emits it when it shows `offline.html` for a failed load) or the
-  `WATCH_MS` watch. Those two resume at most once a minute, and only after
+  `WATCH_MS` watch. Readiness probes (`answers`) check `HEAD /readyz` first
+  (falling back to `HEAD /` when an older server returns 404) so a web host
+  whose TeamHub or database upstream is down is not mistaken for ready. Those
+  two resume at most once a minute, and only after
   `UNREACHABLE_PROBES` checks in a row spread over the grace went unanswered,
   each allowed `UNREACHABLE_PROBE_TIMEOUT_MS` (longer than the launch's 1 s
   fast check), so a server slowed by heavy load is not taken for a stopped

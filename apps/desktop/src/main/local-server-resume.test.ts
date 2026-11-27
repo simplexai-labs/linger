@@ -664,7 +664,7 @@ describe("LocalServerModule resume coordination", () => {
         },
         fetch: (async (input: string | URL | Request) => {
           const url = String(input);
-          if (url === "http://localhost:63009")
+          if (url.startsWith("http://localhost:63009"))
             return new Response(null, { status: 200 });
           throw new Error("connection refused");
         }) as typeof fetch,
@@ -712,7 +712,7 @@ describe("LocalServerModule resume coordination", () => {
         fetch: (async (input: string | URL | Request) => {
           const url = String(input);
           // Unrelated server answers 200 on the moved port.
-          if (url === "http://localhost:63009")
+          if (url.startsWith("http://localhost:63009"))
             return new Response(null, { status: 200 });
           throw new Error("connection refused");
         }) as typeof fetch,
@@ -967,6 +967,101 @@ describe("LocalServerModule resume coordination", () => {
       await f.host.stop("quit");
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(runs(f)).toBe(1);
+    });
+
+    it.each([502, 503])(
+      "treats /readyz %i as unreachable during launch and watch even when / answers 200",
+      async (degradedStatus) => {
+        let readyStatus = degradedStatus;
+        const probe = vi.fn(async (input: string | URL | Request) => {
+          const url = new URL(
+            typeof input === "string" ? input : input.toString(),
+          );
+          if (url.pathname === "/readyz") {
+            return new Response(null, { status: readyStatus });
+          }
+          return new Response(null, { status: 200 });
+        }) as typeof fetch;
+        const f = setupResumeFixture(counting, {
+          fetch: probe,
+          watchMs: 30,
+          unreachableGraceMs: 30,
+        });
+        await f.host.start();
+        await waitForInstaller(() =>
+          expect(f.module.status().phase).toBe("ready"),
+        );
+        expect(f.showStarting).toHaveBeenCalledOnce();
+        expect(runs(f)).toBe(1);
+
+        readyStatus = 200;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(runs(f)).toBe(1);
+
+        readyStatus = degradedStatus;
+        await waitForInstaller(() => expect(runs(f)).toBe(2));
+        expect(recoveries(f)).toEqual([{ trigger: "watch" }]);
+        await f.host.stop("quit");
+      },
+    );
+
+    it("falls back to HEAD / when an older server returns 404 for /readyz", async () => {
+      const probe = vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(
+          typeof input === "string" ? input : input.toString(),
+        );
+        if (url.pathname === "/readyz") {
+          return new Response(null, { status: 404 });
+        }
+        return new Response(null, { status: 200 });
+      }) as typeof fetch;
+      const f = setupResumeFixture(counting, { fetch: probe });
+      await f.host.start();
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      expect(f.showStarting).not.toHaveBeenCalled();
+      expect(probe).toHaveBeenCalledWith(
+        "http://localhost:3000/readyz",
+        expect.objectContaining({ method: "HEAD" }),
+      );
+      expect(probe).toHaveBeenCalledWith(
+        "http://localhost:3000",
+        expect.objectContaining({ method: "HEAD" }),
+      );
+      await f.host.stop("quit");
+    });
+
+    it("passes resume_revived when fast_ready_check passed yet --resume reports a cold path", async () => {
+      const probe = vi.fn(
+        async () => new Response(null, { status: 200 }),
+      ) as typeof fetch;
+      const f = setupResumeFixture(
+        `
+          process.stdout.write(JSON.stringify({
+            code: 0,
+            details: { origin: "http://localhost:3000" },
+            resumeTimings: {
+              path: "cold",
+              probeMs: 12,
+              coldStartMs: 1500,
+              totalMs: 1520,
+            },
+          }) + "\\n");
+        `,
+        { fetch: probe },
+      );
+      await f.host.start();
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      expect(f.showStarting).not.toHaveBeenCalled();
+      expect(f.setServer).toHaveBeenCalledWith(
+        "http://localhost:3000",
+        "http://localhost:3000",
+        { reason: "resume_revived" },
+      );
+      await f.host.stop("quit");
     });
   });
 

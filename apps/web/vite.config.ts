@@ -70,7 +70,11 @@ export default defineConfig(({ command, mode }) => {
         "yjs",
       ],
     },
-    plugins: [react(), developmentHealthPlugin(), panelUrlPreviewPlugin()],
+    plugins: [
+      react(),
+      developmentHealthPlugin(teamhubUrl),
+      panelUrlPreviewPlugin(),
+    ],
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -193,29 +197,102 @@ export function oneWorkerBuildAtATime(): Plugin {
   };
 }
 
-export function developmentHealthPlugin(): Plugin {
+export function developmentHealthPlugin(teamHubBaseUrl?: string): Plugin {
   return {
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(request.url ?? "/", "http://localhost")
           .pathname;
-        if (
-          pathname !== "/healthz" ||
-          (request.method !== "GET" && request.method !== "HEAD")
-        ) {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          next();
+          return;
+        }
+        if (pathname === "/healthz") {
+          const body = JSON.stringify({
+            ok: true,
+            service: "linger-web-dev",
+          });
+
+          response.statusCode = 200;
+          response.setHeader("cache-control", "no-store");
+          response.setHeader("content-type", "application/json; charset=utf-8");
+          response.end(request.method === "HEAD" ? undefined : body);
+          return;
+        }
+        if (pathname !== "/readyz") {
           next();
           return;
         }
 
-        const body = JSON.stringify({
-          ok: true,
-          service: "linger-web-dev",
-        });
+        const reply = (
+          statusCode: number,
+          payload: Record<string, unknown>,
+        ) => {
+          if (response.destroyed || response.writableEnded) return;
+          response.statusCode = statusCode;
+          response.setHeader("cache-control", "no-store");
+          response.setHeader("content-type", "application/json; charset=utf-8");
+          response.end(
+            request.method === "HEAD" ? undefined : JSON.stringify(payload),
+          );
+        };
 
-        response.statusCode = 200;
-        response.setHeader("cache-control", "no-store");
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(request.method === "HEAD" ? undefined : body);
+        if (!teamHubBaseUrl) {
+          reply(200, { ok: true, service: "linger-web-dev" });
+          return;
+        }
+
+        let targetUrl: URL;
+        try {
+          targetUrl = new URL("/healthz", teamHubBaseUrl);
+        } catch {
+          reply(502, {
+            ok: false,
+            service: "linger-web-dev",
+            upstream: "teamhub",
+          });
+          return;
+        }
+
+        const controller = new AbortController();
+        const onClose = () => {
+          if (!response.writableEnded) controller.abort();
+        };
+        if (typeof response.once === "function") {
+          response.once("close", onClose);
+        }
+        void fetch(targetUrl, {
+          method: "GET",
+          redirect: "manual",
+          signal: AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(2_000),
+          ]),
+        })
+          .then(async (upstream) => {
+            await upstream.body?.cancel();
+            if (upstream.status >= 200 && upstream.status < 300) {
+              reply(200, { ok: true, service: "linger-web-dev" });
+              return;
+            }
+            reply(503, {
+              ok: false,
+              service: "linger-web-dev",
+              upstream: "teamhub",
+            });
+          })
+          .catch(() => {
+            reply(502, {
+              ok: false,
+              service: "linger-web-dev",
+              upstream: "teamhub",
+            });
+          })
+          .finally(() => {
+            if (typeof response.off === "function") {
+              response.off("close", onClose);
+            }
+          });
       });
     },
     name: "linger-development-health",

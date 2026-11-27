@@ -132,6 +132,66 @@ describe("Vite config", () => {
     expect(next).toHaveBeenCalledOnce();
     expect(response.end).not.toHaveBeenCalled();
   });
+
+  it("answers /readyz by probing TeamHub /healthz when configured", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false }), { status: 503 }),
+      )
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+    const middleware = captureDevelopmentHealthMiddleware(
+      "http://127.0.0.1:8080",
+    );
+
+    const healthy = createResponseFake();
+    middleware({ method: "GET", url: "/readyz" }, healthy, vi.fn());
+    await vi.waitFor(() => expect(healthy.end).toHaveBeenCalledOnce());
+    expect(healthy.statusCode).toBe(200);
+    expect(healthy.end).toHaveBeenCalledWith(
+      JSON.stringify({ ok: true, service: "linger-web-dev" }),
+    );
+
+    const degraded = createResponseFake();
+    middleware({ method: "HEAD", url: "/readyz" }, degraded, vi.fn());
+    await vi.waitFor(() => expect(degraded.end).toHaveBeenCalledOnce());
+    expect(degraded.statusCode).toBe(503);
+    expect(degraded.end).toHaveBeenCalledWith(undefined);
+
+    const unreachable = createResponseFake();
+    middleware({ method: "GET", url: "/readyz" }, unreachable, vi.fn());
+    await vi.waitFor(() => expect(unreachable.end).toHaveBeenCalledOnce());
+    expect(unreachable.statusCode).toBe(502);
+    expect(unreachable.end).toHaveBeenCalledWith(
+      JSON.stringify({
+        ok: false,
+        service: "linger-web-dev",
+        upstream: "teamhub",
+      }),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("answers 502 without throwing when teamHubBaseUrl is malformed", () => {
+    const middleware = captureDevelopmentHealthMiddleware("://not-a-valid-url");
+    const response = createResponseFake();
+    const next = vi.fn();
+
+    middleware({ method: "GET", url: "/readyz" }, response, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(502);
+    expect(response.end).toHaveBeenCalledWith(
+      JSON.stringify({
+        ok: false,
+        service: "linger-web-dev",
+        upstream: "teamhub",
+      }),
+    );
+  });
 });
 
 type DevelopmentHealthMiddleware = (
@@ -140,9 +200,12 @@ type DevelopmentHealthMiddleware = (
   next: () => void,
 ) => void;
 
-function captureDevelopmentHealthMiddleware(): DevelopmentHealthMiddleware {
+function captureDevelopmentHealthMiddleware(
+  teamHubBaseUrl?: string,
+): DevelopmentHealthMiddleware {
   const middlewares: unknown[] = [];
-  const configureServer = developmentHealthPlugin().configureServer;
+  const configureServer =
+    developmentHealthPlugin(teamHubBaseUrl).configureServer;
 
   if (typeof configureServer !== "function") {
     throw new Error("Expected development health plugin to configure Vite.");
