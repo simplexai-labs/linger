@@ -1286,6 +1286,8 @@
         height: 100%;
         overflow: visible;
         display: block;
+        /* Not the icon stroke every other svg here inherits. */
+        stroke: none;
       }
       .mk-svg * {
         transform-box: fill-box;
@@ -1334,13 +1336,13 @@
         stroke: #c9c7bf;
       }
       /* The install: a pale outline, the trace and the dot's ring. */
-      .mark.scene .mk-track {
+      .mark.mark-scene .mk-track {
         stroke: #e2e1da;
       }
-      .mark.scene :is(.mk-fill, .mk-d) {
+      .mark.mark-scene :is(.mk-fill, .mk-d) {
         opacity: 0;
       }
-      .mark.scene:not(.off) .mk-ring {
+      .mark.mark-scene:not(.off) .mk-ring {
         animation: mk-ring 2.8s ease-in-out infinite;
       }
       .mark.breathe {
@@ -2961,7 +2963,12 @@
     </header>
     <!-- Linger's mark: the wedge and the dot from apps/web/public/favicon.svg,
          verbatim. Every mark on the page draws from these two paths. -->
-    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <svg
+      width="0"
+      height="0"
+      style="position: absolute; width: 0; height: 0"
+      aria-hidden="true"
+    >
       <defs>
         <path
           id="logo-wedge"
@@ -2989,7 +2996,7 @@
         </div>
       </div>
       <div class="sc-mark">
-        <span class="mark scene" id="sc-mark" data-role="scene"></span>
+        <span class="mark mark-scene" id="sc-mark" data-role="scene"></span>
       </div>
     </div>
     <div id="flyer" aria-hidden="true"></div>
@@ -4196,7 +4203,7 @@
         mark.style.setProperty("--s", base + "px");
         mark.innerHTML = markHTML("mark", base);
         $("flyer").append(mark);
-        if (toEl.classList.contains("scene")) {
+        if (toEl.classList.contains("mark-scene")) {
           mark.querySelector(".mk-track").style.stroke = "#e2e1da";
           for (const part of mark.querySelectorAll(
             ".mk-fill, .mk-d, .mk-trace",
@@ -6608,7 +6615,7 @@
         // The scene's mark is grey once it failed, its trace stopped where
         // it was, and breathes while it works.
         const mark =
-          "mark scene" +
+          "mark mark-scene" +
           (failed ? " off" : "") +
           (REDUCE || failed ? "" : " breathe");
         if ($("sc-mark").className !== mark) $("sc-mark").className = mark;

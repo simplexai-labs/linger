@@ -1683,6 +1683,9 @@ describe("setup page installing", () => {
       expect(fill.getAttribute("href")).toBe("#logo-wedge");
     expect(document.querySelectorAll(".orb")).toHaveLength(0);
     const mark = $("sc-mark");
+    // The page's own .scene (the old top-bar art) is hidden in the wizard;
+    // the install mark must not share that class.
+    expect(mark.matches(".scene")).toBe(false);
     const trace = mark.querySelector<SVGPathElement>(".mk-trace")!;
     const traced = () => 100 - Number(trace.style.strokeDashoffset);
     const bar = () => Number($("installing-bar").getAttribute("aria-valuenow"));
