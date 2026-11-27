@@ -887,7 +887,9 @@ application's on-screen modal dialogs and names any other than the addressed
 window in the result of `get_window_state`, `list_windows` with a `pid`, and
 each input. Foreground input and keys addressed to such a dialog pass the
 front-window check, and `bring_to_front` on it brings the application forward
-without a `window_id`, which Cua accepts only for ordinary windows.
+without a `window_id`, which Cua accepts only for ordinary windows. Each query
+takes about 150 ms: a read or a background input makes one, and a foreground
+input or key that names a window makes two.
 
 The Daemon remembers the application it raised last. When the user brings
 another application forward, key input returns `COMPUTER_USER_TOOK_OVER` and the
