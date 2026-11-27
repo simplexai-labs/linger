@@ -19,8 +19,6 @@ export type TeamHubApiPath = keyof paths;
 const unauthenticatedPaths = new Set<TeamHubApiPath>([
   "/v0/auth/login",
   "/v0/session",
-  "/v0/shared-documents/content",
-  "/v0/shared-documents/resolve",
   "/v0/shared-room-history/asset",
   "/v0/shared-room-history/read",
 ]);

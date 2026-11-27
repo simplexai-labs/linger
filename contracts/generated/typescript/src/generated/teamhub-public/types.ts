@@ -2647,27 +2647,6 @@ export interface paths {
     patch: operations["updateDocumentMetadata"];
     trace?: never;
   };
-  "/v0/documents/{documentId}/link-share": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: string;
-      };
-      cookie?: never;
-    };
-    /** Read link policy as an Owner or Manager; the secret is never returned. */
-    get: operations["getDocumentLinkShare"];
-    /** Create, change, or reset a link policy as an Owner or Manager. */
-    put: operations["setDocumentLinkShare"];
-    post?: never;
-    /** Revoke link access without changing independent Actor or Room grants. */
-    delete: operations["revokeDocumentLinkShare"];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v0/rooms/{roomId}/history-shares": {
     parameters: {
       query?: never;
@@ -2775,63 +2754,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v0/shared-documents/resolve": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Resolve an active capability without permanently granting access. */
-    post: operations["resolveDocumentLinkShare"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v0/shared-documents/content": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Download exact current content using a revocable link capability. */
-    post: operations["downloadSharedDocument"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v0/documents/{documentId}/collaborators": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-      };
-      cookie?: never;
-    };
-    /** Explain the caller's effective role and the Document's Direct and Context sources. */
-    get: operations["getDocumentShareView"];
-    put?: never;
-    /**
-     * Share the Document directly with one active Agent.
-     * @description A repeated submission finds the Agent already a collaborator and gets 409.
-     */
-    post: operations["createDocumentDirectCollaborator"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v0/documents/{documentId}/agent-mention-candidates": {
     parameters: {
       query?: never;
@@ -2844,52 +2766,6 @@ export interface paths {
     get: operations["listDocumentAgentMentionCandidates"];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v0/documents/{documentId}/collaborators/{sourceId}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-        sourceId: components["schemas"]["Id"];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Change one Human Direct collaborator source with source-level CAS.
-     * @description A repeated submission carries a stale expected_version and gets 409 DOCUMENT_COLLABORATOR_CONFLICT.
-     */
-    patch: operations["updateDocumentDirectCollaborator"];
-    trace?: never;
-  };
-  "/v0/documents/{documentId}/collaborators/{sourceId}/revoke": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-        sourceId: components["schemas"]["Id"];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Revoke one Human Direct collaborator source with source-level CAS.
-     * @description A repeated submission carries a stale expected_version and gets 409 DOCUMENT_COLLABORATOR_CONFLICT.
-     */
-    post: operations["revokeDocumentDirectCollaborator"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7574,35 +7450,6 @@ export interface components {
     DocumentMetadataUpdateRequest: {
       title: string;
     };
-    DocumentLinkShare: {
-      id: string;
-      document_id: string;
-      /** @enum {string} */
-      role: "viewer" | "editor";
-      /** @enum {string} */
-      status: "active" | "revoked";
-      /** Format: int64 */
-      version: number;
-      /** @description Returned only on creation or reset. Never persisted as plaintext. */
-      token?: string;
-      /**
-       * Format: uri
-       * @description Public Web URL with the capability in its fragment; returned only with a new token.
-       */
-      url?: string;
-    };
-    SetDocumentLinkShare: {
-      /** @enum {string} */
-      role: "viewer" | "editor";
-      /** Format: int64 */
-      expected_version: number;
-      /** @default false */
-      reset: boolean;
-    };
-    RevokeDocumentLinkShare: {
-      /** Format: int64 */
-      expected_version: number;
-    };
     RoomHistoryShare: {
       id: string;
       room_name: string;
@@ -7657,60 +7504,6 @@ export interface components {
       next_after: number;
       items: components["schemas"]["RoomHistoryMessage"][];
     };
-    ResolveDocumentLinkShare: {
-      token: string;
-    };
-    DocumentLinkAccess: {
-      link_id: string;
-      tenant_id: string;
-      document_id: string;
-      /** @enum {string} */
-      role: "viewer" | "editor";
-      /** Format: int64 */
-      version: number;
-    };
-    DocumentManagementCapabilitiesV2: {
-      can_change_ownership: boolean;
-      can_update_link_policy: boolean;
-      can_update_external_policy: boolean;
-    };
-    DocumentGeneralAccessV1: {
-      scope: components["schemas"]["DocumentLinkScopeV2"];
-      /**
-       * Format: uri-reference
-       * @description Stable Product Client URL. Reading or copying it never mutates authorization state.
-       */
-      canonical_url: string;
-    };
-    DocumentShareSourceV2: {
-      source: components["schemas"]["DocumentAccessSourceV2"];
-      label: string;
-      target_actor?: components["schemas"]["ActorRef"];
-      /**
-       * @description Stable Share panel group for this provenance source.
-       * @enum {string}
-       */
-      source_group?: "direct" | "context" | "link";
-      /**
-       * @description Explains whether this source currently determines or still contributes to the caller's effective role.
-       * @enum {string}
-       */
-      caller_access_state?: "winning" | "remaining" | "inactive" | "not_caller";
-    };
-    DocumentShareViewV2: {
-      /** @constant */
-      schema_version: 2;
-      caller_content_role: components["schemas"]["DocumentContentRoleV2"];
-      can_manage_collaborators: boolean;
-      management_capabilities?: components["schemas"]["DocumentManagementCapabilitiesV2"];
-      general_access?: components["schemas"]["DocumentGeneralAccessV1"];
-      sources: components["schemas"]["DocumentShareSourceV2"][];
-    };
-    DocumentDirectCollaboratorCreateRequest: {
-      target_actor_id: components["schemas"]["Id"];
-      /** @enum {string} */
-      role: "viewer" | "editor" | "manager";
-    };
     /** @enum {string} */
     DocumentAgentMentionRelationshipV1: "sponsor" | "ordinary_direct";
     DocumentAgentMentionCandidateV1: {
@@ -7721,16 +7514,6 @@ export interface components {
     DocumentAgentMentionCandidatePageV1: {
       items: components["schemas"]["DocumentAgentMentionCandidateV1"][];
       page: components["schemas"]["PageMeta"];
-    };
-    DocumentDirectCollaboratorUpdateRequest: {
-      /** Format: int64 */
-      expected_version: number;
-      /** @enum {string} */
-      role: "viewer" | "editor" | "manager";
-    };
-    DocumentDirectCollaboratorRevokeRequest: {
-      /** Format: int64 */
-      expected_version: number;
     };
     DocumentRoomBindingRemoveRequest: {
       /** Format: int64 */
@@ -7758,8 +7541,6 @@ export interface components {
       page: components["schemas"]["PageMeta"];
     };
     DocumentVersionUploadRequest: {
-      /** @description Optional editor capability; revalidated on every write and replay, without creating an Actor grant. */
-      link_token?: string;
       expected_current_version_id: components["schemas"]["Id"];
       filename: string;
       representation_format: string;
@@ -8641,31 +8422,6 @@ export interface components {
       };
       content: {
         "application/json": components["schemas"]["VoiceProviderKeyErrorResponse"];
-      };
-    };
-    /** @description Rejected or retryable file operation. Native latest changed throughout bounded rendering retries returns 202 with latest_not_ready, private/no-store and no document bytes. Retry after one second. Other conflicts include current and base version IDs. Service failures and exhausted serialization retries remain unavailable. */
-    FileError: {
-      headers: {
-        /** @description Retry delay in seconds, provided for 202 latest_not_ready. */
-        "Retry-After"?: number;
-        [name: string]: unknown;
-      };
-      content: {
-        "application/json": {
-          error: {
-            code: string;
-            message: string;
-            current_version_id?: string;
-            base_version_id?: string;
-            details?: {
-              /**
-               * Format: int32
-               * @description Advisory delay for latest_not_ready.
-               */
-              retry_after_seconds: number;
-            };
-          };
-        };
       };
     };
   };
@@ -13048,91 +12804,6 @@ export interface operations {
       503: components["responses"]["ServiceUnavailable"];
     };
   };
-  getDocumentLinkShare: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Current policy, including a revoked policy. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentLinkShare"];
-        };
-      };
-      401: components["responses"]["Unauthenticated"];
-      403: components["responses"]["Forbidden"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  setDocumentLinkShare: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["SetDocumentLinkShare"];
-      };
-    };
-    responses: {
-      /** @description Committed policy. A new token is returned only on creation or reset. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentLinkShare"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      403: components["responses"]["Forbidden"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
-    };
-  };
-  revokeDocumentLinkShare: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["RevokeDocumentLinkShare"];
-      };
-    };
-    responses: {
-      /** @description Link revoked. */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      403: components["responses"]["Forbidden"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
-    };
-  };
   listRoomHistoryShares: {
     parameters: {
       query?: never;
@@ -13309,118 +12980,6 @@ export interface operations {
       409: components["responses"]["Conflict"];
     };
   };
-  resolveDocumentLinkShare: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ResolveDocumentLinkShare"];
-      };
-    };
-    responses: {
-      /** @description Current link access. Content operations must revalidate the token. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentLinkAccess"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  downloadSharedDocument: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ResolveDocumentLinkShare"];
-      };
-    };
-    responses: {
-      /** @description Current file bytes; native Documents are exported as read-only Markdown. */
-      200: {
-        headers: {
-          "X-Document-Id"?: string;
-          "X-Document-Version-Id"?: string;
-          "X-Document-Filename"?: string;
-          "X-Document-Representation-Format"?: string;
-          "X-Document-Read-Only"?: boolean;
-          "X-Content-Sha256"?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/octet-stream": string;
-        };
-      };
-      202: components["responses"]["FileError"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  getDocumentShareView: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Caller-scoped Share view. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentShareViewV2"];
-        };
-      };
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  createDocumentDirectCollaborator: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["DocumentDirectCollaboratorCreateRequest"];
-      };
-    };
-    responses: {
-      /** @description Direct collaborator source created or exactly replayed. */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentAccessSourceV2"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
-    };
-  };
   listDocumentAgentMentionCandidates: {
     parameters: {
       query?: {
@@ -13446,68 +13005,6 @@ export interface operations {
       };
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
-    };
-  };
-  updateDocumentDirectCollaborator: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-        sourceId: components["schemas"]["Id"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["DocumentDirectCollaboratorUpdateRequest"];
-      };
-    };
-    responses: {
-      /** @description Direct collaborator source updated or exactly replayed. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentAccessSourceV2"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
-    };
-  };
-  revokeDocumentDirectCollaborator: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["DocumentId"];
-        sourceId: components["schemas"]["Id"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["DocumentDirectCollaboratorRevokeRequest"];
-      };
-    };
-    responses: {
-      /** @description Direct collaborator source revoked or exactly replayed. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentAccessSourceV2"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
     };
   };
   removeDocumentFromRoom: {

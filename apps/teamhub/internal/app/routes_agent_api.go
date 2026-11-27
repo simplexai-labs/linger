@@ -85,7 +85,5 @@ func (a *App) agentFileRoutes() []contractRoute {
 		route(http.MethodGet, "/api/agent/v1/files/:documentId/assets/:assetId/content", nil, a.publicDownloadAgentCLIDocumentAsset),
 		route(http.MethodPost, "/api/agent/v1/files/:documentId/body", teamhubagentapi.PublicReplaceAgentCLIDocumentBodyParams{}, a.publicReplaceAgentCLIDocumentBody),
 		route(http.MethodGet, "/api/agent/v1/files/:documentId/content", teamhubagentapi.PublicDownloadAgentCLIFileParams{}, a.publicDownloadAgentCLIFile),
-		route(http.MethodPost, "/api/agent/v1/files/:documentId/link-share", nil, a.publicManageAgentCLIFileLink),
-		route(http.MethodPost, "/api/agent/v1/files/:documentId/share", nil, a.publicShareAgentCLIFile),
 	}
 }

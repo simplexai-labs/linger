@@ -879,9 +879,6 @@ function installSeedRoutes(server: TeamHubTestServer, seed: TeamHubTestSeed) {
           headers: { "content-type": "text/html" },
         }),
     )
-    .on("GET", "/v0/documents/{documentId}/link-share", () =>
-      notFound("DOCUMENT_LINK_SHARE_NOT_FOUND"),
-    )
     .on("GET", "/v0/documents/{documentId}/comment-threads", () => page([]))
     .on("GET", "/v0/documents/{documentId}/agent-mention-candidates", () =>
       page([]),

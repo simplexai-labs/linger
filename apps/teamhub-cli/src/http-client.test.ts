@@ -232,7 +232,7 @@ describe("direct TeamHub HTTP client", () => {
       },
     });
   });
-  it("sends configured identity assertions and the Run to the credential authority and keeps shared links anonymous", async () => {
+  it("sends configured identity assertions and the Run to the credential authority", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockImplementation(async () => Response.json({ accepted: true }));
@@ -253,17 +253,5 @@ describe("direct TeamHub HTTP client", () => {
       "tenant_one",
     );
     expect(authenticated.get("x-teamhub-run-id")).toBe("run_one");
-    await client.request("/v0/shared-documents/content", {
-      method: "POST",
-      body: JSON.stringify({ token: "doc_link_fixture" }),
-    });
-    const anonymous = new Headers(fetcher.mock.calls[1]![1]!.headers);
-    for (const key of [
-      "authorization",
-      "x-teamhub-context-id",
-      "x-teamhub-expected-agent-id",
-      "x-teamhub-run-id",
-    ])
-      expect(anonymous.has(key)).toBe(false);
   });
 });

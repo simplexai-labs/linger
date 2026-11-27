@@ -155,18 +155,6 @@ describe("document command syntax", () => {
       parseDomainCommand(args, { cwd: "/workspace" }),
     ).rejects.toThrow();
   });
-  it("accepts a capability URL as an opaque document reference", async () => {
-    const url = `https://example.test/shared-documents#doc_link_${"a".repeat(43)}`;
-    const cwd = await workspace();
-    const parsed = await parseDomainCommand(
-      ["docs", "get", url, "-o", "report.txt"],
-      { cwd },
-    );
-    expect(parsed.body.input).toEqual({
-      name: url,
-      target_path: path.join(cwd, "report.txt"),
-    });
-  });
 });
 describe("standalone file CLI output", () => {
   it("labels the Windows save commands with their required shells", async () => {

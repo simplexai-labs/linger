@@ -1,6 +1,5 @@
 import {
   Comment01Icon,
-  Share08Icon,
   ArrowDown01Icon,
   PencilEdit01Icon,
   SidebarLeftIcon,
@@ -89,7 +88,6 @@ export function UnifiedDocumentPageHeader({
     setHeadings,
     setHistoryOpen,
     setIsEditing,
-    setShareOpen,
     setTocOpen,
     setTrashConfirmOpen,
     setTreeOpen,
@@ -130,7 +128,6 @@ export function UnifiedDocumentPageHeader({
       onExport={() => void exportDocument()}
       onHistory={() => setHistoryOpen(true)}
       onOpenTree={() => setTreeOpen(!treeOpen)}
-      onShare={() => setShareOpen(true)}
       onToc={() =>
         setTocOpen((value) => {
           const next = !value;
@@ -198,7 +195,6 @@ function UnifiedDocumentHeader({
   onExport,
   onHistory,
   onOpenTree,
-  onShare,
   onToc,
   presence,
   session,
@@ -227,7 +223,6 @@ function UnifiedDocumentHeader({
   onExport: () => void;
   onHistory: () => void;
   onOpenTree: () => void;
-  onShare: () => void;
   onToc: () => void;
   presence?: ReactNode;
   session: RoomDocumentCollaborationSession | null;
@@ -287,17 +282,6 @@ function UnifiedDocumentHeader({
         </span>
       ) : !isWikiPage ? (
         presence
-      ) : null}
-      {document && !isWikiPage ? (
-        <Button
-          aria-label={t(m.share)}
-          size="compactIcon"
-          onClick={onShare}
-          title={t(m.share)}
-          tone="ghost"
-        >
-          <Icon icon={Share08Icon} />
-        </Button>
       ) : null}
 
       {!sidebar &&

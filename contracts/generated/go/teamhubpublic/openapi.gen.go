@@ -1364,48 +1364,6 @@ func (e DocumentCreateRequestRepresentationFormat) Valid() bool {
 	}
 }
 
-// Defines values for DocumentDirectCollaboratorCreateRequestRole.
-const (
-	DocumentDirectCollaboratorCreateRequestRoleEditor  DocumentDirectCollaboratorCreateRequestRole = "editor"
-	DocumentDirectCollaboratorCreateRequestRoleManager DocumentDirectCollaboratorCreateRequestRole = "manager"
-	DocumentDirectCollaboratorCreateRequestRoleViewer  DocumentDirectCollaboratorCreateRequestRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the DocumentDirectCollaboratorCreateRequestRole enum.
-func (e DocumentDirectCollaboratorCreateRequestRole) Valid() bool {
-	switch e {
-	case DocumentDirectCollaboratorCreateRequestRoleEditor:
-		return true
-	case DocumentDirectCollaboratorCreateRequestRoleManager:
-		return true
-	case DocumentDirectCollaboratorCreateRequestRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DocumentDirectCollaboratorUpdateRequestRole.
-const (
-	DocumentDirectCollaboratorUpdateRequestRoleEditor  DocumentDirectCollaboratorUpdateRequestRole = "editor"
-	DocumentDirectCollaboratorUpdateRequestRoleManager DocumentDirectCollaboratorUpdateRequestRole = "manager"
-	DocumentDirectCollaboratorUpdateRequestRoleViewer  DocumentDirectCollaboratorUpdateRequestRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the DocumentDirectCollaboratorUpdateRequestRole enum.
-func (e DocumentDirectCollaboratorUpdateRequestRole) Valid() bool {
-	switch e {
-	case DocumentDirectCollaboratorUpdateRequestRoleEditor:
-		return true
-	case DocumentDirectCollaboratorUpdateRequestRoleManager:
-		return true
-	case DocumentDirectCollaboratorUpdateRequestRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DocumentHistoryCheckpointStatus.
 const (
 	DocumentHistoryCheckpointStatusCompleted DocumentHistoryCheckpointStatus = "completed"
@@ -1469,24 +1427,6 @@ func (e DocumentHistoryTrigger) Valid() bool {
 	}
 }
 
-// Defines values for DocumentLinkAccessRole.
-const (
-	DocumentLinkAccessRoleEditor DocumentLinkAccessRole = "editor"
-	DocumentLinkAccessRoleViewer DocumentLinkAccessRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the DocumentLinkAccessRole enum.
-func (e DocumentLinkAccessRole) Valid() bool {
-	switch e {
-	case DocumentLinkAccessRoleEditor:
-		return true
-	case DocumentLinkAccessRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DocumentLinkScopeV2.
 const (
 	DocumentLinkScopeV2AnyoneWithLink DocumentLinkScopeV2 = "anyone_with_link"
@@ -1508,57 +1448,21 @@ func (e DocumentLinkScopeV2) Valid() bool {
 	}
 }
 
-// Defines values for DocumentLinkShareRole.
-const (
-	DocumentLinkShareRoleEditor DocumentLinkShareRole = "editor"
-	DocumentLinkShareRoleViewer DocumentLinkShareRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the DocumentLinkShareRole enum.
-func (e DocumentLinkShareRole) Valid() bool {
-	switch e {
-	case DocumentLinkShareRoleEditor:
-		return true
-	case DocumentLinkShareRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DocumentLinkShareStatus.
-const (
-	DocumentLinkShareStatusActive  DocumentLinkShareStatus = "active"
-	DocumentLinkShareStatusRevoked DocumentLinkShareStatus = "revoked"
-)
-
-// Valid indicates whether the value is a known member of the DocumentLinkShareStatus enum.
-func (e DocumentLinkShareStatus) Valid() bool {
-	switch e {
-	case DocumentLinkShareStatusActive:
-		return true
-	case DocumentLinkShareStatusRevoked:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DocumentRoomBindingResultV1Role.
 const (
-	DocumentRoomBindingResultV1RoleEditor  DocumentRoomBindingResultV1Role = "editor"
-	DocumentRoomBindingResultV1RoleManager DocumentRoomBindingResultV1Role = "manager"
-	DocumentRoomBindingResultV1RoleViewer  DocumentRoomBindingResultV1Role = "viewer"
+	Editor  DocumentRoomBindingResultV1Role = "editor"
+	Manager DocumentRoomBindingResultV1Role = "manager"
+	Viewer  DocumentRoomBindingResultV1Role = "viewer"
 )
 
 // Valid indicates whether the value is a known member of the DocumentRoomBindingResultV1Role enum.
 func (e DocumentRoomBindingResultV1Role) Valid() bool {
 	switch e {
-	case DocumentRoomBindingResultV1RoleEditor:
+	case Editor:
 		return true
-	case DocumentRoomBindingResultV1RoleManager:
+	case Manager:
 		return true
-	case DocumentRoomBindingResultV1RoleViewer:
+	case Viewer:
 		return true
 	default:
 		return false
@@ -1628,51 +1532,6 @@ func (e DocumentSegmentPresentation) Valid() bool {
 	case DocumentSegmentPresentationCard:
 		return true
 	case DocumentSegmentPresentationInline:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DocumentShareSourceV2CallerAccessState.
-const (
-	Inactive  DocumentShareSourceV2CallerAccessState = "inactive"
-	NotCaller DocumentShareSourceV2CallerAccessState = "not_caller"
-	Remaining DocumentShareSourceV2CallerAccessState = "remaining"
-	Winning   DocumentShareSourceV2CallerAccessState = "winning"
-)
-
-// Valid indicates whether the value is a known member of the DocumentShareSourceV2CallerAccessState enum.
-func (e DocumentShareSourceV2CallerAccessState) Valid() bool {
-	switch e {
-	case Inactive:
-		return true
-	case NotCaller:
-		return true
-	case Remaining:
-		return true
-	case Winning:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DocumentShareSourceV2SourceGroup.
-const (
-	DocumentShareSourceV2SourceGroupContext DocumentShareSourceV2SourceGroup = "context"
-	DocumentShareSourceV2SourceGroupDirect  DocumentShareSourceV2SourceGroup = "direct"
-	DocumentShareSourceV2SourceGroupLink    DocumentShareSourceV2SourceGroup = "link"
-)
-
-// Valid indicates whether the value is a known member of the DocumentShareSourceV2SourceGroup enum.
-func (e DocumentShareSourceV2SourceGroup) Valid() bool {
-	switch e {
-	case DocumentShareSourceV2SourceGroupContext:
-		return true
-	case DocumentShareSourceV2SourceGroupDirect:
-		return true
-	case DocumentShareSourceV2SourceGroupLink:
 		return true
 	default:
 		return false
@@ -3695,24 +3554,6 @@ func (e SearchKeyDecisionViewReason) Valid() bool {
 	}
 }
 
-// Defines values for SetDocumentLinkShareRole.
-const (
-	Editor SetDocumentLinkShareRole = "editor"
-	Viewer SetDocumentLinkShareRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the SetDocumentLinkShareRole enum.
-func (e SetDocumentLinkShareRole) Valid() bool {
-	switch e {
-	case Editor:
-		return true
-	case Viewer:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for SkillManifestAccessScope.
 const (
 	SkillManifestAccessScopeOwner    SkillManifestAccessScope = "owner"
@@ -4648,22 +4489,22 @@ func (e WorkItemPriority) Valid() bool {
 
 // Defines values for WorkItemResolution.
 const (
-	Completed  WorkItemResolution = "completed"
-	Duplicate  WorkItemResolution = "duplicate"
-	Failed     WorkItemResolution = "failed"
-	NotPlanned WorkItemResolution = "not_planned"
+	WorkItemResolutionCompleted  WorkItemResolution = "completed"
+	WorkItemResolutionDuplicate  WorkItemResolution = "duplicate"
+	WorkItemResolutionFailed     WorkItemResolution = "failed"
+	WorkItemResolutionNotPlanned WorkItemResolution = "not_planned"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemResolution enum.
 func (e WorkItemResolution) Valid() bool {
 	switch e {
-	case Completed:
+	case WorkItemResolutionCompleted:
 		return true
-	case Duplicate:
+	case WorkItemResolutionDuplicate:
 		return true
-	case Failed:
+	case WorkItemResolutionFailed:
 		return true
-	case NotPlanned:
+	case WorkItemResolutionNotPlanned:
 		return true
 	default:
 		return false
@@ -6204,31 +6045,6 @@ type DocumentCreateRequest struct {
 // DocumentCreateRequestRepresentationFormat User-facing representation for the native BlockNote Draft. Defaults to markdown.
 type DocumentCreateRequestRepresentationFormat string
 
-// DocumentDirectCollaboratorCreateRequest defines model for DocumentDirectCollaboratorCreateRequest.
-type DocumentDirectCollaboratorCreateRequest struct {
-	Role DocumentDirectCollaboratorCreateRequestRole `json:"role"`
-
-	// TargetActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	TargetActorId Id `json:"target_actor_id"`
-}
-
-// DocumentDirectCollaboratorCreateRequestRole defines model for DocumentDirectCollaboratorCreateRequest.Role.
-type DocumentDirectCollaboratorCreateRequestRole string
-
-// DocumentDirectCollaboratorRevokeRequest defines model for DocumentDirectCollaboratorRevokeRequest.
-type DocumentDirectCollaboratorRevokeRequest struct {
-	ExpectedVersion int64 `json:"expected_version"`
-}
-
-// DocumentDirectCollaboratorUpdateRequest defines model for DocumentDirectCollaboratorUpdateRequest.
-type DocumentDirectCollaboratorUpdateRequest struct {
-	ExpectedVersion int64                                       `json:"expected_version"`
-	Role            DocumentDirectCollaboratorUpdateRequestRole `json:"role"`
-}
-
-// DocumentDirectCollaboratorUpdateRequestRole defines model for DocumentDirectCollaboratorUpdateRequest.Role.
-type DocumentDirectCollaboratorUpdateRequestRole string
-
 // DocumentDraftTitleUpdateRequest defines model for DocumentDraftTitleUpdateRequest.
 type DocumentDraftTitleUpdateRequest struct {
 	Title string `json:"title"`
@@ -6246,13 +6062,6 @@ type DocumentFolderCreateRequest struct {
 
 	// ParentId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	ParentId *Id `json:"parent_id,omitempty"`
-}
-
-// DocumentGeneralAccessV1 defines model for DocumentGeneralAccessV1.
-type DocumentGeneralAccessV1 struct {
-	// CanonicalUrl Stable Product Client URL. Reading or copying it never mutates authorization state.
-	CanonicalUrl string              `json:"canonical_url"`
-	Scope        DocumentLinkScopeV2 `json:"scope"`
 }
 
 // DocumentHistoryCheckpoint defines model for DocumentHistoryCheckpoint.
@@ -6318,48 +6127,8 @@ type DocumentHistoryRestoreResultStatus string
 // DocumentHistoryTrigger defines model for DocumentHistoryTrigger.
 type DocumentHistoryTrigger string
 
-// DocumentLinkAccess defines model for DocumentLinkAccess.
-type DocumentLinkAccess struct {
-	DocumentId string                 `json:"document_id"`
-	LinkId     string                 `json:"link_id"`
-	Role       DocumentLinkAccessRole `json:"role"`
-	TenantId   string                 `json:"tenant_id"`
-	Version    int64                  `json:"version"`
-}
-
-// DocumentLinkAccessRole defines model for DocumentLinkAccess.Role.
-type DocumentLinkAccessRole string
-
 // DocumentLinkScopeV2 defines model for DocumentLinkScopeV2.
 type DocumentLinkScopeV2 string
-
-// DocumentLinkShare defines model for DocumentLinkShare.
-type DocumentLinkShare struct {
-	DocumentId string                  `json:"document_id"`
-	Id         string                  `json:"id"`
-	Role       DocumentLinkShareRole   `json:"role"`
-	Status     DocumentLinkShareStatus `json:"status"`
-
-	// Token Returned only on creation or reset. Never persisted as plaintext.
-	Token *string `json:"token,omitempty"`
-
-	// Url Public Web URL with the capability in its fragment; returned only with a new token.
-	Url     *string `json:"url,omitempty"`
-	Version int64   `json:"version"`
-}
-
-// DocumentLinkShareRole defines model for DocumentLinkShare.Role.
-type DocumentLinkShareRole string
-
-// DocumentLinkShareStatus defines model for DocumentLinkShare.Status.
-type DocumentLinkShareStatus string
-
-// DocumentManagementCapabilitiesV2 defines model for DocumentManagementCapabilitiesV2.
-type DocumentManagementCapabilitiesV2 struct {
-	CanChangeOwnership      bool `json:"can_change_ownership"`
-	CanUpdateExternalPolicy bool `json:"can_update_external_policy"`
-	CanUpdateLinkPolicy     bool `json:"can_update_link_policy"`
-}
 
 // DocumentMetadataUpdateRequest defines model for DocumentMetadataUpdateRequest.
 type DocumentMetadataUpdateRequest struct {
@@ -6503,34 +6272,6 @@ type DocumentSegment struct {
 // DocumentSegmentPresentation Optional presentation intent. inline preserves an in-text @Document reference; card presents a delivered Document with the shared Human/Agent Document card; canvas presents the card and asks clients viewing the Room live to open the Document in the side panel. Omitted values remain inline for historical compatibility.
 type DocumentSegmentPresentation string
 
-// DocumentShareSourceV2 defines model for DocumentShareSourceV2.
-type DocumentShareSourceV2 struct {
-	// CallerAccessState Explains whether this source currently determines or still contributes to the caller's effective role.
-	CallerAccessState *DocumentShareSourceV2CallerAccessState `json:"caller_access_state,omitempty"`
-	Label             string                                  `json:"label"`
-	Source            DocumentAccessSourceV2                  `json:"source"`
-
-	// SourceGroup Stable Share panel group for this provenance source.
-	SourceGroup *DocumentShareSourceV2SourceGroup `json:"source_group,omitempty"`
-	TargetActor *ActorRef                         `json:"target_actor,omitempty"`
-}
-
-// DocumentShareSourceV2CallerAccessState Explains whether this source currently determines or still contributes to the caller's effective role.
-type DocumentShareSourceV2CallerAccessState string
-
-// DocumentShareSourceV2SourceGroup Stable Share panel group for this provenance source.
-type DocumentShareSourceV2SourceGroup string
-
-// DocumentShareViewV2 defines model for DocumentShareViewV2.
-type DocumentShareViewV2 struct {
-	CallerContentRole      DocumentContentRoleV2             `json:"caller_content_role"`
-	CanManageCollaborators bool                              `json:"can_manage_collaborators"`
-	GeneralAccess          *DocumentGeneralAccessV1          `json:"general_access,omitempty"`
-	ManagementCapabilities *DocumentManagementCapabilitiesV2 `json:"management_capabilities,omitempty"`
-	SchemaVersion          int                               `json:"schema_version"`
-	Sources                []DocumentShareSourceV2           `json:"sources"`
-}
-
 // DocumentStateBytes defines model for DocumentStateBytes.
 type DocumentStateBytes = string
 
@@ -6610,13 +6351,10 @@ type DocumentVersionUploadRequest struct {
 	Content openapi_types.File `json:"content"`
 
 	// ExpectedCurrentVersionId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	ExpectedCurrentVersionId Id     `json:"expected_current_version_id"`
-	Filename                 string `json:"filename"`
-
-	// LinkToken Optional editor capability; revalidated on every write and replay, without creating an Actor grant.
-	LinkToken            *string `json:"link_token,omitempty"`
-	MediaType            *string `json:"media_type,omitempty"`
-	RepresentationFormat string  `json:"representation_format"`
+	ExpectedCurrentVersionId Id      `json:"expected_current_version_id"`
+	Filename                 string  `json:"filename"`
+	MediaType                *string `json:"media_type,omitempty"`
+	RepresentationFormat     string  `json:"representation_format"`
 }
 
 // Error defines model for Error.
@@ -8325,16 +8063,6 @@ type ReferenceSegment struct {
 // ReferenceSegmentTargetType user references a Human Actor; agent references an Agent Actor.
 type ReferenceSegmentTargetType string
 
-// ResolveDocumentLinkShare defines model for ResolveDocumentLinkShare.
-type ResolveDocumentLinkShare struct {
-	Token string `json:"token"`
-}
-
-// RevokeDocumentLinkShare defines model for RevokeDocumentLinkShare.
-type RevokeDocumentLinkShare struct {
-	ExpectedVersion int64 `json:"expected_version"`
-}
-
 // Room A member-scoped collaboration space. Current Room members can read the complete Room history, including data committed before they joined. Non-members and callers from another Tenant receive the same not-found response even if they know the Room ID.
 type Room struct {
 	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
@@ -9037,16 +8765,6 @@ type Session struct {
 	Id       Id              `json:"id"`
 	Identity CurrentIdentity `json:"identity"`
 }
-
-// SetDocumentLinkShare defines model for SetDocumentLinkShare.
-type SetDocumentLinkShare struct {
-	ExpectedVersion int64                    `json:"expected_version"`
-	Reset           *bool                    `json:"reset,omitempty"`
-	Role            SetDocumentLinkShareRole `json:"role"`
-}
-
-// SetDocumentLinkShareRole defines model for SetDocumentLinkShare.Role.
-type SetDocumentLinkShareRole string
 
 // SetExternalConnectionAgentAccessRequest defines model for SetExternalConnectionAgentAccessRequest.
 type SetExternalConnectionAgentAccessRequest struct {
@@ -10370,20 +10088,6 @@ type BadRequest = ErrorResponse
 // Conflict defines model for Conflict.
 type Conflict = ErrorResponse
 
-// FileError defines model for FileError.
-type FileError struct {
-	Error struct {
-		BaseVersionId    *string `json:"base_version_id,omitempty"`
-		Code             string  `json:"code"`
-		CurrentVersionId *string `json:"current_version_id,omitempty"`
-		Details          *struct {
-			// RetryAfterSeconds Advisory delay for latest_not_ready.
-			RetryAfterSeconds int32 `json:"retry_after_seconds"`
-		} `json:"details,omitempty"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
 // Forbidden defines model for Forbidden.
 type Forbidden = ErrorResponse
 
@@ -10885,15 +10589,6 @@ type UpdateDocumentMetadataJSONRequestBody = DocumentMetadataUpdateRequest
 // PlanRoomDocumentAssetJSONRequestBody defines body for PlanRoomDocumentAsset for application/json ContentType.
 type PlanRoomDocumentAssetJSONRequestBody = DocumentAssetUploadRequest
 
-// CreateDocumentDirectCollaboratorJSONRequestBody defines body for CreateDocumentDirectCollaborator for application/json ContentType.
-type CreateDocumentDirectCollaboratorJSONRequestBody = DocumentDirectCollaboratorCreateRequest
-
-// UpdateDocumentDirectCollaboratorJSONRequestBody defines body for UpdateDocumentDirectCollaborator for application/json ContentType.
-type UpdateDocumentDirectCollaboratorJSONRequestBody = DocumentDirectCollaboratorUpdateRequest
-
-// RevokeDocumentDirectCollaboratorJSONRequestBody defines body for RevokeDocumentDirectCollaborator for application/json ContentType.
-type RevokeDocumentDirectCollaboratorJSONRequestBody = DocumentDirectCollaboratorRevokeRequest
-
 // CreateRoomDocumentCommentThreadJSONRequestBody defines body for CreateRoomDocumentCommentThread for application/json ContentType.
 type CreateRoomDocumentCommentThreadJSONRequestBody = DocumentCommentThreadCreateRequest
 
@@ -10902,12 +10597,6 @@ type UpdateDocumentDraftTitleJSONRequestBody = DocumentDraftTitleUpdateRequest
 
 // DuplicateDocumentJSONRequestBody defines body for DuplicateDocument for application/json ContentType.
 type DuplicateDocumentJSONRequestBody = DocumentDuplicateRequest
-
-// RevokeDocumentLinkShareJSONRequestBody defines body for RevokeDocumentLinkShare for application/json ContentType.
-type RevokeDocumentLinkShareJSONRequestBody = RevokeDocumentLinkShare
-
-// SetDocumentLinkShareJSONRequestBody defines body for SetDocumentLinkShare for application/json ContentType.
-type SetDocumentLinkShareJSONRequestBody = SetDocumentLinkShare
 
 // SendMailCanvasJSONRequestBody defines body for SendMailCanvas for application/json ContentType.
 type SendMailCanvasJSONRequestBody = SendMailCanvasRequest
@@ -10992,12 +10681,6 @@ type CreateVoiceSessionJSONRequestBody = VoiceSessionCreateRequest
 
 // UpdateRoutineJSONRequestBody defines body for UpdateRoutine for application/json ContentType.
 type UpdateRoutineJSONRequestBody = RoutineUpdateRequest
-
-// DownloadSharedDocumentJSONRequestBody defines body for DownloadSharedDocument for application/json ContentType.
-type DownloadSharedDocumentJSONRequestBody = ResolveDocumentLinkShare
-
-// ResolveDocumentLinkShareJSONRequestBody defines body for ResolveDocumentLinkShare for application/json ContentType.
-type ResolveDocumentLinkShareJSONRequestBody = ResolveDocumentLinkShare
 
 // ReadRoomHistoryShareAssetJSONRequestBody defines body for ReadRoomHistoryShareAsset for application/json ContentType.
 type ReadRoomHistoryShareAssetJSONRequestBody = ReadRoomHistoryShare

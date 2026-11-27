@@ -303,7 +303,7 @@ describe("Agent Run wire contracts", () => {
           ]);
         }
     }
-    expect(cliFileOperations).toBe(7);
+    expect(cliFileOperations).toBe(5);
   });
   it("keeps only TeamHub cancellation inside Agent management", () => {
     expect(nodeServicesInternal.paths).not.toHaveProperty(

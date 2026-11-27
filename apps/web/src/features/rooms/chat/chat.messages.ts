@@ -25,6 +25,8 @@ export const chatMessages = defineMessages("chat", {
   fileUnavailable: "{name} is unavailable",
   loadingFile: "Loading {name}",
   loadingImage: "Loading image...",
+  downloadFileFailed: "Could not download {name}",
+  imageViewer: "Image {name}",
   fileCount: { one: "{count} file", other: "{count} files" },
   folderCount: { one: "{count} folder", other: "{count} folders" },
   fileTypeArchive: "Archive",

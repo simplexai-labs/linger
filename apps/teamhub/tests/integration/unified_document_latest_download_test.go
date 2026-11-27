@@ -172,13 +172,6 @@ func TestUnifiedDocumentLatestDownloadRendersAndRepairsExactNativeProjection(t *
 	if repairedBytes, err := os.ReadFile(filepath.Join(objectRoot, rebuilt.ObjectKey)); err != nil || string(repairedBytes) != "# Native projection\n" {
 		t.Fatalf("repaired projection bytes=%q error=%v", repairedBytes, err)
 	}
-	link, err := service.SetLinkShare(ctx, document.SetLinkShareInput{
-		Principal:  document.LinkSharePrincipal{AccountID: input.AccountID},
-		DocumentID: input.DocumentID, Role: "viewer",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, failure := range []string{"corrupt", "missing"} {
 		if failure == "corrupt" {
 			err = os.WriteFile(filepath.Join(objectRoot, rebuilt.ObjectKey), []byte("corrupt again"), 0o600)
@@ -188,7 +181,7 @@ func TestUnifiedDocumentLatestDownloadRendersAndRepairsExactNativeProjection(t *
 		if err != nil {
 			t.Fatal(err)
 		}
-		if downloaded, err := service.DownloadLinkFile(ctx, link.Token); err != nil || !downloaded.ReadOnly || downloaded.SHA256 != rebuilt.SHA256 {
+		if downloaded, err := service.DownloadAgentFileAs(ctx, "tenant_document_a", "agent_document_a", input.DocumentID, "markdown"); err != nil || !downloaded.ReadOnly || downloaded.SHA256 != rebuilt.SHA256 {
 			t.Fatalf("CLI repaired native download=%+v error=%v", downloaded, err)
 		}
 	}

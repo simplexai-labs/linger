@@ -13,8 +13,8 @@ Reuse those assertions before adding manual variants.
 **Journey:** Open a native Document (writable active Documents open in Edit mode by default; confirm or switch via `Document mode`) and add a unique marker.
 Wait for Saved, then read the same Document in a fresh browser context.
 When entry paths are affected, also open it from a Room attachment, the Room sidebar `Documents` launcher (`Files` tab; `UnifiedDocumentSidebar` hides `Comments` and `Table of contents`), and `Library`.
-Use two browser sessions of the Space's Human account for concurrent-edit and comment visibility checks (each Space has one Human; `DocumentShareDialog` invites Agents only).
-Exercise read-only and denied boundaries on Wiki pages, sent Gmail canvases, anonymous links, trashed Documents, revoked Agent credentials, or foreign Spaces.
+Use two browser sessions of the Space's Human account for concurrent-edit and comment visibility checks (each Space has one Human).
+Exercise read-only and denied boundaries on Wiki pages, sent Gmail canvases, trashed Documents, revoked Agent credentials, or foreign Spaces.
 
 **Pass:** Both sessions read the intended persisted content under the same Document identity.
 Comments attach to the intended selection and appear in the other session.
@@ -71,15 +71,14 @@ Use [permission decisions](tasks.md#runtime-permission-decisions) if the action 
 Existing attachment E2E covers user opening and preview.
 The additional Agent journey connects those boundaries and evaluates output usefulness.
 
-### Agent Document access and share notices
+### Agent Document access
 
-Use an active Agent and an ordinary, never-shared native Document in its Human's Space. Ask it to read a unique fact and save a unique edit without an approval card. Reopen the Document from a fresh browser session. Verify the revision and actual body.
+Use an active Agent and an ordinary native Document in its Human's Space. Ask it to read a unique fact and save a unique edit without an approval card. Reopen the Document from a fresh browser session. Verify the revision and actual body.
 Compare the target's membership in `teamhub docs list --json` and `teamhub docs list --shared --json`; other shared Documents may already exist.
-Share the Document with the Agent from the Human's Share panel. Correlate the share with one hidden mention in the Human–Agent direct Room and its wake. The notice changes the shared filter, not the Agent's owner role or the permission count.
-Revoke the share. The target disappears from the shared filter; the Agent still edits it. Verify append and targeted text replacement separately: one successful edit command does not cover another command that returned an error. Include a Document with an attached comment: append must retain the original text, comment thread and selected quote. Reopen it in a fresh browser and verify both the appended paragraph and the original comment. Separately check that removing a Room binding or Task assignment does not withdraw Document access.
-Try an ordinary Agent edit on a published Wiki page: it must not persist. The staging generator is a separate exception. With a revoked credential, a trashed Document and a foreign Space, assert rejection without disclosing content. Test anonymous link revocation separately.
-Record source, revision, principal, share, notice and Run IDs; distinguish database-backed permission tests from real Agent and browser evidence.
-Reuse `TestAgentEditsEveryDocumentItsHumanEdits`, `TestAgentListsEveryDocumentAndSeesWhatWasSharedWithIt` and `TestUnifiedDocumentDirectAgentRolesLeaveAgentAccess`.
+Verify append and targeted text replacement separately: one successful edit command does not cover another command that returned an error. Include a Document with an attached comment: append must retain the original text, comment thread and selected quote. Reopen it in a fresh browser and verify both the appended paragraph and the original comment. Separately check that removing a Room binding or Task assignment does not withdraw Document access.
+Try an ordinary Agent edit on a published Wiki page: it must not persist. The staging generator is a separate exception. With a revoked credential, a trashed Document and a foreign Space, assert rejection without disclosing content.
+Record source, revision, principal and Run IDs; distinguish database-backed permission tests from real Agent and browser evidence.
+Reuse `TestAgentEditsEveryDocumentItsHumanEdits` and `TestAgentListsEveryDocumentAndSeesWhatWasSharedWithIt`.
 
 ### Comment @Agent mentions
 
@@ -106,16 +105,7 @@ separate assertions. A 201 comment response alone proves none of the latter work
 
 Reuse `TestAgentCommentMentionsHumanWithoutRecursivelyInvokingAgent`, `TestHumanDocumentCommentAgentMentionCreatesOneDocumentContextAcrossRooms`, `TestDocumentCommentMentionsRejectUndiscoverableActorWithoutSideEffects`, `TestResolvedDocumentCommentMentionNeverDispatchesAgent` and `TestHumanDocumentCommentAgentMentionRequiresExactDurableHead`.
 
-**Live evidence:** Record outcomes in the run report, not this reusable map. The tests above use a database and service stubs, not a real model. For a live result, save the @Agent comment in the browser and see that no dialog appears. Find the queued Run and the Agent's reply in the same thread. Then check that `teamhub docs list --shared --json` and the Share panel have not changed. Report test evidence and live evidence separately.
-
-### Anonymous Document links and revocation
-
-Create a link through the Document Share dialog and open it in a signed-out browser context.
-Verify the actual body and supported access level, then disable the link and repeat the anonymous read.
-A native Document exposes read-only Markdown through this route, without an editable collaboration session.
-After revocation, a fresh read must reject the old link and withhold the document body.
-Retain before/after anonymous responses and screenshots; an already downloaded copy cannot be recalled.
-Reuse `apps/web/e2e/room-document-assets.spec.ts` and `apps/teamhub/tests/integration/unified_document_link_shares_test.go`.
+**Live evidence:** Record outcomes in the run report, not this reusable map. The tests above use a database and service stubs, not a real model. For a live result, save the @Agent comment in the browser and see that no dialog appears. Find the queued Run and the Agent's reply in the same thread. Then check that `teamhub docs list --shared --json` has not changed. Report test evidence and live evidence separately.
 
 ## Canvas and Human edits
 
@@ -160,7 +150,7 @@ For a stale whole-document replacement, verify the version conflict and retained
 **Pass:** History identifies the selected revision; restoration creates the contractually required current state without erasing history.
 Comment work uses the Document's permissions, not arbitrary Room access. The answer is attached to the intended comment/Document.
 Unrelated Human changes survive; denied or conflicted changes do not silently overwrite current content.
-Revoking a share or removing a Room binding does not fence the Agent or withdraw its edit access. Revoking the Agent or trashing the Document denies fresh content access.
+Removing a Room binding does not fence the Agent or withdraw its edit access. Revoking the Agent or trashing the Document denies fresh content access.
 For a trash-access comparison, first make the Agent fetch the disposable
 Document with the current `teamhub docs get <documentId> --json` command and
 read its downloaded content. Delete it through the Human UI (`More Document actions` → `Delete` → `Delete Document?`, which notes it cannot currently be restored from the product), then request a new

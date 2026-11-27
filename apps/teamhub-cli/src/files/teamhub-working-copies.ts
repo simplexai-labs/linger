@@ -31,7 +31,6 @@ export interface TeamHubFileBase {
   readonly readOnly: boolean;
   readonly format?: "markdown" | "html" | "blocks";
   readonly historyEntryId?: string;
-  readonly linkToken?: string;
 }
 
 export interface TeamHubWorkspaceFiles {
@@ -188,11 +187,7 @@ export class TeamHubWorkingCopies {
         "invalid_input",
         "Download this Document to the supplied path before replacing it",
       );
-    if (
-      !base.readOnly ||
-      (base.format !== "html" && base.format !== "blocks") ||
-      base.linkToken
-    )
+    if (!base.readOnly || (base.format !== "html" && base.format !== "blocks"))
       throw new TeamHubFileError(
         "invalid_input",
         "Download this native Document with --format blocks before replacing its body",
@@ -328,10 +323,7 @@ const isBase = (value: unknown): value is TeamHubFileBase =>
   (value.format === undefined ||
     value.format === "markdown" ||
     value.format === "html" ||
-    value.format === "blocks") &&
-  (value.linkToken === undefined ||
-    (typeof value.linkToken === "string" &&
-      /^doc_link_[A-Za-z0-9_-]{43}$/.test(value.linkToken)));
+    value.format === "blocks");
 const baseOnly = (base: TeamHubFileBase): TeamHubFileBase => ({
   documentId: base.documentId,
   versionId: base.versionId,
@@ -340,7 +332,6 @@ const baseOnly = (base: TeamHubFileBase): TeamHubFileBase => ({
   readOnly: base.readOnly,
   ...(base.format ? { format: base.format } : {}),
   ...(base.historyEntryId ? { historyEntryId: base.historyEntryId } : {}),
-  ...(base.linkToken ? { linkToken: base.linkToken } : {}),
 });
 const sha = (content: Uint8Array) =>
   createHash("sha256").update(content).digest("hex");

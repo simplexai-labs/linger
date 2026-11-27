@@ -3,7 +3,7 @@
 - Use `pnpm --filter @linger/teamhub-cli test`, `typecheck`, and `build` for this boundary.
 - Keep the CLI independent of Agent Service, daemon, internal Runs, and MCP sessions.
 - TeamHub owns authorization and transactions; local configuration only selects identity and business defaults.
-- Call TeamHub through `client.api`, `openapi-fetch` typed by the generated `teamhub-agent-api` paths; `client.request` is only for byte transfers and the anonymous shared-link read. A new endpoint goes into the contract first.
+- Call TeamHub through `client.api`, `openapi-fetch` typed by the generated `teamhub-agent-api` paths; `client.request` is only for byte transfers. A new endpoint goes into the contract first.
 - The business zod schemas live in `src/domains`, and the host file helpers (exact reads, working copies, Skill packing) in `src/files`; nothing else consumes them, so they stay in this app.
 - Keep help and schemas local and explicit that they do not grant permission. Common commands accept stdin in one shell invocation.
 - Never discover a fresh Task input version when finishing old output. Capture immutable business revisions before work.

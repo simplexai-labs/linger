@@ -19,6 +19,7 @@ import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { FileTypeIcon } from "@/features/library/workspace-file-icon";
+import { documentFileName } from "@/features/library/document-display-name";
 import { isDocumentCardSegment } from "@/features/teamhub/teamhub-message-content";
 import type {
   TeamHubDocumentPreviewTarget,
@@ -425,6 +426,13 @@ function ConversationMessageRow({
         : { filename: attachedName }),
       disabled: attachment ? !attachment.available : false,
       documentId,
+      // A live Document saves as its exported file; a stored file keeps the
+      // name it was uploaded under.
+      downloadFilename: !metadata
+        ? attachedName
+        : metadata.format === "blocknote"
+          ? documentFileName(metadata)
+          : (metadata.version?.filename ?? attachedName),
       previewEnabled: messageFilePreview === "enabled",
       sizeBytes: attachment?.sizeBytes,
     };
@@ -522,13 +530,6 @@ function ConversationMessageRow({
           attachmentByDocument.get(block.segment.document_id)?.mediaType
         }
         onOpen={() => onOpenMessageFile(block.segment)}
-        onOpenImage={() =>
-          onOpenArtifact({
-            id: block.segment.document_id,
-            title: attachedName,
-            current_version: { id: block.segment.document_version_id },
-          })
-        }
         sourceFilename={attachedName}
         versionId={block.segment.document_version_id}
       />

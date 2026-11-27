@@ -17,7 +17,7 @@ export interface TeamHubHttpClient {
   readonly config: TeamHubConfig;
   /** JSON calls; a non-2xx response or an unreadable body throws CliError. */
   readonly api: TeamHubApi;
-  /** Byte transfers and the anonymous shared-link read the contract client does not cover. */
+  /** Byte transfers the contract client does not cover. */
   request(endpoint: string, options?: RequestInit): Promise<Response>;
 }
 
@@ -43,9 +43,8 @@ export function createTeamHubClient(
 ): TeamHubHttpClient {
   const request = async (endpoint: string, options: RequestInit = {}) => {
     const requestPath = endpoint.split("?")[0]!;
-    const sharedDocument = endpoint === "/v0/shared-documents/content";
     if (
-      (!endpoint.startsWith("/api/agent/v1/") && !sharedDocument) ||
+      !endpoint.startsWith("/api/agent/v1/") ||
       endpoint.includes("\\") ||
       endpoint.includes("#") ||
       requestPath.split("/").includes("..") ||
@@ -53,18 +52,17 @@ export function createTeamHubClient(
     )
       throw new CliError("invalid_input", "Invalid TeamHub API endpoint.");
     const headers = new Headers(options.headers);
-    if (!sharedDocument) headers.set("authorization", `Bearer ${config.token}`);
-    if (!sharedDocument && config.identity) {
+    headers.set("authorization", `Bearer ${config.token}`);
+    if (config.identity) {
       headers.set("x-teamhub-expected-tenant-id", config.identity.tenantId);
       headers.set("x-teamhub-expected-agent-id", config.identity.agentId);
     }
-    if (!sharedDocument && config.scope) {
+    if (config.scope) {
       headers.set("x-teamhub-context-kind", config.scope.kind);
       headers.set("x-teamhub-context-id", config.scope.id);
     }
     // The Run this CLI serves; TeamHub keeps it on a Message only after checking it.
-    if (!sharedDocument && config.runId)
-      headers.set("x-teamhub-run-id", config.runId);
+    if (config.runId) headers.set("x-teamhub-run-id", config.runId);
     const operationId = headers.get("x-teamhub-operation-id");
     const operationTiming =
       operationId && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(operationId)

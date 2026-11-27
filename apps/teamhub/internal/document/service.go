@@ -23,7 +23,6 @@ var (
 	ErrNotFound               = errors.New("Document not found")
 	ErrIdempotencyConflict    = errors.New("Document idempotency key reused")
 	ErrVersionConflict        = errors.New("Document current Version changed")
-	ErrCollaboratorConflict   = errors.New("Document collaborator source changed")
 	ErrRuntimeUnavailable     = errors.New("Document Runtime unavailable")
 	ErrRuntimeResultInvalid   = errors.New("Document Runtime result is invalid")
 	ErrRecoveryBudgetExceeded = errors.New("Document recovery bundle exceeds its configured limit")

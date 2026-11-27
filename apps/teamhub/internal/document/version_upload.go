@@ -17,7 +17,6 @@ import (
 )
 
 type UploadDocumentVersionInput struct {
-	LinkToken                                                       string
 	AccountID, DocumentID, ExpectedCurrentVersionID, IdempotencyKey string
 	Filename, RepresentationFormat, MediaType                       string
 	Content                                                         io.Reader
@@ -184,29 +183,11 @@ func authorizeVersionUpload(ctx context.Context, tx pgx.Tx, input UploadDocument
 	if err != nil {
 		return Document{}, err
 	}
-	if input.LinkToken == "" {
-		value, err = get(ctx, tx, input.AccountID, input.DocumentID)
-		if err == nil && !value.Capabilities.Write {
-			err = ErrNotFound
-		}
-		return value, err
+	value, err = get(ctx, tx, input.AccountID, input.DocumentID)
+	if err == nil && !value.Capabilities.Write {
+		err = ErrNotFound
 	}
-	digest, valid := linkTokenDigest(input.LinkToken)
-	if !valid {
-		return Document{}, ErrNotFound
-	}
-	var role string
-	err = tx.QueryRow(ctx, `SELECT link_share_role FROM documents WHERE id=$1 AND link_share_token_sha256=$2 AND link_share_status='active'`, input.DocumentID, digest).Scan(&role)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && role != "editor") {
-		return Document{}, ErrNotFound
-	}
-	if err != nil {
-		return Document{}, err
-	}
-	if _, err := resolveActiveHumanActorTx(ctx, tx, input.AccountID, value.TenantID); err != nil {
-		return Document{}, err
-	}
-	return value, nil
+	return value, err
 }
 
 // resolveActiveHumanActorTx returns the caller's Human Actor in the Tenant
@@ -247,9 +228,6 @@ func uploadDocumentVersionRequestHash(input UploadDocumentVersionInput, object a
 		input.DocumentID, input.ExpectedCurrentVersionID, input.Filename,
 		input.RepresentationFormat, input.MediaType, hex.EncodeToString(object.SHA256[:]),
 		strconv.FormatInt(object.Size, 10),
-	}
-	if input.LinkToken != "" {
-		parts = append(parts, input.LinkToken)
 	}
 	return sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 }

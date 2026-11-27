@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("MessageFileAttachment", () => {
-  it("shows the exact image Version in the chat and opens the sidebar without file chrome", async () => {
+  it("shows the exact image Version in the chat and enlarges it in a viewer", async () => {
     const f = await fixture();
     const getVersion = countVersionReads(f.runtime);
     const view = render(f.element());
@@ -80,12 +80,46 @@ describe("MessageFileAttachment", () => {
     expect(screen.queryByText("photo.png")).not.toBeInTheDocument();
     expect(screen.queryByText("Image")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview photo.png" }));
-    expect(f.onOpen).toHaveBeenCalledOnce();
+    expect(f.onOpen).not.toHaveBeenCalled();
+    const viewer = screen.getByRole("dialog", { name: "Image photo.png" });
+    expect(viewer.querySelector("img")).toHaveAttribute("src", "blob:photo");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(f.createUrl).toHaveBeenCalledOnce();
     expect(f.revokeUrl).not.toHaveBeenCalled();
     view.unmount();
     expect(f.revokeUrl).toHaveBeenCalledExactlyOnceWith("blob:photo");
+  });
+
+  it("downloads a file under its stored name", async () => {
+    const f = await fixture();
+    const blob = new Blob(["report"]);
+    const download = vi
+      .spyOn(f.runtime.client, "downloadLatestDocument")
+      .mockResolvedValue({ blob, mediaType: "application/pdf" });
+    const save = vi
+      .spyOn(loader, "triggerArtifactDownload")
+      .mockImplementation(() => {});
+    render(
+      f.element({
+        downloadFilename: "Q3: report.pdf",
+        filename: "Q3 report",
+        mediaType: "application/pdf",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Download Q3 report" }));
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledExactlyOnceWith(blob, "Q3- report.pdf"),
+    );
+    expect(download).toHaveBeenCalledExactlyOnceWith(f.document.id);
+  });
+
+  it("offers no download for an unavailable file", async () => {
+    const f = await fixture();
+    render(f.element({ disabled: true, mediaType: "application/pdf" }));
+    expect(
+      screen.queryByRole("button", { name: /^Download/ }),
+    ).not.toBeInTheDocument();
   });
 
   it.each([

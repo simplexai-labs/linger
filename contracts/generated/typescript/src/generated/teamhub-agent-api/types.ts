@@ -1277,42 +1277,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/agent/v1/files/{documentId}/share": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["CLIFileDocumentId"];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post: operations["publicShareAgentCLIFile"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/agent/v1/files/{documentId}/link-share": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["CLIFileDocumentId"];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post: operations["publicManageAgentCLIFileLink"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3013,39 +2977,6 @@ export interface components {
       editable: boolean;
       read_only: boolean;
       shared_with_me: boolean;
-    };
-    AgentCLIFileShare: {
-      /** @enum {string} */
-      target_kind: "room" | "actor" | "task";
-      target_id: string;
-      /** @enum {string} */
-      role: "viewer" | "editor" | "manager";
-    };
-    AgentCLIFileLinkCommand: {
-      /** @enum {string} */
-      operation: "read" | "set" | "revoke";
-      /** @enum {string} */
-      role?: "viewer" | "editor";
-      /** Format: int64 */
-      expected_version?: number;
-      reset?: boolean;
-    };
-    DocumentLinkShare: {
-      id: string;
-      document_id: string;
-      /** @enum {string} */
-      role: "viewer" | "editor";
-      /** @enum {string} */
-      status: "active" | "revoked";
-      /** Format: int64 */
-      version: number;
-      /** @description Returned only on creation or reset. Never persisted as plaintext. */
-      token?: string;
-      /**
-       * Format: uri
-       * @description Public Web URL with the capability in its fragment; returned only with a new token.
-       */
-      url?: string;
     };
   };
   responses: {
@@ -5685,65 +5616,6 @@ export interface operations {
         content: {
           "application/octet-stream": string;
         };
-      };
-      default: components["responses"]["FileError"];
-    };
-  };
-  publicShareAgentCLIFile: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["CLIFileDocumentId"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AgentCLIFileShare"];
-      };
-    };
-    responses: {
-      /** @description Target has at least the requested role. */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      default: components["responses"]["FileError"];
-    };
-  };
-  publicManageAgentCLIFileLink: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        documentId: components["parameters"]["CLIFileDocumentId"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AgentCLIFileLinkCommand"];
-      };
-    };
-    responses: {
-      /** @description Current link policy; new capabilities are returned only on create or reset. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["DocumentLinkShare"];
-        };
-      };
-      /** @description Link revoked. */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
       default: components["responses"]["FileError"];
     };

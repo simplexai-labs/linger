@@ -395,11 +395,11 @@ teamhub docs file put document_example ./proposal.pdf --after block_signature
   },
   "docs get": {
     "help": "exit 0
-teamhub docs get <name-or-id-or-link> [flags]
+teamhub docs get <name-or-id> [flags]
 Download an authorized Document working copy or export.
 
 Arguments:
-  <name-or-id-or-link>  Exact name, Document ID or supported share link.
+  <name-or-id>  Exact name or Document ID.
 
 Options:
   -o <value>  Output path; exclusive with --output.
@@ -411,7 +411,7 @@ Options:
   -h  Show help.
 ",
     "schema": "exit 2
-{"error":{"code":"usage","message":"Unknown flag --schema.","command":"docs get","details":{"issues":[{"path":"--schema","code":"unknown_field","message":"not allowed. Allowed: -o, --output, --format, --raw, --json."}],"usage":["teamhub docs get <name-or-id-or-link> [flags]"]}}}
+{"error":{"code":"usage","message":"Unknown flag --schema.","command":"docs get","details":{"issues":[{"path":"--schema","code":"unknown_field","message":"not allowed. Allowed: -o, --output, --format, --raw, --json."}],"usage":["teamhub docs get <name-or-id> [flags]"]}}}
 ",
   },
   "docs image get": {
@@ -4225,11 +4225,11 @@ Options:
   --help  Show this offline command reference.
   -h  Show help.
 
-teamhub docs get <name-or-id-or-link> [flags]
+teamhub docs get <name-or-id> [flags]
 Download an authorized Document working copy or export.
 
 Arguments:
-  <name-or-id-or-link>  Exact name, Document ID or supported share link.
+  <name-or-id>  Exact name or Document ID.
 
 Options:
   -o <value>  Output path; exclusive with --output.

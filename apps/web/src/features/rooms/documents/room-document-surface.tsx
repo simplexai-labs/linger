@@ -26,7 +26,6 @@ import { libraryMessages } from "@/features/library/library.messages";
 import { useT } from "@/i18n/use-translation";
 
 import { DocumentVersionSelectionCommentControl } from "./document-version-selection-comment-control";
-import { DocumentShareDialog } from "./document-share-dialog";
 import { documentPageMessages as m } from "./document-page.messages";
 import { UnifiedDocumentBody } from "./unified-document-body";
 import { UnifiedDocumentPageHeader } from "./unified-document-header";
@@ -110,12 +109,10 @@ function UnifiedDocumentPageView({
     historyOpen,
     isEditing,
     roomId,
-    shareOpen,
     setCommentsOpen,
     setCommentsPortalTarget,
     setHeadings,
     setHistoryOpen,
-    setShareOpen,
     setTocOpen,
     setTrashConfirmOpen,
     tenantId,
@@ -232,9 +229,7 @@ function UnifiedDocumentPageView({
           historyOpen={historyOpen}
           isWikiPage={isWikiPage}
           setHistoryOpen={setHistoryOpen}
-          setShareOpen={setShareOpen}
           setTrashConfirmOpen={setTrashConfirmOpen}
-          shareOpen={shareOpen}
           tenantId={tenantId}
           trashConfirmOpen={trashConfirmOpen}
           trashDocument={trashDocument}
@@ -283,9 +278,7 @@ function UnifiedDocumentPageDialogs({
   historyOpen,
   isWikiPage,
   setHistoryOpen,
-  setShareOpen,
   setTrashConfirmOpen,
-  shareOpen,
   tenantId,
   trashConfirmOpen,
   trashDocument,
@@ -298,9 +291,7 @@ function UnifiedDocumentPageDialogs({
   historyOpen: boolean;
   isWikiPage: boolean;
   setHistoryOpen: (open: boolean) => void;
-  setShareOpen: (open: boolean) => void;
   setTrashConfirmOpen: (open: boolean) => void;
-  shareOpen: boolean;
   tenantId: string;
   trashConfirmOpen: boolean;
   trashDocument: () => Promise<unknown> | void;
@@ -337,15 +328,6 @@ function UnifiedDocumentPageDialogs({
           onConfirm={() => void trashDocument()}
           pending={trashPending}
           title={document.title}
-        />
-      ) : null}
-      {shareOpen && document && !isWikiPage ? (
-        <DocumentShareDialog
-          client={client}
-          documentId={document.id}
-          onClose={() => setShareOpen(false)}
-          ownerActorId={document.owner.id}
-          tenantId={tenantId}
         />
       ) : null}
     </>

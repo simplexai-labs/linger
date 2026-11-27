@@ -3375,8 +3375,6 @@ paths:
           $ref: '../components/common.yaml#/components/responses/NotFound'
         '409':
           $ref: '../components/common.yaml#/components/responses/Conflict'
-  /v0/documents/{documentId}/link-share:
-    $ref: '../paths/document-link-shares.yaml#/manage'
   /v0/rooms/{roomId}/history-shares:
     $ref: '../paths/room-history-shares.yaml#/manage'
   /v0/rooms/{roomId}/history-shares/create:
@@ -3389,54 +3387,6 @@ paths:
     $ref: '../paths/room-history-shares.yaml#/read'
   /v0/shared-room-history/asset:
     $ref: '../paths/room-history-shares.yaml#/asset'
-  /v0/shared-documents/resolve:
-    $ref: '../paths/document-link-shares.yaml#/resolve'
-  /v0/shared-documents/content:
-    $ref: '../paths/document-link-shares.yaml#/content'
-  /v0/documents/{documentId}/collaborators:
-    parameters:
-      - $ref: '#/components/parameters/DocumentId'
-    get:
-      tags: [Documents]
-      operationId: getDocumentShareView
-      summary: Explain the caller's effective role and the Document's Direct and Context sources.
-      responses:
-        '200':
-          description: Caller-scoped Share view.
-          content:
-            application/json:
-              schema:
-                $ref: '../components/room-documents.yaml#/components/schemas/DocumentShareViewV2'
-        '401':
-          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
-        '404':
-          $ref: '../components/common.yaml#/components/responses/NotFound'
-    post:
-      tags: [Documents]
-      operationId: createDocumentDirectCollaborator
-      summary: Share the Document directly with one active Agent.
-      description: A repeated submission finds the Agent already a collaborator and gets 409.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '../components/room-documents.yaml#/components/schemas/DocumentDirectCollaboratorCreateRequest'
-      responses:
-        '201':
-          description: Direct collaborator source created or exactly replayed.
-          content:
-            application/json:
-              schema:
-                $ref: '../components/room-documents.yaml#/components/schemas/DocumentAccessSourceV2'
-        '400':
-          $ref: '../components/common.yaml#/components/responses/BadRequest'
-        '401':
-          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
-        '404':
-          $ref: '../components/common.yaml#/components/responses/NotFound'
-        '409':
-          $ref: '../components/common.yaml#/components/responses/Conflict'
   /v0/documents/{documentId}/agent-mention-candidates:
     parameters:
       - $ref: '#/components/parameters/DocumentId'
@@ -3457,74 +3407,6 @@ paths:
           $ref: '../components/common.yaml#/components/responses/Unauthenticated'
         '404':
           $ref: '../components/common.yaml#/components/responses/NotFound'
-  /v0/documents/{documentId}/collaborators/{sourceId}:
-    parameters:
-      - $ref: '#/components/parameters/DocumentId'
-      - name: sourceId
-        in: path
-        required: true
-        schema:
-          $ref: '../components/common.yaml#/components/schemas/Id'
-    patch:
-      tags: [Documents]
-      operationId: updateDocumentDirectCollaborator
-      summary: Change one Human Direct collaborator source with source-level CAS.
-      description: A repeated submission carries a stale expected_version and gets 409 DOCUMENT_COLLABORATOR_CONFLICT.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '../components/room-documents.yaml#/components/schemas/DocumentDirectCollaboratorUpdateRequest'
-      responses:
-        '200':
-          description: Direct collaborator source updated or exactly replayed.
-          content:
-            application/json:
-              schema:
-                $ref: '../components/room-documents.yaml#/components/schemas/DocumentAccessSourceV2'
-        '400':
-          $ref: '../components/common.yaml#/components/responses/BadRequest'
-        '401':
-          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
-        '404':
-          $ref: '../components/common.yaml#/components/responses/NotFound'
-        '409':
-          $ref: '../components/common.yaml#/components/responses/Conflict'
-  /v0/documents/{documentId}/collaborators/{sourceId}/revoke:
-    parameters:
-      - $ref: '#/components/parameters/DocumentId'
-      - name: sourceId
-        in: path
-        required: true
-        schema:
-          $ref: '../components/common.yaml#/components/schemas/Id'
-    post:
-      tags: [Documents]
-      operationId: revokeDocumentDirectCollaborator
-      summary: Revoke one Human Direct collaborator source with source-level CAS.
-      description: A repeated submission carries a stale expected_version and gets 409 DOCUMENT_COLLABORATOR_CONFLICT.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '../components/room-documents.yaml#/components/schemas/DocumentDirectCollaboratorRevokeRequest'
-      responses:
-        '200':
-          description: Direct collaborator source revoked or exactly replayed.
-          content:
-            application/json:
-              schema:
-                $ref: '../components/room-documents.yaml#/components/schemas/DocumentAccessSourceV2'
-        '400':
-          $ref: '../components/common.yaml#/components/responses/BadRequest'
-        '401':
-          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
-        '404':
-          $ref: '../components/common.yaml#/components/responses/NotFound'
-        '409':
-          $ref: '../components/common.yaml#/components/responses/Conflict'
   /v0/documents/{documentId}/room-bindings/{roomId}/remove:
     parameters:
       - $ref: '#/components/parameters/DocumentId'

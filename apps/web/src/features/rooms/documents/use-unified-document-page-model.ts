@@ -100,14 +100,12 @@ export function useUnifiedDocumentPageModel(sidebar?: {
     roomId: data.roomId,
     resyncSession: data.resyncSession,
     session,
-    shareOpen: panels.shareOpen,
     sharedTree: data.sharedTree,
     setCommentsOpen: panels.setCommentsOpen,
     setCommentsPortalTarget: panels.setCommentsPortalTarget,
     setHeadings: panels.setHeadings,
     setHistoryOpen: panels.setHistoryOpen,
     setIsEditing: panels.setIsEditing,
-    setShareOpen: panels.setShareOpen,
     setTocOpen: panels.setTocOpen,
     setTrashConfirmOpen: actions.setTrashConfirmOpen,
     setTreeOpen: panels.setTreeOpen,
@@ -180,7 +178,6 @@ function useUnifiedDocumentPanels() {
   const [headings, setHeadings] = useState<RoomDocumentHeading[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editingOverride, setIsEditing] = useState<boolean>();
-  const [shareOpen, setShareOpen] = useState(false);
   const { open: treeOpen, setOpen: setTreeOpen } = useWorkspaceTree();
   const [tocOpen, setTocOpen] = useState(false);
   return {
@@ -194,10 +191,8 @@ function useUnifiedDocumentPanels() {
     setHeadings,
     setHistoryOpen,
     setIsEditing,
-    setShareOpen,
     setTocOpen,
     setTreeOpen,
-    shareOpen,
     tocOpen,
     treeOpen,
   };

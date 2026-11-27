@@ -97,7 +97,6 @@ describe("the Document page in the language on screen", () => {
     renderDocumentPage(runtime, document.id);
 
     expect(await screen.findByText("Room BlockNote editor")).toBeVisible();
-    expect(screen.getByRole("button", { name: page.share })).toBeVisible();
     expect(screen.getByRole("button", { name: page.comments })).toBeVisible();
     expect(
       screen.getByRole("navigation", { name: page.breadcrumb }),

@@ -20,11 +20,11 @@ import (
 
 func TestLatestOnDemandReadersRecheckRevisionAndAuthority(t *testing.T) {
 	allowParallelIntegrationTest(t)
-	for _, reader := range []string{"owner", "share", "agent"} {
+	for _, reader := range []string{"owner", "agent"} {
 		for _, scenario := range []string{"current", "new_revision", "revoked", "continual_revision"} {
 			if reader == "owner" && scenario == "revoked" {
-				// The single Human reads every active Document; links lose
-				// access when revoked and Agents when they are removed.
+				// The single Human reads every active Document; Agents lose
+				// access when they are removed.
 				continue
 			}
 			t.Run(reader+"/"+scenario, func(t *testing.T) {
@@ -52,11 +52,7 @@ func TestLatestOnDemandReadersRecheckRevisionAndAuthority(t *testing.T) {
 								return document.ExportRuntimeResult{}, err
 							}
 						case "revoked":
-							query := `UPDATE documents SET link_share_status='revoked' WHERE id='document_human_a' AND link_share_id IS NOT NULL`
-							if reader == "agent" {
-								query = `UPDATE agent_registrations SET status='revoked' WHERE agent_management_id='agent_document_a'`
-							}
-							if _, err := db.ExecContext(ctx, query); err != nil {
+							if _, err := db.ExecContext(ctx, `UPDATE agent_registrations SET status='revoked' WHERE agent_management_id='agent_document_a'`); err != nil {
 								return document.ExportRuntimeResult{}, err
 							}
 						}
@@ -64,26 +60,15 @@ func TestLatestOnDemandReadersRecheckRevisionAndAuthority(t *testing.T) {
 					content := []byte(input.RevisionID)
 					return document.ExportRuntimeResult{MediaType: "text/markdown", Bytes: content, SizeBytes: int64(len(content)), SHA256: semanticDigest(content), CompleteAssetIDs: []string{}, CompleteThreadIDs: []string{}, Warnings: []string{}}, nil
 				}}, objects)
-				var link document.LinkShare
 				var err error
-				if reader == "share" {
-					link, err = service.SetLinkShare(t.Context(), document.SetLinkShareInput{Principal: document.LinkSharePrincipal{AccountID: "account_document_a"}, DocumentID: "document_human_a", Role: "viewer"})
-					if err != nil {
-						t.Fatal(err)
-					}
-				}
 				var key string
 				if reader == "owner" {
 					content, readErr := service.GetLatestDownloadContent(t.Context(), document.LatestDownloadInput{AccountID: "account_document_a", DocumentID: "document_human_a"})
 					err = readErr
 					key = content.ObjectKey
-				} else if reader == "agent" {
+				} else {
 					content, readErr := service.DownloadAgentFileAs(t.Context(), "tenant_document_a", "agent_document_a", "document_human_a", "markdown")
 					err, key = readErr, content.ObjectKey
-				} else {
-					content, readErr := service.DownloadLinkFile(t.Context(), link.Token)
-					err = readErr
-					key = content.ObjectKey
 				}
 				if scenario == "continual_revision" {
 					if !errors.Is(err, document.ErrLatestProjectionNotReady) || key != "" || calls.Load() != 3 {
@@ -124,7 +109,7 @@ func TestLatestOnDemandReadersShareOneCompute(t *testing.T) {
 	allowParallelIntegrationTest(t)
 	_, pool, objects := newUnifiedDocumentSemanticMutationFixture(t)
 	var calls atomic.Int32
-	entered, release := make(chan struct{}, 3), make(chan struct{})
+	entered, release := make(chan struct{}, 2), make(chan struct{})
 	service := document.NewWithRuntime(pool, documentRuntimeStub{export: func(ctx context.Context, input document.ExportRuntimeRequest) (document.ExportRuntimeResult, error) {
 		calls.Add(1)
 		entered <- struct{}{}
@@ -136,19 +121,11 @@ func TestLatestOnDemandReadersShareOneCompute(t *testing.T) {
 		content := []byte("shared read")
 		return document.ExportRuntimeResult{MediaType: "text/markdown", Bytes: content, SizeBytes: int64(len(content)), SHA256: semanticDigest(content), CompleteAssetIDs: []string{}, CompleteThreadIDs: []string{}, Warnings: []string{}}, nil
 	}}, objects)
-	if _, err := service.CreateDirectCollaborator(t.Context(), document.CreateDirectCollaboratorInput{AccountID: "account_document_a", DocumentID: "document_human_a", TargetActorID: "actor_agent_a", Role: "viewer"}); err != nil {
-		t.Fatal(err)
-	}
-	link, err := service.SetLinkShare(t.Context(), document.SetLinkShareInput{Principal: document.LinkSharePrincipal{AccountID: "account_document_a"}, DocumentID: "document_human_a", Role: "viewer"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	results := make(chan error, 3)
+	results := make(chan error, 2)
 	go func() {
 		_, err := service.GetLatestDownloadContent(t.Context(), document.LatestDownloadInput{AccountID: "account_document_a", DocumentID: "document_human_a"})
 		results <- err
 	}()
-	go func() { _, err := service.DownloadLinkFile(t.Context(), link.Token); results <- err }()
 	go func() {
 		_, err := service.DownloadAgentFileAs(t.Context(), "tenant_document_a", "agent_document_a", "document_human_a", "markdown")
 		results <- err
@@ -161,13 +138,13 @@ func TestLatestOnDemandReadersShareOneCompute(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	close(release)
-	for range 3 {
+	for range 2 {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
 	if calls.Load() != 1 {
-		t.Fatalf("three readers computed %d times", calls.Load())
+		t.Fatalf("two readers computed %d times", calls.Load())
 	}
 }
 
