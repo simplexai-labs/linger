@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type {
   CommandArguments,
   CommandInputReader,
 } from "./command-definition.js";
+import { createInputReader, parseArguments } from "./command-input.js";
 import { messageCommandDefinitions } from "./message-commands.js";
+
+const tempDirs: string[] = [];
+afterEach(async () => {
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
+});
 
 function args(
   entries: readonly [string, string][] = [],
@@ -308,6 +319,82 @@ describe("redesigned message inputs", () => {
       ).rejects.toThrow();
     }
   });
+  it("reads exact messages in order via repeatable --message-id and rejects conflicts or duplicates", async () => {
+    expect(
+      (
+        await command("read").normalize(
+          args([["--message-id", "message_one"]]),
+          reader,
+        )
+      ).input,
+    ).toEqual({ message_ids: ["message_one"] });
+    expect(
+      (
+        await command("read").normalize(
+          args([
+            ["--message-id", " message_b "],
+            ["--message-id", "message_a"],
+          ]),
+          reader,
+        )
+      ).input,
+    ).toEqual({ message_ids: ["message_b", "message_a"] });
+    await expect(
+      command("read").normalize(
+        args([
+          ["--message-id", "message_a"],
+          ["--message-id", "message_a"],
+        ]),
+        reader,
+      ),
+    ).rejects.toThrow("--message-id cannot contain duplicate IDs.");
+    await expect(
+      command("read").normalize(
+        args(
+          Array.from(
+            { length: 51 },
+            (_, i) => ["--message-id", `message_${i}`] as [string, string],
+          ),
+        ),
+        reader,
+      ),
+    ).rejects.toThrow("--message-id must contain 1-50 items.");
+    await expect(
+      command("read").normalize(
+        args([
+          ["--message-id", "message_a"],
+          ["--message-ids", "message_b"],
+        ]),
+        reader,
+      ),
+    ).rejects.toThrow("--message-id, --message-ids cannot be used together.");
+    for (const entries of [
+      [
+        ["--message-id", "message_a"],
+        ["--thread", "thread_one"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--inbox", "room:room_one"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--list-inboxes", "true"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--limit", "5"],
+      ],
+      [
+        ["--message-id", "message_a"],
+        ["--cursor", "cursor_1"],
+      ],
+    ] as [string, string][][]) {
+      await expect(
+        command("read").normalize(args(entries), reader),
+      ).rejects.toThrow();
+    }
+  });
   it.each([
     "task:task.alpha:7",
     "meta:actor_one:task_one",
@@ -470,6 +557,150 @@ describe("message ask-user", () => {
     ).resolves.toEqual({
       input: { thread_id: "thread_one", title: "Venue", questions: [radio] },
     });
+  });
+  it("reads questions from --questions-file (file with UTF-8 BOM or stdin) and reports actionable errors", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "teamhub-ask-user-"));
+    tempDirs.push(dir);
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const payload = [
+      radio,
+      { question: "Sides?", options: ["Egg", "Tofu"], multiple: true },
+    ];
+    await writeFile(
+      path.join(dir, "questions.json"),
+      Buffer.concat([bom, Buffer.from(JSON.stringify(payload), "utf8")]),
+    );
+    const fsReader = createInputReader({ cwd: dir });
+    await expect(
+      command("ask-user").normalize(
+        parseArguments(
+          ["--title", "Lunch order", "--questions-file", "questions.json"],
+          command("ask-user").options,
+        ),
+        fsReader,
+      ),
+    ).resolves.toEqual({
+      input: { title: "Lunch order", questions: payload },
+    });
+
+    const stdinReader = createInputReader({
+      cwd: dir,
+      readInput: async (source) => {
+        expect(source).toBe("-");
+        return JSON.stringify([radio]);
+      },
+    });
+    await expect(
+      command("ask-user").normalize(
+        parseArguments(
+          ["--title", "Lunch order", "--questions-file", "-"],
+          command("ask-user").options,
+        ),
+        stdinReader,
+      ),
+    ).resolves.toEqual({
+      input: { title: "Lunch order", questions: [radio] },
+    });
+
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions", JSON.stringify([radio])],
+          ["--questions-file", "questions.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toThrow("--questions, --questions-file cannot be used together.");
+
+    await expect(
+      command("ask-user").normalize(args([["--title", "Lunch order"]]), reader),
+    ).rejects.toThrow("One of --questions, --questions-file is required.");
+
+    expect(() =>
+      parseArguments(
+        ["--title", "Lunch order", "--questions", "-"],
+        command("ask-user").options,
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        code: "invalid_input",
+        details: {
+          issues: [
+            expect.objectContaining({
+              path: "--questions",
+              message:
+                '"-" would be read as literal text; to read stdin use --questions-file -.',
+            }),
+          ],
+        },
+      }),
+    );
+
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions", "[{question:Where?}]"],
+        ]),
+        reader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message: expect.stringContaining("--questions-file <path|->"),
+    });
+
+    await writeFile(path.join(dir, "broken.json"), "[{question:1}]", "utf8");
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions-file", "broken.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message: "--questions-file is not valid JSON.",
+      details: {
+        issues: [
+          expect.objectContaining({
+            path: "--questions-file",
+            code: "invalid_json",
+          }),
+        ],
+      },
+    });
+
+    await writeFile(path.join(dir, "empty.json"), "[]", "utf8");
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions-file", "empty.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toThrow(
+      "--questions-file must be a JSON array of 1 to 20 questions.",
+    );
+
+    await writeFile(
+      path.join(dir, "double-encoded.json"),
+      JSON.stringify(JSON.stringify([radio])),
+      "utf8",
+    );
+    await expect(
+      command("ask-user").normalize(
+        args([
+          ["--title", "Lunch order"],
+          ["--questions-file", "double-encoded.json"],
+        ]),
+        fsReader,
+      ),
+    ).rejects.toThrow(
+      "--questions-file must be a JSON array, not a string of encoded JSON.",
+    );
   });
 });
 

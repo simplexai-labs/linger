@@ -74,9 +74,15 @@ const teamHubWebToolGuide = "Web tools: search the web with `teamhub web search 
 // link that still has its own web tools.
 const teamHubWebOverOwnTools = "Use them instead of your built-in web search and fetch tools, which may not work through the API this model is served by."
 
-// piWindowsPowerShellGuide tells Windows Pi Agents to invoke teamhub with
-// PowerShell syntax rather than POSIX bash heredocs.
-const piWindowsPowerShellGuide = "Shell on Windows: your shell tool is `powershell` (PowerShell), not bash. Run `teamhub` with the `powershell` tool and PowerShell syntax; do not use POSIX heredocs (`<<'EOF'`). For `teamhub` text containing newlines, `$`, `%`, `&`, backticks, or quotes, pass `--file -` using a PowerShell single-quoted here-string (`@'` on its own line, the text, then `'@ | teamhub ... --file -` with `'@` at column 0)."
+// piWindowsPowerShellGuide tells Windows Pi Agents to use PowerShell syntax
+// and file/here-string inputs that avoid Windows PowerShell 5.1 argument
+// corruption.
+const piWindowsPowerShellGuide = "Shell on Windows: your shell tool is `powershell` (PowerShell), not bash; do not use POSIX heredocs (`<<'EOF'`), `&&`/`||` (unsupported in Windows PowerShell 5.1), or inline `VAR=val cmd`. Windows PowerShell 5.1 strips embedded `\"` from native command arguments, breaking inline JSON and quoted text: never pass inline JSON (`--questions`, `--message`, `--item`, `--schedule`, `--arguments`, `--segments`) or strings containing `\"`, newlines, `$`, `%`, `&`, or backticks on the command line; assigning JSON to a PowerShell variable (such as `$q` or `@args`) and passing it to an inline flag is corrupted the same way. Instead pipe a PowerShell single-quoted here-string (`@'` on its own line, the text or JSON, then `'@ | teamhub ... --<name>-file -` with `'@` at column 0), or write a UTF-8 file with the `write` tool (never PowerShell `>`, `Out-File`, or `Set-Content` without `-Encoding utf8`) and pass `--<name>-file <path>`. Quote comma-separated values or use repeatable flags such as `--message-id`, since unquoted `,` splits arguments in PowerShell."
+
+// codexWindowsPowerShellGuide tells Windows Codex Agents to avoid PowerShell
+// 5.1 argument quote stripping and default ASCII stdin piping when invoking
+// teamhub.
+const codexWindowsPowerShellGuide = "Shell on Windows: your shell runs PowerShell, not bash; do not use POSIX heredocs (`<<'EOF'`), `&&`/`||` (unsupported in Windows PowerShell 5.1), or inline `VAR=val cmd`. Windows PowerShell 5.1 strips embedded `\"` from native command arguments and defaults piped stdin `$OutputEncoding` to ASCII, so for JSON (`--questions`, `--message`, `--item`, `--schedule`, `--arguments`, `--segments`) or text containing `\"`, newlines, non-ASCII characters, `$`, `%`, `&`, or backticks, never pass it inline or through a PowerShell variable (such as `$q` or `@args`, which is corrupted the same way) — write a UTF-8 file (never PowerShell `>`, `Out-File`, or `Set-Content` without `-Encoding utf8`) and pass `--<name>-file <path>` (or `--file <path>`). Quote comma-separated values or use repeatable flags such as `--message-id`, since unquoted `,` splits arguments in PowerShell."
 
 // WindowsHostEnvironmentGuide describes Windows shell and Python
 // conventions for Operations running on a Windows Local Computer.
@@ -88,10 +94,17 @@ const WindowsHostEnvironmentGuide = "Windows environment: prefer `python` or `py
 const staticPrefixEndMarker = "<!-- LINGER_STATIC_PREFIX_END -->"
 
 func shellToolGuide(runtimeType, goos string, teamHubCLI bool) string {
-	if runtimeType == "pi" && goos == "windows" && teamHubCLI {
-		return piWindowsPowerShellGuide
+	if goos != "windows" || !teamHubCLI {
+		return ""
 	}
-	return ""
+	switch runtimeType {
+	case "pi":
+		return piWindowsPowerShellGuide
+	case "codex":
+		return codexWindowsPowerShellGuide
+	default:
+		return ""
+	}
 }
 
 // webToolGuide describes the web tools an Operation has. A Runtime on a

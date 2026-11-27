@@ -16,15 +16,16 @@ import {
   jsonSource,
   markdownBodySource,
   option,
-  parseJsonValue,
   requiredOption,
   targetFromFlags,
   values,
 } from "./command-input.js";
 import { CliError } from "./errors.js";
 import {
+  conflictingFlags,
   inputIssue,
   invalidInput,
+  missingFlag,
   missingMessage,
   typeName,
   unknownFieldMessage,
@@ -135,11 +136,11 @@ function cardTitle(args: CommandArguments): string {
 }
 // TeamHub's question card rules, checked field by field so a bad call is
 // corrected before anything reaches the Room.
-function askUserQuestions(value: unknown): Json[] {
+function askUserQuestions(value: unknown, flag = "--questions"): Json[] {
   if (typeof value === "string")
-    fail("--questions must be a JSON array, not a string of encoded JSON.");
+    fail(`${flag} must be a JSON array, not a string of encoded JSON.`);
   if (!Array.isArray(value) || value.length < 1 || value.length > 20)
-    fail("--questions must be a JSON array of 1 to 20 questions.");
+    fail(`${flag} must be a JSON array of 1 to 20 questions.`);
   return (value as unknown[]).map((item, index) => {
     const path = `questions[${index}]`;
     const question = strict(
@@ -427,23 +428,38 @@ async function normalizeRead(
 ): Promise<NormalizedCommandInput> {
   assertPositionals(args, 0, 0);
   const destination = targetFromFlags(args, ["thread"]);
-  const batch = option(args, "--message-ids"),
+  const repeated = values(args, "--message-id"),
+    batch = option(args, "--message-ids"),
     inbox = option(args, "--inbox"),
     discover = option(args, "--list-inboxes");
+  if (repeated.length > 0 && batch !== undefined)
+    throw conflictingFlags(["--message-id", "--message-ids"]);
+  const byIds = repeated.length > 0 || batch !== undefined;
   if (
     Number(Boolean(destination.target)) +
-      Number(batch !== undefined) +
+      Number(byIds) +
       Number(inbox !== undefined) +
       Number(discover !== undefined) >
     1
   )
     fail("Choose exactly one message read target or mode.");
   if (
-    (batch !== undefined || discover !== undefined) &&
+    (byIds || discover !== undefined) &&
     (option(args, "--limit") !== undefined ||
       option(args, "--cursor") !== undefined)
   )
     fail("Batch and Inbox discovery modes do not support pagination.");
+  if (repeated.length > 0) {
+    const message_ids = count(
+      repeated.map((value) => id(value.trim(), "--message-id", 256)),
+      1,
+      50,
+      "--message-id",
+    );
+    if (new Set(message_ids).size !== message_ids.length)
+      fail("--message-id cannot contain duplicate IDs.");
+    return { input: { message_ids } };
+  }
   if (batch !== undefined) {
     const message_ids = count(
       batch.split(",").map((value) => id(value.trim(), "--message-ids", 256)),
@@ -492,12 +508,17 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
     defaultTarget: "room-or-task",
     usage: [
       "[--thread <id>] [flags]",
+      "--message-id <id> ...",
       "--message-ids <id1,id2,...>",
       "--inbox <inbox-id>",
       "--list-inboxes",
     ],
     options: {
       "--thread": targetOptions["--thread"]!,
+      "--message-id": {
+        description: "One exact message ID; repeat up to 50 times in order.",
+        repeatable: true,
+      },
       "--message-ids": {
         description:
           "1-50 comma-separated unique message IDs, returned in input order.",
@@ -804,7 +825,9 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
       "Ask your Sponsor in this Room, or in one of its Threads, with a question card; returns at once without waiting for the answer.",
     readOnly: false,
     schema: true,
-    usage: ["[--thread <id>] --title <text> --questions <JSON>"],
+    usage: [
+      "[--thread <id>] --title <text> (--questions <JSON> | --questions-file <path|->)",
+    ],
     options: {
       ...targetOptions,
       "--title": {
@@ -814,9 +837,14 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
         description:
           'JSON array of 1-20 questions, each {"question": "...", "options": ["...", "..."], "multiple": true}. Your Sponsor picks one option, or several when "multiple" is true, and can also write an answer of their own; every question needs 1-20 options.',
       },
+      "--questions-file": {
+        description:
+          "Read the questions JSON array from a file or - for stdin.",
+      },
     },
     examples: [
       `teamhub message ask-user --title "Friday team outing" --questions '[{"question":"Where should we go?","options":["Hotpot","BBQ"]},{"question":"What else would you like to do?","options":["KTV","Board games","Movie"],"multiple":true}]'`,
+      'teamhub message ask-user --title "Friday team outing" --questions-file ./questions.json',
     ],
     notes: [
       "A card only offers choices. For an open question or a missing fact, ask in an ordinary message; your Sponsor replies in the chat.",
@@ -824,16 +852,27 @@ export const messageCommandDefinitions: readonly CommandDefinition[] = [
       "Every question must be answered and each multiple-choice question needs at least one pick, so don't add optional questions.",
       'The answer arrives later as a new message where the card was posted, "Human interaction <id> answered:" followed by one "- <question> → <answer>" line per question; several picks are joined with ", ".',
       "Meanwhile keep doing work that doesn't depend on the answer; if everything depends on it, end your turn. Never invent the answer, and never post the same question twice.",
+      "Use --questions-file <path|-> when passing JSON through shells that strip or rewrite quotes (such as Windows PowerShell 5.1).",
     ],
-    normalize: async (args) => {
+    normalize: async (args, reader) => {
       assertPositionals(args, 0, 0);
       const thread = targetFromFlags(args, ["thread"]).target;
+      const title = cardTitle(args);
+      const rawQuestions = await jsonSource(
+        args,
+        reader,
+        "--questions",
+        "--questions-file",
+      );
+      if (rawQuestions === undefined)
+        throw missingFlag(["--questions", "--questions-file"]);
       return {
         input: {
           ...(thread ? { thread_id: thread.id } : {}),
-          title: cardTitle(args),
+          title,
           questions: askUserQuestions(
-            parseJsonValue(requiredOption(args, "--questions"), "--questions"),
+            rawQuestions,
+            jsonFlag(args, "--questions"),
           ),
         },
       };

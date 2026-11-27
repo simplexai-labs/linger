@@ -579,9 +579,22 @@ func TestExecutionResolverPlacesStaticGuidesInCodexBaseInstructionsAndStripsMark
 	}
 }
 
-func TestShellToolGuideAndWindowsPiStaticPrefixPlacement(t *testing.T) {
+func TestShellToolGuideAndWindowsStaticPrefixPlacement(t *testing.T) {
 	if got := shellToolGuide("pi", "windows", true); got != piWindowsPowerShellGuide {
 		t.Fatalf("shellToolGuide(pi, windows, true) = %q", got)
+	}
+	if got := shellToolGuide("codex", "windows", true); got != codexWindowsPowerShellGuide {
+		t.Fatalf("shellToolGuide(codex, windows, true) = %q", got)
+	}
+	for _, want := range []string{"powershell", "PowerShell 5.1", "--questions", "--message-id", "write", "$q", "@args"} {
+		if !strings.Contains(piWindowsPowerShellGuide, want) {
+			t.Errorf("piWindowsPowerShellGuide missing %q", want)
+		}
+	}
+	for _, want := range []string{"PowerShell 5.1", "$OutputEncoding", "--questions", "--message-id", "-Encoding utf8", "$q", "@args"} {
+		if !strings.Contains(codexWindowsPowerShellGuide, want) {
+			t.Errorf("codexWindowsPowerShellGuide missing %q", want)
+		}
 	}
 	for _, tc := range []struct {
 		runtimeType, goos string
@@ -590,7 +603,9 @@ func TestShellToolGuideAndWindowsPiStaticPrefixPlacement(t *testing.T) {
 		{"pi", "windows", false},
 		{"pi", "linux", true},
 		{"pi", "darwin", true},
-		{"codex", "windows", true},
+		{"codex", "windows", false},
+		{"codex", "linux", true},
+		{"codex", "darwin", true},
 		{"claude", "windows", true},
 	} {
 		if got := shellToolGuide(tc.runtimeType, tc.goos, tc.cli); got != "" {
@@ -605,46 +620,81 @@ func TestShellToolGuideAndWindowsPiStaticPrefixPlacement(t *testing.T) {
 		CLICredentials: store,
 		ToolGuide:      "StaticToolGuide",
 		Providers: map[string]ProviderInstallation{
-			"pi": {Type: "pi", ExecutablePath: "/local/bin/pi", ModelGateway: true, APILink: true},
+			"pi":    {Type: "pi", ExecutablePath: "/local/bin/pi", ModelGateway: true, APILink: true},
+			"codex": {Type: "codex", ExecutablePath: "/local/bin/codex", ModelGateway: true, APILink: true},
 		},
 		WorkspaceGrants: map[string]WorkspaceGrant{
 			"grant-local": {GrantID: "grant-local", TenantID: "tenant", Path: root},
 		},
 		Views: testContextViews{root: root},
 		Registrations: map[string]RegistrationBinding{
-			"registration-pi": {RegistrationID: "registration-pi", TenantID: "tenant", OwnerActorID: "actor-alice", ProviderType: "pi", Status: registration.StatusOnline},
+			"registration-pi":    {RegistrationID: "registration-pi", TenantID: "tenant", OwnerActorID: "actor-alice", ProviderType: "pi", Status: registration.StatusOnline},
+			"registration-codex": {RegistrationID: "registration-codex", TenantID: "tenant", OwnerActorID: "actor-alice", ProviderType: "codex", Status: registration.StatusOnline},
 		},
 		goos: "windows",
 	}
-	cmd := protocol.Command{
+	piCmd := protocol.Command{
 		TenantID: "tenant", AgentID: "agent", RegistrationID: "registration-pi", AssignmentRevision: 1,
 		WorkspaceGrantID: "grant-local", RuntimeType: "pi",
 		ContextViewRef: json.RawMessage(`{"receipt_ref":"receipt-1"}`),
 	}
-	req := json.RawMessage(`{
+	piReq := json.RawMessage(`{
 		"kind":"run.start",
 		"runtime":{"type":"pi","model":"localmodels/model-a"},
 		"session_options":{"thread_name":"Agent A","base_instructions":"Agent A Prompt","developer_instructions":"StaticCore\n\n` + staticPrefixEndMarker + `\n\nDynamicTail"},
 		"session":{},
 		"input":{"type":"text","text":"Hi"}
 	}`)
-	spec, err := resolver.Resolve(context.Background(), cmd, req)
+	piSpec, err := resolver.Resolve(context.Background(), piCmd, piReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPrefix := strings.Join([]string{
+	wantPiPrefix := strings.Join([]string{
 		"StaticCore",
 		"StaticToolGuide",
 		teamHubWebToolGuide,
 		piWindowsPowerShellGuide,
 	}, "\n\n")
-	wantSystem := wantPrefix + "\n\nAgent A Prompt\n\nDynamicTail"
-	if spec.SystemPrompt != wantSystem {
-		t.Fatalf("SystemPrompt =\n%q\nwant:\n%q", spec.SystemPrompt, wantSystem)
+	wantPiSystem := wantPiPrefix + "\n\nAgent A Prompt\n\nDynamicTail"
+	if piSpec.SystemPrompt != wantPiSystem {
+		t.Fatalf("Pi SystemPrompt =\n%q\nwant:\n%q", piSpec.SystemPrompt, wantPiSystem)
 	}
-	wantDev := wantPrefix + "\n\nDynamicTail"
-	if spec.DeveloperInstructions == nil || *spec.DeveloperInstructions != wantDev {
-		t.Fatalf("DeveloperInstructions = %v, want %q", spec.DeveloperInstructions, wantDev)
+	wantPiDev := wantPiPrefix + "\n\nDynamicTail"
+	if piSpec.DeveloperInstructions == nil || *piSpec.DeveloperInstructions != wantPiDev {
+		t.Fatalf("Pi DeveloperInstructions = %v, want %q", piSpec.DeveloperInstructions, wantPiDev)
+	}
+
+	codexCmd := protocol.Command{
+		TenantID: "tenant", AgentID: "agent", RegistrationID: "registration-codex", AssignmentRevision: 1,
+		WorkspaceGrantID: "grant-local", RuntimeType: "codex",
+		ContextViewRef: json.RawMessage(`{"receipt_ref":"receipt-1"}`),
+	}
+	codexReq := json.RawMessage(`{
+		"kind":"run.start",
+		"runtime":{"type":"codex","model":"localmodels/model-a"},
+		"session_options":{"thread_name":"Agent B","base_instructions":"Responsibility\n\nStaticCore\n\n` + staticPrefixEndMarker + `\n\nAgent B Prompt\n\nDynamicTail"},
+		"session":{"threadId":""},
+		"input":{"type":"text","text":"Hi"}
+	}`)
+	codexSpec, err := resolver.Resolve(context.Background(), codexCmd, codexReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCodexPrefix := strings.Join([]string{
+		"Responsibility\n\nStaticCore",
+		"StaticToolGuide",
+		teamHubWebToolGuide,
+		codexWindowsPowerShellGuide,
+	}, "\n\n")
+	wantCodexBase := wantCodexPrefix + "\n\nAgent B Prompt\n\nDynamicTail"
+	if codexSpec.BaseInstructions == nil || *codexSpec.BaseInstructions != wantCodexBase {
+		t.Fatalf("Codex BaseInstructions =\n%v\nwant:\n%q", codexSpec.BaseInstructions, wantCodexBase)
+	}
+	if codexSpec.DeveloperInstructions != nil {
+		t.Fatalf("Codex DeveloperInstructions = %q, want nil", *codexSpec.DeveloperInstructions)
+	}
+	if strings.Contains(codexSpec.SystemPrompt, staticPrefixEndMarker) {
+		t.Fatalf("Codex SystemPrompt leaked static prefix marker: %q", codexSpec.SystemPrompt)
 	}
 }
 

@@ -537,9 +537,20 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
   early (such as `| head`, exit `141`) or a non-zero upstream stage (such as
   `grep` with no matches piped to `wc -l`) fails the pipeline; a command that
   wants to ignore upstream failures can run `set +o pipefail`. On Windows, Pi
-  uses the built-in `powershell` tool instead of `bash`, so it skips the POSIX
-  `shell-text-hook` and `pipefail`, and the managed extension overrides
-  `powershell` to set UTF-8 `$OutputEncoding` and console encodings.
+  uses the built-in `powershell` tool instead of `bash`, so it skips `pipefail`
+  and the managed extension overrides `powershell` to set UTF-8
+  `$OutputEncoding` and console encodings. Windows Pi also passes
+  `LINGER_PI_SHELL_TEXT_HOOK` so the extension invokes
+  `linger-computer-daemon shell-text-hook` with `tool_name: "powershell"` and
+  `powershell_51` for `teamhub` commands containing `"` or `<<`, refusing POSIX
+  heredocs (`<<'EOF'`) on all PowerShell versions and embedded double quotes in
+  native `teamhub` arguments (outside PowerShell here-strings) on Windows
+  PowerShell 5.1 (`powershell.exe`). Across both `bash` and `powershell`,
+  `pi-mcp.mjs` also runs a per-Run consecutive-failure loop guard (reset on
+  `before_agent_start`, exempting `--help`/`-h`/`--schema`, warning on the 3rd
+  consecutive failure and blocking further retries after 5 consecutive
+  failures) so repeated failing retries of the same `teamhub` subcommand or
+  shell command stop early.
 - Antigravity runs the same `permission.ShellTextRewritten` check inside its
   managed `PreToolUse` hook for `run_command` (except on Windows, where shells
   are PowerShell), returning `{"decision":"deny","reason":...}` so the model

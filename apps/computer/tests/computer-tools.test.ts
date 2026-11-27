@@ -1122,3 +1122,627 @@ it.skipIf(process.platform === "win32")(
   },
   30_000,
 );
+
+it("detects Windows PowerShell 5.1 only on win32 and fails open on errors", async () => {
+  const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+  const { isWindowsPowerShell51 } = (await import(entry)) as {
+    isWindowsPowerShell51: (options?: {
+      platform?: string;
+      resolveShell?: () => { shell: string; args: string[] };
+    }) => boolean;
+  };
+
+  expect(
+    isWindowsPowerShell51({
+      platform: "win32",
+      resolveShell: () => ({
+        shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        args: [],
+      }),
+    }),
+  ).toBe(true);
+  expect(
+    isWindowsPowerShell51({
+      platform: "win32",
+      resolveShell: () => ({
+        shell: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        args: [],
+      }),
+    }),
+  ).toBe(false);
+  expect(
+    isWindowsPowerShell51({
+      platform: "darwin",
+      resolveShell: () => ({ shell: "powershell.exe", args: [] }),
+    }),
+  ).toBe(false);
+  expect(
+    isWindowsPowerShell51({
+      platform: "linux",
+      resolveShell: () => ({ shell: "powershell.exe", args: [] }),
+    }),
+  ).toBe(false);
+  expect(
+    isWindowsPowerShell51({
+      platform: "win32",
+      resolveShell: () => {
+        throw new Error("no powershell");
+      },
+    }),
+  ).toBe(false);
+});
+
+it.skipIf(process.platform === "win32")(
+  "routes powershell shell-text checks to shell-text-hook with lazy PS 5.1 fast-paths",
+  async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "linger-pi-ps-hook-"));
+    try {
+      const hook = path.join(root, "daemon");
+      const logFile = path.join(root, "calls.jsonl");
+      await writeFile(
+        hook,
+        `#!${process.execPath}
+const fs = require("node:fs");
+let input = "";
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", () => {
+  const payload = JSON.parse(input);
+  fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ argv: process.argv.slice(2), payload }) + "\\n");
+  if (payload.tool_input.command.includes("<<")) {
+    process.stderr.write("Not run: PowerShell does not support POSIX heredocs\\n");
+    process.exit(2);
+  }
+  if (payload.powershell_51 && payload.tool_input.command.includes("'[{")) {
+    process.stderr.write("Not run: Windows PowerShell 5.1 strips embedded double quotes\\n");
+    process.exit(2);
+  }
+  process.exit(0);
+});
+`,
+        { mode: 0o700 },
+      );
+
+      const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+      const { refuseRewrittenShellText } = (await import(entry)) as {
+        refuseRewrittenShellText: (
+          event: { toolName: string; input?: { command?: string } },
+          hook?: string,
+          options?: { isPowerShell51?: () => boolean },
+        ) => Promise<{ block: boolean; reason: string } | undefined>;
+      };
+
+      const ps = (command: string) => ({
+        toolName: "powershell",
+        input: { command },
+      });
+      let ps51Calls = 0;
+      const isPs51True = () => {
+        ps51Calls += 1;
+        return true;
+      };
+      let ps7Calls = 0;
+      const isPs51False = () => {
+        ps7Calls += 1;
+        return false;
+      };
+
+      // Fast-path skips both hook and isPowerShell51 when command has no
+      // teamhub or no double quotes / heredoc operator.
+      expect(
+        await refuseRewrittenShellText(
+          ps(`node -e 'console.log("hi")'`),
+          hook,
+          {
+            isPowerShell51: isPs51True,
+          },
+        ),
+      ).toBeUndefined();
+      expect(
+        await refuseRewrittenShellText(
+          ps("teamhub message ask-user --title Pick --questions-file q.json"),
+          hook,
+          { isPowerShell51: isPs51True },
+        ),
+      ).toBeUndefined();
+      expect(ps51Calls).toBe(0);
+
+      // PowerShell 7 with double quotes and no << skips spawning the hook.
+      expect(
+        await refuseRewrittenShellText(
+          ps(
+            `teamhub message ask-user --title "Pick" --questions '[{"question":"Where?"}]'`,
+          ),
+          hook,
+          { isPowerShell51: isPs51False },
+        ),
+      ).toBeUndefined();
+      expect(ps7Calls).toBe(1);
+
+      // PowerShell 5.1 with double quotes invokes shell-text-hook and blocks on exit 2.
+      const ps51Cmd = `teamhub message ask-user --title "Pick" --questions '[{"question":"Where?"}]'`;
+      expect(
+        await refuseRewrittenShellText(ps(ps51Cmd), hook, {
+          isPowerShell51: isPs51True,
+        }),
+      ).toEqual({
+        block: true,
+        reason: "Not run: Windows PowerShell 5.1 strips embedded double quotes",
+      });
+      expect(ps51Calls).toBe(1);
+
+      // PowerShell 5.1 command allowed by hook (exit 0) passes through.
+      expect(
+        await refuseRewrittenShellText(
+          ps('teamhub message send --content "Done."'),
+          hook,
+          { isPowerShell51: isPs51True },
+        ),
+      ).toBeUndefined();
+
+      // PowerShell 7 with POSIX heredoc invokes shell-text-hook with powershell_51: false.
+      const heredocCmd = "teamhub message send --file - <<'EOF'\nHello\nEOF";
+      expect(
+        await refuseRewrittenShellText(ps(heredocCmd), hook, {
+          isPowerShell51: isPs51False,
+        }),
+      ).toEqual({
+        block: true,
+        reason: "Not run: PowerShell does not support POSIX heredocs",
+      });
+
+      // Missing or unset hook fails open.
+      expect(
+        await refuseRewrittenShellText(
+          ps(ps51Cmd),
+          path.join(root, "missing"),
+          {
+            isPowerShell51: isPs51True,
+          },
+        ),
+      ).toBeUndefined();
+      expect(
+        await refuseRewrittenShellText(ps(ps51Cmd), "", {
+          isPowerShell51: isPs51True,
+        }),
+      ).toBeUndefined();
+
+      const recorded = (await readFile(logFile, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(recorded).toEqual([
+        {
+          argv: ["shell-text-hook"],
+          payload: {
+            tool_name: "powershell",
+            powershell_51: true,
+            tool_input: { command: ps51Cmd },
+          },
+        },
+        {
+          argv: ["shell-text-hook"],
+          payload: {
+            tool_name: "powershell",
+            powershell_51: true,
+            tool_input: { command: 'teamhub message send --content "Done."' },
+          },
+        },
+        {
+          argv: ["shell-text-hook"],
+          payload: {
+            tool_name: "powershell",
+            powershell_51: false,
+            tool_input: { command: heredocCmd },
+          },
+        },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
+
+it("warns at 3 consecutive failures, blocks at 5, preserves structuredContent, exempts --help, and resets cleanly", async () => {
+  const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+  const { createFailureLoopTracker, PIPEFAIL_PREFIX, shellFailureSignature } =
+    (await import(entry)) as {
+      PIPEFAIL_PREFIX: string;
+      shellFailureSignature: (
+        toolName: string,
+        command: string,
+      ) => string | undefined;
+      createFailureLoopTracker: () => {
+        reset: () => void;
+        beforeToolCall: (
+          event: Record<string, unknown>,
+        ) => { block: boolean; reason: string } | undefined;
+        onToolResult: (event: Record<string, unknown>) =>
+          | {
+              content?: Array<{ type: string; text: string }>;
+              structuredContent?: unknown;
+            }
+          | undefined;
+      };
+    };
+
+  expect(
+    shellFailureSignature(
+      "powershell",
+      `@'\n[{"a":"b"}]\n'@ | teamhub.exe message ask-user --title "Pick" --questions-file -`,
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature(
+      "powershell",
+      `$q = '[{"a":"b"}]'; & teamhub.cmd message ask-user --title "Pick" --questions $q`,
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature(
+      "powershell",
+      `& "C:\\bin\\teamhub.exe" message ask-user --title "Pick"`,
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature(
+      "powershell",
+      `&"C:\\bin\\teamhub.exe" message ask-user --title "Pick"`,
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature("powershell", "./teamhub message send --content hi"),
+  ).toBe("teamhub message send");
+  expect(
+    shellFailureSignature("powershell", "teamhub message ask-user `\n  --help"),
+  ).toBeUndefined();
+  expect(
+    shellFailureSignature("powershell", `$body = "teamhub" + ' says "hello"'`),
+  ).toBe(`powershell:$body = "teamhub" + ' says "hello"'`);
+  expect(shellFailureSignature("powershell", "& teamhub @args")).toBe(
+    "teamhub",
+  );
+  expect(
+    shellFailureSignature(
+      "bash",
+      "teamhub docs update doc-1 --command str_replace --pattern a --content b",
+    ),
+  ).toBe("teamhub docs update");
+  expect(shellFailureSignature("bash", 'teamhub message search "budget"')).toBe(
+    "teamhub message search",
+  );
+  expect(shellFailureSignature("bash", "teamhub message search budget")).toBe(
+    "teamhub message search",
+  );
+  expect(
+    shellFailureSignature(
+      "bash",
+      "teamhub docs comment reply thr_1 --content hi",
+    ),
+  ).toBe("teamhub docs comment");
+  expect(
+    shellFailureSignature(
+      "bash",
+      "teamhub image-gen --provider fal --model fal-ai/flux/dev --prompt fox",
+    ),
+  ).toBe("teamhub image-gen");
+  expect(
+    shellFailureSignature(
+      "bash",
+      "cat <<'EOF' | teamhub message send --file -\nteamhub docs create --title \"fake\"\nEOF",
+    ),
+  ).toBe("teamhub message send");
+  expect(
+    shellFailureSignature(
+      "bash",
+      `${PIPEFAIL_PREFIX}teamhub message ask-user --title "Pick"`,
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature("powershell", "teamhub message ask-user --help"),
+  ).toBeUndefined();
+  expect(
+    shellFailureSignature("bash", "teamhub message ask-user -h"),
+  ).toBeUndefined();
+  expect(
+    shellFailureSignature("bash", "teamhub message ask-user --schema --json"),
+  ).toBeUndefined();
+  expect(
+    shellFailureSignature("bash", 'teamhub message send --content "--help"'),
+  ).toBe("teamhub message send");
+  expect(
+    shellFailureSignature(
+      "bash",
+      'teamhub message send --content "see --help here"',
+    ),
+  ).toBe("teamhub message send");
+  expect(
+    shellFailureSignature(
+      "powershell",
+      "teamhub message send --content 'it''s --help and -h here'",
+    ),
+  ).toBe("teamhub message send");
+  expect(
+    shellFailureSignature("bash", 'teamhub message send --content "hi" --help'),
+  ).toBeUndefined();
+  expect(
+    shellFailureSignature(
+      "bash",
+      'df -h; teamhub message ask-user --title "Pick" --questions-file q.json',
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature(
+      "powershell",
+      'teamhub apps list; teamhub message ask-user --title "Pick" --questions-file q.json',
+    ),
+  ).toBe("teamhub message ask-user");
+  expect(
+    shellFailureSignature(
+      "powershell",
+      "teamhub apps list; teamhub message ask-user --help",
+    ),
+  ).toBeUndefined();
+  expect(shellFailureSignature("bash", "df -h")).toBe("bash:df -h");
+  expect(shellFailureSignature("bash", "git status --help")).toBeUndefined();
+  expect(shellFailureSignature("bash", 'echo "--help"')).toBe(
+    'bash:echo "--help"',
+  );
+  expect(shellFailureSignature("bash", 'echo "see --help here"')).toBe(
+    'bash:echo "see --help here"',
+  );
+  expect(shellFailureSignature("bash", "pnpm   test\n")).toBe("bash:pnpm test");
+  expect(shellFailureSignature("read", "teamhub message send")).toBeUndefined();
+
+  const tracker = createFailureLoopTracker();
+  const variants = [
+    `teamhub message ask-user --title "Pick" --questions '[{"a":"b"}]'`,
+    `$q = '[{"a":"b"}]'; teamhub message ask-user --title "Pick" --questions $q`,
+    `teamhub.exe message ask-user --title "Pick" --questions-file missing.json`,
+    `@'\n[]\n'@ | teamhub message ask-user --title "Pick" --questions-file -`,
+    `& teamhub.cmd message ask-user --title "Pick" --questions-file broken.json`,
+  ];
+
+  for (let i = 0; i < variants.length; i += 1) {
+    const call = {
+      toolCallId: `call_${i}`,
+      toolName: "powershell",
+      input: { command: variants[i] },
+    };
+    expect(tracker.beforeToolCall(call)).toBeUndefined();
+    const structuredContent = { exitCode: 2 };
+    const result = tracker.onToolResult({
+      ...call,
+      isError: true,
+      content: [{ type: "text", text: "invalid_input" }],
+      structuredContent,
+    });
+    if (i === 2) {
+      expect(result).toEqual({
+        content: [
+          { type: "text", text: "invalid_input" },
+          {
+            type: "text",
+            text: expect.stringContaining(
+              "[Linger loop guard] teamhub message ask-user has failed 3 times in a row.",
+            ),
+          },
+        ],
+        structuredContent,
+      });
+    } else {
+      expect(result).toBeUndefined();
+    }
+  }
+
+  // 6th call (after 5 consecutive failures) is blocked.
+  expect(
+    tracker.beforeToolCall({
+      toolCallId: "call_blocked",
+      toolName: "powershell",
+      input: { command: "teamhub message ask-user --title 'Again'" },
+    }),
+  ).toEqual({
+    block: true,
+    reason: expect.stringContaining(
+      "Blocked after 5 consecutive failures of teamhub message ask-user.",
+    ),
+  });
+
+  // --help is never blocked and succeeding resets the streak.
+  const helpCall = {
+    toolCallId: "call_help",
+    toolName: "powershell",
+    input: { command: "teamhub message ask-user --help" },
+  };
+  expect(tracker.beforeToolCall(helpCall)).toBeUndefined();
+  expect(
+    tracker.onToolResult({
+      ...helpCall,
+      isError: false,
+      content: [{ type: "text", text: "Usage..." }],
+    }),
+  ).toBeUndefined();
+  expect(
+    tracker.beforeToolCall({
+      toolCallId: "call_after_help",
+      toolName: "powershell",
+      input: { command: "teamhub message ask-user --title 'After help'" },
+    }),
+  ).toBeUndefined();
+
+  // Succeeding with another tool (such as write) also resets a streak, and
+  // non-teamhub guidance omits "--help" suggestions.
+  for (let i = 0; i < 5; i += 1) {
+    const call = {
+      toolCallId: `bash_${i}`,
+      toolName: "bash",
+      input: { command: `${PIPEFAIL_PREFIX}npm test` },
+    };
+    const res = tracker.onToolResult({ ...call, isError: true, content: [] });
+    if (i === 2) {
+      expect(res?.content?.[0]?.text).toContain(
+        "bash:npm test has failed 3 times in a row. Do not keep retrying the same failing command",
+      );
+      expect(res?.content?.[0]?.text).not.toContain("--help");
+    }
+  }
+  const bashBlocked = tracker.beforeToolCall({
+    toolCallId: "bash_blocked",
+    toolName: "bash",
+    input: { command: "npm test" },
+  });
+  expect(bashBlocked).toMatchObject({
+    block: true,
+    reason: expect.stringContaining(
+      "Blocked after 5 consecutive failures of bash:npm test.",
+    ),
+  });
+  expect(bashBlocked?.reason).not.toContain("--help");
+  // Distinct non-teamhub command is not blocked.
+  expect(
+    tracker.beforeToolCall({
+      toolCallId: "bash_other",
+      toolName: "bash",
+      input: { command: "npm run lint" },
+    }),
+  ).toBeUndefined();
+
+  tracker.onToolResult({
+    toolCallId: "write_1",
+    toolName: "write",
+    isError: false,
+    content: [],
+  });
+  expect(
+    tracker.beforeToolCall({
+      toolCallId: "bash_after_write",
+      toolName: "bash",
+      input: { command: "npm test" },
+    }),
+  ).toBeUndefined();
+
+  // reset() clears streak across Runs in a resident Pi process.
+  for (let i = 0; i < 5; i += 1) {
+    const call = {
+      toolCallId: `res_${i}`,
+      toolName: "bash",
+      input: { command: "npm test" },
+    };
+    tracker.onToolResult({ ...call, isError: true, content: [] });
+  }
+  expect(
+    tracker.beforeToolCall({
+      toolCallId: "res_blocked",
+      toolName: "bash",
+      input: { command: "npm test" },
+    }),
+  ).toMatchObject({ block: true });
+  tracker.reset();
+  expect(
+    tracker.beforeToolCall({
+      toolCallId: "res_after_reset",
+      toolName: "bash",
+      input: { command: "npm test" },
+    }),
+  ).toBeUndefined();
+});
+
+it("wires loop guard reset on before_agent_start and blocks before review in managedExtension", async () => {
+  const entry = new URL("../tools/pi-mcp.mjs", import.meta.url).href;
+  const mod = (await import(entry)) as {
+    default: (pi: Record<string, unknown>) => Promise<void>;
+  };
+
+  type Handler = (
+    event: Record<string, unknown>,
+    ctx?: Record<string, unknown>,
+  ) => unknown;
+  const handlers = new Map<string, Handler[]>();
+  const fakePi = {
+    on: (event: string, handler: Handler) => {
+      handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+    },
+  };
+  const prevConfig = process.env.LINGER_PI_MANAGED_MCP_CONFIG;
+  delete process.env.LINGER_PI_MANAGED_MCP_CONFIG;
+  try {
+    await mod.default(fakePi);
+  } finally {
+    if (prevConfig !== undefined) {
+      process.env.LINGER_PI_MANAGED_MCP_CONFIG = prevConfig;
+    }
+  }
+
+  let reviewCalls = 0;
+  const ctx = {
+    ui: {
+      input: async () => {
+        reviewCalls += 1;
+        return JSON.stringify({ allow: true });
+      },
+    },
+  };
+  const emitToolCall = async (event: Record<string, unknown>) => {
+    for (const handler of handlers.get("tool_call") ?? []) {
+      const result = await handler(event, ctx);
+      if (result) return result;
+    }
+    return undefined;
+  };
+  const emitToolResult = async (event: Record<string, unknown>) => {
+    for (const handler of handlers.get("tool_result") ?? []) {
+      const result = await handler(event, ctx);
+      if (result) return result;
+    }
+    return undefined;
+  };
+
+  // 5 consecutive bash failures trigger warning on 3rd and block on 6th before review.
+  for (let i = 0; i < 5; i += 1) {
+    const call = {
+      toolCallId: `loop_${i}`,
+      toolName: "bash",
+      input: { command: `teamhub message ask-user --title "T${i}"` },
+    };
+    expect(await emitToolCall(call)).toBeUndefined();
+    const res = await emitToolResult({
+      ...call,
+      isError: true,
+      content: [{ type: "text", text: "bad" }],
+    });
+    if (i === 2) {
+      expect(res).toMatchObject({
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            text: expect.stringContaining("failed 3 times in a row"),
+          }),
+        ]),
+      });
+    }
+  }
+  expect(reviewCalls).toBe(5);
+  const loopBlocked = await emitToolCall({
+    toolCallId: "loop_5",
+    toolName: "bash",
+    input: { command: 'teamhub message ask-user --title "T5"' },
+  });
+  expect(loopBlocked).toMatchObject({
+    block: true,
+    reason: expect.stringContaining("Blocked after 5 consecutive failures"),
+  });
+  expect(reviewCalls).toBe(5);
+
+  // before_agent_start resets the streak for the next Run.
+  for (const start of handlers.get("before_agent_start") ?? []) {
+    await start({}, ctx);
+  }
+  expect(
+    await emitToolCall({
+      toolCallId: "loop_next_run",
+      toolName: "bash",
+      input: { command: 'teamhub message ask-user --title "Fresh"' },
+    }),
+  ).toBeUndefined();
+  expect(reviewCalls).toBe(6);
+});
