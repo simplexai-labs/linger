@@ -22,6 +22,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { c as archive } from "tar";
+import { tarCommand } from "./archive.js";
 import { INSTANCE_BUSY, withInstanceLock, type Instance } from "./instance.js";
 import { runProcess } from "./process.js";
 import { REGION_SCHEMA, regionFile } from "./region.js";
@@ -124,7 +125,7 @@ async function packed(f: Awaited<ReturnType<typeof fixture>>) {
   await mkdir(root);
   await rename(f.directory, path.join(root, "package"));
   const archive = path.join(f.home, "kit.tgz");
-  execFileSync("tar", ["-czf", archive, "-C", root, "package"], {
+  execFileSync(tarCommand(), ["-czf", archive, "-C", root, "package"], {
     env: { ...process.env, COPYFILE_DISABLE: "1" },
   });
   return readFile(archive);
@@ -435,7 +436,7 @@ for (const [label, add] of [
       await chmod(f.directory, 0o700);
       await add(f.directory);
       const archive = path.join(f.home, "kit.tgz");
-      execFileSync("tar", ["-czf", archive, "-C", f.directory, "."], {
+      execFileSync(tarCommand(), ["-czf", archive, "-C", f.directory, "."], {
         env: { ...process.env, COPYFILE_DISABLE: "1" },
       });
       await rm(f.directory, { recursive: true, force: true });

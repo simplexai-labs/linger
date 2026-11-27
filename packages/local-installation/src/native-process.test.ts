@@ -812,7 +812,9 @@ test("restarts a supervised service that exits unasked and logs each exit", asyn
     .toEqual([
       expect.stringMatching(/^\[linger-supervisor\] web started pid=\d+$/),
       expect.stringMatching(
-        /^\[linger-supervisor\] web exited code=null signal=SIGKILL uptime_ms=\d+ restarting_in_ms=100$/,
+        process.platform === "win32"
+          ? /^\[linger-supervisor\] web exited code=1 signal=null uptime_ms=\d+ restarting_in_ms=100$/
+          : /^\[linger-supervisor\] web exited code=null signal=SIGKILL uptime_ms=\d+ restarting_in_ms=100$/,
       ),
       expect.stringMatching(
         /^\[linger-supervisor\] web restarted pid=\d+ attempt=1$/,
@@ -855,7 +857,9 @@ test("never restarts a service an intended stop ends", async (context) => {
   const lines = await supervisorLines(root);
   expect(lines).toHaveLength(2);
   expect(lines[1]).toMatch(
-    /^\[linger-supervisor\] web exited code=0 signal=null uptime_ms=\d+ restart=no reason=stop_requested$/,
+    process.platform === "win32"
+      ? /^\[linger-supervisor\] web exited code=1 signal=null uptime_ms=\d+ restart=no reason=stop_requested$/
+      : /^\[linger-supervisor\] web exited code=0 signal=null uptime_ms=\d+ restart=no reason=stop_requested$/,
   );
   expect((await inspectNativeProcess(root, "web")).running).toBe(false);
 });
@@ -891,6 +895,13 @@ test("gives up after the crash-loop limit and leaves the service stopped", async
     env: process.env,
     restartOnExit: fastRestart,
   });
+  // On Windows, a supervisor between restart attempts has no child and
+  // inspects as stopped; wait for the supervisor's crash-loop exit first.
+  await expect
+    .poll(async () => (await supervisorLines(root)).at(-1))
+    .toBe(
+      "[linger-supervisor] web gave up restarting after 3 exits within 10000 ms",
+    );
   await expect
     .poll(() => inspectNativeProcess(root, "web"))
     .toMatchObject({ running: false });
@@ -906,9 +917,6 @@ test("gives up after the crash-loop limit and leaves the service stopped", async
       /code=3 signal=null uptime_ms=\d+ restart=no reason=crash_loop$/,
     ),
   ]);
-  expect(lines.at(-1)).toBe(
-    "[linger-supervisor] web gave up restarting after 3 exits within 10000 ms",
-  );
 });
 test.for([
   ["startup", fastRestart],

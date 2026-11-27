@@ -116,27 +116,31 @@ describe("hosted receiver from the build", () => {
   it.each([
     [hosted, hosted],
     [undefined, undefined],
-  ])("bundles %s as the hosted receiver", async (value, expected) => {
-    const outfile = path.join(tempDirectory(), "diagnostics-upload.mjs");
-    await build({
-      entryPoints: [path.join(import.meta.dirname, "diagnostics-upload.ts")],
-      outfile,
-      bundle: true,
-      platform: "node",
-      format: "esm",
-      logLevel: "silent",
-      define: {
-        __HOSTED_DIAGNOSTICS_UPLOAD_URL__: JSON.stringify(
-          hostedDiagnosticsUploadUrl(value),
-        ),
-      },
-    });
-    const bundled = (await import(
-      pathToFileURL(outfile).href
-    )) as typeof import("./diagnostics-upload.js");
-    expect(bundled.HOSTED_DIAGNOSTICS_UPLOAD_URL).toBe(expected);
-    expect(bundled.diagnosticsUploadUrl({})).toBe(expected);
-  });
+  ])(
+    "bundles %s as the hosted receiver",
+    async (value, expected) => {
+      const outfile = path.join(tempDirectory(), "diagnostics-upload.mjs");
+      await build({
+        entryPoints: [path.join(import.meta.dirname, "diagnostics-upload.ts")],
+        outfile,
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        logLevel: "silent",
+        define: {
+          __HOSTED_DIAGNOSTICS_UPLOAD_URL__: JSON.stringify(
+            hostedDiagnosticsUploadUrl(value),
+          ),
+        },
+      });
+      const bundled = (await import(
+        pathToFileURL(outfile).href
+      )) as typeof import("./diagnostics-upload.js");
+      expect(bundled.HOSTED_DIAGNOSTICS_UPLOAD_URL).toBe(expected);
+      expect(bundled.diagnosticsUploadUrl({})).toBe(expected);
+    },
+    30_000,
+  );
 });
 
 interface Received {

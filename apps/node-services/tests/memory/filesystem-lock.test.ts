@@ -106,10 +106,25 @@ describe("Wiki filesystem writer lock", () => {
     }
   });
 
-  it("rejects a symlink write root", async () => {
+  it("rejects a symlink write root", async (ctx) => {
     const root = await fixture();
     const linked = path.join(root, "link");
-    await fs.symlink(root, linked, "dir");
+    try {
+      await fs.symlink(
+        root,
+        linked,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch (error) {
+      if (
+        process.platform === "win32" &&
+        (error as NodeJS.ErrnoException).code === "EPERM"
+      ) {
+        ctx.skip();
+        return;
+      }
+      throw error;
+    }
     await expect(
       withDirectoryLock(linked, async () => undefined),
     ).rejects.toThrow("symbolic link");

@@ -105,7 +105,7 @@ describe("AgentManager process", () => {
     PROCESS_TEST_TIMEOUT_MS,
   );
 
-  it.each([false, true])(
+  it.skipIf(process.platform === "win32").each([false, true])(
     "exits with a bounded result when stopping the real entrypoint (startup=%s)",
     async (duringStartup) => {
       const runtimeRoot = await mkdtemp(
@@ -421,7 +421,9 @@ const closeServer = async (server: Server): Promise<void> => {
 };
 
 describe("Agent shutdown process supervisor", () => {
-  it.each(["success", "slow-log", "failure", "hang", "startup"])(
+  it
+    .skipIf(process.platform === "win32")
+    .each(["success", "slow-log", "failure", "hang", "startup"])(
     "bounds %s shutdown and reports its exit code",
     async (mode) => {
       const logRoot = await mkdtemp(

@@ -34,7 +34,9 @@ describe("markMemoryChanged", () => {
     const second = await fs.readFile(marker, "utf8");
 
     expect(second).not.toBe(first);
-    expect((await fs.stat(marker)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await fs.stat(marker)).mode & 0o777).toBe(0o600);
+    }
     // Atomic replacement leaves no temporary file behind.
     expect(await fs.readdir(path.join(root, "agent_1"))).toEqual([
       MEMORY_REVISION_FILE,

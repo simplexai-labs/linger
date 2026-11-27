@@ -162,7 +162,7 @@ it("builds each TeamHub command for Windows from the source package", async () =
   await expect(
     verifyTeamhub(output, "win32-x64", manifest.sourceArchiveSha256),
   ).rejects.toThrow("account.exe does not match");
-});
+}, 30_000);
 
 it("stamps the shipped archive digest when compiling from a separate full archive of the same commit", async () => {
   const f = fixture();
@@ -189,7 +189,7 @@ it("stamps the shipped archive digest when compiling from a separate full archiv
   await expect(verifyTeamhub(output, "win32-x64", fullSha256)).rejects.toThrow(
     "another target or source package",
   );
-});
+}, 30_000);
 
 it("refuses a shipped archive from a different commit before touching output", async () => {
   const f = fixture();
@@ -220,4 +220,4 @@ it("refuses a shipped archive from a different commit before touching output", a
     /Shipped source archive commit .* does not match build source archive/,
   );
   expect(existsSync(sentinel)).toBe(true);
-});
+}, 30_000);

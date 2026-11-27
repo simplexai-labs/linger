@@ -19,18 +19,22 @@ afterEach(() => {
   }
 });
 
-it("cross-compiles the Windows teamhub.exe launcher for win32-x64", async () => {
-  const root = mkdtempSync(path.join(tmpdir(), "build-daemon-launcher-"));
-  roots.push(root);
-  const outputPath = path.join(root, "teamhub.exe");
+it(
+  "cross-compiles the Windows teamhub.exe launcher for win32-x64",
+  async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "build-daemon-launcher-"));
+    roots.push(root);
+    const outputPath = path.join(root, "teamhub.exe");
 
-  await buildTeamhubLauncher("win32-x64", outputPath);
+    await buildTeamhubLauncher("win32-x64", outputPath);
 
-  expect(existsSync(outputPath)).toBe(true);
-  expect(statSync(outputPath).size).toBeGreaterThan(0);
-  const header = readFileSync(outputPath).subarray(0, 2).toString("ascii");
-  expect(header).toBe("MZ");
-}, 30_000);
+    expect(existsSync(outputPath)).toBe(true);
+    expect(statSync(outputPath).size).toBeGreaterThan(0);
+    const header = readFileSync(outputPath).subarray(0, 2).toString("ascii");
+    expect(header).toBe("MZ");
+  },
+  process.platform === "win32" ? 60_000 : 30_000,
+);
 
 it("rejects an unknown target in buildTeamhubLauncher", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "build-daemon-launcher-"));

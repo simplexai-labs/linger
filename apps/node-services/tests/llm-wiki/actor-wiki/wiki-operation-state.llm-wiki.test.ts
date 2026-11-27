@@ -37,18 +37,22 @@ describe("WikiOperationState", () => {
     expect(first.directory.startsWith(join(dataDirectory, "operations"))).toBe(
       true,
     );
-    expect((await lstat(first.directory)).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect((await lstat(first.directory)).mode & 0o777).toBe(0o700);
+    }
 
     await mkdir(join(first.directory, "inputs"));
     await writeFile(join(first.directory, "inputs", "document.md"), "body");
-    await chmod(join(first.directory, "inputs"), 0o500);
+    if (process.platform !== "win32") {
+      await chmod(join(first.directory, "inputs"), 0o500);
+    }
     await first.release();
     await first.release();
     await expect(access(first.directory)).rejects.toThrow();
     await second.release();
   });
 
-  it("clears what a stopped process left without following symlinks", async () => {
+  it("clears what a stopped process left without following symlinks", async (ctx) => {
     const root = await temporaryDirectory();
     const dataDirectory = join(root, "state");
     const operationsDirectory = join(dataDirectory, "operations");
@@ -56,10 +60,27 @@ describe("WikiOperationState", () => {
     const external = join(root, "external");
     await mkdir(join(leftover, "candidate"), { recursive: true });
     await writeFile(join(leftover, "candidate", "page.md"), "# Page");
-    await chmod(join(leftover, "candidate"), 0o500);
     await mkdir(external);
     await writeFile(join(external, "keep.md"), "kept");
-    await symlink(external, join(operationsDirectory, "candidate-link"));
+    try {
+      await symlink(
+        external,
+        join(operationsDirectory, "candidate-link"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch (error) {
+      if (
+        process.platform === "win32" &&
+        (error as NodeJS.ErrnoException).code === "EPERM"
+      ) {
+        ctx.skip();
+        return;
+      }
+      throw error;
+    }
+    if (process.platform !== "win32") {
+      await chmod(join(leftover, "candidate"), 0o500);
+    }
 
     await new WikiOperationState({ dataDirectory }).start();
 
@@ -70,7 +91,9 @@ describe("WikiOperationState", () => {
     await expect(readFile(join(external, "keep.md"), "utf8")).resolves.toBe(
       "kept",
     );
-    expect((await lstat(operationsDirectory)).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect((await lstat(operationsDirectory)).mode & 0o777).toBe(0o700);
+    }
   });
 
   it("allows startup to retry after a local state failure is repaired", async () => {
