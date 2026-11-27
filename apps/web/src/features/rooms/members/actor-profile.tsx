@@ -11,7 +11,6 @@ import {
   Cancel01Icon,
   CpuIcon,
   Delete02Icon,
-  LayoutTemplateIcon,
   ServerStack01Icon,
 } from "@hugeicons/core-free-icons";
 import {
@@ -58,11 +57,6 @@ import { useAgentDeletion } from "./use-agent-deletion";
 const EditAgentProfileDialog = lazy(async () => ({
   default: (await import("./edit-agent-profile-dialog")).EditAgentProfileDialog,
 }));
-const PublishAgentTemplateDialog = lazy(async () => ({
-  default: (await import("../agent-templates/publish-agent-template-dialog"))
-    .PublishAgentTemplateDialog,
-}));
-import { agentTemplateMessages } from "../agent-templates/agent-templates.messages";
 import { roomDialogMessages } from "../room-dialogs.messages";
 import { sidePanelMessages } from "../task-sidebar/side-panel.messages";
 import { agentInfoMessages } from "./agent-info.messages";
@@ -356,11 +350,6 @@ export function AgentProfileContent({
       nameBusy={updateAgent.isPending}
       nameError={updateAgent.error?.message}
       onSaveName={(name) => updateAgent.mutateAsync({ name })}
-      headerAction={
-        canEditAgent && agentRegistration ? (
-          <PublishTemplateButton registration={agentRegistration} />
-        ) : undefined
-      }
       key={actor.id}
       onEditIdentity={editProfile}
       roomId={roomId}
@@ -609,42 +598,6 @@ function useAgentConfigurationUpdate(
       }),
     );
   };
-}
-
-/**
- * Publishes the portable part of this Agent as a template others can create
- * their own Agent from; the dialog lists what is shared and what stays private.
- */
-function PublishTemplateButton({
-  registration,
-}: {
-  registration: TeamHubTenantAgent;
-}) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        aria-label={t(agentTemplateMessages.publishTitle)}
-        className="agent-publish-button"
-        onClick={() => setOpen(true)}
-        title={t(agentTemplateMessages.publishTitle)}
-        type="button"
-      >
-        <Icon icon={LayoutTemplateIcon} size={14} />
-        {t(agentTemplateMessages.publish)}
-      </button>
-      {open ? (
-        <Suspense fallback={null}>
-          <PublishAgentTemplateDialog
-            onClose={() => setOpen(false)}
-            registration={registration}
-            tenantId={registration.actor.tenant_id}
-          />
-        </Suspense>
-      ) : null}
-    </>
-  );
 }
 
 function resolveAgentProfilePermissions(

@@ -1,5 +1,5 @@
 // Package agentregistry owns Agent registrations: creation, update, profile
-// changes, avatars, deletion, Agent templates and Skill bindings.
+// changes, avatars, deletion, starter Agents and Skill bindings.
 //
 // An Agent registration is a TeamHub row: creation, update, move and deletion
 // each commit in one transaction, and Agent Service reads the row when it next
@@ -44,4 +44,11 @@ func New(pool *pgxpool.Pool, artifacts artifactstore.ObjectStore, rooms *collabo
 
 func textValue(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+func optionalText(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	return textValue(*value)
 }

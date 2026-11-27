@@ -696,82 +696,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v0/tenants/{tenantId}/agent-templates": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-      };
-      cookie?: never;
-    };
-    /**
-     * List reusable Agent templates available for Agent creation.
-     * @description Returns deployment built-in templates and every published template. Clients group the result by origin. Skill references are returned exactly as published and are resolved against this Tenant catalog only when an Agent is created.
-     */
-    get: operations["listAgentTemplates"];
-    put?: never;
-    /**
-     * Publish one reusable Agent template to the deployment template market.
-     * @description Any authenticated Human Actor in the Tenant may publish. The published definition becomes visible to every Tenant in this deployment, so callers must obtain explicit Human intent before sending it. Only the publisher may remove it afterwards. A repeated submission publishes another template.
-     */
-    post: operations["publishAgentTemplate"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v0/tenants/{tenantId}/agent-templates/{templateId}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-        templateId: components["parameters"]["AgentTemplateId"];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    /**
-     * Remove one published Agent template.
-     * @description Only the publishing Human Actor may remove a published template. Built-in templates are owned by the deployment and cannot be removed. Agents already created from the template keep their own configuration.
-     */
-    delete: operations["deleteAgentTemplate"];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/v0/tenants/{tenantId}/agent-templates/{templateId}/skill-imports": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-        templateId: components["parameters"]["AgentTemplateId"];
-      };
-      cookie?: never;
-    };
-    /**
-     * Preview which template Skills this caller would need copied into the Tenant.
-     * @description Read-only. Lists the template's Skill references that the caller cannot bind from this Tenant catalog, and whether each can be copied from the publishing Tenant. Publishing a template shares its Skill versions with every Tenant, so a Skill the publisher uploaded privately is importable while it stays sealed and active.
-     */
-    get: operations["listAgentTemplateSkillImports"];
-    put?: never;
-    /**
-     * Copy the template's importable Skills into this Tenant as private Skills of the caller.
-     * @description Each importable source version becomes a sealed, owner-scoped Skill of the calling Human in this Tenant, reusing the immutable package files. A copy with identical package name and content that the caller already owns is reused, so repeating the import is harmless. Nothing is bound to an Agent here.
-     */
-    post: operations["importAgentTemplateSkills"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v0/tenants/{tenantId}/rooms": {
     parameters: {
       query?: never;
@@ -4434,8 +4358,6 @@ export interface components {
      */
     CreatableAgentType: "general";
     TenantAgentCreateRequest: {
-      /** @description TeamHub freezes this template's Routines when reserving the Agent. Activation creates the Sponsor direct Room and copies all Routines atomically. Registration retries reuse the frozen snapshot even if the template is later removed. */
-      template_id?: components["schemas"]["Id"];
       name: string;
       description?: string;
       /** @description Product avatar selection stored with the Agent so every Human sees the same avatar. Clients that do not recognise the key fall back to their own derived default. */
@@ -5342,113 +5264,6 @@ export interface components {
       package: string;
     };
     /**
-     * @description builtin templates ship with the deployment and belong to no Tenant. published templates are Human-published and are visible to every Tenant in the deployment.
-     * @enum {string}
-     */
-    AgentTemplateOrigin: "builtin" | "published";
-    /** @description Stable catalog key. TeamHub validates app availability and capabilities. */
-    ExternalAppKey: string;
-    /** @enum {string} */
-    RoutineCadenceKind:
-      | "daily"
-      | "weekly"
-      | "every_n_hours"
-      | "every_n_minutes"
-      | "once";
-    /** @enum {string} */
-    RoutineWeekday:
-      | "monday"
-      | "tuesday"
-      | "wednesday"
-      | "thursday"
-      | "friday"
-      | "saturday"
-      | "sunday";
-    RoutineCadence: {
-      kind: components["schemas"]["RoutineCadenceKind"];
-      /** @description IANA timezone used to evaluate the cadence. */
-      timezone: string;
-      /** @description Local hour for daily and weekly cadences. */
-      hour?: number;
-      /** @description Local minute for daily and weekly cadences. */
-      minute?: number;
-      /** @description Selected local weekdays for weekly cadences, ordered Monday through Sunday in responses. Required for weekly cadences. */
-      weekdays?: components["schemas"]["RoutineWeekday"][];
-      /** @description Repeat interval for every_n_hours cadences. */
-      interval_hours?: number;
-      /** @description Repeat interval in minutes for every_n_minutes cadences, in 10-minute increments. */
-      interval_minutes?: number;
-      /**
-       * Format: date-time
-       * @description The one moment a once cadence fires; the Routine is done (disabled) afterwards.
-       */
-      run_at?: string;
-    };
-    AgentTemplateRoutine: {
-      key: components["schemas"]["Id"];
-      name: string;
-      instruction: string;
-      cadence: components["schemas"]["RoutineCadence"];
-      enabled: boolean;
-      /** @enum {string} */
-      created_by_role: "human" | "agent";
-      /**
-       * @description Absent when the source Routine has no valid mention of the source Agent. Raw instruction text is never rewritten.
-       * @enum {string}
-       */
-      mention_role?: "agent";
-    };
-    /** @description A reusable Agent definition. It carries identity text, instructions, Routines, and the exact Skill and Connector selections. Runtime provider, model, reasoning effort, and placement are Agent deployment facts and never belong to a template. */
-    AgentTemplate: {
-      template_id: components["schemas"]["Id"];
-      origin: components["schemas"]["AgentTemplateOrigin"];
-      name: string;
-      description: string;
-      instructions: string;
-      /** @description Product avatar selection carried with the template. Clients that do not know the key fall back to their own default. */
-      avatar_key?: string;
-      skill_bindings: components["schemas"]["AgentSkillRegistration"][];
-      /** @description Connected App keys this Agent used, carried so a consumer knows what to authorize. A template never carries a connection, account, credential, or token: the consumer grants access from their own connected accounts after the Agent exists. */
-      connector_bindings: components["schemas"]["ExternalAppKey"][];
-      /** @description Fixed snapshots of all Routines in the publisher's direct Room with the source Agent. Copied automatically into the new Agent's direct Room with its Sponsor. */
-      routines: components["schemas"]["AgentTemplateRoutine"][];
-      /** @description Present only for published templates. */
-      published_by?: components["schemas"]["ActorRef"];
-      created_at: components["schemas"]["Timestamp"];
-      updated_at: components["schemas"]["Timestamp"];
-    };
-    AgentTemplatePage: {
-      items: components["schemas"]["AgentTemplate"][];
-    };
-    /** @description Publishes one reusable definition to the deployment-wide template market. Skill references are stored exactly as given and are resolved against the consuming Tenant catalog when an Agent is created. Publishing shares the referenced Skill versions: a consumer may copy a version private to the publisher into their own Tenant through importAgentTemplateSkills. A reference that can be neither bound nor copied is skipped rather than rejected here. Connector references name Apps only; no connection, credential, or account of the publisher is ever carried. */
-    AgentTemplatePublishRequest: {
-      /** @description When present, TeamHub verifies the caller sponsors this Agent and snapshots every Routine in their direct Room. An absent direct Room produces an empty snapshot. */
-      source_agent_actor_id?: components["schemas"]["Id"];
-      name: string;
-      description?: string;
-      instructions: string;
-      avatar_key?: string;
-      skill_bindings?: components["schemas"]["AgentSkillRegistration"][];
-      /** @description Connected App keys this Agent used, carried so a consumer knows what to authorize. A template never carries a connection, account, credential, or token: the consumer grants access from their own connected accounts after the Agent exists. */
-      connector_bindings?: components["schemas"]["ExternalAppKey"][];
-    };
-    /**
-     * @description importable means the published template's Skill version can be copied from the publisher's Tenant into this Tenant as a private Skill of the caller. imported means the copy exists (created now or reused from an earlier import with identical content). unavailable means the source version is missing, disabled, deleted, or not owned by the template's publishing Tenant.
-     * @enum {string}
-     */
-    AgentTemplateSkillImportStatus: "importable" | "imported" | "unavailable";
-    AgentTemplateSkillImport: {
-      /** @description The Skill reference exactly as the template carries it. */
-      source: components["schemas"]["AgentSkillRegistration"];
-      status: components["schemas"]["AgentTemplateSkillImportStatus"];
-      /** @description The caller-visible private copy to bind. Present only when status is imported. */
-      skill?: components["schemas"]["AgentSkillRegistration"];
-    };
-    /** @description Template Skill references the caller cannot bind from this Tenant catalog. References the catalog already resolves, including platform Skills, are not listed. */
-    AgentTemplateSkillImportPage: {
-      items: components["schemas"]["AgentTemplateSkillImport"][];
-    };
-    /**
      * @description Personal Room participation; leaving preserves membership and its role.
      * @enum {string}
      */
@@ -6112,6 +5927,42 @@ export interface components {
     RoomUpdateRequest: {
       name?: string;
       description?: string;
+    };
+    /** @enum {string} */
+    RoutineCadenceKind:
+      | "daily"
+      | "weekly"
+      | "every_n_hours"
+      | "every_n_minutes"
+      | "once";
+    /** @enum {string} */
+    RoutineWeekday:
+      | "monday"
+      | "tuesday"
+      | "wednesday"
+      | "thursday"
+      | "friday"
+      | "saturday"
+      | "sunday";
+    RoutineCadence: {
+      kind: components["schemas"]["RoutineCadenceKind"];
+      /** @description IANA timezone used to evaluate the cadence. */
+      timezone: string;
+      /** @description Local hour for daily and weekly cadences. */
+      hour?: number;
+      /** @description Local minute for daily and weekly cadences. */
+      minute?: number;
+      /** @description Selected local weekdays for weekly cadences, ordered Monday through Sunday in responses. Required for weekly cadences. */
+      weekdays?: components["schemas"]["RoutineWeekday"][];
+      /** @description Repeat interval for every_n_hours cadences. */
+      interval_hours?: number;
+      /** @description Repeat interval in minutes for every_n_minutes cadences, in 10-minute increments. */
+      interval_minutes?: number;
+      /**
+       * Format: date-time
+       * @description The one moment a once cadence fires; the Routine is done (disabled) afterwards.
+       */
+      run_at?: string;
     };
     RoutineListener: {
       /**
@@ -7156,6 +7007,8 @@ export interface components {
       items: components["schemas"]["MemoryEntryListItem"][];
       next_cursor?: components["schemas"]["Cursor"];
     };
+    /** @description Stable catalog key. TeamHub validates app availability and capabilities. */
+    ExternalAppKey: string;
     /** @enum {string} */
     ExternalConnectionStatus:
       | "pending"
@@ -8823,7 +8676,6 @@ export interface components {
     TenantId: components["schemas"]["Id"];
     ActorId: components["schemas"]["Id"];
     AgentId: components["schemas"]["Id"];
-    AgentTemplateId: components["schemas"]["Id"];
     WorkItemId: components["schemas"]["Id"];
     RoutineId: components["schemas"]["Id"];
     WorkItemCommentId: components["schemas"]["Id"];
@@ -10058,136 +9910,6 @@ export interface operations {
         };
         content?: never;
       };
-    };
-  };
-  listAgentTemplates: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Built-in and published Agent templates in stable order. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentTemplatePage"];
-        };
-      };
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  publishAgentTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AgentTemplatePublishRequest"];
-      };
-    };
-    responses: {
-      /** @description Agent template published. */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentTemplate"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
-    };
-  };
-  deleteAgentTemplate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-        templateId: components["parameters"]["AgentTemplateId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Published template removed, or it was already absent. */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      401: components["responses"]["Unauthenticated"];
-      403: components["responses"]["Forbidden"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  listAgentTemplateSkillImports: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-        templateId: components["parameters"]["AgentTemplateId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Unresolvable template Skill references with importable or unavailable status. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentTemplateSkillImportPage"];
-        };
-      };
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-    };
-  };
-  importAgentTemplateSkills: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenantId: components["parameters"]["TenantId"];
-        templateId: components["parameters"]["AgentTemplateId"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Imported copies and references that stay unavailable. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentTemplateSkillImportPage"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      401: components["responses"]["Unauthenticated"];
-      404: components["responses"]["NotFound"];
-      409: components["responses"]["Conflict"];
     };
   };
   listRooms: {

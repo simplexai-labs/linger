@@ -6,9 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentCreateMenu } from "./agent-create-menu";
 
 describe("AgentCreateMenu", () => {
-  it("offers Agent, Room, and template creation", async () => {
-    const onCreateFromTemplate = vi.fn();
-    renderMenu({ onCreateFromTemplate });
+  it("offers Agent and Room creation", async () => {
+    renderMenu({});
 
     fireEvent.click(screen.getByRole("button", { name: "Create chat" }));
 
@@ -16,11 +15,7 @@ describe("AgentCreateMenu", () => {
     expect(items.map((item) => item.textContent)).toEqual([
       "Create Agent",
       "Create Room",
-      "Agent templates",
     ]);
-
-    fireEvent.click(screen.getByRole("menuitem", { name: "Agent templates" }));
-    expect(onCreateFromTemplate).toHaveBeenCalledOnce();
   });
 
   it("creates an Agent on this Computer without a placement choice", async () => {
@@ -45,7 +40,6 @@ function renderMenu(overrides: Partial<Parameters<typeof AgentCreateMenu>[0]>) {
           <AgentCreateMenu
             onCreateAgent={vi.fn()}
             onCreateRoom={vi.fn()}
-            onCreateFromTemplate={vi.fn()}
             {...overrides}
           />
         ),

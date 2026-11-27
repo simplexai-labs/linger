@@ -11,13 +11,16 @@ export function Field({
   id,
   inputClassName = "",
   label,
+  labelAction,
   suffix,
   ...props
 }: Omit<InputHTMLAttributes<HTMLInputElement>, "size"> & {
   error?: string | null;
-  hint?: string;
+  hint?: ReactNode;
   inputClassName?: string;
   label: string;
+  /** A small link or command at the right of the label, such as "Get a key". */
+  labelAction?: ReactNode;
   suffix?: ReactNode;
 }) {
   const generatedId = useId();
@@ -28,12 +31,24 @@ export function Field({
 
   return (
     <div className={`ui-field ${className}`}>
-      <label
-        className="mb-1.5 block text-sm font-medium text-foreground"
-        htmlFor={inputId}
-      >
-        {label}
-      </label>
+      {labelAction ? (
+        <div className="mb-1.5 flex items-baseline justify-between gap-3">
+          <label
+            className="text-sm font-medium text-foreground"
+            htmlFor={inputId}
+          >
+            {label}
+          </label>
+          {labelAction}
+        </div>
+      ) : (
+        <label
+          className="mb-1.5 block text-sm font-medium text-foreground"
+          htmlFor={inputId}
+        >
+          {label}
+        </label>
+      )}
       <div className="ui-field-frame">
         <input
           aria-describedby={describedBy}

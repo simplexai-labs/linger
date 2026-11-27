@@ -23,22 +23,10 @@ import type {
   TeamHubTenantAgentAvailabilitySnapshot,
 } from "@/features/teamhub/teamhub-types";
 
-import {
-  teamHubIdentityQueryOptions,
-  tenantAgentsQueryOptions,
-} from "../room-queries";
+import { tenantAgentsQueryOptions } from "../room-queries";
 import { ActorAvatar } from "./actor-avatar";
 import { agentInfoMessages } from "./agent-info.messages";
-import {
-  AgentSkillUploadPanel,
-  type SkillManageHint,
-} from "./agent-skill-upload-panel";
 import { AgentStatus } from "./agent-status";
-
-const skillUploadHint: SkillManageHint = {
-  title: agentInfoMessages.uploadFormats,
-  detail: agentInfoMessages.uploadUpgrades,
-};
 
 const RemindersPanel = lazy(() =>
   import("../task-sidebar/reminders-panel").then((module) => ({
@@ -66,7 +54,6 @@ export function AgentInfoContent({
   detailsActions,
   dialogs,
   description,
-  headerAction,
   onEditIdentity,
   registration,
   roomId,
@@ -82,13 +69,11 @@ export function AgentInfoContent({
   nameError?: string;
   onSaveName?: (name: string) => Promise<unknown>;
   details: ReactNode;
-  /** Basic info actions placed after the Skills, such as removing the Agent. */
+  /** Basic info actions placed after the instructions, such as removing the Agent. */
   detailsActions?: ReactNode;
   dialogs?: ReactNode;
   runtimeDetails?: ReactNode;
   description?: string;
-  /** A compact action pinned to the identity header's top-right corner. */
-  headerAction?: ReactNode;
   onEditIdentity?: () => void;
   registration?: TeamHubTenantAgent;
   /** Routines are listed per Room, so the Routines tab needs the open Room. */
@@ -96,29 +81,16 @@ export function AgentInfoContent({
 }) {
   const t = useT();
   const { client } = useTeamHubRuntime();
-  const identityQuery = useQuery(teamHubIdentityQueryOptions(client));
   const { data: agents } = useQuery(tenantAgentsQueryOptions(client, tenantId));
   const liveRegistration =
     agents?.items.find((item) => item.actor.id === actor.id) ?? registration;
-  const currentActorId = identityQuery.data?.actors.find(
-    (candidate) => candidate.tenant_id === tenantId,
-  )?.id;
-  const isSponsor = liveRegistration?.created_by.id === currentActorId;
-  const canManageSkills = Boolean(identityQuery.isSuccess && isSponsor);
-  const skillManageHint: SkillManageHint =
-    identityQuery.isSuccess && !isSponsor
-      ? { title: agentInfoMessages.sponsorOnlySkills }
-      : skillUploadHint;
   const [tab, setTab] = useState<AgentInfoTab>("basic");
-  const [showAllSkills, setShowAllSkills] = useState(false);
-  const skills = liveRegistration?.skill_bindings ?? [];
   const tabId = useId();
   return (
     <div className="agent-info-content flex h-full min-h-0 min-w-0 flex-col bg-sidebar/50">
       <AgentInfoIdentity
         actor={actor}
         availability={availability}
-        action={headerAction}
         canEdit={canEditIdentity}
         canEditName={canEditName}
         nameBusy={nameBusy}
@@ -183,20 +155,6 @@ export function AgentInfoContent({
         aria-labelledby={`${tabId}-tab-basic`}
       >
         {details}
-        <AgentSkillUploadPanel
-          agentId={actor.id}
-          canManage={canManageSkills}
-          manageHint={skillManageHint}
-          skills={skills}
-          tenantId={tenantId}
-          visibleLimit={showAllSkills ? undefined : 5}
-          expanded={showAllSkills}
-          onToggleExpanded={
-            skills.length > 5
-              ? () => setShowAllSkills((value) => !value)
-              : undefined
-          }
-        />
         {detailsActions}
       </div>
       {tab === "routines" ? (
@@ -258,7 +216,6 @@ function AgentRoutines({
 }
 
 function AgentInfoIdentity({
-  action,
   actor,
   availability,
   canEdit,
@@ -269,7 +226,6 @@ function AgentInfoIdentity({
   description,
   onEdit,
 }: {
-  action?: ReactNode;
   description?: string;
   actor: TeamHubActor;
   availability?: TeamHubTenantAgentAvailabilitySnapshot["availability"];
@@ -331,8 +287,7 @@ function AgentInfoIdentity({
     />
   );
   return (
-    <div className="relative mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
-      {action ? <div className="absolute right-3 top-3">{action}</div> : null}
+    <div className="mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
       {canEdit ? (
         <Hint placement="bottom" text={t(agentInfoMessages.editAvatar)}>
           <button

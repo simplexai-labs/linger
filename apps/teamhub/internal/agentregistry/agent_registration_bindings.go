@@ -30,8 +30,7 @@ func NormalizeAgentRegistrationBindings(request *httpapi.TenantAgentCreateReques
 	return nil
 }
 
-// Agent registration and Agent template publication accept the same selections,
-// so both use this rule. They validate identity and shape only; whether a
+// NormalizeAgentSkillRegistrations validates identity and shape only; whether a
 // referenced Manifest exists is resolved against the consuming Tenant catalog.
 func NormalizeAgentSkillRegistrations(input []httpapi.AgentSkillRegistration) ([]httpapi.AgentSkillRegistration, error) {
 	skills := cloneSlice(input)

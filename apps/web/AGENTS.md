@@ -378,7 +378,7 @@ build:assets` to check the initial JS budget.
     language switch and a reload. `pending-message-failure.ts` is the pattern:
     the Outbox stores `failure.reason`, the hook words it with `t`.
   - Names and text that people or Agents wrote (Agent names, message
-    previews, a published template) are data and are shown as they are.
+    previews) are data and are shown as they are.
   - TeamHub's own English is worded here from what it means, never translated
     on the server: a status from its stable code
     (`agent-availability-text.ts`), a card's ask from its kind and fields
@@ -390,7 +390,7 @@ build:assets` to check the initial JS budget.
     `INVALID_REQUEST` and the like keep TeamHub's message, which says what to
     do; a case worth its own wording needs its own code from TeamHub.
   - Fixed catalog text (`web-search-backend-text.ts`, `app-groups.ts`,
-    `builtin-template-text.ts`, `runtime-model-label.ts`) keeps a copy by id
+    `runtime-model-label.ts`) keeps a copy by id
     for other languages only, through `teamHubCatalogText`: English shows
     TeamHub's text, so a change on the server shows at once.
   - Add a language: add it to `LANGUAGES` and `catalogLoaders` in

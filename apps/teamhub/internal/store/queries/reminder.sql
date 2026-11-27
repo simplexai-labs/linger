@@ -285,3 +285,9 @@ SELECT
         )
         FROM latest_message lm
     ), false)::boolean AS latest_message_terminal;
+
+-- name: PauseAgentTemplateOriginRoutines :many
+UPDATE room_reminders
+SET enabled=false, next_run_at=NULL, revision=revision+1, updated_at=clock_timestamp()
+WHERE template_agent_actor_id=$1
+RETURNING *;

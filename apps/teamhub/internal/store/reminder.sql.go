@@ -852,6 +852,58 @@ func (q *Queries) LockRoomReminder(ctx context.Context, arg LockRoomReminderPara
 	return i, err
 }
 
+const pauseAgentTemplateOriginRoutines = `-- name: PauseAgentTemplateOriginRoutines :many
+UPDATE room_reminders
+SET enabled=false, next_run_at=NULL, revision=revision+1, updated_at=clock_timestamp()
+WHERE template_agent_actor_id=$1
+RETURNING id, tenant_id, room_id, created_by_actor_id, instruction, mention_actor_id, cadence_kind, timezone, hour, minute, enabled, next_run_at, revision, created_at, updated_at, name, weekdays, template_agent_actor_id, template_routine_key, trigger, run_at, tracking_item_id, tracking_purpose, interval_minutes
+`
+
+func (q *Queries) PauseAgentTemplateOriginRoutines(ctx context.Context, templateAgentActorID pgtype.Text) ([]RoomReminder, error) {
+	rows, err := q.db.Query(ctx, pauseAgentTemplateOriginRoutines, templateAgentActorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RoomReminder{}
+	for rows.Next() {
+		var i RoomReminder
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RoomID,
+			&i.CreatedByActorID,
+			&i.Instruction,
+			&i.MentionActorID,
+			&i.CadenceKind,
+			&i.Timezone,
+			&i.Hour,
+			&i.Minute,
+			&i.Enabled,
+			&i.NextRunAt,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Name,
+			&i.Weekdays,
+			&i.TemplateAgentActorID,
+			&i.TemplateRoutineKey,
+			&i.Trigger,
+			&i.RunAt,
+			&i.TrackingItemID,
+			&i.TrackingPurpose,
+			&i.IntervalMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveReminderAgentRoomAuthority = `-- name: ResolveReminderAgentRoomAuthority :one
 SELECT room.tenant_id, caller.id AS actor_id, membership.role
 FROM rooms room

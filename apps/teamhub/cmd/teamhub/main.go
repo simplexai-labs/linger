@@ -38,8 +38,8 @@ func main() {
 	}))
 }
 
-// TEAMHUB_SKIP_STARTUP_SKILL_RECONCILIATION=1 skips built-in Skill and Agent
-// template installation and the startup package audit. Only processes that never
+// TEAMHUB_SKIP_STARTUP_SKILL_RECONCILIATION=1 skips built-in Skill
+// installation and the startup package audit. Only processes that never
 // read built-in Skills use it: mirrord debugging and the Room Document E2E harness.
 func skippedWorkers(environment func(string) string) []app.Worker {
 	if environment("TEAMHUB_SKIP_STARTUP_SKILL_RECONCILIATION") == "1" {

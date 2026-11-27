@@ -40,7 +40,7 @@ func newRoomMembershipEnv(t *testing.T, appOptions ...appOption) *testEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	artifactRoot := prepareTemplateAppCatalog(t, pool)
+	artifactRoot := copyTemplateSkillObjects(t, pool)
 	appConfig := config.ForTest(func(c *config.Config) {
 		c.DatabaseURL = databaseURL
 		c.SessionTTL = time.Hour

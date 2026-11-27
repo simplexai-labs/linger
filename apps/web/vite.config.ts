@@ -60,7 +60,6 @@ export default defineConfig(({ command, mode }) => {
     envDir: repositoryRoot,
     optimizeDeps: {
       include: [
-        "ajv-draft-04",
         "@blocknote/core",
         "@blocknote/core/comments",
         "@blocknote/core/extensions",

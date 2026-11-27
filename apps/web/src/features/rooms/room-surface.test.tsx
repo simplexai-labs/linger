@@ -829,25 +829,6 @@ describe("RoomSurface command availability", () => {
     expect(within(editor).getByLabelText("Agent instructions")).toBeEnabled();
   });
 
-  it("allows Skill saves while the Agent has an active Task", async () => {
-    await renderRoomSurface(
-      "room-all",
-      "?profile=actor-codex",
-      await busyCodexRuntime(),
-    );
-    const profile = await screen.findByTestId("panel-tab-agent-info");
-    await waitFor(() =>
-      expect(
-        within(profile).getByRole("button", { name: "Upload Skill" }),
-      ).toBeEnabled(),
-    );
-    await waitFor(() =>
-      expect(
-        within(profile).getByRole("button", { name: "Remove Review Changes" }),
-      ).toBeEnabled(),
-    );
-  });
-
   it("opens editable Agent information in the existing Room sidebar", async () => {
     await renderRoomSurface("room-all", "?profile=actor-codex");
 

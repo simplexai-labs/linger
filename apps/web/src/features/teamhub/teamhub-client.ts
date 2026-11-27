@@ -23,7 +23,6 @@ import {
 } from "./teamhub-room-history";
 import { createTeamHubRunStatusClient } from "./teamhub-run-status-client";
 import type {
-  TeamHubAgentSkillBinding,
   TeamHubArtifactContent,
   TeamHubArtifactContentLocation,
   TeamHubArtifactDownloadOptions,
@@ -80,13 +79,6 @@ export interface TeamHubClient
     assetId: string,
     content: Blob,
   ): Promise<components["schemas"]["DocumentAsset"]>;
-  uploadAgentSkillPackage(
-    tenantId: string,
-    agentId: string,
-    file: Blob,
-    fileName: string,
-    key: string,
-  ): Promise<TeamHubAgentSkillBinding>;
   listTenantLocalComputers(tenantId: string): Promise<TeamHubLocalComputerPage>;
   listRoomRunStatuses(roomId: string): Promise<TeamHubRunStatusList>;
   listRoomRuntimePresentationRuns(

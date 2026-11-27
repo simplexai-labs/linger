@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 
 import { localComputersQueryOptions } from "@/features/local-computer/local-computer-queries";
 import { localModelsQueryOptions } from "@/features/local-models/local-models-queries";
@@ -14,45 +13,6 @@ import type {
 
 import { composerMessages } from "../chat/composer.messages";
 import { runtimeModelLabel } from "./runtime-model-label";
-
-interface RuntimeModel {
-  id: string;
-  label: string;
-  allowed_reasoning_effort?: readonly TeamHubAgentReasoningEffort[];
-  default_reasoning_effort?: TeamHubAgentReasoningEffort;
-}
-
-/** The model and reasoning effort of a new Agent, chosen among the models the
- * selected Computer Runtime reports; the first model is the default. */
-export function useAgentModelSelection(models: readonly RuntimeModel[]) {
-  const t = useT();
-  const [requestedModel, setRequestedModel] = useState("");
-  const [requestedReasoningEffort, setRequestedReasoningEffort] =
-    useState<TeamHubAgentReasoningEffort>("");
-  const selectedModel =
-    models.find(({ id }) => id === requestedModel) ?? models[0];
-  const reasoningEfforts = [...(selectedModel?.allowed_reasoning_effort ?? [])];
-  const defaultReasoningEffort =
-    selectedModel?.default_reasoning_effort &&
-    reasoningEfforts.includes(selectedModel.default_reasoning_effort)
-      ? selectedModel.default_reasoning_effort
-      : reasoningEfforts[0];
-  const reasoningEffort = reasoningEfforts.includes(requestedReasoningEffort)
-    ? requestedReasoningEffort
-    : defaultReasoningEffort;
-
-  return {
-    items: models.map((item) => ({
-      value: item.id,
-      label: runtimeModelLabel(item, t),
-    })),
-    model: selectedModel?.id ?? "",
-    reasoningEffort,
-    reasoningEfforts,
-    selectModel: setRequestedModel,
-    selectReasoningEffort: setRequestedReasoningEffort,
-  };
-}
 
 export const reasoningEffortMessages: Readonly<Record<string, Message>> = {
   off: composerMessages.effortOff,
