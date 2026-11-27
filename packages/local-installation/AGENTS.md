@@ -193,7 +193,13 @@ never served a connection, holds no data, and is initialized again.
 A running PostgreSQL whose configuration changed restarts like LiveKit and
 TeamHub: a release that repins the PostgreSQL archive unpacks it into a new
 component folder, so the server an earlier release left running differs in
-its executable path and must not stop the install. Startup readiness waits up
+its executable path and must not stop the install. On an already-initialized
+cluster (`PG_VERSION` 17 with `postmaster.opts`), `prepareNativeDatabase` first
+runs one combined `psql` probe against `simplexai` (`\gset` + `\if`) that
+proves server readiness, database existence, and whether a pre-Linger schema is
+present in a single subprocess, falling back transparently to the `pg_isready`
+loop, database check/`createdb`, and `preLingerSchema` whenever the probe fails
+or returns unexpected output. Cold startup readiness waits up
 to 120 seconds (logging elapsed progress every 15 seconds) while `postgres`
 stays alive so slow disks and Windows antivirus scanning do not time out during
 initial data-directory fsync, while still failing immediately if `postgres`
@@ -508,11 +514,17 @@ legacy backup was set aside, and no running services) and cold resumes
 `prepareFoundationServices`, and `prepareModelGateway`, holding
 `services`/`account` `succeeded` events and `saveSourceBinding` until both
 branches succeed and aborting and draining both before rollback on failure; on
-upgrades and live re-runs (`!overlapWithRuntime`), `runtime`, `migrate`, and
-`bindLiveKit` still run sequentially first, after which
+upgrades and live re-runs (`!overlapWithRuntime`), blocking `runtime` checks,
+`migrate`, and `bindLiveKit` run sequentially first, after which
 `prepareFoundationServices` and `prepareModelGateway` run concurrently with
 `startAndAwaitServices` and `provisionAccount` under the same
-`Promise.allSettled`, abort, and deferred `saveSourceBinding` barrier. When
+`Promise.allSettled`, abort, and deferred `saveSourceBinding` barrier. On both
+paths, degraded-tolerant runtime recovery (`restoreByokSource`,
+`restoreSavedLocalModel`, and resume `prepareLocalModels`) starts eagerly in
+the background as soon as the blocking runtime check finishes (overlapping
+`release`, `migrate`, and `services` without blocking `migrate` on
+`!overlapWithRuntime`), is awaited before `prepareLocalStackServices`, and is
+aborted and drained alongside `runtime` before rollback on failure. When
 `resume: true`, `prepareRuntime` inspects the selected runtime (or a saved BYOK
 source's runtime) once and skips
 `harness plan` and `harness apply` when it is already installed (falling back to
@@ -528,10 +540,11 @@ otherwise. Within `release`, binary and native-runtime bundle checks run in
 parallel, and per-artifact locks under `tools/native/components/.locks/<key>`
 allow independent native tools to prepare without blocking each other;
 collaboration services (`teamhub`, `node-services`, and `web`) always start
-concurrently via `Promise.allSettled`, even after `node-services` is
-pre-stopped for a TeamHub configuration restart (keeping pre-stopped
-`node-services` and pre-existing `web` and `teamhub` untracked by `started` so
-rollback does not stop previously running services). `runLocalmodels`
+concurrently via `Promise.allSettled`, and when TeamHub's configuration changes
+with `node-services` running, a running `web` whose configuration also changed
+pre-stops concurrently alongside `node-services` (keeping pre-stopped
+`node-services` and `web`, as well as pre-existing `teamhub`, untracked by
+`started` so rollback does not stop previously running services). `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per

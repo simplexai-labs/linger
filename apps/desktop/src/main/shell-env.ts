@@ -214,24 +214,23 @@ export const loginShellEnvironment = async (
     SHELL: shell,
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
   };
-  // Both shells start together and the interactive one wins when it works,
-  // so a hanging .zshrc costs one timeout instead of two.
-  const results = await Promise.all(
-    ["-ilc", "-lc"].map((flags) =>
-      run(shell, [flags, script], {
-        timeoutMs: LOGIN_SHELL_TIMEOUT_MS,
-        env: terminalEnv,
-      }).catch(() => ({ code: -1, stdout: "" })),
-    ),
-  );
-  const parsedResults = results.map(({ code, stdout }) => {
+  const parentMultishell = env[FNM_MULTISHELL_VAR];
+  const parseShellOutput = ({
+    code,
+    stdout,
+  }: {
+    readonly code: number;
+    readonly stdout: string;
+  }): Record<string, string> => {
     const match = new RegExp(`${ENV_MARKER}(.*?)${ENV_MARKER}`, "s").exec(
       stdout,
     );
     return code === 0 ? parseEnv(match?.[1] ?? "") : {};
-  });
-  const winner = parsedResults.find((variables) => Boolean(variables.PATH));
-  if (winner?.PATH) {
+  };
+  const stabilizeWinnerPath = async (
+    winner: Record<string, string>,
+  ): Promise<void> => {
+    if (!winner.PATH) return;
     const resolvedEntries = await Promise.all(
       winner.PATH.split(path.delimiter)
         .filter((directory) => directory && path.isAbsolute(directory))
@@ -243,19 +242,69 @@ export const loginShellEnvironment = async (
     if (stabilizedPath) {
       winner.PATH = stabilizedPath;
     }
-  }
-  const parentMultishell = env[FNM_MULTISHELL_VAR];
-  await Promise.all(
-    parsedResults.map((variables) =>
-      cleanupFnmMultishellSymlink(
+  };
+  const probe = (flags: "-ilc" | "-lc"): Promise<Record<string, string>> =>
+    run(shell, [flags, script], {
+      timeoutMs: LOGIN_SHELL_TIMEOUT_MS,
+      env: terminalEnv,
+    })
+      .catch(() => ({ code: -1, stdout: "" }))
+      .then(parseShellOutput);
+
+  // Both shells start together so a hanging .zshrc costs one timeout instead
+  // of two; when `-ilc` succeeds with PATH, return immediately while still
+  // cleaning up `-lc`'s probe symlink once it finishes.
+  const interactivePromise = probe("-ilc");
+  let loginSettled = false;
+  let loginVariables: Record<string, string> | undefined;
+  let loginCleanup: Promise<void> | undefined;
+  let interactiveWon = false;
+
+  const loginPromise = probe("-lc").then((variables) => {
+    loginSettled = true;
+    loginVariables = variables;
+    if (interactiveWon) {
+      loginCleanup = cleanupFnmMultishellSymlink(
         variables[FNM_MULTISHELL_VAR],
         parentMultishell,
-      ),
+      ).catch(() => undefined);
+    }
+    return variables;
+  });
+
+  const interactive = await interactivePromise;
+  if (interactive.PATH) {
+    await stabilizeWinnerPath(interactive);
+    interactiveWon = true;
+    await cleanupFnmMultishellSymlink(
+      interactive[FNM_MULTISHELL_VAR],
+      parentMultishell,
+    );
+    if (loginSettled) {
+      loginCleanup ??= cleanupFnmMultishellSymlink(
+        loginVariables?.[FNM_MULTISHELL_VAR],
+        parentMultishell,
+      ).catch(() => undefined);
+      await loginCleanup;
+    }
+    delete interactive[FNM_MULTISHELL_VAR];
+    return interactive;
+  }
+
+  const login = await loginPromise;
+  if (login.PATH) {
+    await stabilizeWinnerPath(login);
+  }
+  await Promise.all([
+    cleanupFnmMultishellSymlink(
+      interactive[FNM_MULTISHELL_VAR],
+      parentMultishell,
     ),
-  );
-  if (winner) {
-    delete winner[FNM_MULTISHELL_VAR];
-    return winner;
+    cleanupFnmMultishellSymlink(login[FNM_MULTISHELL_VAR], parentMultishell),
+  ]);
+  if (login.PATH) {
+    delete login[FNM_MULTISHELL_VAR];
+    return login;
   }
   return undefined;
 };

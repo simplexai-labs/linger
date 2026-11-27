@@ -323,12 +323,14 @@ Gateway and runs Agents. The daemon exits with the app.
   `com.apple.quarantine` before running recursive `xattr -dr`. Before
   `UpdaterModule` announces an unpacked macOS bundle `ready`,
   `prepareUpdateTool` best-effort pre-fetches that bundle's pinned `localmodels`
-  tool into the enrolled local installation's tool cache and pre-stages the
+  tool into the enrolled local installation's tool cache, pre-stages the
   staged bundle's packed source checkout, TeamHub binaries, and offline runtime
-  directory (when present) into the enrolled home's versioned source directory
-  without mutating setup/resume progress or getting deleted by background
-  pruning (failures warn as `update.prepare_failed` without blocking the app
-  update). A prune never removes a folder a running process
+  directory (when present) into the enrolled home's versioned source directory,
+  and pre-stages its shared bundled Node.js binary (`runtime/bin/node`)
+  into `<defaultHome>/desktop/node/v<version>/` (logged as
+  `local_server.update_node_prepared`) without mutating setup/resume progress or
+  getting deleted by background pruning (failures warn as
+  `update.prepare_failed` without blocking the app update). A prune never removes a folder a running process
   still starts from (`foldersInUse`; when processes cannot be listed, it
   removes nothing) and logs `local_server.source_in_use` instead. An app older than the recorded version
   (a downgrade) leaves the services on their newer source and logs
@@ -787,7 +789,10 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
    `AGENT_RUNNER_PUBLIC_GATEWAY_URL` and `TEAMHUB_CLI_BASE_URL` to origins the
    computer can reach.
 4. The computer needs Codex or Claude Code installed and signed in; the
-   daemon finds them through the login shell PATH. On Windows, the teamhub CLI
+   daemon finds them through the login shell PATH (`src/main/shell-env.ts`
+   probes `-ilc` and `-lc` concurrently, returns as soon as `-ilc` succeeds with
+   a valid `PATH` while cleaning up `-lc`'s `fnm_multishells` probe symlink in
+   the background, and falls back to `-lc` when `-ilc` fails). On Windows, the teamhub CLI
    runs through the native `dist/teamhub-cli/teamhub.exe` launcher (preferring
    `resources/runtime/bin/node.exe`, then `Linger.exe` with
    `ELECTRON_RUN_AS_NODE=1`, then `LINGER_NODE` or `node` on PATH from source)

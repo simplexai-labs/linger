@@ -849,8 +849,8 @@ export class LocalServerModule implements Module {
   }
 
   // Pre-fetches the updated release's pinned localmodels tool and pre-stages
-  // its bundled source checkout, TeamHub binaries, and offline runtime into
-  // the enrolled home before the user restarts to apply an update.
+  // its bundled source checkout, TeamHub binaries, offline runtime, and
+  // shared Node.js binary before the user restarts to apply an update.
   async prepareUpdateTool(
     stagedBundle: string,
     signal: AbortSignal,
@@ -901,10 +901,42 @@ export class LocalServerModule implements Module {
         installerDirectory,
         effectiveSignal,
       ),
+      this.#prepareUpdateNode(installerDirectory, effectiveSignal),
     ]);
     effectiveSignal.throwIfAborted();
     const rejected = results.find((result) => result.status === "rejected");
     if (rejected) throw rejected.reason;
+  }
+
+  async #prepareUpdateNode(
+    installerDirectory: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted();
+    const bundle = await this.#bundledRuntime(installerDirectory);
+    signal.throwIfAborted();
+    const spec = this.#sharedNodeSpec(bundle, false);
+    if (!spec) return;
+    const source = this.#sharedBundledNodePath(false, installerDirectory);
+    if (!source) return;
+    const directory = this.#desktopDirectory("node", `v${spec.version}`);
+    const relativeBinary = path.join("bin", "node");
+    if (existsSync(path.join(directory, relativeBinary))) return;
+    const startedAt = Date.now();
+    const copied = await this.#copySharedNode(
+      source,
+      directory,
+      relativeBinary,
+      spec.sha256,
+      false,
+      signal,
+    );
+    if (copied) {
+      this.#ctx?.log.info("local_server.update_node_prepared", {
+        version: spec.version,
+        ms: Date.now() - startedAt,
+      });
+    }
   }
 
   async #resolveUpdateSource(
@@ -2863,18 +2895,12 @@ export class LocalServerModule implements Module {
     // archive / folder copy inside runtime-<target>/.
     const bundle = await this.#bundledRuntime();
     const bundled = bundle?.node;
-    const expectedSharedBinary = isWindows
-      ? "runtime/bin/node.exe"
-      : "runtime/bin/node";
-    if (
-      bundle?.target === this.#target() &&
-      bundled?.shared === true &&
-      bundled.version === NODE_RUNTIME_VERSION &&
-      (bundled.binary === undefined ||
-        bundled.binary === expectedSharedBinary) &&
-      typeof bundled.sha256 === "string" &&
-      bundled.sha256.length > 0
-    ) {
+    const sharedNode = this.#sharedNodeSpec(
+      bundle,
+      isWindows,
+      NODE_RUNTIME_VERSION,
+    );
+    if (sharedNode) {
       const source = this.#sharedBundledNodePath(isWindows);
       if (source) {
         try {
@@ -2882,7 +2908,7 @@ export class LocalServerModule implements Module {
             source,
             directory,
             path.relative(directory, binary),
-            bundled.sha256,
+            sharedNode.sha256,
             isWindows,
             signal,
           );
@@ -2944,16 +2970,51 @@ export class LocalServerModule implements Module {
     return binary;
   }
 
-  #sharedBundledNodePath(isWindows: boolean): string | undefined {
+  #sharedNodeSpec(
+    bundle: BundledRuntime | undefined,
+    isWindows: boolean,
+    expectedVersion?: string,
+  ): { version: string; sha256: string } | undefined {
+    const bundled = bundle?.node;
+    const expectedSharedBinary = isWindows
+      ? "runtime/bin/node.exe"
+      : "runtime/bin/node";
+    if (
+      bundle?.target !== this.#target() ||
+      bundled?.shared !== true ||
+      typeof bundled.version !== "string" ||
+      !/^[0-9]+(?:\.[0-9]+){1,2}(?:-[0-9A-Za-z.-]+)?$/.test(bundled.version) ||
+      (expectedVersion !== undefined && bundled.version !== expectedVersion) ||
+      (bundled.binary !== undefined &&
+        bundled.binary !== expectedSharedBinary) ||
+      typeof bundled.sha256 !== "string" ||
+      bundled.sha256.length === 0
+    )
+      return undefined;
+    return { version: bundled.version, sha256: bundled.sha256 };
+  }
+
+  #sharedBundledNodePath(
+    isWindows: boolean,
+    installerDirectory?: string,
+  ): string | undefined {
     const candidate =
-      this.#options.bundledNodePath ??
-      path.resolve(
-        this.#options.installerDirectory,
-        "../../..",
-        "runtime",
-        "bin",
-        isWindows ? "node.exe" : "node",
-      );
+      installerDirectory !== undefined
+        ? path.resolve(
+            installerDirectory,
+            "../../..",
+            "runtime",
+            "bin",
+            isWindows ? "node.exe" : "node",
+          )
+        : (this.#options.bundledNodePath ??
+          path.resolve(
+            this.#options.installerDirectory,
+            "../../..",
+            "runtime",
+            "bin",
+            isWindows ? "node.exe" : "node",
+          ));
     return existsSync(candidate) ? candidate : undefined;
   }
 
@@ -2967,25 +3028,31 @@ export class LocalServerModule implements Module {
     sha256: string,
     isWindows: boolean,
     signal: AbortSignal,
-  ): Promise<void> {
-    if (existsSync(path.join(directory, relativeBinary))) return;
-    const copied = `${directory}.partial`;
-    const target = path.join(copied, relativeBinary);
-    try {
-      await removeRetrying(copied);
-      await mkdir(path.dirname(target), { recursive: true });
-      await copyFile(source, target, fsConstants.COPYFILE_FICLONE);
-      const hash = createHash("sha256");
-      for await (const chunk of createReadStream(target, { signal }))
-        hash.update(chunk as Buffer);
-      if (hash.digest("hex") !== sha256)
-        throw new Error(`The bundled ${relativeBinary} is damaged`);
-      if (!isWindows) await chmod(target, 0o755);
-      await this.#unquarantine(copied, signal, [target, source]);
-      await this.#publish(copied, directory, relativeBinary, signal);
-    } finally {
-      await removeRetrying(copied);
-    }
+  ): Promise<boolean> {
+    if (existsSync(path.join(directory, relativeBinary))) return false;
+    let copiedAny = false;
+    await this.#stageDirectory(directory, signal, async () => {
+      if (existsSync(path.join(directory, relativeBinary))) return;
+      const copied = `${directory}.partial`;
+      const target = path.join(copied, relativeBinary);
+      try {
+        await removeRetrying(copied);
+        await mkdir(path.dirname(target), { recursive: true });
+        await copyFile(source, target, fsConstants.COPYFILE_FICLONE);
+        const hash = createHash("sha256");
+        for await (const chunk of createReadStream(target, { signal }))
+          hash.update(chunk as Buffer);
+        if (hash.digest("hex") !== sha256)
+          throw new Error(`The bundled ${relativeBinary} is damaged`);
+        if (!isWindows) await chmod(target, 0o755);
+        await this.#unquarantine(copied, signal, [target, source]);
+        await this.#publish(copied, directory, relativeBinary, signal);
+        copiedAny = true;
+      } finally {
+        await removeRetrying(copied);
+      }
+    });
+    return copiedAny;
   }
 
   // The source package, unpacked once into the installation folder; or the
