@@ -259,8 +259,9 @@ export interface SetupModelOption {
   readonly name: string;
   readonly publisher?: string;
   readonly quant: string;
-  readonly parameters?: string;
-  readonly activeParameters?: string;
+  // The kit's model family, for its icon; the featured release has its own.
+  readonly family?: string;
+  readonly featured?: true;
   readonly quality?: number;
   readonly decodeTokS?: number;
   readonly downloadBytes: number;

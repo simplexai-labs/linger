@@ -466,7 +466,6 @@ describe("setup page two-step welcome", () => {
     push(welcome(capable));
     expect($("local-row").dataset.pending).toBe("false");
     expect($("local-model-name").textContent).toBe("qwen3-8b");
-    expect($("local-model-needs").textContent).toBe("6.0 GB");
     expect(button("local-install").disabled).toBe(false);
     $("local-install").click();
     await vi.waitFor(() =>
@@ -540,7 +539,6 @@ describe("setup page two-step welcome", () => {
     expect($("subscription-row").hidden).toBe(true);
     expect($("byok-row").hidden).toBe(true);
     expect($("local-model-name").textContent).toBe("qwen3-8b");
-    expect($("local-model-needs").textContent).toBe("6.0 GB");
     expect($("plan-line").textContent).toBe("");
     expect(button("local-install").disabled).toBe(false);
     $("local-install").click();
@@ -2069,10 +2067,10 @@ describe("setup page model picker", () => {
     fields: Partial<SetupModelOption> & { library: string },
   ): SetupModelOption => ({
     name: "Inkling 2 Mini",
-    publisher: "Inkling",
+    publisher: "Thinking Machines",
     quant: "UD-Q4_K_M",
-    parameters: "26.4B",
-    activeParameters: "3.4B",
+    family: "other",
+    featured: true,
     downloadBytes: 16 * GB,
     memoryBytes: 18 * GB,
     fits: true,
@@ -2109,9 +2107,8 @@ describe("setup page model picker", () => {
       option({
         library: "spark-x2.6-4b-q4km:Q4_K_M",
         name: "Spark X2.6 4B",
-        publisher: "Spark",
-        parameters: "4B",
-        activeParameters: undefined,
+        publisher: "XHToken",
+        featured: undefined,
         downloadBytes: 3 * GB,
         memoryBytes: 5 * GB,
         quality: 44,
@@ -2122,8 +2119,8 @@ describe("setup page model picker", () => {
         library: "qwen3.8-flash-next-iq2xs:IQ2_XS",
         name: "Qwen 3.8 Flash Next",
         publisher: "Qwen",
-        parameters: "80B",
-        activeParameters: "3B",
+        family: "qwen",
+        featured: undefined,
         downloadBytes: 48 * GB,
         memoryBytes: 52 * GB,
         fits: false,
@@ -2143,15 +2140,22 @@ describe("setup page model picker", () => {
     open("local");
     // Two builds of one model: the build follows the name.
     expect($("local-model-name").textContent).toBe("Inkling 2 Mini · Standard");
-    expect($("local-model-sub").textContent).toBe(
-      "Inkling · 26.4B · 3.4B active",
-    );
-    expect($("local-model-why").textContent).toBe(
-      "The smartest model this computer can run",
-    );
+    // Who makes it, and nothing more: no parameter counts.
+    expect($("local-model-sub").textContent).toBe("Thinking Machines");
+    // The family's mark before the name: the featured Inkling's sparkle.
+    expect($("local-model-icon").dataset.family).toBe("featured");
+    expect($("local-model-icon").querySelector("svg")).not.toBeNull();
+    // No pitch line while the model fits.
+    expect($("local-model-why-row").hidden).toBe(true);
+    // Two estimates; the download size is not on the card.
     expect($("local-model-quality").textContent).toBe("≈ Sonnet 4.6");
     expect($("local-model-speed").textContent).toBe("~63 tok/s");
-    expect($("local-model-needs").textContent).toBe("16.0 GB");
+    expect(
+      [...document.querySelectorAll("#local-facts > div")].map(
+        (cell) => cell.querySelector("span")!.textContent,
+      ),
+    ).toEqual(["Quality", "Speed · est."]);
+    expect(document.getElementById("local-model-needs")).toBeNull();
     expect($("local-model-mem").textContent).toBe("18 GB of 36 GB");
     // The bar: what macOS and apps hold now (36 - 27 GB), then the model,
     // then what is free, with a key for each.
@@ -2186,9 +2190,20 @@ describe("setup page model picker", () => {
     expect(best.querySelector(".nm")!.textContent).toBe(
       "Inkling 2 Mini · Standard",
     );
-    expect(best.querySelector(".tg")!.textContent).toBe(
-      "Inkling · 26.4B · 3.4B active",
+    expect(best.querySelector(".tg")!.textContent).toBe("Thinking Machines");
+    // Each row leads with its family's mark: the featured sparkle, Qwen's
+    // mark, and the generic chip for a family the app has no mark for.
+    expect(
+      [...rows].map(
+        (row) => row.querySelector<HTMLElement>(".m-ico")!.dataset.family,
+      ),
+    ).toEqual(["featured", "featured", "other", "qwen"]);
+    expect([...rows].every((row) => row.querySelector(".m-ico svg path"))).toBe(
+      true,
     );
+    expect(
+      [...rows].some((row) => /\d+(\.\d+)?B\b/.test(row.textContent ?? "")),
+    ).toBe(false);
     expect([...best.querySelectorAll(".mc")].map((c) => c.textContent)).toEqual(
       ["16.0 GB", "Best fit"],
     );
@@ -2225,9 +2240,8 @@ describe("setup page model picker", () => {
     rowFor("spark-x2.6-4b-q4km:Q4_K_M").click();
     await vi.waitFor(() => expect($("model-sheet").hidden).toBe(true));
     expect($("local-model-name").textContent).toBe("Spark X2.6 4B");
-    expect($("local-model-why").textContent).toBe(
-      "The fastest model on this computer",
-    );
+    expect($("local-model-sub").textContent).toBe("XHToken");
+    expect($("local-model-icon").dataset.family).toBe("other");
     expect($("local-model-quality").textContent).toBe("≈ Gemini 2.5 Pro");
     expect(run).toHaveBeenCalledWith({
       op: "local.model.check",
@@ -2287,7 +2301,7 @@ describe("setup page model picker", () => {
 });
 
 describe("setup page local model plan", () => {
-  it("names the model on step 2 with its size, and no badge or link", async () => {
+  it("names the model on step 2, and no badge or link", async () => {
     await openPage(
       welcome({
         ...capable,
@@ -2304,7 +2318,6 @@ describe("setup page local model plan", () => {
     expect($("source-local-about").textContent).toBe("On this computer");
     $("source-continue").click();
     expect($("local-model-name").textContent).toBe("inkling-2-mini:Q4_K_M");
-    expect($("local-model-needs").textContent).toBe("15.0 GB");
     expect(
       document.querySelector(".featured-pill, .spotlight-link"),
     ).toBeNull();

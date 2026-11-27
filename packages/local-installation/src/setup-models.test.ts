@@ -31,6 +31,7 @@ const library = {
       fits_now: true,
       minimum_memory_bytes: 19847946932,
       publisher: "Thinking Machines",
+      family: "other",
       architecture: "moe",
       parameters: "26.4B",
       active_parameters: "3.4B",
@@ -57,6 +58,7 @@ const library = {
       fits_now: false,
       minimum_memory_bytes: 25216865265,
       publisher: "Qwen",
+      family: "qwen",
     },
     {
       id: "qwen3.8-flash-next-iq2xs:GSQ-RCO-IQ2_XS",
@@ -162,9 +164,8 @@ it("lists every catalog model with the kit's estimates and whether it fits", asy
     name: "Inkling 2 Mini",
     publisher: "Thinking Machines",
     quant: "UD-Q4_K_M",
-    parameters: "26.4B",
-    activeParameters: "3.4B",
-    architecture: "moe",
+    family: "other",
+    featured: true,
     quality: 54,
     decodeTokS: 63.2,
     downloadBytes: 17252349088,
@@ -180,6 +181,11 @@ it("lists every catalog model with the kit's estimates and whether it fits", asy
     needsMemoryBytes: 25216865265,
   });
   expect(listing.models[2]?.tooLarge).toBeUndefined();
+  // The family names its icon; only Inkling 2 Mini is the featured one.
+  expect(listing.models[2]).toMatchObject({ family: "qwen" });
+  expect(listing.models[2]?.featured).toBeUndefined();
+  // Parameter counts stay out: the page doesn't show them.
+  expect(listing.models[0]).not.toHaveProperty("parameters");
   // An unscored model keeps its speed but has no quality.
   expect(listing.models[2]?.quality).toBeUndefined();
   expect(listing.models[2]?.decodeTokS).toBe(76.9);

@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import {
   localmodelsBaseDirectory,
   runLocalmodels,
@@ -41,9 +42,10 @@ export interface SetupModelOption {
   name: string;
   publisher?: string;
   quant: string;
-  parameters?: string;
-  activeParameters?: string;
-  architecture?: string;
+  /** The kit's model family (`qwen`, `llama`, …, `other`), for its icon. */
+  family?: string;
+  /** Whether it is the featured release (Inkling 2 Mini), drawn apart. */
+  featured?: boolean;
   /** The kit's quality score for this model, when it has one (0 = unscored). */
   quality?: number;
   /** Estimated single-stream decode speed on this computer, tokens/s. */
@@ -207,17 +209,16 @@ export async function listSetupModels(
     const estimate = estimates.get(library);
     const role = roles.get(library);
     const publisher = text(model.publisher, 80);
-    const parameters = text(model.parameters, 20);
-    const activeParameters = text(model.active_parameters, 20);
-    const architecture = text(model.architecture, 20);
+    const family = text(model.family, 20);
     models.push({
       library,
       name,
       ...(publisher ? { publisher } : {}),
       quant,
-      ...(parameters ? { parameters } : {}),
-      ...(activeParameters ? { activeParameters } : {}),
-      ...(architecture ? { architecture } : {}),
+      ...(family ? { family } : {}),
+      ...(isInkling2MiniModelId(splitLibraryModel(library).id)
+        ? { featured: true }
+        : {}),
       ...(estimate?.quality !== undefined ? { quality: estimate.quality } : {}),
       ...(estimate?.tokS !== undefined ? { decodeTokS: estimate.tokS } : {}),
       downloadBytes: model.download_bytes,

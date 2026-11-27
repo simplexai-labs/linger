@@ -6374,10 +6374,10 @@ export function setupModelOptions(value: unknown): SetupModelOption[] {
         name: row.name,
         quant: row.quant,
         ...(label(row.publisher, 80) ? { publisher: row.publisher } : {}),
-        ...(label(row.parameters, 20) ? { parameters: row.parameters } : {}),
-        ...(label(row.activeParameters, 20)
-          ? { activeParameters: row.activeParameters }
+        ...(label(row.family, 20) && /^[a-z0-9_-]+$/.test(row.family)
+          ? { family: row.family }
           : {}),
+        ...(row.featured === true ? { featured: true as const } : {}),
         ...(count(row.quality) ? { quality: row.quality } : {}),
         ...(count(row.decodeTokS) ? { decodeTokS: row.decodeTokS } : {}),
         downloadBytes: row.downloadBytes,
