@@ -27,7 +27,11 @@ export function externalConnectionNeedsAttention(
  * use a device-login page with no loopback callback.
  */
 export function canResumePendingExternalConnection(appKey: string) {
-  return !desktopConnectorOAuth() || appKey === "feishu_mail";
+  return (
+    !desktopConnectorOAuth() ||
+    appKey === "feishu_mail" ||
+    appKey === "feishu_im"
+  );
 }
 
 /**

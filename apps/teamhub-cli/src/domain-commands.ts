@@ -21,6 +21,7 @@ import { documentCommandDefinitions } from "./document-commands.js";
 import { documentImageCommandDefinitions } from "./document-image-commands.js";
 import { businessCommandDefinitions } from "./business-commands.js";
 import { mailCommandDefinitions } from "./connector-mail.js";
+import { feishuImCommandDefinitions } from "./connector-feishu-im.js";
 import { gmailCanvasCommandDefinitions } from "./connector-gmail-canvas.js";
 import { calendarCommandDefinitions } from "./connector-calendar.js";
 import { outlookCalendarCommandDefinitions } from "./connector-outlook-calendar.js";
@@ -34,6 +35,7 @@ export const commandDefinitions: readonly CommandDefinition[] = [
   ...documentImageCommandDefinitions,
   ...businessCommandDefinitions,
   ...mailCommandDefinitions,
+  ...feishuImCommandDefinitions,
   ...gmailCanvasCommandDefinitions,
   ...figmaCommandDefinitions,
   ...githubCommandDefinitions,
@@ -145,6 +147,7 @@ export function domainHelp(prefix: readonly string[] = []): string {
       "gmail",
       "outlook",
       "feishu-mail",
+      "feishu-im",
       "outlook-calendar",
       "slack",
       "gcal",

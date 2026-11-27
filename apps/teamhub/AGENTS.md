@@ -24,13 +24,17 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
 - Connector authorization defaults to the public Web callback. For a desktop
   request, pass only a validated one-time loopback address to Composio.
   TeamHub verifies connection status independently under the signed-in Account.
-- Feishu Mail is the one connected app TeamHub runs itself
-  (`internal/feishu`, `externalsource/feishu.go`): Composio has no Feishu
-  toolkit. Every call runs through the owner's own lark-cli on the online
+- Feishu Mail and Feishu IM are the connected apps TeamHub runs itself
+  (`internal/feishu`, `externalsource/feishu.go`, `externalsource/feishu_im.go`):
+  Composio has no Feishu toolkit. Feishu IM (`feishu_im`, tools `FEISHU_IM_*` in
+  `externalsource/feishu_im_tools.go`) reads and sends messages through the same
+  owner's lark-cli, with scopes `im:message` and `im:chat:readonly`, and a send
+  waits for the Human's card. It runs no listener and syncs no nightly import, so
+  it adds no migration. Every call runs through the owner's own lark-cli on the online
   Computer that runs their active Another Me
-  (`store.GetFeishuMailComputerTarget`): TeamHub sends a `feishu_mail` Computer
-  tool call through Node Services (`roomagent.CallLocalComputerToolResult`),
-  and the Daemon runs lark-cli against the owner's mailbox API paths only.
+  (`store.GetFeishuMailComputerTarget`): TeamHub sends a `feishu_mail` or
+  `feishu_im` Computer tool call through Node Services (`roomagent.CallLocalComputerToolResult`),
+  and the Daemon runs lark-cli against the owner's mailbox or IM API paths only.
   TeamHub keeps no Feishu credentials and needs no Feishu app of its own; the
   Feishu app behind lark-cli must enable the mail scopes the Daemon's
   `localtools.FeishuMailScopes` names. The Apps page never shows Feishu Mail,

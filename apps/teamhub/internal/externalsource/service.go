@@ -63,6 +63,7 @@ type Provider interface {
 type Service struct {
 	managed             *managedCatalog
 	feishu              *feishuCatalog
+	feishuIM            *feishuIMCatalog
 	pool                *pgxpool.Pool
 	provider            Provider
 	contextProvider     *composio.Client

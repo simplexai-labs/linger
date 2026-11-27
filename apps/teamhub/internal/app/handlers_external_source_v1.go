@@ -256,9 +256,9 @@ func (a *App) writeFeishuConnectError(c *gin.Context, err error) bool {
 		if notEnabled.PermissionsURL != "" {
 			details = append(details, httpapi.ErrorDetail{Field: "permissions_url", Reason: notEnabled.PermissionsURL})
 		}
-		a.writeErrorWithDetails(c, http.StatusConflict, "FEISHU_SCOPES_NOT_ENABLED", "The Feishu app your lark-cli uses does not enable these mail permissions: "+strings.Join(notEnabled.Scopes, ", ")+". Enable them as user permissions in its developer console, publish a new version, and connect again.", details)
+		a.writeErrorWithDetails(c, http.StatusConflict, "FEISHU_SCOPES_NOT_ENABLED", "The Feishu app your lark-cli uses does not enable these permissions: "+strings.Join(notEnabled.Scopes, ", ")+". Enable them as user permissions in its developer console, publish a new version, and connect again.", details)
 	case errors.As(err, &computer) && computer.Status == feishu.StatusComputerOffline:
-		a.writeError(c, http.StatusConflict, "FEISHU_COMPUTER_OFFLINE", "Feishu Mail runs through lark-cli on the Computer that runs your Another Me, and that Computer is offline. Start it and connect again.")
+		a.writeError(c, http.StatusConflict, "FEISHU_COMPUTER_OFFLINE", "Feishu runs through lark-cli on the Computer that runs your Another Me, and that Computer is offline. Start it and connect again.")
 	case errors.As(err, &computer) && computer.Status == feishu.StatusNotInstalled:
 		// The Web shows the commands from the details as copyable steps.
 		a.writeErrorWithDetails(c, http.StatusConflict, "LARK_CLI_NOT_INSTALLED", "Install lark-cli on the Computer that runs your Another Me, set it up there, and connect again.",

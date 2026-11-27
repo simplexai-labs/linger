@@ -73,6 +73,10 @@ func (d *Daemon) handleComputerTool(ctx context.Context, stream transport.Stream
 			if d.feishuMail != nil {
 				result = d.feishuMail.Call(callCtx, request.Name, request.Arguments)
 			}
+		case "feishu_im":
+			if d.feishuIM != nil {
+				result = d.feishuIM.Call(callCtx, request.Name, request.Arguments)
+			}
 		}
 		if failure := localtools.BrowserCallNotRun(err); failure != "" {
 			// Nothing ran: the owner's Chrome is not connected or is busy,

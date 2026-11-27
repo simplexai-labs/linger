@@ -54,13 +54,16 @@ func (a *App) registerExternalApps(ctx context.Context, cfg config.ExternalAppsC
 	if err = sources.ConfigureManagedApps(ctx, client, keyBox); err != nil {
 		return fmt.Errorf("configure managed connected apps: %w", err)
 	}
-	// Feishu Mail runs through each owner's lark-cli on their Computer.
+	// Feishu Mail and Feishu IM run through each owner's lark-cli on their Computer.
 	if computer, ok := a.localComputers.(externalsource.FeishuComputer); ok {
 		sources.ConfigureFeishu(computer, client, &http.Client{Timeout: config.ExternalSourceRequestTimeout})
+		sources.ConfigureFeishuIM(computer)
 	}
 	a.externalSources = sources
 	a.agentConnectedApps = agentconnectedapps.New(a.pool, agentAuthorization, sources,
-		agentconnectedapps.WithNativeToolkit(client, sources.FeishuMailTools()))
+		agentconnectedapps.WithNativeToolkit(
+			agentconnectedapps.WithNativeToolkit(client, sources.FeishuMailTools()),
+			sources.FeishuIMTools()))
 	a.agentConnectedApps.SetLogger(a.logger)
 	return nil
 }

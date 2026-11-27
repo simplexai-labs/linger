@@ -79,7 +79,7 @@ func (s *Service) FeishuConfigured() bool { return s.feishu != nil }
 // ConnectionProvidersConfigured reports whether any connection provider
 // works: Composio, or Feishu Mail through owners' Computers.
 func (s *Service) ConnectionProvidersConfigured() bool {
-	return s.ProviderConfigured() || s.FeishuConfigured()
+	return s.ProviderConfigured() || s.FeishuConfigured() || s.FeishuIMConfigured()
 }
 
 // feishuMailbox is upstreamID's mailbox.
@@ -267,6 +267,9 @@ func isFeishuApp(appKey string) bool { return appKey == FeishuMailAppKey }
 func (s *Service) createLinkInTx(ctx context.Context, tx pgx.Tx, accountID, appKey, managedConfigID string) (composio.Link, error) {
 	if isFeishuApp(appKey) {
 		return s.createFeishuLinkInTx(ctx, tx, accountID)
+	}
+	if isFeishuIMApp(appKey) {
+		return s.createFeishuIMLinkInTx(ctx, tx, accountID)
 	}
 	return s.createManagedLinkInTx(ctx, tx, accountID, toolkitForApp(appKey), managedConfigID)
 }

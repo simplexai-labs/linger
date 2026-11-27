@@ -35,7 +35,7 @@ elsewhere.
 | Chat                          | 对话                       |                                                   |
 | Library                       | 资料库                     |                                                   |
 | Connectors                    | 连接器                     |                                                   |
-| Feishu                        | 飞书                       | The product; Feishu Mail is 飞书邮箱.             |
+| Feishu                        | 飞书                       | Feishu Mail is 飞书邮箱, Feishu IM is 飞书 IM.    |
 | Settings                      | 设置                       |                                                   |
 | Profile                       | 个人资料                   |                                                   |
 | Security                      | 安全                       |                                                   |

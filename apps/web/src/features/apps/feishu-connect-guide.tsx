@@ -189,8 +189,13 @@ function FeishuScopesGuide({
       detail.field === "permissions_url" &&
       CONSOLE_ORIGINS.some((origin) => detail.reason.startsWith(origin)),
   )?.reason;
+  // Feishu IM and Feishu Mail share this guide; the scopes say which app.
+  const isIM = scopes.some((scope) => scope.startsWith("im:"));
   return (
-    <GuideBox className={className} title={t(m.feishuScopesTitle)}>
+    <GuideBox
+      className={className}
+      title={t(isIM ? m.feishuImScopesTitle : m.feishuScopesTitle)}
+    >
       <li>
         {t(m.feishuScopesStepOpen)}
         {permissionsUrl ? (
@@ -210,7 +215,7 @@ function FeishuScopesGuide({
       <li>
         {t(m.feishuScopesStepAdd)}
         <ul
-          aria-label={t(m.feishuScopesList)}
+          aria-label={t(isIM ? m.feishuImScopesList : m.feishuScopesList)}
           className="mt-1 space-y-0.5 font-mono text-foreground"
         >
           {scopes.map((scope) => (

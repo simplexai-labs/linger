@@ -23,6 +23,8 @@ export const connectorWriteApproval: Readonly<Record<string, CommandApproval>> =
     "feishu-mail draft": "allow",
     "feishu-mail canvas-draft": "allow",
     "feishu-mail archive": "allow",
+    "feishu-im send": "confirm",
+    "feishu-im reply": "confirm",
     "slack send": "confirm",
     "slack react": "judge",
     "gcal create": "judge",

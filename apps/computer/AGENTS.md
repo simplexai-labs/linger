@@ -129,10 +129,16 @@
   method and an API path under `/open-apis/mail/v1/user_mailboxes/me`, never
   lark-cli's other Feishu scopes. A started login's device code stays in the
   Daemon's memory under the caller's login name, so a restart drops it and
-  the owner connects again. Results carry lark-cli's error type, subtype,
+the owner connects again. Results carry lark-cli's error type, subtype,
   Feishu code, never a decision made from its message; a
   `config` error, a lark-cli never set up with a Feishu app, is
   `not_configured`.
+- The `feishu_im` Computer tool (`localtools.FeishuIM`) runs the owner's own
+  lark-cli for TeamHub's Feishu IM the same way. A request names only a GET or
+  POST method and an API path under `/open-apis/im/v1`, so a recall or delete is
+  refused, and its scopes are `im:message` and `im:chat:readonly`. A started
+  login's device code stays in the Daemon's memory under the caller's login
+  name, so a restart drops it and the owner connects again.
 - Do not commit runtime state, PID files, sockets, logs, credentials, or build
   output.
 

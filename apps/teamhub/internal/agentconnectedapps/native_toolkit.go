@@ -76,6 +76,11 @@ func (p routedProvider) SaveDraftRaw(ctx context.Context, upstreamID, draftID st
 	if saver, ok := p.native.(nativeDraftSaver); ok {
 		return saver.SaveDraftRaw(ctx, upstreamID, draftID, raw)
 	}
+	// A routed provider may wrap another one, whose native toolkit saves the
+	// draft when this one does not.
+	if saver, ok := p.ToolProvider.(nativeDraftSaver); ok {
+		return saver.SaveDraftRaw(ctx, upstreamID, draftID, raw)
+	}
 	return "", errNoGmailDrafts
 }
 

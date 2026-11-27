@@ -205,6 +205,8 @@ func toolkitForApp(key string) string {
 	// TeamHub authorizes Feishu itself; its connections record this slug.
 	case FeishuMailAppKey:
 		return feishuToolkit
+	case FeishuIMAppKey:
+		return feishuToolkit
 	default:
 		return key
 	}
