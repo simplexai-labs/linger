@@ -741,14 +741,6 @@ function createSettingsRoute(): RouteObject {
       },
       {
         lazy: async () => ({
-          Component: (
-            await import("@/features/settings/security-settings-page")
-          ).SecuritySettingsPage,
-        }),
-        path: "security",
-      },
-      {
-        lazy: async () => ({
           Component: (await import("@/features/local-computer/computers-page"))
             .ComputersPage,
         }),
@@ -771,6 +763,8 @@ function createSettingsRoute(): RouteObject {
       },
       { loader: openModels, path: "local-models" },
       { loader: openProfile, path: "administration" },
+      // Security merged into Account; old links land there.
+      { loader: openProfile, path: "security" },
     ],
     ErrorBoundary: PanelRouteErrorSurface,
     // Settings is reachable from every surface, so it stays out of the shell

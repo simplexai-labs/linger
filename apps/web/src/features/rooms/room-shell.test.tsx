@@ -579,12 +579,12 @@ describe("Room shell Tenant transition", () => {
               path: "settings",
               element: <SettingsLayout />,
               children: [
-                { path: "account", element: <p>Profile section</p> },
+                { path: "account", element: <p>Account section</p> },
                 {
-                  path: "security",
+                  path: "computers",
                   lazy: async () => {
                     await new Promise((resolve) => setTimeout(resolve, 50));
-                    return { element: <p>Security section</p> };
+                    return { element: <p>Computers section</p> };
                   },
                 },
               ],
@@ -620,17 +620,17 @@ describe("Room shell Tenant transition", () => {
       name: "Settings navigation",
     });
     expect(room).not.toBeInTheDocument();
-    expect(screen.getByText("Profile section")).toBeVisible();
-    fireEvent.click(screen.getByRole("link", { name: "Security" }));
+    expect(screen.getByText("Account section")).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: "Computers" }));
     expect(
       screen.queryByRole("status", { name: /^Loading/ }),
     ).not.toBeInTheDocument();
-    expect(await screen.findByText("Security section")).toBeVisible();
+    expect(await screen.findByText("Computers section")).toBeVisible();
     expect(
       screen.getByRole("complementary", { name: "Settings navigation" }),
     ).toBe(sidebar);
     expect(router.state.location.pathname).toBe(
-      "/t/tenant-northstar/settings/security",
+      "/t/tenant-northstar/settings/computers",
     );
   });
 

@@ -125,7 +125,7 @@ Neither proves a real supplier account was used.
 Use the current provider and tool prerequisites from the [TeamHub CLI README](../../../../apps/teamhub-cli/README.md).
 The Connectors page (`/t/{tenantId}/apps`, nav label `Connectors`) renders the 16 grouped managed apps from `apps/web/src/features/apps/app-groups.ts` (backed by the 18-app catalog in `apps/teamhub/internal/externalsource/catalog.go`, omitting `googledrive` and `facebook` unless already connected), filtered by one pill row (`All`, each app group, and `Web search`) plus a `Connected only` toggle.
 It has no search box, provider toolkit sync or paginated catalog; GitLab and HubSpot are not offered.
-Connecting needs a Composio API key from `COMPOSIO_API_KEY` or saved in the Connectors setup modal or `Settings → Security → API keys`.
+Connecting needs a Composio API key from `COMPOSIO_API_KEY` or saved in the Connectors setup modal or `Settings → Account → API keys`.
 
 **Journey:** Connect the account from the app's card through the provider popup.
 Pending authorization reconciles immediately when the popup lands on `/oauth/composio-complete` (`POST /v0/external-connection-completions`), with a 5-second fallback poll for the first 3 minutes and a 1-minute poll thereafter.

@@ -78,7 +78,7 @@ A recipe row is a test definition, not a passing result. Mark each selected vari
 Also reconcile Web routes in `apps/web/src/app/router.tsx`: login, Computer connection,
 Room, stable Document links, shared Document/history links, Library/Wiki/Wiki preview/Meetings,
 Dashboard detail (`/t/:tenantId/dashboard/:workItemId`), Apps, `/oauth/composio-complete`,
-and Settings Account/Security/Computers/Models (`/t/:tenantId/settings/models`).
+and Settings Account/Computers/Models (`/t/:tenantId/settings/models`).
 Retired or compatibility aliases (`/t/:tenantId/profile`, `/t/:tenantId/computers`,
 `/t/:tenantId/settings/local-models`, `/t/:tenantId/settings/administration`,
 `/t/:tenantId/library/my-documents`, `/t/:tenantId/library/shared-with-me`,
@@ -170,7 +170,7 @@ Live also needs the `LIVEKIT_*` media service. Live tools such as Slack, documen
 
 Check the key paths separately:
 
-- Settings → Security → API keys shows the Composio row, plus Soniox and xAI rows only when `voice_available` is true.
+- Settings → Account → API keys shows the Composio row, plus Soniox and xAI rows only when `voice_available` is true.
 - Saving a key in the voice dialog applies without a restart; the voice workers start within seconds. Record the policy read before and after.
 - With the key in the environment, the API keys row shows `Set by your server` / `Set with <ENV_VAR> on the server.` and hides the edit button; direct `PUT /v0/voice-provider-keys/{provider}` conflict returns HTTP `409 VOICE_KEY_FROM_ENVIRONMENT`.
 - A saved key is shared by everyone on the server and TeamHub currently exposes only `PUT /v0/voice-provider-keys/{provider}` (no public `DELETE` route or UI removal button). Use a disposable test environment/database and never put keys in evidence.

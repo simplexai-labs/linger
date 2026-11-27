@@ -190,7 +190,7 @@ printf '%s\n' 'test1234' | docker compose exec -T teamhub \
   teamhub-account create-owner --email owner@linger.local --password-stdin
 ```
 
-Change the test password in **Settings › Security** before other people can
+Change the test password in **Settings › Account** before other people can
 reach the server.
 
 Open <http://localhost:3000> and sign in. The app then shows the commands that

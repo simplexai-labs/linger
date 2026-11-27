@@ -154,14 +154,13 @@ The Collaboration panel reads the current Room's published `team.md`; fixture re
 **Setup:** Use disposable Alice and Bob accounts in the isolated database.
 Never change a real teammate's password or profile for verification.
 **Journey:** Check wrong-password rejection, successful login and return to an authorized deep link.
-Change Name, Bio and Organization in Settings → Profile, then reload and read them in a fresh login.
-The visible label is Profile; its current route is `/t/{tenantId}/settings/account`.
+Change the display name in Settings → Account (`/t/{tenantId}/settings/account`), then reload and read it in a fresh login.
 Upload a supported avatar and cover image; read both after a fresh login.
 Check invalid-format and oversized-image feedback, then confirm saved images
 remain unchanged. The current page exposes upload/replacement, not removal.
 Restore disposable image fields through the account API for cleanup when needed;
 do not count that cleanup as a user-facing removal scenario.
-In Settings → Security, reject a wrong current password, change the password, then sign in in a fresh browser context.
+In Settings → Account, reject a wrong current password, change the password, then sign in in a fresh browser context.
 Check that the old password fails and the new password succeeds. Sign out and revisit a protected URL.
 Keep a second signed-in browser context before changing the password. Verify that
 the change revokes that other session while preserving the changing session.
@@ -174,7 +173,7 @@ credential only in private recovery storage and report the unresolved state.
 **Pass:** The account identity and tenant scope remain unchanged. Saved fields survive reload.
 Invalid input does not replace saved state. A signed-out/expired session cannot reuse cached private content.
 A return URL cannot send the user to an unrelated external site.
-Settings exposes four tabs: `Profile` (`/settings/account`), `Security` (`/settings/security`), `Computers` (`/settings/computers`), and `Models` (`/settings/models`, with `/settings/local-models` redirecting). For local model management, BYOK configuration, and `Runtime settings` links to `Settings › Models`, see [Local Models and BYOK](local-models-and-byok.md).
+Settings exposes `Account` (`/settings/account`: the profile card, password and API keys; `/settings/security` redirects there), `Computers` (`/settings/computers`), and `Models` (`/settings/models`, with `/settings/local-models` redirecting). For local model management, BYOK configuration, and `Runtime settings` links to `Settings › Models`, see [Local Models and BYOK](local-models-and-byok.md).
 **Evidence:** Save screenshots and sanitized status/identity reads; never retain entered passwords or session cookies.
 **Reuse:** `room-login-chain.spec.ts` (login, return target, wrong password, logout), `apps/teamhub/tests/integration/account_password_change_test.go` (real PostgreSQL password-change persistence, `INVALID_CURRENT_PASSWORD`, session revocation, and rate limiting), and the Settings unit tests; browser E2E does not yet cover password change.
 

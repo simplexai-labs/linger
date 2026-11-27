@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
@@ -16,9 +16,9 @@ import {
 } from "@/test/teamhub-test-server";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import { ChangePasswordDialog } from "./change-password-dialog";
-import { SecuritySettingsPage } from "./security-settings-page";
+import { AccountSettingsPage } from "./account-settings-page";
 
-describe("Security password through the live HTTP client", () => {
+describe("Account password through the live HTTP client", () => {
   it("keeps the pending password dialog open until the result arrives", async () => {
     let rejectChange!: (error: Error) => void;
     const changePassword = vi.fn(
@@ -97,8 +97,15 @@ describe("Security password through the live HTTP client", () => {
         }
       >
         <TeamHubRuntimeProvider runtime={fixture}>
-          <MemoryRouter>
-            <SecuritySettingsPage />
+          <MemoryRouter
+            initialEntries={["/t/tenant-northstar/settings/account"]}
+          >
+            <Routes>
+              <Route
+                element={<AccountSettingsPage />}
+                path="/t/:tenantId/settings/account"
+              />
+            </Routes>
           </MemoryRouter>
         </TeamHubRuntimeProvider>
       </QueryClientProvider>,
@@ -132,7 +139,7 @@ describe("Security password through the live HTTP client", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("status")).toHaveTextContent("Password changed");
+    expect(screen.getByText("Password changed")).toBeVisible();
     expect(change).toHaveBeenCalledTimes(2);
     expect(change).toHaveBeenLastCalledWith(
       expect.objectContaining({

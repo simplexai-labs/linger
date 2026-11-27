@@ -146,9 +146,6 @@ export type TeamHubPersonalProfileGenerationCreateInput =
   components["schemas"]["PersonalProfileGenerationCreateRequest"];
 export type TeamHubPersonalProfileGenerationSourceInput =
   components["schemas"]["PersonalProfileGenerationSourceInput"];
-export type TeamHubPersonalInsight = components["schemas"]["PersonalInsight"];
-export type TeamHubPersonalInsightList =
-  components["schemas"]["PersonalInsightList"];
 export type TeamHubCurrentIdentity = components["schemas"]["CurrentIdentity"];
 export type TeamHubErrorResponse = components["schemas"]["ErrorResponse"];
 export type TeamHubMessage = components["schemas"]["Message"];

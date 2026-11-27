@@ -3,15 +3,10 @@ import type {
   TeamHubPersonalProfileGeneration,
   TeamHubPersonalProfileGenerationCreateInput,
   TeamHubPersonalProfileGenerationList,
-  TeamHubPersonalInsightList,
   TeamHubPersonalProfileReplaceInput,
   TeamHubPersonalProfileRevision,
 } from "./teamhub-types";
-import {
-  teamHubData as data,
-  teamHubDone as done,
-  type TeamHubApi,
-} from "./teamhub-api";
+import { teamHubData as data, type TeamHubApi } from "./teamhub-api";
 
 export interface TeamHubPersonalProfileClient {
   getPersonalProfile(tenantId: string): Promise<TeamHubPersonalProfile>;
@@ -26,8 +21,6 @@ export interface TeamHubPersonalProfileClient {
     tenantId: string,
     input: TeamHubPersonalProfileGenerationCreateInput,
   ): Promise<TeamHubPersonalProfileGeneration>;
-  listPersonalInsights(tenantId: string): Promise<TeamHubPersonalInsightList>;
-  deletePersonalInsight(tenantId: string, insightId: string): Promise<void>;
 }
 
 export function createHttpTeamHubPersonalProfileClient(
@@ -60,19 +53,6 @@ export function createHttpTeamHubPersonalProfileClient(
           params: { ...tenant(tenantId) },
           body,
         }),
-      ),
-    listPersonalInsights: (tenantId) =>
-      data(
-        api.GET("/v0/tenants/{tenantId}/personal-insights", {
-          params: tenant(tenantId),
-        }),
-      ),
-    deletePersonalInsight: (tenantId, personalInsightId) =>
-      done(
-        api.DELETE(
-          "/v0/tenants/{tenantId}/personal-insights/{personalInsightId}",
-          { params: { path: { tenantId, personalInsightId } } },
-        ),
       ),
   };
 }

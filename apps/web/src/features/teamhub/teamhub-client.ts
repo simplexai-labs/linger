@@ -181,8 +181,6 @@ const personalProfileClientMethods = [
   "replacePersonalProfile",
   "listPersonalProfileGenerations",
   "createPersonalProfileGeneration",
-  "listPersonalInsights",
-  "deletePersonalInsight",
 ] as const satisfies ReadonlyArray<keyof TeamHubPersonalProfileClient>;
 
 function createLazyClient<Client extends object>(

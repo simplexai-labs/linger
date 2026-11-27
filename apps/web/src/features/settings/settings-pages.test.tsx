@@ -15,13 +15,10 @@ import {
   createTestTeamHubRuntime,
   type TestTeamHubRuntime,
 } from "@/test/teamhub-test-runtime";
-import type { TestRouteRequest } from "@/test/teamhub-test-server";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
-import type { TeamHubAccountProfileUpdate } from "@/features/teamhub/teamhub-types";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 
 import { AccountSettingsPage } from "./account-settings-page";
-import { SecuritySettingsPage } from "./security-settings-page";
 import { SettingsLayout } from "./settings-page";
 
 // The dialog imports its sections lazily, so pay that cost before the first
@@ -29,7 +26,6 @@ import { SettingsLayout } from "./settings-page";
 beforeAll(async () => {
   await Promise.all([
     import("./account-settings-page"),
-    import("./security-settings-page"),
     import("@/features/local-computer/computers-page"),
   ]);
 });
@@ -95,67 +91,30 @@ describe("Settings surfaces", () => {
     );
   });
 
-  it("shows Personal Insights without provenance and lets the Human remove one", async () => {
-    const runtime = await testRuntime();
-    const remove = vi
-      .spyOn(runtime.client, "deletePersonalInsight")
-      .mockResolvedValue();
-    renderSettings(runtime);
-
-    expect(
-      await screen.findByRole("heading", { name: "Insights" }),
-    ).toBeVisible();
-    expect(
-      screen.getByText(
-        "You prefer direct evidence and clear ownership before a team commits to a plan.",
-      ),
-    ).toBeVisible();
-    expect(screen.queryByText("Evidence source")).not.toBeInTheDocument();
-
-    vi.spyOn(runtime.client, "listPersonalInsights").mockResolvedValue({
-      items: [],
-    });
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Delete Communication style insight",
-      }),
-    );
-
-    await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("No insights yet.")).toBeVisible();
-  });
-
   it("switches Settings sections through their own addresses", async () => {
     const runtime = await testRuntime();
-    renderSettings(runtime);
+    renderSettings(runtime, "/t/tenant-northstar/settings/language");
 
     fireEvent.click(
       within(
         await screen.findByRole("navigation", { name: "Settings sections" }),
-      ).getByRole("link", { name: "Security" }),
+      ).getByRole("link", { name: "Account" }),
     );
 
     expect(
       await screen.findByRole("button", { name: "Change password" }),
     ).toBeVisible();
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/t/tenant-northstar/settings/security",
+      "/t/tenant-northstar/settings/account",
     );
-    expect(screen.getByRole("link", { name: "Security" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
       "aria-current",
       "page",
     );
   });
 
-  it("presents Settings as a page and displays the saved Account response", async () => {
+  it("presents Account as the profile card, the password and the API keys", async () => {
     const runtime = await testRuntime();
-    const saved = {
-      ...(await accountProfile(runtime)),
-      organization: "Northstar Labs",
-      organization_user_managed: true,
-    };
-    const patch = vi.fn(() => saved);
-    runtime.server.on("PATCH", "/v0/tenants/{tenantId}/account-profile", patch);
     renderSettings(runtime);
 
     expect(
@@ -169,121 +128,35 @@ describe("Settings surfaces", () => {
       within(settingsNav)
         .getAllByRole("link")
         .map((link) => link.textContent?.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Profile", "Security", "Computers", "Models", "Language"]);
+    ).toEqual(["Account", "Computers", "Models", "Language"]);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Account" }),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "Edit display name" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Change cover" })).toBeVisible();
+    expect(
+      screen.getAllByRole("button", { name: "Upload profile photo" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: "Change password" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Composio")).toBeVisible();
+    expect(screen.queryByLabelText("Bio")).toBeNull();
+    expect(screen.queryByLabelText("Organization")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Insights" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Log out" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Change password" }),
-    ).not.toBeInTheDocument();
-    // The display name is edited on the profile card, not in this form.
-    expect(screen.queryByLabelText("Name")).toBeNull();
-    const organization = await screen.findByLabelText("Organization");
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument();
-    fireEvent.change(organization, { target: { value: "Northstar Labs" } });
-    const saveProfile = screen.getByRole("button", { name: "Save" });
-    expect(saveProfile).toBeEnabled();
-    runtime.server.on(
-      "GET",
-      "/v0/tenants/{tenantId}/account-profile",
-      () => saved,
-    );
-    fireEvent.click(saveProfile);
-
-    expect(await screen.findByText("Account saved")).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument();
-    expect(patch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: { bio: "", organization: "Northstar Labs" },
-        params: { tenantId: "tenant-northstar" },
-      }),
-    );
-    expect(organization).toHaveValue("Northstar Labs");
+    expect(screen.queryByText("jenny@northstar.example")).toBeNull();
   });
 
-  it("locks Account input while a profile save is pending", async () => {
-    const runtime = await testRuntime();
-    const currentAccount = await accountProfile(runtime);
-    let completeSave!: () => void;
-    const save = vi.fn(
-      ({ body }: TestRouteRequest) =>
-        new Promise((resolve) => {
-          completeSave = () =>
-            resolve({
-              ...currentAccount,
-              organization:
-                (body as TeamHubAccountProfileUpdate).organization ??
-                currentAccount.organization,
-              organization_user_managed: true,
-            });
-        }),
-    );
-    runtime.server.on("PATCH", "/v0/tenants/{tenantId}/account-profile", save);
-    renderSettings(runtime);
-
-    const organization = await screen.findByLabelText("Organization");
-    fireEvent.change(organization, { target: { value: "Northstar Labs" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(organization).toBeDisabled());
-    await waitFor(() => expect(save).toHaveBeenCalled());
-    await act(async () => completeSave());
-    expect(await screen.findByText("Account saved")).toBeVisible();
-  });
-
-  it("preserves a dirty Account input when server state refreshes", async () => {
-    const runtime = await testRuntime();
-    const { queryClient } = renderSettings(runtime);
-    const organization = await screen.findByLabelText("Organization");
-
-    fireEvent.change(organization, { target: { value: "Draft Co" } });
-    act(() => {
-      queryClient.setQueryData(
-        ["teamhub", "account-profile", "tenant-northstar"],
-        {
-          name: "Jenny Remote",
-          bio: "",
-          organization: "",
-          name_user_managed: false,
-          bio_user_managed: false,
-          organization_user_managed: false,
-          email: "jenny@northstar.example",
-        },
-      );
-    });
-
-    expect((await screen.findAllByText("Jenny Remote"))[0]).toBeVisible();
-    expect(organization).toHaveValue("Draft Co");
-
-    fireEvent.change(organization, { target: { value: "" } });
-    act(() => {
-      queryClient.setQueryData(
-        ["teamhub", "account-profile", "tenant-northstar"],
-        {
-          name: "Jenny Remote Again",
-          bio: "",
-          organization: "",
-          name_user_managed: false,
-          bio_user_managed: false,
-          organization_user_managed: false,
-          email: "jenny@northstar.example",
-        },
-      );
-    });
-
-    expect((await screen.findAllByText("Jenny Remote Again"))[0]).toBeVisible();
-    expect(organization).toHaveValue("");
-  });
-
-  it("submits a valid password change from Security settings", async () => {
+  it("submits a valid password change from Account settings", async () => {
     const runtime = await testRuntime();
     const change = vi.fn(() => undefined);
     runtime.server.on("POST", "/v0/account/password", change);
-    renderSettings(runtime, "/t/tenant-northstar/settings/security");
+    renderSettings(runtime);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Change password" }),
@@ -324,43 +197,6 @@ describe("Settings surfaces", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("lets live TeamHub write Bio and Organization", async () => {
-    const fixture = await testRuntime();
-    renderSettings({
-      ...fixture,
-    });
-
-    expect(await screen.findByLabelText("Bio")).toBeVisible();
-    expect(screen.getByLabelText("Organization")).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Save" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Log out" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows the hero, Account form, and Insights only", async () => {
-    const runtime = await testRuntime();
-    renderSettings(runtime);
-
-    expect(await screen.findByLabelText("Organization")).toBeVisible();
-    expect(screen.queryByText("Connected accounts")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "Insights" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Change cover" })).toBeVisible();
-    expect(
-      screen.getAllByRole("button", { name: "Upload profile photo" }),
-    ).toHaveLength(1);
-    expect(screen.queryByText("jenny@northstar.example")).toBeNull();
-    expect(
-      screen.queryByText("Your private profile, also used by Another Me."),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("article", { name: "Profile content" }),
-    ).toBeNull();
-  });
-
   it("wraps mobile Settings section links cleanly so Models and Language are not clipped at 390px width", async () => {
     const runtime = await testRuntime();
     renderSettings(runtime);
@@ -374,7 +210,7 @@ describe("Settings surfaces", () => {
     const links = within(nav).getAllByRole("link");
     expect(
       links.map((link) => link.textContent?.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Profile", "Security", "Computers", "Models", "Language"]);
+    ).toEqual(["Account", "Computers", "Models", "Language"]);
     for (const link of links) {
       expect(link).toHaveClass("shrink-0");
     }
@@ -400,7 +236,7 @@ describe("Voice API keys", () => {
         saved = true;
         return { source: "stored", can_save: true };
       });
-    renderSettings(runtime, "/t/tenant-northstar/settings/security");
+    renderSettings(runtime);
 
     const addSoniox = await screen.findByRole("button", {
       name: "Add Soniox key",
@@ -432,7 +268,7 @@ describe("Voice API keys", () => {
       "/v0/tenants/{tenantId}/voice-media-policy",
       () => ({ voice_available: false, voice_media_supported: false }),
     );
-    renderSettings(runtime, "/t/tenant-northstar/settings/security");
+    renderSettings(runtime);
 
     expect(await screen.findByText("Composio")).toBeVisible();
     await act(async () => undefined);
@@ -464,7 +300,7 @@ function renderSettings(
               {
                 children: [
                   { element: <AccountSettingsPage />, path: "account" },
-                  { element: <SecuritySettingsPage />, path: "security" },
+                  { element: <p>Language page</p>, path: "language" },
                 ],
                 element: (
                   <>
