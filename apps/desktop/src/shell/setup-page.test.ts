@@ -70,6 +70,8 @@ const openPage = async (
   initial: SetupState = state("installing"),
   step = "installing",
   language: Language = "en",
+  // How long the welcome's intro plays; none unless a test watches it.
+  introMs = 0,
 ) => {
   stopPage();
   const intervals: ReturnType<typeof setInterval>[] = [];
@@ -99,8 +101,7 @@ const openPage = async (
   Object.assign(window, {
     matchMedia: () => ({ matches: true }),
     lingerSetup: {
-      // No welcome animation to wait out.
-      introMs: 0,
+      introMs,
       nvidiaDriverDownloadUrl: NVIDIA_DRIVER_DOWNLOAD_URL,
       nvidiaDriverGuideUrl: NVIDIA_DRIVER_GUIDE_URL,
       minDriverForCuda: minNvidiaDriverForCuda,
@@ -352,22 +353,24 @@ describe("setup page two-step welcome", () => {
     );
   });
 
-  it("checks this computer first, then offers the three sources with the advice picked", async () => {
+  it("plays the welcome, then offers the three sources while the check still runs", async () => {
     const { run, push } = await openPage(
       welcome({ state: "checking" }),
       "welcome",
+      "en",
+      40,
     );
-    expect(stage()).toBe("checking");
-    // The orb and a welcome: no words about what the check is doing.
+    expect(stage()).toBe("intro");
+    // The orb and a welcome: no words about the check.
     expect($("welcome-checking").hidden).toBe(false);
     expect($("intro-title").textContent).toBe("Welcome to Linger");
     const shown = () =>
       $("welcome-checking")
-        .textContent!.replace($("checking-skip").textContent!, "")
-        .replace($("intro-title").textContent!, "")
+        .textContent!.replace($("intro-title").textContent!, "")
         .trim();
     expect(shown()).toBe("");
-    expect($("checking-skip").hidden).toBe(true);
+    expect(document.getElementById("checking-skip")).toBeNull();
+    expect(document.body.textContent).not.toContain("Choose now");
     expect($("welcome-checking").getAttribute("aria-label")).toBe(
       "Getting ready",
     );
@@ -376,22 +379,32 @@ describe("setup page two-step welcome", () => {
     expect($("step-label").textContent).toBe("");
     // The runtime rows are read once, for step 2.
     expect(run).toHaveBeenCalledWith({ op: "local.runtimes.check" });
-    // The first run downloads the localmodels tool before checking.
+    // The intro hands off by itself; the check is still running.
+    await vi.waitFor(() => expect(stage()).toBe("choose"));
+    expect($("step-label").textContent).toBe("Step 1 of 2");
+    expect($("welcome-checking").hidden).toBe(true);
+    expect($("source-grid").hidden).toBe(false);
+    // The local model can be picked and says, quietly, that it is checked.
+    expect(card("local").disabled).toBe(false);
+    expect(card("local").dataset.pending).toBe("true");
+    expect($("source-local-about").textContent).toBe("Checking this computer…");
+    expect(card("byok").disabled).toBe(false);
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    expect($("plan-why").hidden).toBe(true);
+    expect(card("local").querySelector(".spinner")).toBeNull();
+    // The first run downloads the localmodels tool; no word of it.
     push(
       welcome({
         state: "checking",
         download: { completed: 12 * 1024 ** 2, total: 69 * 1024 ** 2 },
       }),
     );
-    expect(shown()).toBe("");
     expect(document.body.textContent).not.toContain("setup tools");
+    expect($("source-local-about").textContent).toBe("Checking this computer…");
+    // The answer settles the advice once, onto the local model.
     push(welcome(capable));
-    expect(stage()).toBe("choose");
-    expect($("step-label").textContent).toBe("Step 1 of 2");
-    expect($("welcome-checking").hidden).toBe(true);
-    expect($("source-grid").hidden).toBe(false);
-    expect($("source-panel").hidden).toBe(true);
     expect(card("local").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").dataset.pending).toBe("false");
     expect(card("local").tabIndex).toBe(0);
     expect(card("subscription").tabIndex).toBe(-1);
     // A title and one short line per card; no badges, no subtitle.
@@ -401,34 +414,112 @@ describe("setup page two-step welcome", () => {
         '[data-step="welcome"] :is(.eyebrow:not(.behind), .lead)',
       ),
     ).toBeNull();
-    expect($("stage-bar").hidden).toBe(true);
     expect($("source-local-about").textContent).toBe("On this computer");
     expect($("source-byok-about").textContent).toBe("Your API key");
     expect($("source-sub-about").textContent).toBe("ChatGPT or Claude plan");
     expect($("source-continue").hidden).toBe(false);
     expect($("local-install").hidden).toBe(true);
     expect($("plan-line").textContent).toBe("");
+    // Settled: a later sign-in does not move it again.
+    push(
+      welcome(capable, {
+        runtimes: rows({}, { installed: true, signedIn: true }),
+      }),
+    );
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
     expect(installed(run)).toEqual([]);
   });
 
-  it("offers a way on only once the check has run for 20 seconds", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      await openPage(welcome({ state: "checking" }), "welcome");
-      expect($("checking-skip").hidden).toBe(true);
-      vi.advanceTimersByTime(19_000);
-      expect($("checking-skip").hidden).toBe(true);
-      vi.advanceTimersByTime(1_000);
-      expect($("checking-skip").hidden).toBe(false);
-      expect($("checking-skip").textContent).toBe("Choose now");
-    } finally {
-      vi.useRealTimers();
-    }
-    $("checking-skip").click();
+  it("never moves a card the person picked when the check answers", async () => {
+    const { push } = await openPage(welcome({ state: "checking" }), "welcome");
     expect(stage()).toBe("choose");
+    card("byok").click();
+    push(welcome(capable));
+    expect(card("byok").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("goes on to the local model while it is checked, and fills its card in", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    open("local");
+    expect(stage()).toBe("settings");
+    expect($("welcome-title").textContent).toBe("Local model");
+    // The card's outline, quietly shimmering; nothing to change or install.
+    expect($("local-row").dataset.pending).toBe("true");
+    expect($("local-row").getAttribute("aria-busy")).toBe("true");
+    expect($("local-model-name").textContent).toBe("");
+    expect($("local-model-sub").textContent).toBe("Checking this computer…");
+    expect($("local-model-why-row").hidden).toBe(true);
+    expect(button("model-change").disabled).toBe(true);
+    expect(button("local-install").disabled).toBe(true);
+    push(welcome(capable));
+    expect($("local-row").dataset.pending).toBe("false");
+    expect($("local-model-name").textContent).toBe("qwen3-8b");
+    expect($("local-model-needs").textContent).toBe("6.0 GB");
+    expect(button("local-install").disabled).toBe(false);
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "local" }),
+    );
+  });
+
+  it("keeps Continue off a local model the check turned down", async () => {
+    const { push } = await openPage(welcome({ state: "checking" }), "welcome");
+    card("local").click();
+    expect(button("source-continue").disabled).toBe(false);
+    push(welcome(small));
+    // The pick stays where the person put it, and says why it can't go on.
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
     expect(card("local").disabled).toBe(true);
-    expect($("source-local-about").textContent).toBe("Checking…");
+    expect($("source-local-about").textContent).toBe("Not available here");
+    expect($("plan-why").hidden).toBe(false);
+    expect(button("source-continue").disabled).toBe(true);
+    card("subscription").click();
+    expect(button("source-continue").disabled).toBe(false);
+  });
+
+  it("says briefly when the check failed, and the other sources still work", async () => {
+    const { push, run } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    push(
+      welcome(
+        { state: "unavailable" },
+        { runtimes: rows({}, { installed: true, signedIn: true }) },
+      ),
+    );
+    expect(card("local").disabled).toBe(true);
+    expect(card("local").dataset.pending).toBe("false");
+    expect($("plan-why").textContent).toBe("Couldn't check this computer.");
+    expect(card("byok").disabled).toBe(false);
     expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    open("subscription");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
+    );
+  });
+
+  it("lets BYOK and a subscription go on while the check runs", async () => {
+    const { run } = await openPage(
+      welcome(
+        { state: "checking" },
+        { runtimes: rows({}, { installed: true, signedIn: true }) },
+      ),
+      "welcome",
+    );
+    open("subscription");
+    expect(stage()).toBe("settings");
+    expect(button("local-install").disabled).toBe(false);
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
+    );
+    expect(installed(run)[0]).not.toHaveProperty("model");
   });
 
   it("installs the local model with Pi from its settings", async () => {
@@ -442,15 +533,12 @@ describe("setup page two-step welcome", () => {
     expect($("byok-row").hidden).toBe(true);
     expect($("local-model-name").textContent).toBe("qwen3-8b");
     expect($("local-model-needs").textContent).toBe("6.0 GB");
-    // The local model is the source itself, so nothing else downloads.
-    expect($("background-row").hidden).toBe(true);
     expect($("plan-line").textContent).toBe("");
     expect(button("local-install").disabled).toBe(false);
     $("local-install").click();
     await vi.waitFor(() => expect(installed(run)).toHaveLength(1));
     const [command] = installed(run);
     expect(command).toMatchObject({ op: "local.start", runtime: "local" });
-    expect(command).not.toHaveProperty("background");
     // The installation makes its own sign-in account, as before.
     expect(command).not.toHaveProperty("account");
     expect(command).not.toHaveProperty("keys");
@@ -1069,7 +1157,7 @@ describe("setup page subscription runtimes", () => {
     );
   });
 
-  it("also downloads the local model in the background when asked", async () => {
+  it("offers no local model download beside a subscription", async () => {
     const { run } = await openPage(
       welcome(capable, {
         runtimes: rows({}, { installed: true, signedIn: true }),
@@ -1077,21 +1165,15 @@ describe("setup page subscription runtimes", () => {
       "welcome",
     );
     open("subscription");
-    expect($("background-row").hidden).toBe(false);
-    const box = $("background-model") as HTMLInputElement;
-    // Off unless chosen.
-    expect(box.checked).toBe(false);
-    expect(document.getElementById("background-model-detail")).toBeNull();
-    box.checked = true;
-    box.dispatchEvent(new Event("change"));
-    expect($("plan-line").textContent).toBe("");
+    expect(document.getElementById("background-row")).toBeNull();
+    expect(document.getElementById("background-model")).toBeNull();
+    expect(document.body.textContent).not.toContain("Also download");
     $("local-install").click();
     await vi.waitFor(() =>
-      expect(installed(run)[0]).toMatchObject({
-        runtime: "subscription",
-        background: true,
-      }),
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
     );
+    expect(installed(run)[0]).not.toHaveProperty("background");
+    expect(installed(run)[0]).not.toHaveProperty("model");
   });
 });
 
@@ -1145,11 +1227,7 @@ describe("setup page BYOK", () => {
     type("byok-model", "glm-4.6");
     expect(button("local-install").disabled).toBe(false);
     expect($("plan-line").textContent).toBe("");
-    const box = $("background-model") as HTMLInputElement;
-    expect(box.checked).toBe(false);
-    box.checked = true;
-    box.dispatchEvent(new Event("change"));
-    expect($("plan-line").textContent).toBe("");
+    expect(document.getElementById("background-model")).toBeNull();
 
     let answer!: (check: SetupState["localServer"]["byokCheck"]) => void;
     answering(
@@ -1193,7 +1271,6 @@ describe("setup page BYOK", () => {
       op: "local.start",
       runtime: "pi",
       byok: config,
-      background: true,
     });
   });
 
@@ -1371,6 +1448,9 @@ describe("setup page leaving the local model's wait", () => {
     expect(stage()).toBe("choose");
     expect(card("local").disabled).toBe(true);
     expect($("source-local-about").textContent).toBe("Downloading · 42%");
+    // The advice moves off the local model it left, without a shimmer.
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").dataset.pending).toBe("false");
     open("subscription");
     expect(stage()).toBe("settings");
     expect($("welcome-title").textContent).toBe("Subscription");
@@ -1378,8 +1458,6 @@ describe("setup page leaving the local model's wait", () => {
     expect($("model-behind-text").textContent).toBe("Local model 42%");
     expect($("local-install-label").textContent).toBe("Continue setup");
     expect($("plan-line").textContent).toBe("");
-    // The model is not offered again while it downloads.
-    expect($("background-row").hidden).toBe(true);
     $("source-back").click();
     expect(card("local").disabled).toBe(true);
     expect($("source-local-about").textContent).toBe("Downloading · 42%");
@@ -1388,7 +1466,6 @@ describe("setup page leaving the local model's wait", () => {
     await vi.waitFor(() =>
       expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
     );
-    expect(installed(run)[0]).not.toHaveProperty("background");
   });
 
   it("says where a failed switch went wrong", async () => {
@@ -1692,7 +1769,12 @@ describe("setup page installing", () => {
     for (const [language, want] of [
       [
         "en",
-        ["Local", "Runs on this Mac", "Personal agent", "Works just for you"],
+        [
+          "Local",
+          "Runs on your computer",
+          "Personal agent",
+          "Works just for you",
+        ],
       ],
       [
         "zh-CN",
@@ -1955,7 +2037,7 @@ describe("setup page in Chinese", () => {
     expect($("welcome-checking").getAttribute("aria-label")).toBe(
       zh.gettingReady,
     );
-    expect($("checking-skip").textContent).toBe(zh.chooseNow);
+    expect($("source-local-about").textContent).toBe(zh.checkingComputer);
     const { push } = await openPage(undefined, undefined, "zh-CN");
     push(state("ready", { email: "admin@gmail.com" }));
     expect($("account-toggle").textContent?.trim()).toBe(zh.accountTitle);
@@ -1971,7 +2053,8 @@ describe("setup page in Chinese", () => {
 
 describe("setup page model picker", () => {
   // What the kit lists on a 36 GB Mac: two builds of one model, a smaller
-  // and faster one, and one that needs a larger Mac.
+  // and faster one, and one that needs more memory. The words stay the same
+  // on every system.
   const option = (
     fields: Partial<SetupModelOption> & { library: string },
   ): SetupModelOption => ({
@@ -2054,7 +2137,7 @@ describe("setup page model picker", () => {
       "Inkling · 26.4B · 3.4B active",
     );
     expect($("local-model-why").textContent).toBe(
-      "The smartest model this Mac can run",
+      "The smartest model this computer can run",
     );
     expect($("local-model-quality").textContent).toBe("≈ Sonnet 4.6");
     expect($("local-model-speed").textContent).toBe("~63 tok/s");
@@ -2068,7 +2151,7 @@ describe("setup page model picker", () => {
       [...document.querySelectorAll("#local-model-memory .memkey > span")].map(
         (key) => key.textContent,
       ),
-    ).toEqual(["macOS & apps", "Inkling 2 Mini · Standard", "Free"]);
+    ).toEqual(["System & apps", "Inkling 2 Mini · Standard", "Free"]);
     expect($("model-change").hidden).toBe(false);
     expect($("model-sheet").hidden).toBe(true);
   });
@@ -2079,7 +2162,7 @@ describe("setup page model picker", () => {
     $("model-change").click();
     expect($("model-sheet").hidden).toBe(false);
     expect($("model-change").getAttribute("aria-expanded")).toBe("true");
-    expect($("model-sheet-title").textContent).toBe("Models for this Mac");
+    expect($("model-sheet-title").textContent).toBe("Models for this computer");
     // No subtitle: the estimates carry their own ≈ and ~.
     expect(document.querySelector("#model-sheet .head p")).toBeNull();
     const rows =
@@ -2114,7 +2197,7 @@ describe("setup page model picker", () => {
     const large = rowFor("qwen3.8-flash-next-iq2xs:IQ2_XS");
     expect(large.disabled).toBe(true);
     expect(large.querySelector(".needs")!.textContent).toBe(
-      "Needs a 96 GB Mac",
+      "Needs 96 GB of memory",
     );
     expect(large.querySelector(".meter")).toBeNull();
     $("model-sheet").dispatchEvent(
@@ -2133,7 +2216,7 @@ describe("setup page model picker", () => {
     await vi.waitFor(() => expect($("model-sheet").hidden).toBe(true));
     expect($("local-model-name").textContent).toBe("Spark X2.6 4B");
     expect($("local-model-why").textContent).toBe(
-      "The fastest model on this Mac",
+      "The fastest model on this computer",
     );
     expect($("local-model-quality").textContent).toBe("≈ Gemini 2.5 Pro");
     expect(run).toHaveBeenCalledWith({

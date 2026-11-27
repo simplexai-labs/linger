@@ -88,7 +88,6 @@ const setupCommand = z.discriminatedUnion("op", [
         })
         .strict()
         .optional(),
-      background: z.boolean().optional(),
       model: localModel.optional(),
     })
     .strict(),

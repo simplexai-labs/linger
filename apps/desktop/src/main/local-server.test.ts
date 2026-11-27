@@ -10164,12 +10164,9 @@ describe("LocalServerModule setup sources", () => {
     await f.host.stop("quit");
   });
 
-  it("installs BYOK on Pi while the planned local model downloads in the background", async () => {
+  it("installs BYOK on Pi without downloading a local model", async () => {
     const commands = setupCommands({
-      "--download-local-model": [
-        { event: "progress", phase: "download", completed: 3, total: 9 },
-        { outcome: { state: "done" } },
-      ],
+      "--download-local-model": [{ outcome: { state: "done" } }],
     });
     const f = fixture(
       (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
@@ -10195,21 +10192,17 @@ describe("LocalServerModule setup sources", () => {
       modelId: "m",
       runtime: "pi" as const,
     };
-    await f.module.beginSetup({ runtime: "pi", byok, background: true });
+    await f.module.beginSetup({ runtime: "pi", byok });
     expect(
       commands.calls.filter(
         (call) => call.args[0] === "--download-local-model",
       ),
-    ).toEqual([{ args: ["--download-local-model", "qwen3-8b:Q4_K_M"] }]);
-    expect(f.module.status().backgroundModel).toEqual({
-      model: "qwen3-8b:Q4_K_M",
-      state: "done",
-      completed: 9,
-      total: 9,
-    });
+    ).toEqual([]);
+    expect(f.module.status().backgroundModel).toBeUndefined();
     expect(f.api.created).toEqual([
       expect.objectContaining({ setupChoice: "pi", byok }),
     ]);
+    expect(f.api.created[0]).not.toHaveProperty("localModel");
     await f.host.stop("quit");
   });
 
@@ -10409,47 +10402,6 @@ describe("LocalServerModule setup sources", () => {
       code: "MEMORY_INSUFFICIENT",
     });
     await f.module.beginSetup({ runtime: "local", localModel: "other:Q4" });
-    expect(f.api.created[0]).not.toHaveProperty("localModel");
-    await f.host.stop("quit");
-  });
-
-  it("downloads the picked model in the background for another source", async () => {
-    const commands = setupCommands({
-      "--download-local-model": [{ outcome: { state: "done" } }],
-    });
-    const f = fixture(
-      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
-      {},
-      withPicker,
-    );
-    await f.host.start();
-    f.module.inspect();
-    await waitForInstaller(() =>
-      expect(f.module.status().localModels).toMatchObject({
-        state: "checked",
-      }),
-    );
-    const byok = {
-      baseUrl: "https://byok.example",
-      path: "/v1",
-      endpoint: "/chat/completions",
-      protocol: "openai-chat" as const,
-      modelId: "m",
-      runtime: "pi" as const,
-    };
-    await f.module.beginSetup({
-      runtime: "pi",
-      byok,
-      background: true,
-      localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
-    });
-    expect(
-      commands.calls.filter(
-        (call) => call.args[0] === "--download-local-model",
-      ),
-    ).toEqual([
-      { args: ["--download-local-model", "inkling-2-mini-iq3xxs:UD-IQ3_XXS"] },
-    ]);
     expect(f.api.created[0]).not.toHaveProperty("localModel");
     await f.host.stop("quit");
   });

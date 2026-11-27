@@ -1495,13 +1495,6 @@
         display: inline-block;
         white-space: pre;
       }
-      .intro .skip {
-        position: absolute;
-        top: 420px;
-        left: 0;
-        right: 0;
-        text-align: center;
-      }
       #flyer {
         position: fixed;
         inset: 0;
@@ -1799,6 +1792,58 @@
           0 0 0 1.5px var(--ink),
           0 14px 30px -16px rgba(26, 26, 22, 0.3);
         transition: transform 0.42s var(--ease);
+      }
+
+      /* While this computer is still checked: a soft light passes over the
+         local model's line and its card's outline. No spinner. */
+      .src-row[data-pending="true"] small,
+      .mcard[data-pending="true"] .m-sub {
+        background: linear-gradient(
+            90deg,
+            var(--muted) 40%,
+            #d2d2cb 50%,
+            var(--muted) 60%
+          )
+          0 0 / 250% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: shimmer 2.4s ease-in-out infinite;
+      }
+      .mcard[data-pending="true"] .m-name,
+      .mcard[data-pending="true"] .m-specs b,
+      .mcard[data-pending="true"] .membar {
+        background: linear-gradient(
+            90deg,
+            #f1f1ec 40%,
+            #f9f9f6 50%,
+            #f1f1ec 60%
+          )
+          0 0 / 250% 100%;
+        animation: shimmer 2.4s ease-in-out infinite;
+      }
+      .mcard[data-pending="true"] .m-name {
+        width: 200px;
+        height: 18px;
+        margin: 3px 0;
+        border-radius: 6px;
+      }
+      .mcard[data-pending="true"] .m-specs b {
+        width: 64px;
+        height: 14px;
+        margin: 3px 0 4px;
+        border-radius: 5px;
+      }
+      .mcard[data-pending="true"] .memkey {
+        visibility: hidden;
+      }
+      @keyframes shimmer {
+        from {
+          background-position: 100% 0;
+        }
+        to {
+          background-position: 0 0;
+        }
       }
 
       /* The local model card */
@@ -2344,61 +2389,6 @@
       .lnk + .lnk {
         margin-left: 12px;
       }
-      /* A switch row with a small orb: also download the local model. */
-      .tgl {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        height: 64px;
-        padding: 0 18px 0 20px;
-        font-size: 13.5px;
-        color: var(--body);
-        cursor: pointer;
-      }
-      .tgl .tl {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .tgl .orb {
-        --s: 26px;
-      }
-      body[data-look="wizard"] input.sw {
-        appearance: none;
-        -webkit-appearance: none;
-        position: relative;
-        width: 32px;
-        height: 19px;
-        margin: 0;
-        border-radius: 19px;
-        background: #e4e4de;
-        flex: none;
-        cursor: pointer;
-        transition: background 0.25s;
-      }
-      input.sw::after {
-        content: "";
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 15px;
-        height: 15px;
-        border-radius: 50%;
-        background: #fff;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-        transition: transform 0.25s var(--ease);
-      }
-      body[data-look="wizard"] input.sw:checked {
-        background: var(--ink);
-      }
-      input.sw:checked::after {
-        transform: translateX(13px);
-      }
-      input.sw:focus-visible {
-        outline: 2px solid rgba(10, 111, 194, 0.5);
-        outline-offset: 2px;
-      }
-
       /* Subscription runtimes */
       .rt {
         display: flex;
@@ -2917,8 +2907,8 @@
 
     <main>
       <section data-step="welcome" aria-labelledby="welcome-title">
-        <!-- The welcome: the orb forms and the title rises while this
-             computer is checked; it hands off to step 1. -->
+        <!-- The welcome: the orb forms and the title rises, then it hands
+             off to step 1 while this computer may still be checked. -->
         <div
           class="intro"
           id="welcome-checking"
@@ -2930,15 +2920,6 @@
             <span class="orb big" id="intro-ball" style="--s: 112px"></span>
           </div>
           <p class="intro-title" id="intro-title" aria-hidden="true"></p>
-          <div class="skip">
-            <button
-              class="link quiet"
-              id="checking-skip"
-              type="button"
-              hidden
-              data-t="chooseNow"
-            ></button>
-          </div>
         </div>
         <div class="wz-stage" id="wz-stage">
           <div class="wz-hd" data-in>
@@ -3277,14 +3258,6 @@
               </div>
               <div class="byok-box" id="byok-row" data-in hidden>
                 <div class="grp byok-fields" id="byok-fields"></div>
-              </div>
-              <div class="grp" id="background-row" data-in hidden>
-                <label class="tgl" for="background-model"
-                  ><span class="tl"
-                    ><span class="orb" aria-hidden="true"></span
-                    ><span data-t="alsoDownload"></span></span
-                  ><input type="checkbox" class="sw" id="background-model"
-                /></label>
               </div>
               <div class="grp" id="location-row" hidden>
                 <div class="rt">
@@ -4103,13 +4076,12 @@
       // The local models the picker offers, in the page's words. The
       // quality peers are the ones docs/local-inference.md names.
       const GB = 1024 ** 3;
-      const MAC_SIZES = [16, 24, 32, 36, 48, 64, 96, 128, 192, 256, 512];
+      const MEMORY_SIZES = [16, 24, 32, 36, 48, 64, 96, 128, 192, 256, 512];
       const QUALITY_PEERS = [
         [/^inkling-2-mini/, "≈ Sonnet 4.6"],
         [/^spark-x2\.6-4b-q4km/, "≈ Gemini 2.5 Pro"],
         [/^qwen3\.8-flash-next-iq2xs/, "≈ Opus 4.6"],
       ];
-      const onMac = () => state.platform === "darwin";
       const qualityText = (option) => {
         const peer = QUALITY_PEERS.find(([pattern]) =>
           pattern.test(option.library ?? ""),
@@ -4153,7 +4125,7 @@
             ? "whySmartest"
             : option.role === "fastest"
               ? "whyFastest"
-              : "whyFits") + (onMac() ? "Mac" : "Computer"),
+              : "whyFits") + "Computer",
         );
       // What a model too large for this computer needs: memory as a
       // computer is sold with it, of which a model may use three quarters.
@@ -4161,10 +4133,10 @@
         if (!option.tooLarge) return t("needsFreeMemory");
         const wanted = (option.needsMemoryBytes ?? option.memoryBytes) / 0.75;
         const size =
-          MAC_SIZES.find(
+          MEMORY_SIZES.find(
             (gb) => gb * GB >= wanted && (!total || gb * GB > total),
           ) ?? Math.ceil(wanted / GB);
-        return t(onMac() ? "needsMac" : "needsComputer", {
+        return t("needsComputer", {
           size: String(size),
         });
       };
@@ -4223,9 +4195,10 @@
             : local.failure === "installer_unreachable"
               ? t("installerUnreachable")
               : local.message;
-      // What step 2 offers first: the local model when the localmodels tool
+      // What step 1 offers first: the local model when the localmodels tool
       // picked it for this computer and no subscription runtime is signed
-      // in already; else the subscription. BYOK is never the advice.
+      // in already; else the subscription, also while the check runs. BYOK
+      // is never the advice.
       const defaults = () => {
         const local = state.localServer;
         const models = local.localModels;
@@ -4245,16 +4218,13 @@
       let source;
       // Whether the person picked it; until then it follows defaults().
       let picked = false;
-      // Where the welcome is: checking this computer, choosing a source, or
-      // the chosen source's settings.
+      // The advice settles once, when the check's answer arrives, so the
+      // selection never moves again by itself after that.
+      let settled = false;
+      // Where the welcome is: the intro, choosing a source, or the chosen
+      // source's settings. The intro never waits for the check.
       let stage;
-      // The check only offers a way on without it once it has run this long.
-      const SLOW_CHECK_MS = 20_000;
-      let slowCheck = false;
-      let slowTimer = 0;
       let runtimesAsked = false;
-      // Also download the local model in the background.
-      let background = false;
       // The ready screen's new password while it is typed:
       // { value, visible, tried, saving }.
       let passwordEdit = null;
@@ -4266,8 +4236,8 @@
       // then the kit's recommendation.
       let pickedModel;
       let sheetOpen = false;
-      // The welcome: the orb forms and the title rises for this long, and
-      // at least as long as the check runs, then it hands off to step 1.
+      // The welcome: the orb forms and the title rises for this long, then
+      // it hands off to step 1, whether or not the check has finished.
       const INTRO_MS = setup.introMs ?? (REDUCE ? 1200 : 2600);
       let introDone = INTRO_MS <= 0;
       let introStarted = false;
@@ -4279,14 +4249,6 @@
         const section = document.querySelector('[data-step="welcome"]');
         stage = next;
         section.dataset.stage = next;
-        clearTimeout(slowTimer);
-        slowCheck = false;
-        // Only a check that runs very long offers a way on without it.
-        if (next === "checking")
-          slowTimer = setTimeout(() => {
-            slowCheck = true;
-            render();
-          }, SLOW_CHECK_MS);
       };
       // The orb where the welcome is now: the picked card's on step 1, the
       // title's on step 2.
@@ -4295,6 +4257,8 @@
       // flies from the card to the title or back, and the new stage's parts
       // rise in from the side they come from.
       const setStage = (next, motion) => {
+        // Going on with a source is picking it: the advice no longer moves.
+        if (next === "settings") picked = true;
         const fromOrb = stageOrb();
         const from = fromOrb?.getBoundingClientRect();
         const kind = fromOrb ? kindOf(fromOrb) : "";
@@ -4321,7 +4285,7 @@
         return [...title.children];
       };
       // The orb forms, the words rise one after another, then the orb gives
-      // one soft bounce while the check finishes.
+      // one soft bounce before it hands off.
       const startIntro = () => {
         if (introStarted) return;
         introStarted = true;
@@ -5692,7 +5656,9 @@
 
       // The model card on step 2: what the model is, how good and fast it
       // is here, the download and the memory it takes on this computer.
-      const renderModelCard = (local, models, option, busy) => {
+      // While this computer is still checked it is the card's outline,
+      // quietly shimmering, and fills in once the check answers.
+      const renderModelCard = (local, models, option, busy, pending) => {
         const options = models.models ?? [];
         const total = models.totalMemoryBytes ?? models.memoryBytes;
         const priced =
@@ -5700,14 +5666,48 @@
             ? local.modelCheck
             : undefined;
         const held = models.state === "checked" && !!models.blockedNow;
+        const mcard = $("local-row");
+        const wasPending = mcard.dataset.pending === "true";
+        mcard.dataset.pending = String(pending);
+        mcard.setAttribute("aria-busy", String(pending));
         setText(
           $("local-model-name"),
-          option ? nameText(option, options) : t("localNotAvailable"),
+          pending
+            ? ""
+            : option
+              ? nameText(option, options)
+              : t("localNotAvailable"),
         );
-        setText($("local-model-sub"), option ? cardSub(option) : "");
+        setText(
+          $("local-model-sub"),
+          pending ? t("checkingComputer") : option ? cardSub(option) : "",
+        );
         $("local-model-sub").hidden = !$("local-model-sub").textContent;
-        $("model-change").hidden = options.length < 2;
-        $("model-change").disabled = busy;
+        $("model-change").hidden = !pending && options.length < 2;
+        $("model-change").disabled = busy || pending;
+        // The answer fades in over the outline.
+        if (wasPending && !pending && !mcard.hidden)
+          for (const part of mcard.children)
+            anim(part, [{ opacity: 0.35 }, { opacity: 1 }], {
+              duration: 420,
+              easing: EASE,
+            });
+        if (pending) {
+          $("local-model-why-row").hidden = true;
+          for (const id of [
+            "local-model-quality",
+            "local-model-speed",
+            "local-model-needs",
+          ]) {
+            setText($(id), "");
+            $(id).parentElement.hidden = false;
+          }
+          $("local-model-memory").hidden = false;
+          setText($("local-model-mem"), "");
+          $("local-model-sys").hidden = true;
+          $("local-model-bar").style.width = "0%";
+          return { checking: true, refused: false };
+        }
         const why = $("local-model-why-row");
         const whyLine = held
           ? ["err", reasonsText(models, true)]
@@ -5753,10 +5753,7 @@
           $("local-model-sys").style.width = percent(held);
           $("local-model-bar").style.width = percent(model);
           $("local-model-sys-key").hidden = held <= 0;
-          setText(
-            $("local-model-sys-name"),
-            t(onMac() ? "memSystemMac" : "memSystemComputer"),
-          );
+          setText($("local-model-sys-name"), t("memSystemComputer"));
           setText($("local-model-key"), nameText(option, options));
         }
         return {
@@ -5772,9 +5769,7 @@
       const renderPicker = (models, chosen, busy) => {
         const options = models.state === "checked" ? (models.models ?? []) : [];
         const total = models.totalMemoryBytes ?? models.memoryBytes;
-        $("model-sheet-title").textContent = t(
-          onMac() ? "pickerTitleMac" : "pickerTitleComputer",
-        );
+        $("model-sheet-title").textContent = t("pickerTitleComputer");
         const key = JSON.stringify([
           options,
           total,
@@ -5940,19 +5935,19 @@
             .catch(() => {});
       };
 
-      // The welcome view: the welcome while this computer is checked, the
-      // three sources, then the chosen source's settings with Install.
+      // The welcome view: the intro, the three sources, then the chosen
+      // source's settings with Install. Nothing here waits for the check of
+      // this computer: until it answers, only the local model shows that it
+      // is still being checked.
       const renderWelcome = (local, busy) => {
         const section = document.querySelector('[data-step="welcome"]');
         const available = local.available;
         section.dataset.local = String(available);
         const models = local.localModels;
-        const checking = models.state === "checking";
         if (available && step === "welcome") {
-          if (stage === undefined)
-            enterStage(checking || !introDone ? "checking" : "choose");
-          if (stage === "checking") startIntro();
-          if (stage === "checking" && !checking && introDone) handOff();
+          if (stage === undefined) enterStage(introDone ? "choose" : "intro");
+          if (stage === "intro") startIntro();
+          if (stage === "intro" && introDone) handOff();
           if (!runtimesAsked) {
             runtimesAsked = true;
             // The rows come through onState; the reply may be older than
@@ -5960,15 +5955,24 @@
             setup.run({ op: "local.runtimes.check" }).catch(() => {});
           }
         }
-        if (!picked) source = defaults();
         const known =
           models.state === "checked" || models.state === "unavailable";
+        // Until the person picks, the advice follows the check, and settles
+        // once its answer is in; the glider carries the change.
+        if (!picked && !settled) source = defaults();
+        if (known) settled = true;
+        // Still checking: the local model can be picked and shows so.
+        const pending = !known;
         const model =
           models.state === "checked" && models.eligible && models.model;
         const held = models.state === "checked" && !!models.blockedNow;
         const heldModel = held && models.model;
         const behind = modelBehind(local);
         const localUsable = Boolean(model) && !behind;
+        // The local model can be picked while the check runs, but Continue
+        // only goes on to it once the check found it usable or is still
+        // checking; a local model that turned out not to fit stays put.
+        const localOpen = localUsable || (pending && !behind);
         const rows = runtimeRows(local);
         const signedIn = ["codex", "claude"].filter(
           (runtime) => rows[runtime]?.signedIn,
@@ -5978,7 +5982,7 @@
         );
         const settings = available && stage === "settings";
         const choosing = available && stage === "choose";
-        const checkingStage = available && stage === "checking";
+        const checkingStage = available && stage === "intro";
 
         // The bar under the stage: the local model's progress after the
         // person left its wait.
@@ -6009,10 +6013,8 @@
         const hdOrb = "orb" + KIND[source];
         if ($("hd-orb").className !== hdOrb) $("hd-orb").className = hdOrb;
 
-        // The welcome: the orb and the title, and a way on once the check
-        // has run very long.
+        // The welcome: the orb and the title.
         $("welcome-checking").hidden = !checkingStage && !handing;
-        $("checking-skip").hidden = !slowCheck || !checkingStage;
         if (!introStarted) introWords();
 
         $("local-setup").hidden = !choosing && !settings;
@@ -6036,11 +6038,13 @@
                 ? t("onHold")
                 : known
                   ? t("localNotAvailable")
-                  : t("rtChecking"),
+                  : t("checkingComputer"),
         );
+        // A quiet shimmer on that line while the check runs.
+        localCard.dataset.pending = String(pending && !behind);
         for (const card of document.querySelectorAll(".source-card")) {
           const value = card.dataset.value;
-          const off = value === "local" && !localUsable;
+          const off = value === "local" && !localOpen;
           card.disabled = busy || off;
           card.setAttribute("aria-checked", String(source === value));
           // One card takes Tab; the arrows move between them.
@@ -6080,22 +6084,20 @@
         $("subscription-row").hidden = source !== "subscription";
         $("byok-row").hidden = source !== "byok";
         const option = model || heldModel ? chosenModel(models) : undefined;
-        const card = renderModelCard(local, models, option, busy);
-        if (!option && !held) {
+        const card = renderModelCard(
+          local,
+          models,
+          option,
+          busy,
+          pending && !behind,
+        );
+        if (!option && !held && !pending) {
           setText($("local-model-why"), unavailableText);
           $("local-model-why-row").hidden = !unavailableText;
         }
         renderPicker(models, option, busy);
         renderRuntimes(rows, busy);
         mainByok.sync(busy || byokTesting);
-        // The local model can come along in the background, off unless
-        // chosen, on a computer that runs it.
-        const offerBackground =
-          source !== "local" && Boolean(model) && !held && !behind;
-        if (!offerBackground) background = false;
-        $("background-row").hidden = !offerBackground;
-        $("background-model").checked = background;
-        $("background-model").disabled = busy;
 
         // The install location shows only when it is the problem, with
         // what is wrong and a way to change it: a folder Linger cannot use,
@@ -6140,7 +6142,7 @@
         // waits for what the source needs.
         $("source-continue").hidden = !choosing;
         $("source-continue").disabled =
-          busy || (source === "local" && !localUsable);
+          busy || (source === "local" && !localOpen);
         $("local-install").hidden = !settings;
         $("get-started").hidden = available;
         const ready =
@@ -6581,7 +6583,7 @@
         if (step === "ready" && accountOpen) body.expanded = "true";
         else delete body.expanded;
         const intro =
-          step === "welcome" && local.available && stage === "checking";
+          step === "welcome" && local.available && stage === "intro";
         if (intro) body.chrome = "off";
         else delete body.chrome;
         const pips =
@@ -6810,9 +6812,8 @@
                   ? "pi"
                   : "subscription",
             ...(byokPayload ? { byok: byokPayload } : {}),
-            ...(background && chosen !== "local" ? { background: true } : {}),
             // The model picked in the picker; else the kit's pick.
-            ...(pickedModel && (chosen === "local" || background)
+            ...(pickedModel && chosen === "local"
               ? { model: pickedModel }
               : {}),
           },
@@ -7006,10 +7007,6 @@
       $("source-back").addEventListener("click", () =>
         setStage("choose", "back"),
       );
-      $("checking-skip").addEventListener("click", () => {
-        handOff();
-        render();
-      });
       // The model picker.
       $("model-change").addEventListener("click", openSheet);
       $("model-sheet-close").addEventListener("click", () => closeSheet());
@@ -7086,10 +7083,6 @@
           return;
         setStage("choose", "back");
       });
-      $("background-model").addEventListener("change", () => {
-        background = $("background-model").checked;
-        render();
-      });
 
       // The runtime rows. Each command returns at once; the row follows
       // the install or sign-in through onState.
@@ -7161,8 +7154,10 @@
       for (const leave of document.querySelectorAll("[data-leave]"))
         leave.addEventListener("click", async () => {
           if (!(await run({ op: "local.leave-local" }, "leave-error"))) return;
-          // Back to step 1, to pick another source meanwhile.
+          // Back to step 1, to pick another source meanwhile; the advice
+          // settles again, away from the local model.
           picked = false;
+          settled = false;
           introDone = true;
           enterStage("choose");
           show("welcome");

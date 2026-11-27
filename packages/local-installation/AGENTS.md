@@ -351,8 +351,8 @@ upgrade keeps its sign-in. `writeLocalLoginPassword` replaces only the
 password there after TeamHub accepted a change (same checks as a read,
 written beside the file and renamed over it, owner-only). A plan whose model
 names a quantization carries `libraryModel` (`<id>:<quant>`,
-`LIBRARY_MODEL_ID`), which setup downloads in the background while another
-source runs.
+`LIBRARY_MODEL_ID`), which setup downloads on in the background when the
+person leaves the local model's installation for another source.
 `inspectSetup` also lists every model the kit's catalog offers there
 (`listSetupModels`, `setup-models.ts`) as `models` with `totalMemoryBytes`,
 for the setup page's model picker: `library status --json` gives each model,

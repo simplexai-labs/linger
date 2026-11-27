@@ -1,7 +1,7 @@
 // The model sources the setup page offers before anything is installed: the
 // subscription runtimes (Claude Code, Codex, Pi) with their install and
-// sign-in, and the planned local model downloading in the background while
-// another source runs. Each runs a headless installer command
+// sign-in, and the local model downloading in the background after the
+// person left its installation's wait for another source. Each runs a headless installer command
 // (installer.js --runtime-status, --prepare-runtime, --runtime-login,
 // --download-local-model) that answers in JSON lines; LocalServer supplies
 // how to run it.
@@ -349,8 +349,8 @@ export class SetupRuntimes {
   }
 }
 
-// The planned local model, downloading into the model library while another
-// source runs; once done, Settings › Models offers it. It stops with the app;
+// The local model left from its installation's wait, downloading into the
+// model library while another source runs; once done, Settings › Models offers it. It stops with the app;
 // Settings › Models resumes a download that stopped.
 export class BackgroundModel {
   readonly #run: SetupCommandRunner;

@@ -219,19 +219,17 @@ export interface LocalServerPlan {
   // configures beside the one it runs by default (codex or claude only).
   readonly linkedRuntimes?: readonly ("codex" | "claude")[];
   // The local model picked on the page (`<catalog id>:<quant>`); the local
-  // runtime installs exactly it, another source downloads it meanwhile.
+  // runtime installs exactly it.
   readonly localModel?: string;
 }
 
 // What setup's Install asks for: a plan, or "subscription" for the runtimes
 // signed in on the page (Codex by default when both are, the other linked).
-// background: download the planned local model meanwhile.
 export interface LocalServerRequest extends Omit<
   LocalServerPlan,
   "runtime" | "linkedRuntimes"
 > {
   readonly runtime: LocalServerPlan["runtime"] | "subscription";
-  readonly background?: boolean;
 }
 
 export const QUICK_INSTALL: LocalServerPlan = {
@@ -680,7 +678,8 @@ export class LocalServerModule implements Module {
   #byokCheck: SetupByokCheck | undefined;
   #byokModels: SetupByokModels | undefined;
   #modelCheck: SetupModelCheck | undefined;
-  // The local model picked on the page, for the background download.
+  // The local model picked on the page, for the download that goes on
+  // after the person leaves its installation's wait.
   #pickedModel: string | undefined;
   #legacyBackup: string | undefined;
   // The installer that runs the sign-in, and what the person asked for
@@ -1221,10 +1220,11 @@ export class LocalServerModule implements Module {
   }
 
   // Setup's Install: resolves a subscription to the runtimes signed in on
-  // the page, and starts the local model's background download when asked.
+  // the page. BYOK and a subscription download no local model; the Local
+  // models page adds one later.
   beginSetup(request: LocalServerRequest): Promise<void> {
     if (this.#running) return this.#running;
-    const { runtime, background, localModel, ...rest } = request;
+    const { runtime, localModel, ...rest } = request;
     // Only a model the check listed; the installer validates it again.
     const listed =
       this.#check.state === "checked" &&
@@ -1250,7 +1250,6 @@ export class LocalServerModule implements Module {
         runtime,
         ...(runtime === "local" && listed ? { localModel: listed } : {}),
       };
-    if (background && plan.runtime !== "local") this.#downloadInBackground();
     return this.begin(plan);
   }
 
@@ -1273,8 +1272,9 @@ export class LocalServerModule implements Module {
     return this.#runtimes;
   }
 
-  // The planned local model, downloading into the model library while
-  // another source installs; Settings › Models offers it once done.
+  // The local model left from its installation's wait, downloading into
+  // the model library while another source installs; Settings › Models
+  // offers it once done.
   #downloadInBackground(): void {
     const library =
       this.#pickedModel ??

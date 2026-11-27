@@ -89,8 +89,8 @@ export interface SetupLocalServer {
     | "installer_unreachable";
   // Step 2's subscription runtimes, once first checked.
   readonly runtimes?: readonly SetupRuntimeRow[];
-  // The local model downloading in the background while another source
-  // runs.
+  // The local model downloading in the background after the person left
+  // its installation's wait for another source.
   readonly backgroundModel?: SetupBackgroundModel;
   // While installing or failed: the source being installed.
   readonly source?: "local" | "subscription" | "byok";
@@ -430,8 +430,6 @@ export type SetupCommand =
       readonly runtime?: SetupLocalRuntime;
       readonly byok?: SetupByokConfig;
       readonly keys?: SetupProviderKeys;
-      // Also download the planned local model in the background.
-      readonly background?: boolean;
       // The local model picked on the page (`<catalog id>:<quant>`).
       readonly model?: string;
     }

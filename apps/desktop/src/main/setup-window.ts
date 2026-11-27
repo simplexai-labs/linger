@@ -319,7 +319,6 @@ export class SetupWindowModule implements Module {
             : (command.runtime ?? "recommended"),
           ...(command.byok ? { byok: command.byok } : {}),
           ...(command.keys ? { keys: command.keys } : {}),
-          ...(command.background ? { background: true } : {}),
           ...(command.model ? { localModel: command.model } : {}),
         } as const;
         // Nothing signed in for a subscription: the page keeps Install off

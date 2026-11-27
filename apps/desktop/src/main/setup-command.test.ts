@@ -339,12 +339,16 @@ describe("parseSetupCommand", () => {
 
   it("accepts the setup sources' commands", () => {
     expect(
+      parseSetupCommand({ op: "local.start", runtime: "subscription" }),
+    ).toEqual({ op: "local.start", runtime: "subscription" });
+    // BYOK and a subscription no longer take the local model along.
+    expect(() =>
       parseSetupCommand({
         op: "local.start",
         runtime: "subscription",
         background: true,
       }),
-    ).toEqual({ op: "local.start", runtime: "subscription", background: true });
+    ).toThrow();
     for (const command of [
       { op: "local.runtimes.check" },
       { op: "local.runtime.install", runtime: "pi" },

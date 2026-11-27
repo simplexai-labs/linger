@@ -226,13 +226,12 @@ Gateway and runs Agents. The daemon exits with the app.
   [Packaging Details](../../docs/desktop-release.md#packaging-details) for
   where the minimum comes from.
   The welcome has two steps in one window of fixed size, with the main
-  button in a fixed place (`data-stage` on the section: `checking`,
-  `choose`, `settings`). While it checks this computer the welcome shows
-  only the orb and "Welcome to Linger" (no words about the check; after
-  20 s "Choose now" offers the cards while the check runs on); the orb
-  forms, the words rise, and the orb gives one soft bounce. It stays at
-  least `introMs` (2.6 s, 1.2 s with reduced motion; the page tests pass
-  0), then the orb flies along a curve into the picked card's orb (a
+  button in a fixed place (`data-stage` on the section: `intro`,
+  `choose`, `settings`). The intro shows only the orb and "Welcome to
+  Linger"; the orb forms, the words rise, and the orb gives one soft
+  bounce. It never waits for the check of this computer: after `introMs`
+  (2.6 s, 1.2 s with reduced motion; the page tests pass 0 unless they
+  watch the intro) the orb flies along a curve into the picked card's orb (a
   shared-element move with a soft spring, about 780 ms) while the title
   fades and the cards rise in one after another. Step 1 offers three
   source cards, each a title and one short line,
@@ -240,10 +239,19 @@ Gateway and runs Agents. The daemon exits with the app.
   ("Your API key") and Subscription ("ChatGPT or Claude plan").
   The card picked first is the advice: the Local model when the
   localmodels report recommends `local-models` with a model that runs now
-  and no subscription runtime is signed in, else Subscription; BYOK is never
-  picked. A local model that cannot run, or is held, shows its card
+  and no subscription runtime is signed in, else Subscription (also while
+  the check runs); BYOK is never picked. While the check (and a first
+  download of the localmodels tool) runs, the Local model card can be
+  picked and says "Checking this computer…" with a soft shimmer, no
+  spinner and no tool names; Continue to it shows step 2's model card as
+  a shimmering outline with Change and Install off until the answer fills
+  it in. The advice settles once, when the answer arrives (the glider
+  moves); a card the person picked, or went on with, never moves by
+  itself. A local model that cannot run, or is held, shows its card
   disabled ("Not available here" or "On hold") with the reason under the
-  cards and Check again. Step 2 shows the chosen source's
+  cards and Check again, and Continue stays off while it is picked; a
+  failed check says "Couldn't check this computer." BYOK and Subscription
+  never wait for the check or use its answer. Step 2 shows the chosen source's
   settings, Back (or Escape) and Install. The install location shows only
   when the default one fails its check, with the error and Change inline;
   setup takes no app keys. The Local model installs Pi with the planned
@@ -257,9 +265,10 @@ Gateway and runs Agents. The daemon exits with the app.
   `listSetupModels` in the local-installation package): name, publisher and
   build, a size chip, Best fit on the recommended one and Fastest only
   where the kit says so, and small Quality and Speed bars from the kit's
-  numbers; a model that cannot fit is dimmed with what it needs ("Needs a
-  96 GB Mac", rounded up to a size Macs are sold in, of which a model may
-  use three quarters). A pick other than the kit's is priced again for
+  numbers; a model that cannot fit is dimmed with what it needs ("Needs
+  96 GB of memory", rounded up to a common memory size, of which a model
+  may use three quarters). Setup's words name no operating system except
+  where a step is truly specific to one (the macOS permissions). A pick other than the kit's is priced again for
   this computer (`local.model.check`, the answer as state's `modelCheck`);
   Install waits for it and passes `model` only when one was picked. BYOK
   asks only for the URL, API key and Model ID and always runs on Pi
@@ -281,11 +290,12 @@ Gateway and runs Agents. The daemon exits with the app.
   only while Claude Code or Codex is signed in and nothing installs or
   signs in. With both signed in, Codex is the default runtime and Claude Code
   is configured too (`linkedRuntimes`, `linked-runtimes.json` in the
-  instance). BYOK and Subscription offer "Also download the local model in
-  the background" (off by default), which downloads the planned model into
-  the model library (`--download-local-model`) for Settings › Models. While the Local model's installation downloads, its wait offers "Use
-  Subscription or BYOK meanwhile" (`local.leave-local`), back to step 1: the installer's job is
-  cancelled, the model keeps downloading in the background, step 1's Local
+  instance). BYOK and Subscription download no local model; Settings ›
+  Models adds one later. While the Local model's installation downloads,
+  its wait offers "Use Subscription or BYOK meanwhile"
+  (`local.leave-local`), back to step 1: the installer's job is cancelled,
+  the model keeps downloading into the model library in the background
+  (`--download-local-model`, for Settings › Models), step 1's Local
   model card says "Downloading · NN%" and step 2 of the other source shows
   "Local model NN%". Setup asks nothing about the
   sign-in: the installer gives a new installation's owner `admin@gmail.com`
