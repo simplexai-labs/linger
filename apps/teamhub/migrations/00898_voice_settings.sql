@@ -3,7 +3,7 @@
 -- snapshots, and per-VoiceSession resolved speech dispatch config.
 CREATE TABLE public.voice_settings (
     account_id text NOT NULL REFERENCES public.accounts(id) ON DELETE CASCADE,
-    tenant_id text NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    tenant_id text NOT NULL,
     speech_provider text NOT NULL DEFAULT 'auto'
         CHECK (speech_provider IN ('auto', 'local', 'cloud')),
     local_computer_id text,
