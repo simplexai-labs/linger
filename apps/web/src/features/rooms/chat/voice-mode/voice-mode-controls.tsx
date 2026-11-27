@@ -45,7 +45,8 @@ const noVoiceModes: VoiceModeModes = { dictation: false, live: false };
 function voiceModes(policy: TeamHubVoiceMediaPolicy | undefined) {
   return policy
     ? {
-        dictation: policy.voice_media_supported === true,
+        dictation:
+          (policy.dictation_supported ?? policy.voice_media_supported) === true,
         live: policy.live_supported === true,
       }
     : noVoiceModes;

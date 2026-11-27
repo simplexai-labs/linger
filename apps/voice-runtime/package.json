@@ -43,5 +43,8 @@
       "linger-production": "./dist/main.js",
       "default": "./src/main.ts"
     }
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-node": "1.12.14"
   }
 }

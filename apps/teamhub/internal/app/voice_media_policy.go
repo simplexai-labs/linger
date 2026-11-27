@@ -29,11 +29,14 @@ func (a *App) getVoiceMediaPolicy(c *gin.Context) {
 	}
 	available := a.voiceMedia != nil && a.voiceKeys.Enabled()
 	transcription := available && soniox.Source != voicekey.SourceNone
+	// Local dictation needs no Soniox key; recording still does.
+	dictation := available && (soniox.Source != voicekey.SourceNone || a.cfg.Voice.LocalASR)
 	live := available && xai.Source != voicekey.SourceNone
 	sonioxStatus, xaiStatus := voiceProviderKeyModel(soniox), voiceProviderKeyModel(xai)
 	response := httpapi.VoiceMediaPolicy{
 		LiveSupported: &live, LiveEnabled: &live,
 		VoiceMediaSupported: transcription,
+		DictationSupported:  &dictation,
 		VoiceAvailable:      &available,
 		SonioxKey:           &sonioxStatus, XaiKey: &xaiStatus,
 	}

@@ -17,6 +17,11 @@ components:
         voice_media_supported:
           type: boolean
           description: Soniox ASR is configured, so Recording, Pocket notes dictation and Voice Mode dictation are available.
+        dictation_supported:
+          type: boolean
+          description: >-
+            Dictation (Pocket notes and Voice Mode) is available, through the Soniox key or a local
+            transcription engine (VOICE_LOCAL_ASR). Recording still needs voice_media_supported.
         active_room_id:
           $ref: "./common.yaml#/components/schemas/Id"
         live_supported:

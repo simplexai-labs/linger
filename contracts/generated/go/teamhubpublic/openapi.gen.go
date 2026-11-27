@@ -9759,6 +9759,9 @@ type VoiceMediaPolicy struct {
 	// ActiveRoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	ActiveRoomId *Id `json:"active_room_id,omitempty"`
 
+	// DictationSupported Dictation (Pocket notes and Voice Mode) is available, through the Soniox key or a local transcription engine (VOICE_LOCAL_ASR). Recording still needs voice_media_supported.
+	DictationSupported *bool `json:"dictation_supported,omitempty"`
+
 	// LiveEnabled Whether this tenant may enter live voice mode.
 	LiveEnabled *bool `json:"live_enabled,omitempty"`
 

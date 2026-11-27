@@ -681,6 +681,7 @@ ${scripts[name].replace(/^node scripts\/with-local-env\.mjs -- sh -c '(.*)'$/s, 
       "TEAMHUB_DOCUMENT_PREVIEW_PUBLIC_ORIGIN",
       "TEAMHUB_CLI_BASE_URL",
       "AGENT_SERVICE_URL",
+      "VOICE_LOCAL_ASR_MODEL_DIR",
     ])
       expect(template[name], name).toBeUndefined();
     // Compose loads the same defaults and keeps container values explicit.

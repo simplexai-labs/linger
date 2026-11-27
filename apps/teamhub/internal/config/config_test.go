@@ -28,6 +28,7 @@ var teamhubEnvironment = []string{
 	"XAI_API_KEY",
 	"TEAMHUB_VOICE_MEDIA",
 	"TEAMHUB_VOICE_TOOLS_BIN",
+	"VOICE_LOCAL_ASR",
 	"LIVEKIT_URL",
 	"LIVEKIT_API_URL",
 	"LIVEKIT_API_KEY",
@@ -218,6 +219,30 @@ func TestLoadVoiceToolsBinConfiguration(t *testing.T) {
 		t.Setenv("TEAMHUB_VOICE_TOOLS_BIN", relative)
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TEAMHUB_VOICE_TOOLS_BIN must be an absolute path") {
 			t.Fatalf("TEAMHUB_VOICE_TOOLS_BIN=%q error = %v", relative, err)
+		}
+	}
+}
+
+func TestLoadVoiceLocalASRSetting(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"on", true}, {"off", false}, {" on ", true}} {
+		clearTeamHubEnvironment(t)
+		t.Setenv("TEAMHUB_DATABASE_URL", "postgres://environment.example/teamhub")
+		t.Setenv("LINGER_SECRET_SEED", testSecretSeed)
+		t.Setenv("VOICE_LOCAL_ASR", tc.value)
+		cfg, err := Load()
+		if err != nil || cfg.Voice.LocalASR != tc.want {
+			t.Fatalf("VOICE_LOCAL_ASR=%q: local=%v err=%v", tc.value, cfg.Voice.LocalASR, err)
+		}
+	}
+	clearTeamHubEnvironment(t)
+	t.Setenv("TEAMHUB_DATABASE_URL", "postgres://environment.example/teamhub")
+	for _, value := range []string{"true", "ON", "1"} {
+		t.Setenv("VOICE_LOCAL_ASR", value)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "VOICE_LOCAL_ASR") {
+			t.Fatalf("VOICE_LOCAL_ASR=%q error = %v", value, err)
 		}
 	}
 }

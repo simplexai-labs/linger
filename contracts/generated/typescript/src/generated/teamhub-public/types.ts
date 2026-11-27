@@ -6721,6 +6721,8 @@ export interface components {
     VoiceMediaPolicy: {
       /** @description Soniox ASR is configured, so Recording, Pocket notes dictation and Voice Mode dictation are available. */
       voice_media_supported: boolean;
+      /** @description Dictation (Pocket notes and Voice Mode) is available, through the Soniox key or a local transcription engine (VOICE_LOCAL_ASR). Recording still needs voice_media_supported. */
+      dictation_supported?: boolean;
       active_room_id?: components["schemas"]["Id"];
       /** @description Whether the xAI live voice provider is configured; Live does not need Soniox. */
       live_supported?: boolean;
