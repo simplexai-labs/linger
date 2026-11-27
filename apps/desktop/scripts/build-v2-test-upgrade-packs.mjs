@@ -39,11 +39,13 @@ import {
   PLATFORM_TARGETS,
   computeNativeDepsHash,
   planBundleBuilds,
+  resolveDbSchemaEpoch,
 } from "./compute-bundle-inputs.mjs";
 
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptsDir, "..");
 const defaultRepoRoot = path.resolve(desktopDir, "../..");
+const defaultDbSchemaEpoch = resolveDbSchemaEpoch(defaultRepoRoot);
 
 export function deriveStepVersions(baseVersion = "0.1.11-v2test.0") {
   const match = /^(\d+\.\d+\.\d+)(?:-([A-Za-z0-9-]+)(?:\.(\d+))?)?$/.exec(
@@ -71,7 +73,7 @@ export const STEP_DEFINITIONS = Object.freeze([
     updateBehavior:
       "Initial 2+1 V2 Store seed (web + unified backend + node-native-deps)",
     rollbackSafe: true,
-    dbSchemaEpoch: 892,
+    dbSchemaEpoch: defaultDbSchemaEpoch,
   },
   {
     id: "step-01-web",
@@ -79,7 +81,7 @@ export const STEP_DEFINITIONS = Object.freeze([
     updateBehavior:
       "0-downtime Web static-host hot reload + visible V2 badge (backend & node-native-deps 0B skipped)",
     rollbackSafe: true,
-    dbSchemaEpoch: 892,
+    dbSchemaEpoch: defaultDbSchemaEpoch,
   },
   {
     id: "step-02-backend",
@@ -87,7 +89,7 @@ export const STEP_DEFINITIONS = Object.freeze([
     updateBehavior:
       "Atomic signed backend rolling upgrade (teamhub + daemon + node-services/skills/installer; PG/LiveKit/Electron 0 restart; web & node-native-deps 0B skipped)",
     rollbackSafe: true,
-    dbSchemaEpoch: 892,
+    dbSchemaEpoch: defaultDbSchemaEpoch,
   },
   {
     id: "step-03-rollback-faulty",
@@ -95,7 +97,7 @@ export const STEP_DEFINITIONS = Object.freeze([
     updateBehavior:
       "Faulty signed backend (rollbackSafe:false, exit 42) -> pg_dump/pg_restore + atomic rollback to step-02 + denylist",
     rollbackSafe: false,
-    dbSchemaEpoch: 893,
+    dbSchemaEpoch: defaultDbSchemaEpoch + 1,
   },
 ]);
 

@@ -190,6 +190,32 @@ function readNodeMajor(repoRoot) {
   return match ? match[1] : "26";
 }
 
+/**
+ * Derives the latest PostgreSQL schema epoch from the highest numbered SQL
+ * migration prefix under `apps/teamhub/migrations/` (e.g. `00896_*.sql` -> 896).
+ * Falls back cleanly to `fallback` (default 0) when the migrations directory is
+ * absent or contains no numbered SQL migrations.
+ */
+export function resolveDbSchemaEpoch(repoRoot = defaultRepoRoot, fallback = 0) {
+  const migrationsDir = path.join(repoRoot, "apps", "teamhub", "migrations");
+  let entries;
+  try {
+    entries = readdirSync(migrationsDir);
+  } catch {
+    return fallback;
+  }
+  let highest = -1;
+  for (const name of entries) {
+    const match = /^(\d+)_.*\.sql$/i.exec(name);
+    if (!match) continue;
+    const epoch = Number.parseInt(match[1], 10);
+    if (Number.isSafeInteger(epoch) && epoch > highest) {
+      highest = epoch;
+    }
+  }
+  return highest >= 0 ? highest : fallback;
+}
+
 function listTreeEntriesFromGit(repoRoot, ref, ownedPaths) {
   const existing = ownedPaths.filter((p) => {
     try {

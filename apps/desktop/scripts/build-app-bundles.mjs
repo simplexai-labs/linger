@@ -35,6 +35,7 @@ import {
   BUNDLE_IDS,
   PLATFORM_TARGETS,
   planBundleBuilds,
+  resolveDbSchemaEpoch,
 } from "./compute-bundle-inputs.mjs";
 
 const desktopDir = path.resolve(
@@ -349,7 +350,8 @@ export function assembleManifestV3({
         : {}),
       minNativeDepsHash: compat?.minNativeDepsHash ?? plan.nativeDepsHash,
       runnerGatewayProtocol: compat?.runnerGatewayProtocol ?? 1,
-      dbSchemaEpoch: compat?.dbSchemaEpoch ?? 892,
+      dbSchemaEpoch:
+        compat?.dbSchemaEpoch ?? resolveDbSchemaEpoch(defaultRepoRoot),
       rollbackSafe: compat?.rollbackSafe ?? true,
     },
     ...(compatIndex?.length ? { compatIndex } : {}),
@@ -483,7 +485,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         minShellVersion: flag("--min-shell") ?? "0.2.0",
         minNativeDepsHash: plan.nativeDepsHash,
         runnerGatewayProtocol: Number(flag("--gateway-protocol") ?? "1"),
-        dbSchemaEpoch: Number(flag("--db-epoch") ?? "892"),
+        dbSchemaEpoch:
+          flag("--db-epoch") !== undefined
+            ? Number(flag("--db-epoch"))
+            : resolveDbSchemaEpoch(repoRoot),
         rollbackSafe: flag("--rollback-safe") !== "false",
       },
       plan,

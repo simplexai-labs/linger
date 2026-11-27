@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { packDeterministicTarZst } from "../../scripts/build-app-bundles.mjs";
 import {
   buildShellSeedManifest,
+  resolveDbSchemaEpoch,
   writeShellSeedManifest,
 } from "../../scripts/build-shell-seed-manifest.mjs";
 import { planBundleBuilds } from "../../scripts/compute-bundle-inputs.mjs";
@@ -69,11 +70,15 @@ describe("Zero-bloat shell-baseline seed & hybrid Shell+Store lifecycle", () => 
       plan.bundles.backend?.inputHash,
     );
     expect(written.manifest.compat.minNativeDepsHash).toBe(plan.nativeDepsHash);
+    const derivedEpoch = resolveDbSchemaEpoch(repoRoot);
+    expect(derivedEpoch).toBeGreaterThanOrEqual(896);
+    expect(written.manifest.compat.dbSchemaEpoch).toBe(derivedEpoch);
     expect(written.manifest.infra.nodeDeps).toBe(
       `infra/node-deps/${plan.nativeDepsShortId}`,
     );
 
-    // Works cleanly on a source tree with no .git directory (fs fallback).
+    // Works cleanly on a source tree with no .git directory (fs fallback) and
+    // falls back to 0 when apps/teamhub/migrations is absent.
     const fakeRepo = await makeTempDir("linger-nogit-repo-");
     await mkdir(path.join(fakeRepo, "apps/web"), { recursive: true });
     await writeFile(
@@ -82,14 +87,44 @@ describe("Zero-bloat shell-baseline seed & hybrid Shell+Store lifecycle", () => 
       "utf8",
     );
     await writeFile(path.join(fakeRepo, ".node-version"), "26.6.0\n", "utf8");
+    expect(resolveDbSchemaEpoch(fakeRepo)).toBe(0);
     const noGitManifest = buildShellSeedManifest({
       repoRoot: fakeRepo,
       appVersion: "0.2.0",
       ref: "HEAD",
     });
     expect(noGitManifest.mode).toBe("shell-baseline");
+    expect(noGitManifest.compat.dbSchemaEpoch).toBe(0);
     expect(noGitManifest.bundles.web.inputHash).toMatch(/^[0-9a-f]{64}$/);
-  });
+
+    // Derives highest numeric migration prefix when apps/teamhub/migrations exists.
+    await mkdir(path.join(fakeRepo, "apps/teamhub/migrations"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(fakeRepo, "apps/teamhub/migrations/00105_init.sql"),
+      "",
+      "utf8",
+    );
+    await writeFile(
+      path.join(fakeRepo, "apps/teamhub/migrations/00912_latest.sql"),
+      "",
+      "utf8",
+    );
+    await writeFile(
+      path.join(fakeRepo, "apps/teamhub/migrations/embed.go"),
+      "",
+      "utf8",
+    );
+    expect(resolveDbSchemaEpoch(fakeRepo)).toBe(912);
+    expect(
+      buildShellSeedManifest({
+        repoRoot: fakeRepo,
+        appVersion: "0.2.0",
+        ref: "HEAD",
+      }).compat.dbSchemaEpoch,
+    ).toBe(912);
+  }, 15_000);
 
   it("seeds lazily post-setup, upgrades seed only on newer Shell, performs 0B backend pure-Web first update, cold-starts hybrid daemon from Shell, and rolls back to hybrid Shell backend", async () => {
     const home = await makeTempDir("linger-hybrid-home-");

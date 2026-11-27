@@ -38,6 +38,11 @@ export interface BuildShellSeedManifestOptions {
   readonly dbSchemaEpoch?: number;
 }
 
+export function resolveDbSchemaEpoch(
+  repoRoot?: string,
+  fallback?: number,
+): number;
+
 export function buildShellSeedManifest(
   options: BuildShellSeedManifestOptions,
 ): ShellSeedManifest;

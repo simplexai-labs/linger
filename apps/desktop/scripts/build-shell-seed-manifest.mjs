@@ -5,7 +5,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { planBundleBuilds } from "./compute-bundle-inputs.mjs";
+import {
+  planBundleBuilds,
+  resolveDbSchemaEpoch,
+} from "./compute-bundle-inputs.mjs";
+
+export { resolveDbSchemaEpoch };
 
 const desktopDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -20,7 +25,7 @@ export function buildShellSeedManifest({
   ref = "HEAD",
   useFs = false,
   lockfileText = null,
-  dbSchemaEpoch = 1,
+  dbSchemaEpoch = resolveDbSchemaEpoch(repoRoot),
 } = {}) {
   if (!appVersion || typeof appVersion !== "string") {
     throw new Error("buildShellSeedManifest requires appVersion");

@@ -74,6 +74,11 @@ export interface BundleBuildPlan {
   readonly reused: string[];
 }
 
+export declare function resolveDbSchemaEpoch(
+  repoRoot?: string,
+  fallback?: number,
+): number;
+
 export declare function planBundleBuilds(
   repoRoot: string,
   options?: {
