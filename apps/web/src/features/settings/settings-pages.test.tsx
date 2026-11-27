@@ -129,7 +129,14 @@ describe("Settings surfaces", () => {
       within(settingsNav)
         .getAllByRole("link")
         .map((link) => link.textContent?.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Account", "Computers", "Models", "Phones", "Language"]);
+    ).toEqual([
+      "Account",
+      "Computers",
+      "Models",
+      "Phones",
+      "Voice",
+      "Language",
+    ]);
     expect(
       screen.getByRole("heading", { level: 1, name: "Account" }),
     ).toBeVisible();
@@ -211,7 +218,14 @@ describe("Settings surfaces", () => {
     const links = within(nav).getAllByRole("link");
     expect(
       links.map((link) => link.textContent?.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Account", "Computers", "Models", "Phones", "Language"]);
+    ).toEqual([
+      "Account",
+      "Computers",
+      "Models",
+      "Phones",
+      "Voice",
+      "Language",
+    ]);
     for (const link of links) {
       expect(link).toHaveClass("shrink-0");
     }

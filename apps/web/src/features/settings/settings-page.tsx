@@ -3,6 +3,7 @@ import {
   LanguageSkillIcon,
   LaptopIcon,
   SmartPhone01Icon,
+  Mic01Icon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
@@ -51,6 +52,11 @@ export function SettingsLayout() {
             icon={<Icon icon={SmartPhone01Icon} size={14} />}
             label={t(settingsMessages.phones)}
             to="phones"
+          />
+          <SettingsLink
+            icon={<Icon icon={Mic01Icon} size={14} />}
+            label={t(settingsMessages.voice)}
+            to="voice"
           />
           <SettingsLink
             icon={<Icon icon={LanguageSkillIcon} size={14} />}

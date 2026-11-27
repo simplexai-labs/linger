@@ -118,6 +118,15 @@ build:assets` to check the initial JS budget.
   `LOCAL_COMPUTER_OFFLINE` disables BYOK edits immediately. A Computer's detail
   on the Computers page links here, reads `model-source` for its active runtime
   pill, and reads no local model library state itself.
+- `src/features/voice-settings`: Settings › Voice (`settings/voice`) and the
+  shared `VoiceLocalModelsSection` mounted in both Settings › Voice and the
+  orthogonal `Voice` tab of Settings › Models. Manages local speech models
+  (`local-speech` invalidation hints, GPU/CPU device pills and fallback
+  notices, mandatory license disclosure for custom-licensed models), Soniox
+  cloud setup, browser-local microphone selection (`localStorage` only) with
+  clash-safe live level testing (`use-microphone-test.ts`), and dictation
+  `Stop after silence` timers (applied to Pocket Notes and Voice Mode
+  dictation only, never Live Voice or Meeting Recording).
 - `src/i18n`: the interface languages (English and Simplified Chinese).
   `messages.ts` re-exports the React-free core from
   `@linger/service-kit/messages`, which the desktop shell shares,

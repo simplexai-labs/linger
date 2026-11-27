@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { useLayoutEffect, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,14 +21,22 @@ describe("Pocket Note dictation session lifecycle", () => {
     receive: (event: VoiceModeEvent) => void;
   }[] = [];
   const runtime = createTestTeamHubRuntime();
+  let queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <TeamHubRuntimeProvider runtime={runtime}>
-      {children}
-    </TeamHubRuntimeProvider>
+    <QueryClientProvider client={queryClient}>
+      <TeamHubRuntimeProvider runtime={runtime}>
+        {children}
+      </TeamHubRuntimeProvider>
+    </QueryClientProvider>
   );
 
   beforeEach(() => {
     connections.length = 0;
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     transport.open.mockReset().mockImplementation(async ({ receive }) => {
       const connection = { close: vi.fn(async () => undefined), receive };
       connections.push(connection);
@@ -41,6 +50,7 @@ describe("Pocket Note dictation session lifecycle", () => {
     const { result } = renderHook(
       () => {
         const dictation = usePocketDictation({
+          onAutoStop: vi.fn(),
           roomId: "room-1",
           tenantId: "tenant-1",
           onTurn,
@@ -95,7 +105,12 @@ describe("Pocket Note dictation session lifecycle", () => {
     const nextOnTurn = vi.fn();
     const { result, rerender, unmount } = renderHook(
       ({ roomId, onTurn }) =>
-        usePocketDictation({ roomId, onTurn, tenantId: "tenant-1" }),
+        usePocketDictation({
+          onAutoStop: vi.fn(),
+          roomId,
+          onTurn,
+          tenantId: "tenant-1",
+        }),
       { wrapper, initialProps: { roomId: "room-1", onTurn: firstOnTurn } },
     );
     await act(async () => result.current.start());
@@ -145,15 +160,24 @@ describe("Pocket Note dictation availability", () => {
       const { result } = renderHook(
         () =>
           usePocketDictation({
+            onAutoStop: vi.fn(),
             roomId: "room-1",
             tenantId: "tenant-1",
             onTurn: vi.fn(),
           }),
         {
           wrapper: ({ children }: { children: ReactNode }) => (
-            <TeamHubRuntimeProvider runtime={runtime}>
-              {children}
-            </TeamHubRuntimeProvider>
+            <QueryClientProvider
+              client={
+                new QueryClient({
+                  defaultOptions: { queries: { retry: false } },
+                })
+              }
+            >
+              <TeamHubRuntimeProvider runtime={runtime}>
+                {children}
+              </TeamHubRuntimeProvider>
+            </QueryClientProvider>
           ),
         },
       );
