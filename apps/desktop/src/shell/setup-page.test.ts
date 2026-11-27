@@ -1672,6 +1672,36 @@ describe("setup page installing", () => {
     expect($("installing-actions").hidden).toBe(true);
   });
 
+  it("draws Linger's mark, its trace following the bar and stopping grey on a failure", async () => {
+    const { push } = await openPage(withLocal("installing", { progress: 0.4 }));
+    // Every mark is the favicon's wedge and dot, the same on every source.
+    expect($("logo-wedge").getAttribute("d")).toMatch(/^M316\.285,237\.609c/u);
+    expect($("logo-dot").getAttribute("d")).toMatch(/^M642,366c/u);
+    const fills = [...document.querySelectorAll(".source-card .mk-fill")];
+    expect(fills).toHaveLength(3);
+    for (const fill of fills)
+      expect(fill.getAttribute("href")).toBe("#logo-wedge");
+    expect(document.querySelectorAll(".orb")).toHaveLength(0);
+    const mark = $("sc-mark");
+    const trace = mark.querySelector<SVGPathElement>(".mk-trace")!;
+    const traced = () => 100 - Number(trace.style.strokeDashoffset);
+    const bar = () => Number($("installing-bar").getAttribute("aria-valuenow"));
+    expect(bar()).toBeGreaterThanOrEqual(40);
+    expect(traced()).toBe(bar());
+    expect(mark.classList.contains("off")).toBe(false);
+    push(withLocal("installing", { progress: 0.7 }));
+    expect(bar()).toBeGreaterThanOrEqual(70);
+    expect(traced()).toBe(bar());
+    // A failure greys the mark; the trace stays with the bar, which stops
+    // within the step that failed.
+    push(
+      withLocal("failed", { progress: 0.7, message: "Services did not start" }),
+    );
+    expect(mark.classList.contains("off")).toBe(true);
+    expect(mark.classList.contains("breathe")).toBe(false);
+    expect(traced()).toBe(bar());
+  });
+
   it("folds a download into the same line, in its own words", async () => {
     // The installer's words name tools and timings; the line does not, and
     // it carries no file sizes: the bar says how far.
@@ -1773,7 +1803,7 @@ describe("setup page installing", () => {
     expect($("report-issue").textContent).toBe(zhCN.setup.reportIssue);
   });
 
-  it("says beside the install orb that Linger runs locally and is your own agent", async () => {
+  it("says beside the install mark that Linger runs locally and is your own agent", async () => {
     for (const [language, want] of [
       [
         "en",

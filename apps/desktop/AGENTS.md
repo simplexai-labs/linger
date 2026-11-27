@@ -114,12 +114,18 @@ Gateway and runs Agents. The daemon exits with the app.
   with the chosen AI runtime and local models, then the job's progress, which
   the setup page shows as one progress bar with one short line that changes
   with the step (a download, such as the local model's, folds into the same
-  line with its bytes); there is no checklist and no timings. When the job
-  completes the bar fills, folds up into the orb, the orb blooms with one
-  ring ripple, its check draws, and "Linger is ready" and Open Linger rise
-  in while the agent cards settle (about 1.5 s, no confetti). Every motion
-  moves only transform and opacity; with `prefers-reduced-motion` nothing
-  flies, bounces or blooms, and parts fade in briefly instead. Each Install
+  line with its bytes); there is no checklist and no timings. The page's
+  animated element is Linger's mark, the wedge and dot of
+  `apps/web/public/favicon.svg` embedded verbatim. While installing it is a
+  pale outline that an ink trace draws around as the bar fills (the trace
+  follows the bar's value), with the dot's ring pulsing; a failure greys it
+  with the trace stopped. When the job completes the bar fills, folds up
+  into the mark, the mark fills with ink, its dot pops with one ripple and
+  its check draws, and "Linger is ready" and Open Linger rise in while the
+  agent cards settle (about 1.5 s, no confetti). Every motion moves only
+  transform and opacity, except the trace's `stroke-dashoffset`; with
+  `prefers-reduced-motion` nothing flies, bounces, pulses or draws, and parts
+  fade in briefly instead. Each Install
   is a new attempt: its timers and bar start over, and the bar never moves
   back within one. A failure shows a brief message and one button, Report
   issue: Send Diagnostics' consent flow when a receiver is set up, else Save
@@ -227,16 +233,19 @@ Gateway and runs Agents. The daemon exits with the app.
   where the minimum comes from.
   The welcome has two steps in one window of fixed size, with the main
   button in a fixed place (`data-stage` on the section: `intro`,
-  `choose`, `settings`). The intro shows only the orb and "Welcome to
-  Linger"; the orb forms, the words rise, and the orb gives one soft
-  bounce. It never waits for the check of this computer: after `introMs`
-  (2.6 s, 1.2 s with reduced motion; the page tests pass 0 unless they
-  watch the intro) the orb flies along a curve into the picked card's orb (a
+  `choose`, `settings`). The intro shows only the mark and "Welcome to
+  Linger"; its outline draws, it fills with ink, the dot drops in with one
+  soft bounce, and the words rise. It never waits for the check of this
+  computer: after `introMs` (2.6 s, 1.2 s with reduced motion; the page
+  tests pass 0 unless they watch the intro) the mark flies along a curve
+  into the picked card's mark (a
   shared-element move with a soft spring, about 780 ms) while the title
   fades and the cards rise in one after another. Step 1 offers three
   source cards, each a title and one short line,
   with no subtitle, badges or tags: Local model ("On this computer"), BYOK
-  ("Your API key") and Subscription ("ChatGPT or Claude plan").
+  ("Your API key") and Subscription ("ChatGPT or Claude plan"). Every card
+  carries the same mark, with no colour per source: the picked one fills
+  with ink and its dot pops in, the others show only its outline.
   The card picked first is the advice: the Local model when the
   localmodels report recommends `local-models` with a model that runs now
   and no subscription runtime is signed in, else Subscription (also while

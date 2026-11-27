@@ -1148,7 +1148,7 @@
 
       /* ---------- Wizard look (welcome, installing, ready) ----------
          One 760x660 window: a quiet wash, the logo on top, a 440px
-         stage, and the orb that carries the eye from the welcome through
+         stage, and the mark that carries the eye from the welcome through
          step 1, the settings and the install. Ported from
          the round-4 prototype; motion is transform and opacity only. */
       body[data-look="wizard"] {
@@ -1180,13 +1180,13 @@
         pointer-events: none;
         background:
           radial-gradient(
-            40% 32% at 50% 34%,
-            rgba(94, 200, 229, 0.1),
+            40% 32% at 50% 36%,
+            rgba(253, 169, 70, 0.085),
             transparent 70%
           ),
           radial-gradient(
-            36% 30% at 58% 38%,
-            rgba(241, 154, 180, 0.1),
+            34% 28% at 47% 40%,
+            rgba(20, 20, 20, 0.03),
             transparent 70%
           );
         transition: opacity 0.8s var(--ease);
@@ -1266,194 +1266,144 @@
         cursor: default;
       }
 
-      /* ---------- The orb: a soft gradient sphere ----------
-         o-base glow behind, o-fill the colour body, o-solid the ready fill,
-         o-shade light and contact shadow, o-ring a hairline on large orbs,
-         o-arc the highlight. */
-      .orb {
+      /* ---------- The mark: Linger's logo, built from line art ----------
+         The favicon's wedge and dot. Unpicked, it is an outline; picked, it
+         fills with ink and its dot. While installing, an ink trace follows
+         the progress around a pale outline and the dot's ring pulses; ready
+         fills it and draws a check on the dot. */
+      .mark {
         --s: 44px;
-        --a: #5ccbe8;
-        --b: #a3aaf4;
-        --c: #f3a3c2;
-        --d: #c9b8f6;
         position: relative;
         display: inline-block;
         width: var(--s);
         height: var(--s);
         flex: none;
       }
-      .orb i {
-        position: absolute;
-        display: block;
-        border-radius: 50%;
-        pointer-events: none;
-      }
-      .orb .o-base {
-        inset: -40%;
-        background: radial-gradient(
-          closest-side,
-          color-mix(in srgb, var(--b) 24%, transparent) 30%,
-          color-mix(in srgb, var(--c) 10%, transparent) 60%,
-          transparent
-        );
-      }
-      .orb .o-fill {
-        inset: 0;
-        background:
-          radial-gradient(66% 66% at 26% 24%, var(--a), transparent 84%),
-          radial-gradient(72% 72% at 82% 78%, var(--c), transparent 84%),
-          radial-gradient(60% 60% at 84% 20%, var(--d), transparent 82%),
-          radial-gradient(
-            62% 62% at 18% 84%,
-            color-mix(in srgb, var(--b) 60%, var(--c)),
-            transparent 82%
-          ),
-          var(--b);
-      }
-      .orb .o-solid {
-        inset: 0;
-        opacity: 0;
-        background: linear-gradient(
-          150deg,
-          color-mix(in srgb, var(--a) 88%, #1d6fd8) 8%,
-          color-mix(in srgb, var(--b) 92%, #4b4fd0) 52%,
-          color-mix(in srgb, var(--c) 90%, #d9467e) 96%
-        );
-      }
-      .orb .o-shade {
-        inset: 0;
-        background:
-          radial-gradient(
-            46% 40% at 36% 28%,
-            rgba(255, 255, 255, 0.62),
-            rgba(255, 255, 255, 0) 72%
-          ),
-          radial-gradient(
-            circle at 44% 40%,
-            transparent 62%,
-            rgba(46, 40, 110, 0.07) 100%
-          );
-        box-shadow:
-          inset 0 calc(var(--s) * -0.06) calc(var(--s) * 0.14)
-            rgba(255, 255, 255, 0.34),
-          0 calc(var(--s) * 0.16) calc(var(--s) * 0.3) calc(var(--s) * -0.14)
-            color-mix(in srgb, var(--b) 50%, transparent);
-      }
-      .orb .o-ring {
-        inset: -11%;
-        display: none;
-        border: 1px solid color-mix(in srgb, var(--b) 20%, transparent);
-      }
-      .orb.big .o-ring {
-        display: block;
-      }
-      .orb .o-arc {
-        left: 23%;
-        top: 13%;
-        width: 26%;
-        height: 15%;
-        transform: rotate(-28deg);
-        background: radial-gradient(
-          closest-side,
-          rgba(255, 255, 255, 0.9),
-          rgba(255, 255, 255, 0)
-        );
-      }
-      .orb.k-byok {
-        --a: #62d0c0;
-        --b: #9dc3ee;
-        --c: #f6b49c;
-        --d: #b7e3dc;
-      }
-      .orb.k-sub {
-        --a: #8f97f6;
-        --b: #bba6f2;
-        --c: #f5b896;
-        --d: #e1b3e8;
-      }
-      .orb.k-off {
-        --a: #c9c9c3;
-        --b: #d6d6d0;
-        --c: #c2c2bc;
-        --d: #dcdcd6;
-      }
-      /* The idle motion is slow enough to read as calm, and runs on
-         composited layers only (transform, opacity), so nothing repaints or
-         lands on half pixels while it moves. */
-      .orb.breathe {
-        animation: orb-breathe 6s ease-in-out infinite;
-        will-change: transform;
-      }
-      .orb.breathe .o-base {
-        animation: orb-glow 6s ease-in-out infinite;
-        will-change: opacity;
-      }
-      .orb.turn .o-fill {
-        animation: orb-turn 48s linear infinite;
-        will-change: transform;
-      }
-      @keyframes orb-breathe {
-        50% {
-          transform: scale(1.015);
-        }
-      }
-      @keyframes orb-glow {
-        50% {
-          opacity: 0.8;
-        }
-      }
-      @keyframes orb-turn {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-      .orb .o-check {
+      .mk-svg {
         position: absolute;
         inset: 0;
-        display: grid;
-        place-items: center;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        display: block;
+      }
+      .mk-svg * {
+        transform-box: fill-box;
+        transform-origin: 50% 50%;
+      }
+      .mk-track {
+        fill: none;
+        stroke: #b9b8b0;
+        stroke-linejoin: round;
+      }
+      .mk-trace {
+        fill: none;
+        stroke: #141414;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+        stroke-dasharray: 100;
+        stroke-dashoffset: 0;
+        transition: stroke-dashoffset 0.7s var(--ease);
+      }
+      .mk-fill {
+        fill: #141414;
+        transition: opacity 0.4s var(--ease);
+      }
+      .mk-ring {
+        fill: none;
+        stroke: #fda946;
+      }
+      .mk-d {
+        fill: #fda946;
+        transition: opacity 0.4s var(--ease);
+      }
+      .mk-ck {
+        fill: none;
+        stroke: #fff;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 24;
+        stroke-dashoffset: 24;
         opacity: 0;
       }
-      body[data-look="wizard"] .orb .o-check svg {
-        width: 36%;
-        height: 36%;
-        filter: drop-shadow(0 1px 2px rgba(40, 40, 120, 0.25));
+      /* Step 1: the cards not picked show the outline only. */
+      .source-card:not([aria-checked="true"]) :is(.mk-fill, .mk-d, .mk-trace) {
+        opacity: 0;
       }
-      /* Ready: the orb is solid and carries the check. */
-      body[data-scene="ready"] #sc-ball .o-solid {
-        opacity: 0.92;
+      .source-card:not([aria-checked="true"]) .mk-ring {
+        stroke: #c9c7bf;
       }
-      body[data-scene="ready"] #sc-ball .o-check {
+      /* The install: a pale outline, the trace and the dot's ring. */
+      .mark.scene .mk-track {
+        stroke: #e2e1da;
+      }
+      .mark.scene :is(.mk-fill, .mk-d) {
+        opacity: 0;
+      }
+      .mark.scene:not(.off) .mk-ring {
+        animation: mk-ring 2.8s ease-in-out infinite;
+      }
+      .mark.breathe {
+        animation: mk-breathe 4.6s ease-in-out infinite;
+      }
+      @keyframes mk-ring {
+        50% {
+          opacity: 0.35;
+        }
+      }
+      @keyframes mk-breathe {
+        50% {
+          scale: 1.02;
+        }
+      }
+      /* Failed: grey, the trace stopped where it was. */
+      .mark.off :is(.mk-trace, .mk-ring) {
+        stroke: #c9c8c1;
+      }
+      .mark.off .mk-track {
+        stroke: #ebeae4;
+      }
+      /* Ready: filled, with the check drawn on the dot. */
+      body[data-scene="ready"] #sc-mark :is(.mk-fill, .mk-d) {
         opacity: 1;
       }
-      body[data-scene="ready"] #sc-check {
+      body[data-scene="ready"] #sc-mark .mk-ring {
+        animation: none;
+      }
+      body[data-scene="ready"] #sc-mark .mk-trace {
+        stroke-dashoffset: 0 !important;
+      }
+      body[data-scene="ready"] #sc-mark .mk-ck {
+        opacity: 1;
         stroke-dashoffset: 0;
       }
-      .o-ripple {
+      /* The ready ripple spreads from the dot: (585.2, 441.2), r 94.1 in
+         the mark's 556-unit box. */
+      .mk-ripple {
         position: absolute;
-        inset: -11%;
+        left: 46.24%;
+        top: 20.16%;
+        width: 33.85%;
+        height: 33.85%;
         border-radius: 50%;
-        border: 1.5px solid rgba(163, 170, 244, 0.55);
+        box-shadow: inset 0 0 0 1.5px rgba(253, 169, 70, 0.85);
         opacity: 0;
         pointer-events: none;
       }
 
-      /* ---------- The welcome: the orb forms, the words rise ---------- */
+      /* ---------- The welcome: the mark draws, the words rise ---------- */
       .intro {
         position: absolute;
         inset: 0;
         z-index: 15;
       }
-      .intro-orb {
+      .intro-mark {
         position: absolute;
         left: 324px;
         top: 212px;
         width: 112px;
         height: 112px;
         transform-origin: 0 0;
-      }
-      .intro-orb > .orb {
-        transform-origin: 50% 100%;
       }
       body[data-look="wizard"] .intro-title {
         position: absolute;
@@ -1478,7 +1428,7 @@
         pointer-events: none;
         z-index: 40;
       }
-      #flyer .orb {
+      #flyer .mark {
         position: absolute;
         left: 0;
         top: 0;
@@ -1521,7 +1471,7 @@
         height: 330px;
       }
       /* Under the local model's card, a location problem takes the title
-         orb's room and the model's one-line pitch, so the step still fits
+         mark's room and the model's one-line pitch, so the step still fits
          above the fixed buttons. The other sources have room as they are. */
       section[data-stage="settings"]:has(
           #local-row:not([hidden]) ~ #location-row[data-warn="true"]
@@ -1697,7 +1647,7 @@
       .src-row:disabled {
         cursor: default;
       }
-      .src-row:disabled .orb {
+      .src-row:disabled .mark {
         filter: grayscale(0.85);
         opacity: 0.6;
       }
@@ -1860,12 +1810,8 @@
         height: 20px;
       }
       .m-ico[data-family="featured"] {
-        color: #1d5f86;
-        background: linear-gradient(
-          135deg,
-          rgba(67, 198, 232, 0.16),
-          rgba(242, 154, 182, 0.16)
-        );
+        color: #a35a00;
+        background: rgba(253, 169, 70, 0.16);
       }
       .m-ico[data-family="claude"] {
         color: #6e4b0f;
@@ -2033,7 +1979,7 @@
       }
       .membar .mdl,
       .memkey .mdl {
-        background: linear-gradient(90deg, #43c6e8, #a9b3f2 55%, #f29ab6);
+        background: #fda946;
       }
       .memkey .free {
         background: #efefea;
@@ -2705,7 +2651,7 @@
         inset: 0;
         pointer-events: none;
       }
-      .sc-orb {
+      .sc-mark {
         position: absolute;
         left: 320px;
         top: 214px;
@@ -2713,16 +2659,16 @@
           transform 0.5s var(--ease),
           translate 0.7s var(--ease);
       }
-      /* While it works, the orb, bar and line sit a little lower, centred
+      /* While it works, the mark, bar and line sit a little lower, centred
          in the window; ready lifts them back for its title and button. */
       body[data-scene="installing"]:not([data-failed])
-        :is(.sc-orb, #sc-install, .floaters) {
+        :is(.sc-mark, #sc-install, .floaters) {
         translate: 0 24px;
       }
-      .sc-orb > .orb {
+      .sc-mark > .mark {
         --s: 120px;
       }
-      body[data-expanded] .sc-orb,
+      body[data-expanded] .sc-mark,
       body[data-expanded] .sc-ready {
         transform: translateY(-104px);
       }
@@ -2756,7 +2702,7 @@
           0 18px 40px -20px rgba(26, 26, 22, 0.2);
         text-align: center;
       }
-      .agent .orb {
+      .agent .mark {
         --s: 44px;
         display: block;
         margin: 2px auto 14px;
@@ -3013,42 +2959,44 @@
       <img class="brand" src="logo.png" alt="Linger" />
       <span id="step-label"></span>
     </header>
-    <!-- The install scene: one orb between two cards, one saying Linger
+    <!-- Linger's mark: the wedge and the dot from apps/web/public/favicon.svg,
+         verbatim. Every mark on the page draws from these two paths. -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <path
+          id="logo-wedge"
+          d="M316.285,237.609c1.68,.008,3.359,.014,5.039,.018c4.358,.015,8.716,.054,13.074,.098c4.472,.042,8.944,.06,13.416,.08c8.729,.042,17.458,.11,26.186,.195c.07,1.151,.14,2.301,.212,3.487C376.837,284.102,381.843,325.167,395,366c.285,.889,.569,1.779,.862,2.695C407.665,405.134,425,440.623,447,472c.731,1.054,1.462,2.109,2.215,3.195c9.28,13.27,19.042,26.268,30.187,38.032c1.994,2.128,3.906,4.279,5.805,6.488c4.308,4.946,8.904,9.588,13.543,14.223c.889,.888,1.778,1.776,2.694,2.691c5.141,5.093,10.285,9.944,16.005,14.383c2.455,1.913,4.814,3.915,7.166,5.952c67.32,58.119,158.419,91.487,246.906,94.641c.964,.038,1.928,.075,2.92,.114c.853,.03,1.706,.06,2.585,.092c4.008,.255,7.986,.719,11.974,1.189c.047,8.477,.082,16.953,.104,25.43c.01,3.938,.024,7.875,.047,11.813c.022,3.813,.034,7.625,.039,11.438c.003,1.441,.011,2.883,.021,4.325c.172,23.575-3.796,43.893-20.617,61.525c-17.034,16.213-37.218,18.935-59.656,18.85c-2.009,.003-4.018,.008-6.028,.014c-5.488,.013-10.976,.006-16.465-.003c-5.931-.007-11.862,.004-17.793,.012c-10.934,.013-21.868,.012-32.802,.003c-10.098-.007-20.195-.009-30.292-.006c-.335,.001-.335,.001-2.032,.001c-2.723,.001-5.446,.002-8.168,.003c-25.513,.009-51.025,.001-76.537-.015c-22.666-.015-45.332-.013-67.998,.001c-25.481,.016-50.961,.023-76.441,.013c-2.715-.001-5.43-.002-8.144-.003c-.669,0-1.337,0-2.026,0c-10.097-.004-20.194,0-30.291,.008c-11.473,.008-22.946,.006-34.419-.01c-5.856-.008-11.712-.011-17.567-.001c-5.356,.009-10.711,.004-16.067-.012c-1.941-.003-3.883-.002-5.825,.006c-2.631,.009-5.261,0-7.892-.014c-.761,.007-1.522,.014-2.306,.021c-4.466-.048-7.275-.683-10.845-3.399c-4.324-4.787-4.146-9.57-4.129-15.775c-.001-.396-.001-.396-.005-2.4c-.005-2.67-.002-5.34,0-8.01c-.002-1.927-.004-3.855-.007-5.782c-.006-5.309-.006-10.619-.004-15.928c0-5.722-.006-11.443-.01-17.164c-.009-11.217-.011-22.434-.012-33.651c-.001-9.119-.003-18.239-.006-27.359c-.007-21.644-.013-43.288-.013-64.932c0-.693,0-1.385,0-2.099c0-3.51,0-7.02,.001-10.53c0-.697,0-1.394,0-2.112c0-1.41,0-2.82,0-4.229c0-21.913-.007-43.826-.021-65.739c-.015-24.621-.024-49.243-.023-73.865c0-13.035-.002-26.07-.013-39.104c-.009-11.104-.011-22.207-.005-33.31c.004-5.663,.004-11.325-.005-16.988c-.008-5.191-.006-10.382,.002-15.573c.002-1.871,0-3.742-.005-5.613c-.072-25.655,3.6-46.796,22.255-65.837c.592-.628,1.183-1.256,1.793-1.902c4.064-3.956,8.658-6.667,13.645-9.285c.589-.322,1.178-.643,1.785-.974c13.198-6.569,27.623-7.423,42.062-7.23Z"
+        />
+        <path
+          id="logo-dot"
+          d="M642,366c.986,.722,1.972,1.444,2.988,2.188C663.946,382.871,675.904,405.358,679,429c2.045,27.438-4.01,52.149-21.906,73.625C641.462,520.356,619.927,533.137,596,535c-29.582,1.483-54.081-6.249-76.297-26.047c-18.487-17.467-27.594-41.32-28.66-66.372C490.655,419.286,498.737,397.508,514,380c.49-.621,.98-1.243,1.484-1.883C524.787,366.463,538.987,357.721,553,353c.984-.348,1.967-.696,2.98-1.055c29.507-9.847,61.107-4.266,86.02,14.055Z"
+        />
+      </defs>
+    </svg>
+    <!-- The install scene: one mark between two cards, one saying Linger
          runs locally and one that it is your personal agent; shared by
          installing, its failure and ready. -->
     <div class="sc" id="sc" aria-hidden="true">
       <div class="floaters" id="floaters">
         <div class="agent a1">
-          <span class="orb k-byok"></span><b data-t="agentLocal"></b
+          <span class="mark"></span><b data-t="agentLocal"></b
           ><small data-t="agentLocalAbout"></small>
         </div>
         <div class="agent a2">
-          <span class="orb"></span><b data-t="agentPersonal"></b
+          <span class="mark" data-role="agent"></span
+          ><b data-t="agentPersonal"></b
           ><small data-t="agentPersonalAbout"></small>
         </div>
       </div>
-      <div class="sc-orb" id="sc-orb">
-        <span class="orb big" id="sc-ball"
-          ><span class="o-check"
-            ><svg viewBox="0 0 24 24">
-              <path
-                id="sc-check"
-                d="M5 12.5 10 17 19 7.5"
-                fill="none"
-                stroke="#fff"
-                stroke-width="2.6"
-                stroke-dasharray="24"
-                stroke-dashoffset="24"
-              /></svg></span
-          ><span class="o-ripple" id="sc-ripple"></span
-        ></span>
+      <div class="sc-mark">
+        <span class="mark scene" id="sc-mark" data-role="scene"></span>
       </div>
     </div>
     <div id="flyer" aria-hidden="true"></div>
 
     <main>
       <section data-step="welcome" aria-labelledby="welcome-title">
-        <!-- The welcome: the orb forms and the title rises, then it hands
+        <!-- The welcome: the mark draws and the title rises, then it hands
              off to step 1 while this computer may still be checked. -->
         <div
           class="intro"
@@ -3057,15 +3005,15 @@
           data-t-aria-label="gettingReady"
           hidden
         >
-          <div class="intro-orb" id="intro-orb" aria-hidden="true">
-            <span class="orb big" id="intro-ball" style="--s: 112px"></span>
+          <div class="intro-mark" id="intro-mark" aria-hidden="true">
+            <span class="mark" id="intro-logo" style="--s: 112px"></span>
           </div>
           <p class="intro-title" id="intro-title" aria-hidden="true"></p>
         </div>
         <div class="wz-stage" id="wz-stage">
           <div class="wz-hd" data-in>
             <div class="slot" aria-hidden="true">
-              <span class="orb" id="hd-orb"></span>
+              <span class="mark" id="hd-mark"></span>
             </div>
             <h1 id="welcome-title" tabindex="-1" data-t="welcomeTitle"></h1>
           </div>
@@ -3084,7 +3032,7 @@
                 data-value="local"
                 data-in
               >
-                <span class="orb" aria-hidden="true"></span
+                <span class="mark" aria-hidden="true"></span
                 ><span class="tx"
                   ><b data-t="localModel"></b
                   ><small
@@ -3100,7 +3048,7 @@
                 data-value="byok"
                 data-in
               >
-                <span class="orb k-byok" aria-hidden="true"></span
+                <span class="mark" aria-hidden="true"></span
                 ><span class="tx"
                   ><b>BYOK</b
                   ><small
@@ -3117,7 +3065,7 @@
                 data-value="subscription"
                 data-in
               >
-                <span class="orb k-sub" aria-hidden="true"></span
+                <span class="mark" aria-hidden="true"></span
                 ><span class="tx"
                   ><b data-t="subscription"></b
                   ><small
@@ -4148,10 +4096,33 @@
           svg: `<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>`,
         };
       };
-      const ORB_LAYERS =
-        '<i class="o-base"></i><i class="o-fill"></i><i class="o-solid"></i><i class="o-shade"></i><i class="o-ring"></i><i class="o-arc"></i>';
-      for (const orb of document.querySelectorAll(".orb"))
-        orb.insertAdjacentHTML("afterbegin", ORB_LAYERS);
+      // Linger's mark, from the favicon's two paths: an outline under the
+      // ink fill, a trace that can draw the outline, and the dot in its
+      // ring. The outline keeps about 1.5px (2px when large) at any size.
+      // The install's mark also carries the ready check and ripple; the
+      // personal agent's card shows the dot inside its ring.
+      const WEDGE = $("logo-wedge").getAttribute("d");
+      const markHTML = (role, size) => {
+        if (role === "agent") {
+          const w = +((1.5 * 252) / size).toFixed(2);
+          return `<svg class="mk-svg" viewBox="459 315 252 252"><circle class="mk-ring" cx="585.2" cy="441.2" r="${124 - w / 2}" stroke-width="${w}"/><use class="mk-d" href="#logo-dot"/></svg>`;
+        }
+        const w = +(((size >= 100 ? 2 : 1.5) * 556) / size).toFixed(2);
+        const scene = role === "scene";
+        const check = scene
+          ? '<path class="mk-ck" id="sc-check" pathLength="24" d="M546 444 L574 471 L625 414" stroke-width="17"/>'
+          : "";
+        return (
+          `<svg class="mk-svg" viewBox="234 235 556 556"><path class="mk-track" d="${WEDGE}" stroke-width="${w}"/><use class="mk-fill" href="#logo-wedge"/><path class="mk-trace" pathLength="100" d="${WEDGE}" stroke-width="${w}"${scene ? ' style="stroke-dashoffset: 100"' : ""}/><g class="mk-dot"><circle class="mk-ring" cx="585.2" cy="441.2" r="${(94.1 - w / 2).toFixed(2)}" stroke-width="${w}"/><use class="mk-d" href="#logo-dot"/>${check}</g></svg>` +
+          (scene ? '<span class="mk-ripple" id="sc-ripple"></span>' : "")
+        );
+      };
+      for (const mark of document.querySelectorAll(".mark"))
+        mark.innerHTML = markHTML(
+          mark.dataset.role,
+          parseFloat(mark.style.getPropertyValue("--s")) ||
+            (mark.dataset.role === "scene" ? 120 : 44),
+        );
       for (const radio of document.querySelectorAll(".radio"))
         radio.innerHTML = RADIO;
 
@@ -4189,27 +4160,54 @@
                 { duration: 520, delay: base + i * gap, easing: EASE },
               ),
         );
-      // The orb's colour for each source.
-      const KIND = { local: "", byok: " k-byok", subscription: " k-sub" };
-      const kindOf = (el) =>
-        [...el.classList]
-          .filter((name) => name.startsWith("k-"))
-          .map((name) => " " + name)
-          .join("");
-      // Flies a copy of an orb from one place to another along a gentle
+      // A picked card's outline fills with ink and its dot pops in.
+      const fillPop = (card) => {
+        if (REDUCE || !card) return;
+        anim(
+          card.querySelector(".mk-fill"),
+          [
+            { opacity: 0, transform: "scale(0.94)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: 420, easing: EASE },
+        );
+        anim(
+          card.querySelector(".mk-d"),
+          [
+            { opacity: 0, transform: "scale(0.4)" },
+            { opacity: 1, transform: "scale(1.12)", offset: 0.7 },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: 520, delay: 160, easing: EASE },
+        );
+      };
+      // Flies a copy of a mark from one place to another along a gentle
       // arc, scaling as it goes; the destination shows once it lands. The
       // copy is drawn at the larger size, so it never scales up blurred.
-      const flyOrb = (from, kind, toEl, duration, big = false) => {
+      // Into the install scene it empties to the scene's pale outline.
+      const flyMark = (from, toEl, duration) => {
         if (REDUCE || !from?.width || typeof toEl?.animate !== "function")
           return;
         const to = toEl.getBoundingClientRect();
         if (!to.width) return;
         const base = Math.max(from.width, to.width);
-        const orb = document.createElement("span");
-        orb.className = "orb" + kind + (big ? " big" : "");
-        orb.style.setProperty("--s", base + "px");
-        orb.innerHTML = ORB_LAYERS;
-        $("flyer").append(orb);
+        const mark = document.createElement("span");
+        mark.className = "mark";
+        mark.style.setProperty("--s", base + "px");
+        mark.innerHTML = markHTML("mark", base);
+        $("flyer").append(mark);
+        if (toEl.classList.contains("scene")) {
+          mark.querySelector(".mk-track").style.stroke = "#e2e1da";
+          for (const part of mark.querySelectorAll(
+            ".mk-fill, .mk-d, .mk-trace",
+          ))
+            anim(part, [{ opacity: 1 }, { opacity: 0 }], {
+              duration: duration * 0.7,
+              delay: duration * 0.25,
+              easing: EASE,
+              fill: "both",
+            });
+        }
         toEl.style.opacity = "0";
         const k0 = from.width / base;
         const k1 = to.width / base;
@@ -4226,14 +4224,14 @@
           const s = k0 + (k1 - k0) * p;
           frames.push({ transform: `translate(${x}px, ${y}px) scale(${s})` });
         }
-        const flight = orb.animate(frames, {
+        const flight = mark.animate(frames, {
           duration,
           easing: SPRING,
           fill: "forwards",
         });
         const land = () => {
           toEl.style.opacity = "";
-          orb.remove();
+          mark.remove();
           anim(toEl, [{ transform: "scale(1.08)" }, { transform: "none" }], {
             duration: 420,
             easing: EASE,
@@ -4246,8 +4244,8 @@
         [...document.querySelectorAll("#wz-stage [data-in]")].filter(
           (el) => !el.closest("[hidden]"),
         );
-      const selectedOrb = () =>
-        document.querySelector('.source-card[aria-checked="true"] .orb');
+      const selectedMark = () =>
+        document.querySelector('.source-card[aria-checked="true"] .mark');
 
       // The local models the picker offers, in the page's words. The
       // quality peers are the ones docs/local-inference.md names.
@@ -4402,37 +4400,36 @@
       // then the kit's recommendation.
       let pickedModel;
       let sheetOpen = false;
-      // The welcome: the orb forms and the title rises for this long, then
+      // The welcome: the mark draws and the title rises for this long, then
       // it hands off to step 1, whether or not the check has finished.
       const INTRO_MS = setup.introMs ?? (REDUCE ? 1200 : 2600);
       let introDone = INTRO_MS <= 0;
       let introStarted = false;
-      // The welcome's orb is flying into step 1.
+      // The welcome's mark is flying into step 1.
       let handing = false;
-      // The install has finished and the bar is folding into the orb.
+      // The install has finished and the bar is folding into the mark.
       let finishing = false;
       const enterStage = (next) => {
         const section = document.querySelector('[data-step="welcome"]');
         stage = next;
         section.dataset.stage = next;
       };
-      // The orb where the welcome is now: the picked card's on step 1, the
+      // The mark where the welcome is now: the picked card's on step 1, the
       // title's on step 2.
-      const stageOrb = () => (stage === "choose" ? selectedOrb() : $("hd-orb"));
-      // Moves between the welcome's stages and says where it went: the orb
+      const stageMark = () =>
+        stage === "choose" ? selectedMark() : $("hd-mark");
+      // Moves between the welcome's stages and says where it went: the mark
       // flies from the card to the title or back, and the new stage's parts
       // rise in from the side they come from.
       const setStage = (next, motion) => {
         // Going on with a source is picking it: the advice no longer moves.
         if (next === "settings") picked = true;
-        const fromOrb = stageOrb();
-        const from = fromOrb?.getBoundingClientRect();
-        const kind = fromOrb ? kindOf(fromOrb) : "";
+        const from = stageMark()?.getBoundingClientRect();
         enterStage(next);
         render();
         $("welcome-title").focus({ preventScroll: true });
         $("welcome-live").textContent = $("welcome-title").textContent;
-        flyOrb(from, kind, stageOrb(), 640);
+        flyMark(from, stageMark(), 640);
         enter(stageParts(), 40, 75, motion === "back" ? -14 : 14);
       };
 
@@ -4450,26 +4447,66 @@
         );
         return [...title.children];
       };
-      // The orb forms, the words rise one after another, then the orb gives
-      // one soft bounce before it hands off.
+      // The dot's drop: it falls in, lands with a squash, hops once and
+      // settles.
+      const DROP = [
+        {
+          transform: "translate(0px, -560px)",
+          opacity: 0,
+          easing: "cubic-bezier(0.5, 0, 0.9, 0.5)",
+        },
+        {
+          transform: "translate(0px, -200px)",
+          opacity: 1,
+          offset: 0.32,
+          easing: "cubic-bezier(0.5, 0, 0.9, 0.5)",
+        },
+        {
+          transform: "translate(0px, 0px) scale(1.1, 0.88)",
+          offset: 0.56,
+          easing: "cubic-bezier(0.2, 0.6, 0.4, 1)",
+        },
+        {
+          transform: "translate(0px, -64px) scale(0.97, 1.04)",
+          offset: 0.76,
+          easing: "cubic-bezier(0.6, 0, 0.8, 0.4)",
+        },
+        { transform: "translate(0px, 0px) scale(1.04, 0.96)", offset: 0.9 },
+        { transform: "none" },
+      ];
+      // The mark draws its outline and fills with ink, the dot drops in
+      // with one soft bounce, and the words rise one after another.
       const startIntro = () => {
         if (introStarted) return;
         introStarted = true;
         const words = introWords();
-        const ball = $("intro-ball");
-        if (!REDUCE) ball.classList.add("breathe", "turn");
+        const logo = $("intro-logo");
         if (REDUCE) {
-          fadeIn(ball);
+          fadeIn(logo);
           words.forEach((word) => fadeIn(word, 200));
         } else {
+          const part = (selector) => logo.querySelector(selector);
           anim(
-            ball,
+            part(".mk-trace"),
+            [{ strokeDashoffset: 100 }, { strokeDashoffset: 0 }],
+            { duration: 1050, easing: "cubic-bezier(0.45, 0, 0.2, 1)" },
+          );
+          // The pale outline and the ring wait while the ink draws.
+          anim(part(".mk-track"), [{ opacity: 0 }, { opacity: 0 }], {
+            duration: 1050,
+          });
+          anim(part(".mk-ring"), [{ opacity: 0 }, { opacity: 0 }], {
+            duration: 1080,
+          });
+          anim(
+            part(".mk-fill"),
             [
-              { opacity: 0, transform: "scale(0.55)" },
+              { opacity: 0, transform: "scale(0.97)" },
               { opacity: 1, transform: "none" },
             ],
-            { duration: 1100, easing: EASE },
+            { duration: 520, delay: 900, easing: EASE },
           );
+          anim(part(".mk-dot"), DROP, { duration: 1250, delay: 860 });
           words.forEach((word, i) =>
             anim(
               word,
@@ -4480,27 +4517,6 @@
               { duration: 800, delay: 520 + i * 110, easing: EASE },
             ),
           );
-          // One bounce, once the words are up: a squash, a soft hop that
-          // overshoots a little, then settled.
-          const bounceAt = Math.max(1100, Math.min(1700, INTRO_MS - 900));
-          anim(
-            ball,
-            [
-              { transform: "none" },
-              { transform: "scale(1.04, 0.95)", offset: 0.14 },
-              { transform: "translateY(-12px) scale(1.08)", offset: 0.42 },
-              { transform: "scale(1.05, 0.93)", offset: 0.68 },
-              { transform: "scale(0.97)", offset: 0.84 },
-              { transform: "none" },
-            ],
-            {
-              duration: 720,
-              delay: bounceAt,
-              easing: "ease-in-out",
-              fill: "none",
-              composite: "add",
-            },
-          );
         }
         if (!introDone)
           setTimeout(() => {
@@ -4508,12 +4524,13 @@
             render();
           }, INTRO_MS);
       };
-      // The hand-off to step 1: the welcome's orb flies along a gentle curve
-      // into the picked card's orb, the title fades, and the cards rise in.
+      // The hand-off to step 1: the welcome's mark flies along a gentle
+      // curve into the picked card's mark, the title fades, and the cards
+      // rise in.
       const handOff = () => {
-        const from = $("intro-orb").getBoundingClientRect();
+        const from = $("intro-mark").getBoundingClientRect();
         introDone = true;
-        handing = !REDUCE && typeof $("intro-orb").animate === "function";
+        handing = !REDUCE && typeof $("intro-mark").animate === "function";
         enterStage("choose");
         if (!handing) {
           setTimeout(() => enter(stageParts(), 0, 60));
@@ -4522,8 +4539,8 @@
         requestAnimationFrame(() => flyIntro(from));
       };
       const flyIntro = (from) => {
-        const orb = $("intro-orb");
-        const target = selectedOrb();
+        const mark = $("intro-mark");
+        const target = selectedMark();
         const glider = $("glider");
         const to = target?.getBoundingClientRect();
         if (!to?.width || !from.width) {
@@ -4548,7 +4565,7 @@
             transform: `translate(${x}px, ${y}px) scale(${1 + (k - 1) * p})`,
           });
         }
-        const flight = orb.animate(frames, {
+        const flight = mark.animate(frames, {
           duration: 780,
           easing: SPRING,
           fill: "forwards",
@@ -5423,13 +5440,20 @@
         );
       };
 
-      // The install's end: the bar fills, folds into the orb, the orb
-      // blooms with a ripple, the check draws, and the ready words rise.
+      // The install's trace around the mark follows the bar.
+      const traceTo = (percent) => {
+        const trace = $("sc-mark").querySelector(".mk-trace");
+        if (trace) trace.style.strokeDashoffset = String(100 - percent);
+      };
+      // The install's end: the bar and the trace complete, fold into the
+      // mark, the mark fills, its dot pops with a ripple, the check draws,
+      // and the ready words rise.
       const completeInstall = () => {
-        if (REDUCE || finishing || typeof $("sc-ball").animate !== "function")
+        if (REDUCE || finishing || typeof $("sc-mark").animate !== "function")
           return show("ready");
         finishing = true;
         $("installing-fill").style.transform = "scaleX(1)";
+        traceTo(100);
         $("installing-bar").setAttribute("aria-valuenow", "100");
         setLine(t("lineAlmost"));
         setTimeout(() => {
@@ -5457,42 +5481,50 @@
         }, 520);
       };
       const readyMoment = () => {
-        const ball = $("sc-ball");
+        const part = (selector) => $("sc-mark").querySelector(selector);
         anim(
-          ball.querySelector(".o-solid"),
-          [{ opacity: 0 }, { opacity: 0.92 }],
-          {
-            duration: 700,
-            easing: EASE,
-          },
+          part(".mk-fill"),
+          [
+            { opacity: 0, transform: "scale(0.97)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: 640, easing: EASE },
         );
         anim(
-          ball,
+          part(".mk-d"),
+          [
+            { opacity: 0, transform: "scale(0.5)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: 520, delay: 160, easing: EASE },
+        );
+        anim(
+          part(".mk-dot"),
           [
             { transform: "none" },
-            { transform: "scale(1.1)", offset: 0.4 },
+            { transform: "scale(1.16)", offset: 0.4 },
             { transform: "scale(0.98)", offset: 0.75 },
             { transform: "none" },
           ],
-          { duration: 900, easing: "ease-in-out", composite: "add" },
+          { duration: 900, delay: 200, easing: "ease-in-out" },
         );
         anim(
           $("sc-ripple"),
           [
-            { opacity: 0.7, transform: "scale(1)" },
-            { opacity: 0, transform: "scale(1.7)" },
+            { opacity: 0.8, transform: "scale(1)" },
+            { opacity: 0, transform: "scale(2.6)" },
           ],
           { duration: 1100, delay: 140, easing: EASE, fill: "none" },
         );
-        anim(ball.querySelector(".o-check"), [{ opacity: 0 }, { opacity: 1 }], {
+        anim(part(".mk-ck"), [{ opacity: 0 }, { opacity: 1 }], {
           duration: 300,
-          delay: 340,
+          delay: 460,
           easing: "linear",
         });
         anim(
           $("sc-check"),
           [{ strokeDashoffset: 24 }, { strokeDashoffset: 0 }],
-          { duration: 520, delay: 380, easing: EASE },
+          { duration: 520, delay: 480, easing: EASE },
         );
         enter(
           [...document.querySelectorAll("#sc-ready [data-r]")].filter(
@@ -6170,11 +6202,7 @@
               ? t("chooseTitle")
               : t("welcomeTitle"),
         );
-        // Step 2's title carries the chosen source's orb.
-        const hdOrb = "orb" + KIND[source];
-        if ($("hd-orb").className !== hdOrb) $("hd-orb").className = hdOrb;
-
-        // The welcome: the orb and the title.
+        // The welcome: the mark and the title.
         $("welcome-checking").hidden = !checkingStage && !handing;
         if (!introStarted) introWords();
 
@@ -6577,13 +6605,13 @@
         const section = document.querySelector('[data-step="installing"]');
         const steps = ALL_STEPS.filter(([id]) => local.steps.includes(id));
         section.dataset.failed = String(failed);
-        // The scene's orb is Linger's own, grey once it failed, and
-        // breathes while it works.
-        const ball =
-          "orb big" +
-          (failed ? " k-off" : "") +
-          (REDUCE || failed ? "" : " breathe turn");
-        if ($("sc-ball").className !== ball) $("sc-ball").className = ball;
+        // The scene's mark is grey once it failed, its trace stopped where
+        // it was, and breathes while it works.
+        const mark =
+          "mark scene" +
+          (failed ? " off" : "") +
+          (REDUCE || failed ? "" : " breathe");
+        if ($("sc-mark").className !== mark) $("sc-mark").className = mark;
         if (finishing) {
           renderSignIn(local, busy);
           return;
@@ -6596,6 +6624,7 @@
         const percent = Math.round(shownProgress(local, at) * 100);
         $("installing-fill").style.transform =
           `scaleX(${Math.max(2, percent) / 100})`;
+        traceTo(Math.max(2, percent));
         $("installing-bar").setAttribute("aria-valuenow", String(percent));
         // One bar and one line under it: what is happening now, a download
         // folded in with how far it is.
@@ -6980,10 +7009,11 @@
         // Saved or not, the keys leave the page once sent.
         if (ok) clearKeys();
         if (ok && state.localServer.phase !== "idle") {
-          // The title's orb flies on into the install scene.
-          const from = $("hd-orb").getBoundingClientRect();
+          // The title's mark flies on into the install scene and empties
+          // to the outline the install then traces.
+          const from = $("hd-mark").getBoundingClientRect();
           show("installing");
-          flyOrb(from, "", $("sc-ball"), 820, true);
+          flyMark(from, $("sc-mark"), 820);
           enter([$("installing-bar"), $("installing-line")], 260, 90);
           anim($("floaters"), [{ opacity: 0 }, { opacity: 1 }], {
             duration: 900,
@@ -7127,8 +7157,11 @@
       const cards = [...document.querySelectorAll(".source-card")];
       const pick = (value) => {
         picked = true;
+        const changed = source !== value;
         source = value;
         render();
+        if (changed)
+          fillPop(cards.find((card) => card.dataset.value === value));
       };
       for (const card of cards) {
         card.addEventListener("click", () => {
