@@ -74,6 +74,9 @@ localmodels kit opens a lock update merge request for each new stable Codex
 or Claude Code at least seven days old; it should merge only after that
 Runtime's canary passes on that version.
 It performs bounded protocol and authentication probes.
+A Pi Run that names a non-default model also asks Pi to check that model's
+credentials before the process starts; an answer that is not a definitive
+missing-credential result never blocks the Run.
 A protocol probe passes once the Runtime answers the handshake, however the
 process exits after its input closes. When the handshake fails, the daemon log
 records `runner.runtime_probe.handshake_failed` with the exit status and the

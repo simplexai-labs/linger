@@ -634,12 +634,20 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 			execution.mu.Unlock()
 			close(execution.ready)
 			failureCode := ""
+			publicDetail := ""
 			if errors.Is(err, native.ErrSessionNotFound) {
 				failureCode = "session_not_found"
 			} else if errors.Is(err, native.ErrProviderPrepareNotEligible) {
 				failureCode = "not_eligible"
+			} else if errors.Is(err, native.ErrPiModelAuthenticationRequired) {
+				// The pre-flight has no provider response to diagnose, so the
+				// code comes from the sentinel and not from the HTTP status.
+				// Its message is the recovery hint the user must see, and it
+				// is authored here so it is safe to publish.
+				failureCode = "authentication_required"
+				publicDetail = err.Error()
 			}
-			finish(Result{Status: "failed", FailureCode: failureCode, Error: err.Error()})
+			finish(Result{Status: "failed", FailureCode: failureCode, Error: err.Error(), PublicDetail: publicDetail})
 			return
 		}
 		execution.mu.Lock()

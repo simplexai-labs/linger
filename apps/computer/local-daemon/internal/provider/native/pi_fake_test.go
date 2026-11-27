@@ -19,6 +19,8 @@ const (
 	piFakeEnv       = "NATIVE_PI_FAKE"
 	piFakeRecordEnv = "PI_FAKE_RECORD"
 	piFakeArgvEnv   = "PI_FAKE_ARGV"
+	piFakeAuthEnv   = "PI_FAKE_AUTH_COMMANDS"
+	piFakeStatusEnv = "PI_FAKE_AUTH_STATUS"
 	piFakeChildEnv  = "PI_FAKE_CHILD_PID"
 	piFakeLogEnv    = "PI_FAKE_COMMANDS"
 	// piFakeDialogEnv names the file the review mode appends each
@@ -88,6 +90,9 @@ func (f *piFakeProcess) tool(id, name string, isError bool) {
 }
 
 func piFake(mode string, args []string) int {
+	if len(args) == 5 && args[0] == "auth" && args[1] == "check" && args[2] == "--model" && args[4] == "--json" {
+		return piAuthCheckFake(args)
+	}
 	f := &piFakeProcess{mode: mode, thinking: "medium"}
 	for i := 0; i+1 < len(args); i++ {
 		switch args[i] {
@@ -145,6 +150,37 @@ func piFake(mode string, args []string) int {
 			return code
 		}
 	}
+}
+
+func piAuthCheckFake(args []string) int {
+	if os.Getenv("PI_FAKE_AUTH_HANG") != "" {
+		time.Sleep(time.Minute)
+	}
+	if path := os.Getenv(piFakeAuthEnv); path != "" {
+		_ = os.WriteFile(path, []byte(strings.Join(args, "\n")), 0o600)
+		_ = os.WriteFile(path+".child_env", []byte(os.Getenv("PI_AUTH_PREFLIGHT_MARKER")), 0o600)
+	}
+	switch status := os.Getenv(piFakeStatusEnv); status {
+	case "", "ready":
+		fmt.Println(`{"status":"ready"}`)
+	case "not_ready":
+		fmt.Println(`{"status":"not_ready"}`)
+		return 1
+	case "provider_not_found":
+		fmt.Println(`{"status":"not_ready","reason":"provider_not_found"}`)
+		return 1
+	case "invalid":
+		// Pi exits 2 for invalid, its own bad-state verdict.
+		fmt.Println(`{"status":"invalid"}`)
+		return 2
+	case "not-json":
+		fmt.Println("not json")
+		return 7
+	default:
+		fmt.Fprintf(os.Stderr, "unexpected auth status %q\n", status)
+		return 2
+	}
+	return 0
 }
 
 // handle returns an exit code, or -1 to keep reading.
