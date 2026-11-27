@@ -203,6 +203,11 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   input for compatibility with older CLI/Desktop builds); Web API keeps
   `every_n_hours` + `interval_hours` for whole-hour intervals and uses
   `every_n_minutes` + `interval_minutes` for non-whole-hour intervals.
+  Daily and weekly Routines retain their configured local clock when advancing
+  to another date; normalization of a nonexistent clock on a daylight-saving
+  transition day must not shift the scheduled hour or weekday on later dates.
+  Daily Routines advance to a later occurrence even when a midnight gap
+  normalizes the scheduled slot onto the preceding local date.
 
 - Room input acceptance: Runtime State validates canonical
   conversation/targeted agent_runtime inputs atomically with Local Run and cursor.

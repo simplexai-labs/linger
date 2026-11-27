@@ -266,14 +266,18 @@ func nextDaily(hour, minute int, timezone string, after time.Time) (time.Time, e
 		return time.Time{}, err
 	}
 	local := after.In(location)
-	candidate := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, location)
-	if !candidate.After(after) {
-		candidate = candidate.AddDate(0, 0, 1)
+	// Each candidate is built from its own calendar day: time.Date moves a
+	// clock time that a DST change skips, and shifting that result would
+	// carry the moved clock to the next days. Two days ahead covers a gap
+	// at midnight, which can move the next day's slot back to after or
+	// earlier.
+	for day := 0; day <= 2; day++ {
+		candidate := time.Date(local.Year(), local.Month(), local.Day()+day, hour, minute, 0, 0, location)
+		if candidate.After(after) {
+			return candidate.UTC(), nil
+		}
 	}
-	if !candidate.After(after) {
-		return time.Time{}, ErrInvalid
-	}
-	return candidate.UTC(), nil
+	return time.Time{}, ErrInvalid
 }
 
 func nextWeekly(hour, minute int, weekdayName, timezone string, after time.Time) (time.Time, error) {
@@ -286,14 +290,14 @@ func nextWeekly(hour, minute int, weekdayName, timezone string, after time.Time)
 		return time.Time{}, ErrInvalid
 	}
 	local := after.In(location)
-	candidate := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, location)
-	days := int(wanted - candidate.Weekday())
+	days := int(wanted - local.Weekday())
 	if days < 0 {
 		days += 7
 	}
-	candidate = candidate.AddDate(0, 0, days)
+	// Pick the calendar date before resolving its clock across an offset change.
+	candidate := time.Date(local.Year(), local.Month(), local.Day()+days, hour, minute, 0, 0, location)
 	if !candidate.After(after) {
-		candidate = candidate.AddDate(0, 0, 7)
+		candidate = time.Date(local.Year(), local.Month(), local.Day()+days+7, hour, minute, 0, 0, location)
 	}
 	if !candidate.After(after) {
 		return time.Time{}, ErrInvalid
