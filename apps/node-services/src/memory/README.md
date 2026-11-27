@@ -27,6 +27,12 @@ tsvector plus CJK bigrams, ranked with `ts_rank_cd` and then lexically reranked)
 called and there is no vector column. Wiki related pages have no "similar" edges, and flashback matches only names
 and aliases.
 
+Wiki search removes evidence labels from ordinary prose, while code spans,
+code blocks, links and link definitions retain their literal contents. Both
+indexing and evidence reads use this same projection. Index profile `raw-md-v7`
+rebuilds older chunks on the next source sync so their offsets match the
+preserved text; the stored Wiki Markdown is unchanged.
+
 ## File layout
 
 ```text

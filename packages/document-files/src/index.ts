@@ -53,6 +53,40 @@ const invalid = () =>
   );
 
 type Tree = ReturnType<typeof processor.parse>;
+
+/** Rewrite prose without serializing or changing code, links and definitions. */
+export function mapMarkdownProse(
+  markdown: string,
+  transform: (text: string) => string,
+): string {
+  const parts: string[] = [];
+  let offset = 0;
+  const stack: unknown[] = [processor.parse(markdown)];
+  while (stack.length) {
+    const node = stack.pop() as {
+      type: string;
+      children?: unknown[];
+      position?: { start: { offset?: number }; end: { offset?: number } };
+    };
+    if (node.type === "link" || node.type === "linkReference") continue;
+    if (node.type === "text") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) {
+        parts.push(markdown.slice(offset, start));
+        parts.push(transform(markdown.slice(start, end)));
+        offset = end;
+      }
+    } else if (node.children) {
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        stack.push(node.children[i]);
+      }
+    }
+  }
+  parts.push(markdown.slice(offset));
+  return parts.join("");
+}
+
 interface ImageNode {
   type: string;
   url: string;

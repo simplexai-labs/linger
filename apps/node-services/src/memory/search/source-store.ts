@@ -10,6 +10,7 @@ import {
   sessionSourceUri,
 } from "../session-source.js";
 import type { PersonalKnowledgeQueryRequest } from "@linger/wire-contracts/node-services-internal/client";
+import { mapMarkdownProse } from "@linger/document-files";
 import { SESSION_ITEM_LABELS } from "@linger/knowledge-format/sections";
 import { localIsoString } from "../date.js";
 import { markMemoryChanged } from "../fs-utils.js";
@@ -280,9 +281,9 @@ const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)*/u;
  */
 export function wikiPageSearchText(markdown: string): string {
   const match = frontmatter.exec(markdown);
-  const body = (match ? markdown.slice(match[0].length) : markdown).replace(
-    citationLabels,
-    "",
+  const body = mapMarkdownProse(
+    match ? markdown.slice(match[0].length) : markdown,
+    (text) => text.replace(citationLabels, ""),
   );
   const lines = match ? describedBy(match[1]!) : [];
   if (!lines.length) return body;
