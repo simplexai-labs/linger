@@ -1214,10 +1214,10 @@ describe("knowledge output budget", () => {
   // Small enough that these fixtures always overflow it.
   const OUTPUT_BUDGET_CHARS = 4_000;
   const chars = (value: unknown) => JSON.stringify(value).length;
-  // Unspaced text of three UTF-8 bytes per character, as in CJK sources.
+  // Three-byte letters keep output budgets independent of the chunk token limit.
   const wide = (seed: number, length: number) =>
     Array.from({ length }, (_, index) =>
-      String.fromCodePoint(0x4e00 + ((seed * 131 + index * 7) % 2_000)),
+      String.fromCodePoint(0x1e00 + ((seed * 131 + index * 7) % 128)),
     ).join("");
   const document = (index: number, sections: string[]) => {
     const markdown = [

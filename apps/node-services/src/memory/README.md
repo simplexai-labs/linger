@@ -27,6 +27,14 @@ tsvector plus CJK bigrams, ranked with `ts_rank_cd` and then lexically reranked)
 called and there is no vector column. Wiki related pages have no "similar" edges, and flashback matches only names
 and aliases.
 
+Oversized source paragraphs split into chunks bounded by both 3,000 UTF-16
+characters and 500 search-analyzer tokens. Each chunk retains exact source
+offsets and whole Unicode characters, with overlap for continuity. Overlap is
+limited to 200 characters and half of the current chunk so normalization that
+expands the search tokens still makes proportional progress through the source.
+The previous chunk length seeds the next token-bound search, which expands or
+shrinks as token density changes while retaining the same analyzer and bounds.
+
 ## File layout
 
 ```text
