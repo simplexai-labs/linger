@@ -43,7 +43,7 @@ mkdir -p \
   "$TMP_ROOT/workspace-c"
 touch "$CALLBACK_LOG" "$PROXY_EVENTS"
 printf '[]\n' >"$INBOX_MESSAGES"
-mkdir -p "$TMP_ROOT/agent-codex-home"
+mkdir -p "$TMP_ROOT/agent-codex-home" "$TMP_ROOT/agent-claude-home"
 printf '{}\n' >"$TMP_ROOT/agent-codex-home/auth.json"
 
 cleanup() {
@@ -288,41 +288,14 @@ wait_for_two_running_runs() {
   done
   printf 'Two concurrent run.start operations were not observed\n' >&2
   computer daemon runners --json >&2 || true
-  node - "$TMP_ROOT/computer-state/operations.sqlite" <<'NODE' >&2 || true
-import { DatabaseSync } from "node:sqlite";
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-	console.error(JSON.stringify(database.prepare(`
-	  SELECT operation_id,status,last_acked_seq,last_emitted_seq
-	  FROM operations ORDER BY created_at,operation_id
-	`).all()));
-database.close();
-NODE
+  node "$ROOT/scripts/local-runner-proxy-ledger.mjs" dump "$PROXY_EVENTS" >&2 || true
   return 1
 }
 
 snapshot_active_run_owners() {
   local output_file=$1
-  node - "$TMP_ROOT/computer-state/operations.sqlite" "$output_file" <<'NODE'
-import { writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const rows = database.prepare(`
-	  SELECT operation_id,identity_json,operation_kind
-	  FROM operations
-	  WHERE status='running' ORDER BY operation_id
-	`).all().flatMap(({ operation_id, identity_json, operation_kind }) => {
-	  if (operation_kind !== "run.start") return [];
-  const encoded = typeof identity_json === "string"
-    ? identity_json
-    : Buffer.from(identity_json).toString("utf8");
-  const identity = JSON.parse(encoded);
-  return [{ agent_id: identity.agent_id, operation_id }];
-});
-database.close();
-if (rows.length !== 2) process.exit(1);
-writeFileSync(process.argv[3], JSON.stringify(rows));
-NODE
+  node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+    active-run-owners "$PROXY_EVENTS" 2 "$output_file"
 }
 
 wait_for_pid_exit() {
@@ -401,43 +374,13 @@ wait_for_run_receipt_terminal() {
       "http://127.0.0.1:$CALLBACK_PORT/__test__/runtime-state" \
       -H "Authorization: Bearer $SERVICE_TOKEN" \
       >"$TMP_ROOT/runtime-state-snapshot.json" 2>/dev/null &&
-      node - \
-      "$TMP_ROOT/runtime-state-snapshot.json" \
-      "$TMP_ROOT/computer-state/operations.sqlite" \
-      "$agent_id" \
-      "$expected_receipt_count" \
-      "$expected_connection_epoch" <<'NODE'
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const [snapshotPath, ledgerPath, agentId, expectedCountText, epochText] =
-  process.argv.slice(2);
-const starts = JSON.parse(readFileSync(snapshotPath, "utf8"))
-  .operation_receipts
-  .filter(
-    (receipt) =>
-      receipt.agent_id === agentId &&
-      (epochText === "" || receipt.connection_epoch === Number(epochText)),
-  );
-if (starts.length < Number(expectedCountText)) process.exit(1);
-const latest = starts.at(-1);
-
-const ledger = new DatabaseSync(ledgerPath, { readOnly: true });
-const operation = ledger
-  .prepare(`
-	    SELECT operation_id,status,last_acked_seq,last_emitted_seq,
-	           terminal_event_json
-    FROM operations WHERE operation_id = ?
-  `)
-  .get(latest.operation_id);
-ledger.close();
-if (
-  operation?.status !== "terminal" ||
-  !operation.terminal_event_json ||
-  operation.last_emitted_seq < 1 ||
-  operation.last_acked_seq !== operation.last_emitted_seq
-) process.exit(1);
-NODE
+      node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+        wait-receipt-terminal \
+        "$TMP_ROOT/runtime-state-snapshot.json" \
+        "$PROXY_EVENTS" \
+        "$agent_id" \
+        "$expected_receipt_count" \
+        "$expected_connection_epoch"
     then
       return 0
     fi
@@ -457,15 +400,13 @@ assert_run_receipt_count() {
     "http://127.0.0.1:$CALLBACK_PORT/__test__/runtime-state" \
     -H "Authorization: Bearer $SERVICE_TOKEN" \
     >"$TMP_ROOT/runtime-state-snapshot.json"
-  jq -e \
-    --arg agent "$agent_id" \
-    --argjson expected "$expected_receipt_count" \
-    --arg epoch "$expected_connection_epoch" \
-    '[.operation_receipts[] | select(
-      .agent_id == $agent
-      and ($epoch == "" or .connection_epoch == ($epoch | tonumber))
-    )] | length == $expected' \
-    "$TMP_ROOT/runtime-state-snapshot.json" >/dev/null
+  node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+    assert-receipt-count \
+    "$TMP_ROOT/runtime-state-snapshot.json" \
+    "$PROXY_EVENTS" \
+    "$agent_id" \
+    "$expected_receipt_count" \
+    "$expected_connection_epoch"
 }
 
 # The placement and Runtime status come from the rows TeamHub keeps: the
@@ -517,26 +458,8 @@ wait_for_agent_runtime_status() {
 wait_for_two_unacknowledged_run_events() {
   local output_file=$1
   for _ in {1..240}; do
-    if node - "$TMP_ROOT/computer-state/operations.sqlite" "$output_file" <<'NODE'
-import { writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const rows = database
-  .prepare(`
-	    SELECT operation_id,last_emitted_seq
-	    FROM operations
-	    WHERE last_emitted_seq > last_acked_seq
-    ORDER BY operation_id
-  `)
-  .all()
-  .map(({ operation_id, last_emitted_seq }) => ({ operation_id, last_emitted_seq }));
-database.close();
-if (rows.length !== 2) {
-  process.exit(1);
-}
-writeFileSync(process.argv[3], JSON.stringify(rows));
-NODE
+    if node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+      unacknowledged-runs "$PROXY_EVENTS" 2 "$output_file"
     then
       return 0
     fi
@@ -548,23 +471,10 @@ NODE
 
 wait_for_replayed_event_acknowledgements() {
   local expected_file=$1
+  local min_connection_id=$2
   for _ in {1..240}; do
-    if node - "$TMP_ROOT/computer-state/operations.sqlite" "$expected_file" <<'NODE'
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const expected = JSON.parse(readFileSync(process.argv[3], "utf8"));
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const statement = database.prepare(`
-  SELECT last_acked_seq FROM operations WHERE operation_id = ?
-`);
-const acknowledged = expected.every(({ operation_id, last_emitted_seq }) => {
-  const row = statement.get(operation_id);
-  return row && row.last_acked_seq >= last_emitted_seq;
-});
-database.close();
-process.exit(acknowledged ? 0 : 1);
-NODE
+    if node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+      verify-replayed-acks "$PROXY_EVENTS" "$expected_file" "$min_connection_id"
     then
       return 0
     fi
@@ -612,7 +522,19 @@ revoke_agent() {
 }
 
 computer() {
-  "$ROOT/apps/computer/dist/cli/linger-computer" "$@" --config "$CONFIG"
+  env \
+    -u ANTHROPIC_API_KEY \
+    -u ANTHROPIC_AUTH_TOKEN \
+    -u ANTHROPIC_BASE_URL \
+    -u ANTHROPIC_MODEL \
+    -u CLAUDE_CODE_OAUTH_TOKEN \
+    -u OPENAI_API_KEY \
+    -u OPENAI_BASE_URL \
+    -u OPENAI_ORGANIZATION \
+    -u OPENAI_PROJECT \
+    CODEX_HOME="$TMP_ROOT/agent-codex-home" \
+    CLAUDE_CONFIG_DIR="$TMP_ROOT/agent-claude-home" \
+    "$ROOT/apps/computer/dist/cli/linger-computer" "$@" --config "$CONFIG"
 }
 
 # Register the Computer as production does: TeamHub's enrollment exchange
@@ -646,18 +568,20 @@ enroll_computer() {
 
 verify_offline_agent_removal() {
   local agent_id=$1
-  # Product deletion succeeds while the old identity is offline. Its retained
-  # Runner tombstone must still clean up the real Daemon on the next connection.
+  local connections_before new_connection_id
+  connections_before="$(jq -s '[.[] | select(.type == "connection")] | length' "$PROXY_EVENTS")"
+  new_connection_id=$((connections_before + 1))
+  # Product deletion succeeds while the Computer is offline. Reconnecting must
+  # reconcile without re-ensuring a Runner for the revoked Agent.
   revoke_agent "$agent_id"
   SHELL="$LOGIN_SHELL_FIXTURE" \
   computer daemon start >"$TMP_ROOT/daemon-after-offline-delete.log" 2>&1
   DAEMON_PID="$(computer daemon status --json | jq -er '.daemon.pid')"
-  wait_for_gateway_ready
+  wait_for_gateway_connection_count "$new_connection_id"
   for attempt in {1..160}; do
-    computer daemon runners --json >"$TMP_ROOT/runners-after-offline-delete.json"
-    if jq -e --arg agent "$agent_id" \
-      'any(.runners[]; .agent_id == $agent and .state == "removed" and .pid == null)' \
-      "$TMP_ROOT/runners-after-offline-delete.json" >/dev/null; then
+    if computer daemon status --json 2>/dev/null | jq -e \
+      '.daemon.gateway_state == "connected" and .daemon.reconciled == true' \
+      >/dev/null; then
       break
     fi
     if [[ "$attempt" == 160 ]]; then
@@ -666,6 +590,15 @@ verify_offline_agent_removal() {
     fi
     sleep 0.05
   done
+  # Post-reconciliation sanity check: confirm the fresh in-memory Daemon holds
+  # no active Runner for the revoked Agent while assert-no-ensure-since proves
+  # the Gateway never re-ensured it on the new connection.
+  computer daemon runners --json >"$TMP_ROOT/runners-after-offline-delete.json"
+  jq -e --arg agent "$agent_id" \
+    'all(.runners[]; .agent_id != $agent or (.state == "removed" and .pid == null))' \
+    "$TMP_ROOT/runners-after-offline-delete.json" >/dev/null
+  node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+    assert-no-ensure-since "$PROXY_EVENTS" "$agent_id" "$new_connection_id"
   computer daemon stop >/dev/null
   wait_for_pid_exit "$DAEMON_PID"
   DAEMON_PID=""
@@ -857,6 +790,7 @@ jq -n \
     display_name: $display,
     gateway: {url: $gateway, token_file: $token},
     state_directory: $state,
+    enabled_runtimes: ["codex", "claude", "pi"],
     runtime_paths: {codex: $codex, claude: $claude, pi: $pi},
     workspace_grants: [
       {
@@ -921,39 +855,23 @@ append_context_message \
   "warm up the Claude Agent through a direct mention"
 publish_inbox_state 3 "actor-$AGENT_C"
 wait_for_agent_activation "$AGENT_C"
+wait_for_run_receipt_terminal \
+  "$AGENT_C" \
+  1 \
+  1
 if [[ "${LOCAL_RUNNER_SMOKE_SCENARIO:-full}" == "offline-agent-removal" ]]; then
   computer daemon stop >/dev/null
   wait_for_pid_exit "$DAEMON_PID"
   DAEMON_PID=""
   verify_offline_agent_removal "$AGENT_C"
-  printf 'Local Runner offline Agent removal smoke passed: TeamHub revocation, repeated registration-change notice, and Daemon reconnect cleanup.\n'
+  printf 'Local Runner offline Agent removal smoke passed: TeamHub revocation, repeated registration-change notice, and Daemon reconnect reconciliation without re-ensuring the revoked Agent.\n'
   exit 0
 fi
-wait_for_run_receipt_terminal \
-  "$AGENT_C" \
-  1 \
-  1
 
 DAEMON_PID_BEFORE_LOGIN="$(computer daemon status --json | jq -er '.daemon.pid')"
-node - "$TMP_ROOT/computer-state/operations.sqlite" "$TMP_ROOT/auth-operation-baseline.json" <<'NODE'
-import { writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const counts = Object.entries(
-  database.prepare("SELECT terminal_event_json FROM operations WHERE status='terminal'").all()
-    .map(({ terminal_event_json }) => JSON.parse(
-      typeof terminal_event_json === "string"
-        ? terminal_event_json
-        : Buffer.from(terminal_event_json).toString("utf8"),
-    ).payload?.type)
-    .map((type) => type === "run" ? "run.start" : type)
-    .filter((kind) => kind === "run.start")
-    .reduce((result, kind) => ({ ...result, [kind]: (result[kind] ?? 0) + 1 }), {}),
-).sort(([left], [right]) => left.localeCompare(right));
-database.close();
-writeFileSync(process.argv[3], JSON.stringify(counts));
-NODE
+node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+  run-start-count "$PROXY_EVENTS" \
+  >"$TMP_ROOT/auth-operation-baseline.json"
 curl --fail-with-body --silent --show-error \
   --max-time 10 \
   "http://127.0.0.1:$CALLBACK_PORT/__test__/retired-invocation-requests" \
@@ -997,28 +915,13 @@ jq -e \
   --slurpfile baseline "$TMP_ROOT/auth-retired-invocation-baseline.json" \
   '.count == $baseline[0].count' \
   "$TEAMHUB_FIXTURE_STATE" >/dev/null
-node - "$TMP_ROOT/computer-state/operations.sqlite" "$TMP_ROOT/auth-operation-baseline.json" <<'NODE'
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const counts = Object.entries(
-  database.prepare("SELECT terminal_event_json FROM operations WHERE status='terminal'").all()
-    .map(({ terminal_event_json }) => JSON.parse(
-      typeof terminal_event_json === "string"
-        ? terminal_event_json
-        : Buffer.from(terminal_event_json).toString("utf8"),
-    ).payload?.type)
-    .map((type) => type === "run" ? "run.start" : type)
-    .filter((kind) => kind === "run.start")
-    .reduce((result, kind) => ({ ...result, [kind]: (result[kind] ?? 0) + 1 }), {}),
-).sort(([left], [right]) => left.localeCompare(right));
-database.close();
-const baseline = JSON.parse(readFileSync(process.argv[3], "utf8"));
-if (JSON.stringify(counts) !== JSON.stringify(baseline)) {
-  throw new Error("Runtime authentication failure started a Run Operation");
-}
-NODE
+node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+  run-start-count "$PROXY_EVENTS" \
+  >"$TMP_ROOT/auth-operation-after.json"
+if ! cmp -s "$TMP_ROOT/auth-operation-baseline.json" "$TMP_ROOT/auth-operation-after.json"; then
+  printf 'Runtime authentication failure started a Run Operation\n' >&2
+  exit 1
+fi
 
 touch "$CLAUDE_LOGIN_MARKER"
 wait_for_agent_runtime_status "$AGENT_C" ready
@@ -1134,36 +1037,20 @@ wait_for_two_running_runs "$TMP_ROOT/runs-before-reconnect.json"
 kill -USR2 "$PROXY_PID"
 wait_for_proxy_event "block_agent_to_daemon"
 wait_for_two_unacknowledged_run_events "$TMP_ROOT/unacknowledged-run-events.json"
-node - \
-  "$TMP_ROOT/computer-state/operations.sqlite" \
+jq -c '[.[] | {agent_id, operation_id}]' \
   "$TMP_ROOT/unacknowledged-run-events.json" \
-  "$TMP_ROOT/runs-during-disconnect.owners" <<'NODE'
-import { readFileSync, writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-
-const expected = JSON.parse(readFileSync(process.argv[3], "utf8"));
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const statement = database.prepare(
-  "SELECT identity_json FROM operations WHERE operation_id=?",
-);
-const owners = expected.map(({ operation_id }) => {
-  const row = statement.get(operation_id);
-  if (!row) throw new Error(`Missing retained Operation ${operation_id}`);
-  const encoded = typeof row.identity_json === "string"
-    ? row.identity_json
-    : Buffer.from(row.identity_json).toString("utf8");
-  return { agent_id: JSON.parse(encoded).agent_id, operation_id };
-}).sort((left, right) => left.operation_id.localeCompare(right.operation_id));
-database.close();
-writeFileSync(process.argv[4], JSON.stringify(owners));
-NODE
-cmp \
-  "$TMP_ROOT/runs-before-reconnect.json.owners" \
-  "$TMP_ROOT/runs-during-disconnect.owners"
+  >"$TMP_ROOT/runs-during-disconnect.owners"
+jq -e -n \
+  --slurpfile before "$TMP_ROOT/runs-before-reconnect.json.owners" \
+  --slurpfile during "$TMP_ROOT/runs-during-disconnect.owners" \
+  '$before[0] == $during[0]' \
+  >/dev/null
+CONNECTIONS_BEFORE_REPLAY="$(jq -s '[.[] | select(.type == "connection")] | length' "$PROXY_EVENTS")"
+REPLAY_CONNECTION_ID=$((CONNECTIONS_BEFORE_REPLAY + 1))
 kill -USR1 "$PROXY_PID"
-wait_for_gateway_connection_count 3
+wait_for_gateway_connection_count "$REPLAY_CONNECTION_ID"
 wait_for_gateway_ready
-wait_for_replayed_event_acknowledgements "$TMP_ROOT/unacknowledged-run-events.json"
+wait_for_replayed_event_acknowledgements "$TMP_ROOT/unacknowledged-run-events.json" "$REPLAY_CONNECTION_ID"
 wait_for_local_run_terminal \
   "$AGENT_A" \
   succeeded \
@@ -1184,27 +1071,10 @@ wait_for_run_receipt_terminal \
 computer daemon runners --json | jq -e \
   '.runners | length == 3 and all(.[]; .state == "ready" and .active_operation_id == null)' \
   >/dev/null
+computer daemon status --json | jq -e '.daemon.active_operations == 0' >/dev/null
 
-node - "$TMP_ROOT/computer-state/operations.sqlite" <<'NODE'
-import { DatabaseSync } from "node:sqlite";
-
-const database = new DatabaseSync(process.argv[2], { readOnly: true });
-const rows = Object.entries(
-  database.prepare("SELECT terminal_event_json FROM operations WHERE status='terminal'").all()
-    .map(({ terminal_event_json }) => JSON.parse(
-      typeof terminal_event_json === "string"
-        ? terminal_event_json
-        : Buffer.from(terminal_event_json).toString("utf8"),
-    ).payload?.type)
-    .map((type) => type === "run" ? "run.start" : type)
-    .reduce((result, kind) => ({ ...result, [kind]: (result[kind] ?? 0) + 1 }), {}),
-).map(([kind, count]) => ({ kind, count })).sort((left, right) => left.kind.localeCompare(right.kind));
-database.close();
-const expected = [{ kind: "run.start", count: 5 }];
-if (JSON.stringify(rows) !== JSON.stringify(expected)) {
-  throw new Error(`Unexpected operation ledger: ${JSON.stringify(rows)}`);
-}
-NODE
+node "$ROOT/scripts/local-runner-proxy-ledger.mjs" \
+  terminal-summary "$PROXY_EVENTS" 5 >/dev/null
 
 send_inbox_wake >"$TMP_ROOT/hold-a.json" &
 HOLD_A_DELIVERY_PID=$!
@@ -1254,4 +1124,4 @@ if find "$TMP_ROOT/computer-state/runner-processes" -type f -name '*.json' -prin
   exit 1
 fi
 
-printf 'Local Runner smoke passed: Execution Context Local Runs, in-place Computer identity preservation, Claude authentication block/recovery without restart, 3 Agent Runners, Codex reconnect/replay, duplicate suppression, CLI Runner stop, offline Agent deletion/reconnect cleanup, and complete process cleanup.\n'
+printf 'Local Runner smoke passed: Execution Context Local Runs, in-place Computer identity preservation, Claude authentication block/recovery without restart, 3 Agent Runners, Codex reconnect/replay, duplicate suppression, CLI Runner stop, offline Agent deletion/reconnect reconciliation, and complete process cleanup.\n'

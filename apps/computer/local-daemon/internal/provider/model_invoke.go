@@ -265,6 +265,9 @@ func (m ModelInvoker) invoke(ctx context.Context, request ModelInvokeRequest, in
 	if request.RuntimeType == "pi" {
 		return invokePiModel(ctx, request, installed, work, scratch)
 	}
+	if request.RuntimeType == "antigravity" {
+		return invokeAntigravityModel(ctx, request, installed, work, scratch)
+	}
 	if request.Mode == ModelInvokeWorkspace {
 		if err := writeModelInvokeFiles(work, request.WorkspaceFiles); err != nil {
 			return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: err.Error()}
@@ -1085,4 +1088,45 @@ func classifyModelInvokeFailureWithDiagnostics(
 		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: reason}
 	}
 	return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: reason}
+}
+
+func structuredModelInvokeInstructions(request ModelInvokeRequest) string {
+	instructions := request.Instructions
+	if request.Mode == ModelInvokeStructured {
+		instructions += "\n\nReturn only a JSON object matching this schema:\n" + string(request.OutputSchema)
+	}
+	return instructions
+}
+
+// classifyNativeModelInvokeFailure maps native RPC background model-call
+// failures shared by Pi and Antigravity into structured outcomes. When
+// forwardSanitizedError is false, raw provider error text is never echoed back
+// to the caller.
+func classifyNativeModelInvokeFailure(runtimeName string, err error, answer native.Outcome, forwardSanitizedError bool) ModelInvokeResult {
+	if err != nil {
+		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: runtimeName + " background runtime failed to start"}
+	}
+	if apiErr, ok := parseStructuredAPIError(answer.Error); ok {
+		if isContextTooLongErrorCode(apiErr.Code) || isContextTooLongErrorCode(apiErr.Type) {
+			return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
+		}
+		if apiErr.Code == "model_not_found" {
+			return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: runtimeName + " background model is not available"}
+		}
+		if isAuthErrorCode(apiErr.Code) || isAuthErrorCode(apiErr.Type) {
+			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: runtimeName + " background authentication is required"}
+		}
+		if isUnavailableErrorCode(apiErr.Code) || isUnavailableErrorCode(apiErr.Type) {
+			return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: runtimeName + " background model service is unavailable"}
+		}
+	}
+	if posixNetworkErrnoPattern.MatchString(answer.Error) {
+		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: runtimeName + " background model service is unavailable"}
+	}
+	if forwardSanitizedError {
+		if sanitized := truncateRunes(redact.Text(strings.TrimSpace(answer.Error)), 300); sanitized != "" {
+			return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: sanitized}
+		}
+	}
+	return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: runtimeName + " background call did not complete"}
 }

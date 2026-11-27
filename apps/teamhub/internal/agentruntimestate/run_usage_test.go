@@ -65,3 +65,35 @@ func TestFilterLocalRunUsageSkipsInvalidEntriesWithoutRejectingReceipt(t *testin
 		}
 	})
 }
+
+func TestFilterLocalRunUsageAcceptsAntigravityAndLegacyUnknownProvider(t *testing.T) {
+	t.Run("accepts antigravity provider with reasoning and compactions", func(t *testing.T) {
+		raw := json.RawMessage(`[{"provider":"antigravity","model":"gemini-pro","input":100,"cache_read":25,"cache_write":0,"output":40,"reasoning":15,"compaction_count":2}]`)
+		usages, rejected := filterLocalRunUsage(raw, "antigravity")
+		if len(rejected) != 0 || len(usages) != 1 {
+			t.Fatalf("usages=%+v rejected=%+v", usages, rejected)
+		}
+		if usages[0].Provider != "antigravity" || usages[0].Reasoning == nil || *usages[0].Reasoning != 15 || usages[0].CompactionCount == nil || *usages[0].CompactionCount != 2 {
+			t.Fatalf("usage=%+v", usages[0])
+		}
+	})
+
+	t.Run("accepts unknown provider from older Daemons", func(t *testing.T) {
+		raw := json.RawMessage(`[{"provider":"unknown","model":"gemini-pro","input":10,"cache_read":0,"cache_write":0,"output":5,"reasoning":2,"compaction_count":0}]`)
+		usages, rejected := filterLocalRunUsage(raw, "antigravity")
+		if len(rejected) != 0 || len(usages) != 1 || usages[0].Provider != "unknown" {
+			t.Fatalf("usages=%+v rejected=%+v", usages, rejected)
+		}
+	})
+
+	t.Run("rejects openai and anthropic providers for antigravity", func(t *testing.T) {
+		raw := json.RawMessage(`[
+			{"provider":"openai","model":"gemini-a","input":10,"cache_read":0,"cache_write":0,"output":5},
+			{"provider":"anthropic","model":"gemini-b","input":10,"cache_read":0,"cache_write":0,"output":5}
+		]`)
+		usages, rejected := filterLocalRunUsage(raw, "antigravity")
+		if len(usages) != 0 || len(rejected) != 2 {
+			t.Fatalf("usages=%+v rejected=%+v", usages, rejected)
+		}
+	})
+}

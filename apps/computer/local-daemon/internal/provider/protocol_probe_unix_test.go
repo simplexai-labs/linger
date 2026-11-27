@@ -3,10 +3,8 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,15 +21,6 @@ func writeProbeScript(t *testing.T, body string) string {
 	return path
 }
 
-func captureProbeLog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var output bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-	return &output
-}
-
 func TestProtocolProbeAcceptsAnAnswerFollowedByAFailedExit(t *testing.T) {
 	logged := captureProbeLog(t)
 	script := writeProbeScript(t, `read request
@@ -41,7 +30,7 @@ echo 'shutting down after input closed' >&2
 exit 1
 `)
 	environment := map[string]string{"PATH": "/usr/bin:/bin", "HOME": t.TempDir()}
-	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second); err != nil {
+	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second, ""); err != nil {
 		t.Fatalf("an answered handshake failed: %v", err)
 	}
 	if !strings.Contains(logged.String(), "runner.runtime_probe.exit_after_handshake") || !strings.Contains(logged.String(), "exit_code=1") {
@@ -55,7 +44,7 @@ func TestProtocolProbeLogsWhyAnUnansweredHandshakeFailed(t *testing.T) {
 exit 2
 `)
 	environment := map[string]string{"PATH": "/usr/bin:/bin", "HOME": t.TempDir()}
-	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second); err == nil {
+	if err := probeRuntimeProtocol(context.Background(), "codex", script, environment, 5*time.Second, ""); err == nil {
 		t.Fatal("an unanswered handshake passed")
 	}
 	output := logged.String()

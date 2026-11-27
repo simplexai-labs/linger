@@ -34,7 +34,7 @@ func TestConnectionDecisionsDraftTheirOwnCards(t *testing.T) {
 		t.Fatalf("provider_key draft without an app=%+v err=%v", draft, err)
 	}
 	draft, err = DecisionCommand{BrowserConnection: &BrowserConnectionDecision{Prompt: "Connect Chrome", ComputerID: "computer-1"}}.draft()
-	if err != nil || draft.kind != DecisionKindBrowserConnection || draft.lifetime != 0 || !draft.connection {
+	if err != nil || draft.kind != DecisionKindBrowserConnection || draft.lifetime != connectionAuthorizationTTL || !draft.connection {
 		t.Fatalf("browser_connection draft=%+v err=%v", draft, err)
 	}
 	draft, err = DecisionCommand{ComputerPermission: &ComputerPermissionDecision{ComputerID: "computer-1", Subject: "linger",
@@ -140,7 +140,10 @@ func TestConnectionNoticesTellRoomAgentsAndAlterEgos(t *testing.T) {
 		{DecisionKindProviderKey, "answered", `{"decision":"configured"}`, view, task, "The Sponsor added the Composio API key. Run the command that needed notion again"},
 		{DecisionKindBrowserConnection, "answered", `{"decision":"connected"}`, chrome, pgtype.Text{}, "the user connected their everyday Chrome"},
 		{DecisionKindBrowserConnection, "denied", `{"decision":"deny"}`, chrome, pgtype.Text{}, "declined to connect their everyday Chrome"},
-		{DecisionKindBrowserConnection, "answered", `{"decision":"connected"}`, chrome, task, ""},
+		{DecisionKindBrowserConnection, "expired", "", chrome, pgtype.Text{}, "expired: the user did not connect their everyday Chrome"},
+		{DecisionKindBrowserConnection, "answered", `{"decision":"connected"}`, chrome, task, "The Sponsor connected their everyday Chrome"},
+		{DecisionKindBrowserConnection, "denied", `{"decision":"deny"}`, chrome, task, "The Sponsor declined to connect their everyday Chrome"},
+		{DecisionKindBrowserConnection, "expired", "", chrome, task, "expired before the Sponsor connected it"},
 		{DecisionKindComputerPermission, "answered", `{"decision":"granted"}`, permission, pgtype.Text{},
 			"Human interaction decision_1 resolved: the user granted screen_recording for Linger. Continue the task now."},
 		{DecisionKindComputerPermission, "answered", `{"decision":"granted"}`, permission, task, "the user granted screen_recording for Linger"},
@@ -154,6 +157,9 @@ func TestConnectionNoticesTellRoomAgentsAndAlterEgos(t *testing.T) {
 		text, err := decisionNoticeText("decision_1", decision)
 		if err != nil || test.want == "" && text != "" || test.want != "" && !strings.Contains(text, test.want) {
 			t.Fatalf("%s %s: text=%q err=%v", test.kind, test.status, text, err)
+		}
+		if test.kind == DecisionKindBrowserConnection && test.alterEgo.Valid && strings.HasPrefix(text, "Human interaction") {
+			t.Fatalf("%s %s alterEgo notice used Room wording: %q", test.kind, test.status, text)
 		}
 	}
 }

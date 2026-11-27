@@ -213,6 +213,53 @@ describe("Agent memory lifecycle", () => {
     },
   );
 
+  it("extracts and publishes Antigravity memory when history inspection is available, and skips when unsupported", async () => {
+    const supported = fixture({
+      ghostRuntime: {
+        type: "local",
+        placement: {
+          ...OWNER,
+          runtimeType: "antigravity",
+          computerId: "computer-1",
+        },
+      },
+      canReadHistory: (_computerId, runtimeType) =>
+        runtimeType === "antigravity",
+    });
+    try {
+      await supported.coordinator.wake("A");
+      expect(supported.host.inspectDebugContextHistory).toHaveBeenCalled();
+      expect(supported.stages()).toEqual(["extract", "consolidate"]);
+      expect(supported.documents.get("A")?.memory).toContain("lantern-482");
+      expect(supported.respond.mock.calls[0]?.[0]).toMatchObject({
+        placement: expect.objectContaining({ runtimeType: "antigravity" }),
+      });
+    } finally {
+      await supported.coordinator.close();
+    }
+
+    const unsupported = fixture({
+      ghostRuntime: {
+        type: "local",
+        placement: {
+          ...OWNER,
+          runtimeType: "antigravity",
+          computerId: "computer-legacy",
+        },
+      },
+      canReadHistory: () => false,
+    });
+    try {
+      await unsupported.coordinator.wake("A");
+      expect(
+        unsupported.host.inspectDebugContextHistory,
+      ).not.toHaveBeenCalled();
+      expect(unsupported.stages()).toEqual([]);
+    } finally {
+      await unsupported.coordinator.close();
+    }
+  });
+
   it("extracts, consolidates and publishes in one wake on the Agent's own Computer", async () => {
     const f = fixture();
     try {

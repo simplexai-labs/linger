@@ -6,6 +6,7 @@
   "main": "dist/main/index.mjs",
   "scripts": {
     "build": "node build.mjs",
+    "dev": "node scripts/dev.mjs",
     "electron:install": "node node_modules/electron/install.js",
     "start": "node build.mjs && electron .",
     "test": "vitest run --config vitest.config.ts",

@@ -3,8 +3,9 @@ import path from "node:path";
 import type {
   CommandArguments,
   CommandExecutionContext,
+  CommandInputReader,
 } from "./command-definition.js";
-import { values } from "./command-input.js";
+import { option, values } from "./command-input.js";
 import { fetchConnectorFile, saveConnectorBytes } from "./connector-files.js";
 import { usage } from "./connector-input.js";
 import {
@@ -21,7 +22,7 @@ import {
   str,
 } from "./connector-schemas.js";
 import { CliError } from "./errors.js";
-import { invalidFlag } from "./input-issues.js";
+import { inputIssue, invalidFlag, invalidInput } from "./input-issues.js";
 
 // Shared by the generative media connectors (fal, Higgsfield): model
 // parameters given as flags, continuing a provider job, and saving its
@@ -102,6 +103,17 @@ export function prose(value: string | undefined, label: string): string {
   return value as string;
 }
 
+const fieldNamePattern = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u;
+
+export const reservedParameterNames: readonly string[] = [
+  "model",
+  "prompt",
+  "get_cost",
+  "__proto__",
+  "constructor",
+  "prototype",
+];
+
 /**
  * Each `--set field=value` sets one top-level field. A value that parses as
  * JSON keeps that type, so `--set count=2` is a number and `--set seed=x` a
@@ -112,7 +124,7 @@ export function fieldValues(args: CommandArguments): Json {
   for (const item of values(args, "--set")) {
     const at = item.indexOf("=");
     const field = at > 0 ? item.slice(0, at) : "";
-    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(field))
+    if (!fieldNamePattern.test(field))
       usage("--set takes field=value with a plain field name.");
     if (Object.hasOwn(fields, field))
       usage(`--set sets ${field} more than once.`);
@@ -124,6 +136,32 @@ export function fieldValues(args: CommandArguments): Json {
       // Not JSON: the value is the text itself.
     }
     fields[field] = parsed;
+  }
+  return fields;
+}
+
+/**
+ * Reads `--params-file` as one JSON object of top-level model parameters,
+ * preserving nested JSON types and rejecting invalid or reserved keys.
+ */
+export async function parameterFileValues(
+  args: CommandArguments,
+  reader: CommandInputReader,
+): Promise<Json> {
+  const source = option(args, "--params-file");
+  if (source === undefined) return {};
+  const raw = await reader.json(source, "--params-file");
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw))
+    throw invalidInput("--params-file must be one JSON object.", [
+      inputIssue("--params-file", "invalid_type", "must be a JSON object."),
+    ]);
+  const fields: Json = Object.create(null);
+  for (const [key, value] of Object.entries(raw)) {
+    if (!fieldNamePattern.test(key))
+      usage("--params-file keys must be plain field names.");
+    if (reservedParameterNames.includes(key))
+      usage(`Use the dedicated flags instead of --params-file ${key}.`);
+    fields[key] = value;
   }
   return fields;
 }

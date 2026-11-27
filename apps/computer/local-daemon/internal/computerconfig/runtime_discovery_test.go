@@ -70,6 +70,24 @@ func TestRuntimeDiscoveryOptionsRejectsInvalidInputs(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected error for relative configured path when RequireAbsolutePaths is true")
 	}
+	if _, err := RuntimeDiscoveryOptions(RuntimeDiscoveryRequest{
+		TempBase: "relative/tmp",
+	}); err == nil {
+		t.Fatal("expected error for relative TempBase")
+	}
+}
+
+func TestRuntimeDiscoveryOptionsForwardsTempBase(t *testing.T) {
+	tempBase := filepath.Join(t.TempDir(), "operation-tmp")
+	options, err := RuntimeDiscoveryOptions(RuntimeDiscoveryRequest{
+		TempBase: tempBase,
+	})
+	if err != nil {
+		t.Fatalf("RuntimeDiscoveryOptions failed: %v", err)
+	}
+	if options.TempBase != tempBase {
+		t.Fatalf("TempBase = %q, want %q", options.TempBase, tempBase)
+	}
 }
 
 func TestRuntimeDiscoveryOptionsForwardsBundledPaths(t *testing.T) {

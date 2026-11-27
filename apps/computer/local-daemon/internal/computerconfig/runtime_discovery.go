@@ -1,6 +1,7 @@
 package computerconfig
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,10 @@ type RuntimeDiscoveryRequest struct {
 	Runtimes         []string
 	SkipModelCatalog bool
 	Timeout          time.Duration
+	// TempBase holds per-probe temporary directories inside a private state
+	// directory; when non-empty it must be absolute, and empty falls back to
+	// the OS temporary directory.
+	TempBase string
 	// RequireAbsolutePaths rejects relative paths in ConfiguredPaths and ignores
 	// relative LINGER_<TYPE>_PATH values.
 	RequireAbsolutePaths bool
@@ -49,6 +54,10 @@ func RuntimeDiscoveryOptions(request RuntimeDiscoveryRequest) (provider.Discover
 		if err := provider.ValidateRuntimeSelection(request.Runtimes); err != nil {
 			return provider.DiscoveryOptions{}, err
 		}
+	}
+	tempBase := strings.TrimSpace(request.TempBase)
+	if tempBase != "" && !filepath.IsAbs(tempBase) {
+		return provider.DiscoveryOptions{}, errors.New("TempBase must be absolute")
 	}
 	selected := map[string]string{}
 	for _, runtimeType := range allRuntimeTypes {
@@ -73,5 +82,6 @@ func RuntimeDiscoveryOptions(request RuntimeDiscoveryRequest) (provider.Discover
 		Runtimes:         request.Runtimes,
 		SkipModelCatalog: request.SkipModelCatalog,
 		Timeout:          request.Timeout,
+		TempBase:         tempBase,
 	}, nil
 }

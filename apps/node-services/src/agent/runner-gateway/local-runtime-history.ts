@@ -44,7 +44,8 @@ export function mapLocalRuntimeHistory(
     !result.snapshot ||
     (source !== "codex_rollout" &&
       source !== "claude_transcript" &&
-      source !== "pi_session")
+      source !== "pi_session" &&
+      source !== "antigravity_transcript")
   ) {
     throw new Error("Local Runtime returned an incomplete History page");
   }

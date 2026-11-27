@@ -42,7 +42,7 @@ func (s *Service) ExpireStoppedTaskApprovals(ctx context.Context, tenantID, task
 	defer tx.Rollback(ctx)
 	rows, err := tx.Query(ctx, `UPDATE decisions SET status='expired', finished_at=clock_timestamp()
  WHERE tenant_id=$1 AND alter_ego_task_id=$2 AND status='pending'
-  AND kind NOT IN ('connection_auth','provider_key','browser_connection','search_key')
+  AND kind NOT IN ('connection_auth','provider_key','browser_connection','computer_permission','search_key')
  RETURNING decider_actor_id, message_id`, tenantID, taskID)
 	if err != nil {
 		return err

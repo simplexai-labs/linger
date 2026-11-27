@@ -1,5 +1,5 @@
 import type { ExecFileException } from "node:child_process";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface ExecCall {
   file: string;
@@ -16,6 +16,9 @@ const mockExec = vi.hoisted(() => ({
         options: Record<string, unknown>,
       ) => { error: ExecFileException | null; stdout: string; stderr: string })
     | null,
+}));
+const mockProc = vi.hoisted(() => ({
+  stats: null as Map<number, string> | null,
 }));
 
 vi.mock("node:child_process", async (original) => {
@@ -39,10 +42,37 @@ vi.mock("node:child_process", async (original) => {
   };
   return { ...actual, execFile };
 });
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: (async (
+      file: Parameters<typeof actual.readFile>[0],
+      ...rest: unknown[]
+    ) => {
+      if (mockProc.stats && typeof file === "string") {
+        const match = /^\/proc\/(\d+)\/stat$/.exec(file);
+        if (match) {
+          const content = mockProc.stats.get(Number(match[1]));
+          if (content === undefined) {
+            throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+          }
+          return content;
+        }
+      }
+      return (actual.readFile as (...args: unknown[]) => unknown)(
+        file,
+        ...rest,
+      );
+    }) as typeof actual.readFile,
+  };
+});
 
 import {
   WINDOWS_PROCESSES,
+  parseLinuxProcStatState,
   parseWindowsProcesses,
+  posixLivePids,
   sanitizeInspectionStderr,
   windowsPowerShellExecutable,
   windowsProcesses,
@@ -51,6 +81,7 @@ import {
 beforeEach(() => {
   mockExec.calls = [];
   mockExec.handler = null;
+  mockProc.stats = null;
 });
 
 describe("WINDOWS_PROCESSES query", () => {
@@ -201,5 +232,74 @@ describe("windowsProcesses", () => {
     await expect(windowsProcesses("C:\\Windows")).rejects.toThrow(
       "Native processes could not be enumerated (exit 1: Get-CimInstance : Invalid class Win32_Process api_key=[REDACTED]).",
     );
+  });
+
+  it("runs a fresh PowerShell enumeration for every caller, including concurrent callers", async () => {
+    let invocation = 0;
+    mockExec.handler = () => {
+      invocation += 1;
+      return {
+        error: null,
+        stdout: JSON.stringify({
+          p: [
+            { p: invocation * 10, q: 1, c: 100, l: `pass-${invocation}.exe` },
+          ],
+        }),
+        stderr: "",
+      };
+    };
+
+    // Concurrent callers must never coalesce onto a pre-spawn or pre-kill snapshot.
+    const [first, second] = await Promise.all([
+      windowsProcesses("C:\\Windows"),
+      windowsProcesses("C:\\Windows"),
+    ]);
+    expect(mockExec.calls).toHaveLength(2);
+    expect(first).toEqual([
+      { pid: 10, parent: 1, created: 100, command: "pass-1.exe" },
+    ]);
+    expect(second).toEqual([
+      { pid: 20, parent: 1, created: 100, command: "pass-2.exe" },
+    ]);
+  });
+});
+
+describe("parseLinuxProcStatState and posixLivePids on Linux", () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { ...platform, value: "linux" });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", platform);
+    mockProc.stats = null;
+  });
+
+  it("extracts process state even when comm contains spaces and nested parentheses", () => {
+    expect(parseLinuxProcStatState("123 (node) S 1 123 123 0")).toBe("S");
+    expect(parseLinuxProcStatState("124 (teamhub) R 1 124 124 0")).toBe("R");
+    expect(parseLinuxProcStatState("125 (defunct) Z 1 125 125 0")).toBe("Z");
+    expect(parseLinuxProcStatState("126 (foo (bar) baz) S 1 126 126 0")).toBe(
+      "S",
+    );
+    expect(parseLinuxProcStatState("127 (weird ) name) Z 1 127 127 0")).toBe(
+      "Z",
+    );
+    expect(parseLinuxProcStatState("malformed-stat-line")).toBeUndefined();
+  });
+
+  it("returns live non-zombie PIDs from /proc/<pid>/stat and ignores zombies, missing, or invalid PIDs", async () => {
+    mockProc.stats = new Map([
+      [101, "101 (node) S 1 101 101 0"],
+      [102, "102 (defunct) Z 1 102 102 0"],
+      [103, "103 (foo (bar) baz) R 1 103 103 0"],
+      [104, "104 (weird ) name) Z 1 104 104 0"],
+      [105, "corrupt-line-without-paren"],
+    ]);
+
+    const live = await posixLivePids([
+      101, 102, 103, 104, 105, 999, 101, 0, -5,
+    ]);
+    expect([...live].sort((a, b) => a - b)).toEqual([101, 103]);
+    expect(await posixLivePids([])).toEqual(new Set());
   });
 });

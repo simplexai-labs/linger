@@ -338,12 +338,19 @@ describe("Runtime model call", () => {
     expect(none.invokeModel.mock.calls[0]![1].runtimeType).toBe("codex");
   });
 
-  it("calls an Antigravity Agent's model through Claude, else Codex", async () => {
+  it("calls an Antigravity Agent's model through Antigravity, falling back to Claude, else Codex", async () => {
     const antigravity: ModelPlacement = {
       ...alice,
       runtimeType: "antigravity",
     };
-    const claude = setup({ placements: [antigravity], ready: () => true });
+    const own = setup({ placements: [antigravity], ready: () => true });
+    await own.modelCall.call({ ...ask, input: "x" });
+    expect(own.invokeModel.mock.calls[0]![1].runtimeType).toBe("antigravity");
+
+    const claude = setup({
+      placements: [antigravity],
+      ready: (_computer, runtime) => runtime !== "antigravity",
+    });
     await claude.modelCall.call({ ...ask, input: "x" });
     expect(claude.invokeModel.mock.calls[0]![1].runtimeType).toBe("claude");
 
@@ -353,6 +360,21 @@ describe("Runtime model call", () => {
     });
     await codex.modelCall.call({ ...ask, input: "x" });
     expect(codex.invokeModel.mock.calls[0]![1].runtimeType).toBe("codex");
+
+    const none = setup({
+      placements: [antigravity],
+      ready: () => false,
+      outcomes: [
+        new ModelCallError(
+          "runtime_unavailable",
+          "Runtime antigravity is not ready",
+        ),
+      ],
+    });
+    await expect(
+      none.modelCall.call({ ...ask, input: "x" }),
+    ).rejects.toMatchObject({ kind: "runtime_unavailable" });
+    expect(none.invokeModel.mock.calls[0]![1].runtimeType).toBe("antigravity");
   });
 
   it("caches an owner's placement for 30 seconds and drops it when the Computer is offline", async () => {

@@ -46,7 +46,13 @@ components:
             - AgentDebugHistoryInstructionsStatusUnavailable
         source:
           type: string
-          enum: [codex_rollout, claude_transcript, pi_session]
+          enum:
+            [
+              codex_rollout,
+              claude_transcript,
+              pi_session,
+              antigravity_transcript,
+            ]
         reason:
           type: string
           minLength: 1

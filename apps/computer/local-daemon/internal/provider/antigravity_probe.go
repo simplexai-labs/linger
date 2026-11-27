@@ -3,19 +3,30 @@ package provider
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 )
 
 // probeAntigravityAuthentication opens an empty ACP session: Antigravity
 // answers session/new with ACP's authentication-required error when neither
 // a Google sign-in nor a Gemini API key is available.
-func probeAntigravityAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration, _ string) runtimeProbeOutcome {
+func probeAntigravityAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration, tempBase string) runtimeProbeOutcome {
 	ctx, cancel := context.WithTimeout(ctx, boundedAuthTimeout(timeout))
 	defer cancel()
-	probe, err := native.ProbeAntigravity(ctx, native.NewInvocation(executable, nil).WithEnvironment(environment))
+	probe, err := native.ProbeAntigravity(ctx, native.NewInvocation(executable, nil).WithEnvironment(environment), tempBase)
 	if err != nil {
+		if errors.Is(err, native.ErrAntigravityProbePrepare) {
+			slog.Warn("runner.runtime_auth.prepare_failed", "runtime_type", "antigravity", "error", redact.Text(err.Error()))
+			return runtimeProbeOutcome{
+				Status:  "error",
+				Code:    "RUNTIME_DIAGNOSTIC_FAILED",
+				Message: "Antigravity diagnostic environment could not be prepared",
+			}
+		}
+		slog.Warn("runner.runtime_auth.probe_failed", "runtime_type", "antigravity", "error", redact.Text(err.Error()))
 		message := "Antigravity authentication could not be verified"
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			message = "Antigravity authentication check timed out"

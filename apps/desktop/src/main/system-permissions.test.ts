@@ -18,7 +18,7 @@ const setup = (screen: string, trusted = false) => {
     },
     captureScreens: async () => {
       calls.push("capture");
-      return [];
+      return [{ id: "screen" }];
     },
     openExternal: async (url) => {
       calls.push(`open ${url}`);
@@ -63,8 +63,9 @@ describe("SystemPermissions", () => {
     const { permissions, calls } = setup("denied");
     await permissions.openSettings("accessibility");
     await permissions.openSettings("screen_recording");
-    expect(calls.filter((c) => c.startsWith("open"))).toEqual([
+    expect(calls.filter((c) => c !== "trusted false")).toEqual([
       `open ${SYSTEM_SETTINGS_URL.accessibility}`,
+      "capture",
       `open ${SYSTEM_SETTINGS_URL.screen_recording}`,
     ]);
   });
@@ -82,12 +83,34 @@ describe("SystemPermissions", () => {
     expect(permissions.status()[0]!.relaunch_required).toBe(false);
   });
 
-  it("needs a relaunch after opening Screen Recording settings", async () => {
+  it("keeps the Settings action when macOS returns no screen sources", async () => {
+    const { api, permissions } = setup("denied");
+    api.captureScreens = async () => [];
+    const [screen] = await permissions.prompt("screen_recording");
+    expect(screen?.relaunch_required).toBe(false);
+  });
+
+  it("keeps the settings action after macOS rejects a capture", async () => {
+    const { api, calls, permissions } = setup("denied");
+    api.captureScreens = async () => {
+      throw new Error("Capture denied");
+    };
+    for (const action of ["prompt", "openSettings"] as const) {
+      expect(
+        (await permissions[action]("screen_recording"))[0]?.relaunch_required,
+      ).toBe(false);
+    }
+    expect(calls.filter((call) => call.startsWith("open"))).toEqual(
+      Array(2).fill(`open ${SYSTEM_SETTINGS_URL.screen_recording}`),
+    );
+  });
+
+  it("keeps Settings available when opening it with screen access denied", async () => {
     const { permissions } = setup("denied");
     await permissions.openSettings("accessibility");
     expect(permissions.status()[0]!.relaunch_required).toBe(false);
     const after = await permissions.openSettings("screen_recording");
-    expect(after[0]!.relaunch_required).toBe(true);
+    expect(after[0]!.relaunch_required).toBe(false);
     expect(after[1]!.relaunch_required).toBe(false);
   });
 });

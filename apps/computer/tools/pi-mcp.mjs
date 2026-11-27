@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFileSync, lstatSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, win32 } from "node:path";
 // The Daemon puts the Computer tools on NODE_PATH so Pi can load this
 // extension. Node has read it by now; put back the value Pi inherited so the
 // commands Pi starts never resolve a package from the tools.
@@ -10,13 +10,17 @@ if (process.env.LINGER_PI_INHERITED_NODE_PATH !== undefined) {
   else delete process.env.NODE_PATH;
   delete process.env.LINGER_PI_INHERITED_NODE_PATH;
 }
-// The Daemon executable that judges a bash command before Pi runs it; the
-// commands Pi starts do not inherit it.
+// The Daemon executable that judges a shell command (bash or PowerShell)
+// before Pi runs it; the commands Pi starts do not inherit it.
 const shellTextHook = process.env.LINGER_PI_SHELL_TEXT_HOOK;
 delete process.env.LINGER_PI_SHELL_TEXT_HOOK;
 // An installed Pi may alias bare package imports to its own version. Resolve
 // the pinned public entry by URL so this adapter keeps its shipped API.
-const { createMcpExtension, createPowerShellToolDefinition } = await import(
+const {
+  createMcpExtension,
+  createPowerShellToolDefinition,
+  getPowerShellConfig,
+} = await import(
   new URL(
     "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js",
     import.meta.url,
@@ -127,36 +131,322 @@ export function sortActiveToolNames(toolNames) {
   return [...nonMcp, ...mcp];
 }
 
+const TEAMHUB_PROGRAM_PATTERN = /\bteamhub(?:\.(?:exe|cmd))?\b/iu;
+const TEAMHUB_SUBCOMMAND_PATTERN = /^[a-z][a-z0-9-]*$/u;
+
 /**
- * Refuses a bash call whose TeamHub text the shell would rewrite, by the
- * Daemon's shell-text-hook, the check Codex runs before its shell commands.
- * Only a command that names teamhub and holds $ or a backquote can be
- * refused, so no other call starts the hook. A hook that cannot run lets the
- * call proceed.
+ * Reports whether Pi's Windows powershell tool resolves to Windows PowerShell
+ * 5.1 (`powershell.exe`) rather than PowerShell 7 (`pwsh.exe`). Fails open so
+ * shell resolution errors never block execution.
  */
-export async function refuseRewrittenShellText(event, hook = shellTextHook) {
-  const command = event.toolName === "bash" ? event.input?.command : undefined;
-  if (
-    !hook ||
-    typeof command !== "string" ||
-    !command.includes("teamhub") ||
-    !/[$`]/u.test(command)
-  ) {
+export function isWindowsPowerShell51({
+  platform = process.platform,
+  resolveShell = getPowerShellConfig,
+} = {}) {
+  if (platform !== "win32" || typeof resolveShell !== "function") {
+    return false;
+  }
+  try {
+    const config = resolveShell();
+    if (typeof config?.shell !== "string" || !config.shell) {
+      return false;
+    }
+    return win32.basename(config.shell).toLowerCase() === "powershell.exe";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuses a bash or powershell call whose TeamHub text the shell would corrupt,
+ * by invoking the Daemon's shell-text-hook. Fast-paths skip the hook (and
+ * PowerShell 5.1 detection) unless the command names teamhub and contains
+ * characters that the target shell can corrupt. A hook that cannot run lets
+ * the call proceed.
+ */
+export async function refuseRewrittenShellText(
+  event,
+  hook = shellTextHook,
+  { isPowerShell51 } = {},
+) {
+  const command = event?.input?.command;
+  if (!hook || typeof command !== "string") {
+    return undefined;
+  }
+  let payload;
+  if (event.toolName === "bash") {
+    if (!command.includes("teamhub") || !/[$`]/u.test(command)) {
+      return undefined;
+    }
+    payload = { tool_name: "bash", tool_input: { command } };
+  } else if (event.toolName === "powershell") {
+    if (
+      !TEAMHUB_PROGRAM_PATTERN.test(command) ||
+      (!command.includes('"') && !command.includes("<<"))
+    ) {
+      return undefined;
+    }
+    const ps51 =
+      typeof isPowerShell51 === "function"
+        ? Boolean(isPowerShell51())
+        : isWindowsPowerShell51();
+    if (!ps51 && !command.includes("<<")) {
+      return undefined;
+    }
+    payload = {
+      tool_name: "powershell",
+      powershell_51: ps51,
+      tool_input: { command },
+    };
+  } else {
     return undefined;
   }
   const reason = await new Promise((resolve) => {
     const child = execFile(
       hook,
       ["shell-text-hook"],
-      { timeout: 10_000 },
+      { timeout: 10_000, windowsHide: true },
       (error, _stdout, stderr) => {
         resolve(error?.code === 2 ? stderr.trim() : "");
       },
     );
     child.stdin?.on("error", () => {});
-    child.stdin?.end(JSON.stringify({ tool_input: { command } }));
+    child.stdin?.end(JSON.stringify(payload));
   });
   return reason ? { block: true, reason } : undefined;
+}
+
+function stripHereBodies(script, powerShell) {
+  if (powerShell) {
+    return script.replace(
+      /@(['"])[ \t]*\r?\n(?:[\s\S]*?\n)?\1@(?=[ \t]*(?:\r?\n|[;|)&}]|$))/gu,
+      "",
+    );
+  }
+  if (!script.includes("<<")) return script;
+  const lines = script.split(/\r?\n/u);
+  const kept = [];
+  const pending = [];
+  for (const line of lines) {
+    if (pending.length > 0) {
+      const { delim, stripTabs } = pending[0];
+      if ((stripTabs ? line.replace(/^\t+/u, "") : line) === delim) {
+        pending.shift();
+      }
+      continue;
+    }
+    kept.push(line);
+    const matches = line.matchAll(
+      /(?<!<)<<(?!<)(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_][A-Za-z0-9_]*))/gu,
+    );
+    for (const match of matches) {
+      const delim = match[2] ?? match[3] ?? match[4];
+      if (delim) pending.push({ delim, stripTabs: match[1] === "-" });
+    }
+  }
+  return kept.join("\n");
+}
+
+function findTeamHubTail(segment, powerShell) {
+  let rest = segment.trim();
+  let hadParen = false;
+  while (rest.length > 0) {
+    const next = rest.replace(
+      powerShell
+        ? /^(?:(?:\$\(|\()+\s*|\$[A-Za-z_][A-Za-z0-9_:]*\s*=\s*|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)/u
+        : /^(?:(?:\$\(|\()+\s*|[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s"'`]*)\s+)/u,
+      "",
+    );
+    if (next.length >= rest.length) break;
+    if (/^(?:\$\(|\()/u.test(rest)) hadParen = true;
+    rest = next;
+  }
+  let sawCallOp = false;
+  if (powerShell) {
+    const next = rest.replace(/^(?:&\s*|\.\s+)/u, "");
+    if (next.length < rest.length) {
+      sawCallOp = true;
+      rest = next;
+    }
+  }
+  let program;
+  let tail;
+  if (rest.startsWith('"') || rest.startsWith("'")) {
+    if (powerShell && !sawCallOp) return undefined;
+    const close = rest.indexOf(rest[0], 1);
+    if (close < 0) return undefined;
+    program = rest.slice(1, close);
+    tail = rest.slice(close + 1);
+  } else {
+    const match = /^(\S+)([\s\S]*)$/u.exec(rest);
+    if (!match) return undefined;
+    program = match[1];
+    tail = match[2];
+  }
+  const base = win32.basename(program.replace(/[\\/]+$/u, "")).toLowerCase();
+  if (base !== "teamhub" && base !== "teamhub.exe" && base !== "teamhub.cmd") {
+    return undefined;
+  }
+  const trimmedTail = tail.trim();
+  return hadParen ? trimmedTail.replace(/\s*\)+$/u, "") : trimmedTail;
+}
+
+function stripQuotedText(text, powerShell) {
+  return text.replace(
+    powerShell
+      ? /'(?:''|[^'])*'|"(?:`.|""|[^"`])*"/gu
+      : /'[^']*'|"(?:\\.|[^"\\])*"/gu,
+    '""',
+  );
+}
+
+/**
+ * Normalizes a bash or powershell command into a retry signature for the
+ * consecutive-failure loop guard. Help/schema lookups return undefined so
+ * checking flags never counts toward or triggers a block.
+ */
+export function shellFailureSignature(toolName, command) {
+  if (
+    (toolName !== "bash" && toolName !== "powershell") ||
+    typeof command !== "string"
+  ) {
+    return undefined;
+  }
+  let effective = command;
+  if (toolName === "bash" && effective.startsWith(PIPEFAIL_PREFIX)) {
+    effective = effective.slice(PIPEFAIL_PREFIX.length);
+  }
+  const trimmed = effective.trim();
+  if (!trimmed) return undefined;
+  const powerShell = toolName === "powershell";
+  const cleaned = stripHereBodies(effective, powerShell).replace(
+    powerShell ? /`[ \t]*\r?\n/gu : /\\\r?\n/gu,
+    powerShell ? " " : "",
+  );
+  const segments = cleaned
+    .split(/(?:\r?\n|;|&&|\|\||\|&|\||[{}])/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !part.startsWith("#"));
+  let lastTeamHubTail;
+  for (const segment of segments) {
+    const tail = findTeamHubTail(segment, powerShell);
+    if (tail !== undefined) lastTeamHubTail = tail;
+  }
+  if (lastTeamHubTail !== undefined) {
+    const unquotedTail = stripQuotedText(lastTeamHubTail, powerShell).trim();
+    const words = unquotedTail ? unquotedTail.split(/\s+/u) : [];
+    if (
+      words.some(
+        (word) => word === "--help" || word === "-h" || word === "--schema",
+      )
+    ) {
+      return undefined;
+    }
+    const subcommands = [];
+    for (const word of words) {
+      if (!TEAMHUB_SUBCOMMAND_PATTERN.test(word) || subcommands.length >= 2) {
+        break;
+      }
+      subcommands.push(word);
+    }
+    return subcommands.length > 0
+      ? `teamhub ${subcommands.join(" ")}`
+      : "teamhub";
+  }
+  if (
+    segments.length === 1 &&
+    stripQuotedText(segments[0], powerShell)
+      .split(/\s+/u)
+      .some((word) => word === "--help" || word === "--schema")
+  ) {
+    return undefined;
+  }
+  return `${toolName}:${trimmed.replace(/\s+/gu, " ")}`;
+}
+
+const FAILURE_LOOP_WARN_THRESHOLD = 3;
+const FAILURE_LOOP_BLOCK_THRESHOLD = 5;
+
+class FailureLoopTracker {
+  #streakSignature = "";
+  #streakCount = 0;
+
+  reset() {
+    this.#streakSignature = "";
+    this.#streakCount = 0;
+  }
+
+  beforeToolCall(event) {
+    if (event?.toolName !== "bash" && event?.toolName !== "powershell") {
+      return undefined;
+    }
+    const signature = shellFailureSignature(
+      event.toolName,
+      event.input?.command,
+    );
+    if (
+      signature &&
+      signature === this.#streakSignature &&
+      this.#streakCount >= FAILURE_LOOP_BLOCK_THRESHOLD
+    ) {
+      const isTeamHub = signature.startsWith("teamhub");
+      return {
+        block: true,
+        reason: isTeamHub
+          ? `[Linger loop guard] Blocked after ${this.#streakCount} consecutive failures of ${signature}. Stop retrying minor variations: run "${signature} --help" to check file/stdin flags, change approach (for example write input files with the write tool), or stop and explain the blocker to the user.`
+          : `[Linger loop guard] Blocked after ${this.#streakCount} consecutive failures of ${signature}. Do not keep retrying the same failing command; inspect the error, change approach, or stop and explain the blocker to the user.`,
+      };
+    }
+    return undefined;
+  }
+
+  onToolResult(event) {
+    if (event?.isError !== true) {
+      this.#streakSignature = "";
+      this.#streakCount = 0;
+      return undefined;
+    }
+    if (event.toolName !== "bash" && event.toolName !== "powershell") {
+      return undefined;
+    }
+    const signature = shellFailureSignature(
+      event.toolName,
+      event.input?.command,
+    );
+    if (!signature) {
+      return undefined;
+    }
+    if (signature === this.#streakSignature) {
+      this.#streakCount += 1;
+    } else {
+      this.#streakSignature = signature;
+      this.#streakCount = 1;
+    }
+    if (this.#streakCount === FAILURE_LOOP_WARN_THRESHOLD) {
+      const existingContent = Array.isArray(event.content) ? event.content : [];
+      const isTeamHub = signature.startsWith("teamhub");
+      const guidance = isTeamHub
+        ? `Do not keep retrying minor quoting or syntax tweaks; check "${signature} --help" for file/stdin options, change approach, or report the blocker.`
+        : "Do not keep retrying the same failing command; inspect the error, change approach, or report the blocker.";
+      return {
+        content: [
+          ...existingContent,
+          {
+            type: "text",
+            text: `\n\n[Linger loop guard] ${signature} has failed ${this.#streakCount} times in a row. ${guidance}`,
+          },
+        ],
+        ...(event.structuredContent !== undefined
+          ? { structuredContent: event.structuredContent }
+          : {}),
+      };
+    }
+    return undefined;
+  }
+}
+
+export function createFailureLoopTracker() {
+  return new FailureLoopTracker();
 }
 
 const managedMcpExtension = createMcpExtension({
@@ -355,14 +645,24 @@ export async function mountManagedMcp(
 }
 
 // The Daemon loads this extension for every Pi Run to enforce bash pipefail,
-// the POSIX shell text check, permission review, managed MCP servers, and the
-// Windows PowerShell UTF-8 override. The review hook stays on because a
-// resident Pi process may serve a reviewed Run after an unreviewed one. A call
-// the shell text check refuses never reaches review, and a refused call is
+// the shell-text-hook check (POSIX bash and Windows PowerShell), the
+// consecutive shell failure loop guard, permission review, managed MCP
+// servers, and the Windows PowerShell UTF-8 override. The review hook stays on
+// because a resident Pi process may serve a reviewed Run after an unreviewed
+// one. A call a shell guard refuses never reaches review, and a refused call is
 // neither run nor rewritten.
 export default async function managedExtension(pi) {
   registerWindowsPowerShellTool(pi);
+  const failureLoop = createFailureLoopTracker();
+  let cachedPowerShell51;
+  const isPowerShell51 = () => {
+    if (cachedPowerShell51 === undefined) {
+      cachedPowerShell51 = isWindowsPowerShell51();
+    }
+    return cachedPowerShell51;
+  };
   pi.on("before_agent_start", () => {
+    failureLoop.reset();
     if (
       typeof pi.getActiveTools !== "function" ||
       typeof pi.setActiveTools !== "function"
@@ -381,12 +681,16 @@ export default async function managedExtension(pi) {
   });
   pi.on("tool_call", async (event, ctx) => {
     const blocked =
-      (await refuseRewrittenShellText(event)) ??
+      (await refuseRewrittenShellText(event, shellTextHook, {
+        isPowerShell51,
+      })) ??
+      failureLoop.beforeToolCall(event) ??
       (await reviewToolCall(event, ctx.ui, ctx.signal));
     if (blocked) return blocked;
     enablePipefail(event);
     return undefined;
   });
+  pi.on("tool_result", (event) => failureLoop.onToolResult(event));
   if (process.env.LINGER_PI_MANAGED_MCP_CONFIG) {
     await mountManagedMcp(pi, process.env.LINGER_PI_MANAGED_MCP_CONFIG);
   }

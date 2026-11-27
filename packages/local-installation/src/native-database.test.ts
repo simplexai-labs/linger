@@ -313,6 +313,135 @@ describe("prepareNativeDatabase initdb", () => {
       expect(renameRetrying).toHaveBeenCalled();
     });
   });
+
+  describe("warm single-subprocess probe on an initialized cluster", () => {
+    let root: string;
+    const backup = "simplex-backup-warm";
+    beforeEach(async () => {
+      root = await mkdtemp(path.join(tmpdir(), "native-database-warm-"));
+      await mkdir(path.join(root, "native/postgres-data"), { recursive: true });
+      await writeFile(
+        path.join(root, "native/postgres-data/PG_VERSION"),
+        "17\n",
+      );
+      await writeFile(
+        path.join(root, "native/postgres-data/postmaster.opts"),
+        "",
+      );
+    });
+    afterEach(() => rm(root, { recursive: true, force: true }));
+    const prepare = (signal = options.signal) =>
+      prepareNativeDatabase({
+        ...options,
+        signal,
+        instance: { ...instance, root },
+      });
+
+    it.each(["linger", "empty"] as const)(
+      "skips pg_isready, createdb, and preLingerSchema when the single psql probe returns %s",
+      async (token) => {
+        run.mockResolvedValueOnce(ok(`${token}\n`));
+        expect(await prepare()).toEqual({});
+        expect(run).toHaveBeenCalledTimes(1);
+        const [command, args, callOptions] = run.mock.calls[0]!;
+        expect(path.basename(command)).toBe("psql");
+        expect(args).toEqual(
+          expect.arrayContaining([
+            "--dbname",
+            "simplexai",
+            "--tuples-only",
+            "--no-align",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--no-psqlrc",
+          ]),
+        );
+        expect(callOptions?.input).toContain("\\gset");
+        expect(callOptions?.input).toContain("\\if :has_accounts");
+        expect(setAsideLegacyData).not.toHaveBeenCalled();
+        expect(stopNativeProcess).not.toHaveBeenCalled();
+      },
+    );
+
+    it("sets aside legacy data directly when the single psql probe returns legacy", async () => {
+      vi.mocked(setAsideLegacyData).mockImplementationOnce(async () => {
+        await rm(path.join(root, "native/postgres-data"), {
+          recursive: true,
+          force: true,
+        });
+        return path.join(root, backup);
+      });
+      run.mockImplementation(async (command, args) => {
+        if (path.basename(command) === "psql" && args.includes("--no-psqlrc"))
+          return ok("legacy\n");
+        if (
+          path.basename(command) === "psql" &&
+          args.some((arg) => arg.includes("pg_database"))
+        )
+          return ok("1\n");
+        return ok();
+      });
+      expect(await prepare()).toEqual({
+        legacyBackup: path.join(root, backup),
+      });
+      expect(stopNativeProcess).toHaveBeenCalledWith(root, "postgres");
+      expect(setAsideLegacyData).toHaveBeenCalledWith(root, options.signal);
+      expect(startNativeProcess).toHaveBeenCalledTimes(2);
+      // The first open() resolved legacy without running pg_isready; only the
+      // fresh cluster open() after setAsideLegacyData uses initdb + pg_isready.
+      const programs = run.mock.calls.map(([cmd]) => path.basename(cmd));
+      expect(programs).toEqual(["psql", "initdb", "pg_isready", "psql"]);
+    });
+
+    it("falls back to pg_isready and cold checks when the warm psql probe fails, throws, or prints unexpected output", async () => {
+      for (const failure of [
+        () => Promise.resolve({ code: 2, stdout: "", stderr: "starting up" }),
+        () => Promise.reject(new Error("Command stdin unavailable")),
+        () => Promise.resolve(ok("unexpected\n")),
+      ]) {
+        vi.clearAllMocks();
+        run.mockImplementationOnce(failure);
+        run.mockImplementation(async (command, args) => {
+          if (path.basename(command) === "pg_isready") return ok();
+          if (
+            path.basename(command) === "psql" &&
+            args.some((arg) => arg.includes("pg_database"))
+          )
+            return ok("1\n");
+          if (
+            path.basename(command) === "psql" &&
+            args.some((arg) => arg.includes("to_regclass"))
+          )
+            return ok("t|t\n");
+          if (
+            path.basename(command) === "psql" &&
+            args.some((arg) => arg.includes("goose_db_version"))
+          )
+            return ok("t\n");
+          return ok();
+        });
+        expect(await prepare()).toEqual({});
+        const programs = run.mock.calls.map(([cmd]) => path.basename(cmd));
+        expect(programs).toEqual([
+          "psql",
+          "pg_isready",
+          "psql",
+          "psql",
+          "psql",
+        ]);
+      }
+    });
+
+    it("propagates abort instead of falling back when cancelled during the warm probe", async () => {
+      const controller = new AbortController();
+      run.mockImplementationOnce(async () => {
+        controller.abort();
+        throw new DOMException("Interrupted", "AbortError");
+      });
+      await expect(prepare(controller.signal)).rejects.toThrow("Interrupted");
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe("prepareNativeDatabase with an existing TeamHub schema", () => {

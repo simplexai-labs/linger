@@ -909,3 +909,16 @@ func TestFileUploadReportsExtensionWithoutFileAccess(t *testing.T) {
 		t.Fatal("the refused upload started a Playwright session")
 	}
 }
+
+func TestToolGuidesCoverEverydayChromeConnection(t *testing.T) {
+	for name, guide := range map[string]string{"macOS": MacToolGuide, "Windows": WindowsToolGuide} {
+		for _, want := range []string{"teamhub browser connect", "BROWSER_CONNECTION_REQUIRED", "BROWSER_CONNECTION_INVALID"} {
+			if !strings.Contains(guide, want) {
+				t.Fatalf("%s ToolGuide missing %q", name, want)
+			}
+		}
+	}
+	if strings.Contains(NativeLinuxToolGuide, "teamhub browser connect") {
+		t.Fatal("Linux ToolGuide should not mention teamhub browser connect")
+	}
+}

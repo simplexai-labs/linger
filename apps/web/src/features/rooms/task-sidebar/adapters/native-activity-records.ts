@@ -4,7 +4,8 @@ import type { Translate } from "@/i18n/language";
 import { runPanelMessages as m } from "./run-panel.messages";
 
 // Reads native Runtime history records of every Runtime's shape: Codex
-// response items, Claude Code transcript lines and Pi session messages.
+// response items, Claude Code transcript lines, Pi session messages, and
+// Antigravity transcript entries.
 
 type HistoryCategory = TeamHubMessageActivityRecord["category"];
 
@@ -15,10 +16,11 @@ export function nativeCommand(record: TeamHubMessageActivityRecord) {
   const input =
     asObject(block?.input) ??
     asObject(block?.arguments) ??
+    asObject(payload?.args) ??
     parseObject(payload?.arguments) ??
     asObject(payload?.action) ??
     payload;
-  const command = input?.cmd ?? input?.command;
+  const command = input?.CommandLine ?? input?.cmd ?? input?.command;
   if (typeof command === "string") return command;
   if (Array.isArray(command)) return command.filter(isString).join(" ");
   return undefined;
@@ -90,10 +92,15 @@ function contentBlockCategory(type: unknown): HistoryCategory | undefined {
 export function contentBlockRecords(
   record: TeamHubMessageActivityRecord,
 ): TeamHubMessageActivityRecord[] {
+  const native = asObject(record.native_record);
+  if (native?.type === "PLANNER_RESPONSE") {
+    const expanded = antigravityPlannerRecords(record, native);
+    if (expanded.length > 0) return expanded;
+    return [record];
+  }
   const blocks = messageContentBlocks(record);
   if (!blocks) return [record];
-  const native = asObject(record.native_record)!;
-  const message = asObject(native.message)!;
+  const message = asObject(native!.message)!;
   return blocks.flatMap((block) => {
     const category = contentBlockCategory(block.type);
     if (!category) return [];
@@ -103,10 +110,87 @@ export function contentBlockRecords(
         category,
         tool_call_id: stringValue(block.id ?? block.tool_use_id),
         tool_name: stringValue(block.name),
-        native_record: { ...native, message: { ...message, content: [block] } },
+        native_record: {
+          ...native!,
+          message: { ...message, content: [block] },
+        },
       },
     ];
   });
+}
+
+function antigravityPlannerRecords(
+  record: TeamHubMessageActivityRecord,
+  native: JsonObject,
+): TeamHubMessageActivityRecord[] {
+  const { tool_calls: rawToolCalls, ...base } = native;
+  const result: TeamHubMessageActivityRecord[] = [];
+  if (typeof native.content === "string" && native.content.trim().length > 0) {
+    result.push({
+      ...record,
+      category: "message",
+      role: "assistant",
+      tool_call_id: undefined,
+      tool_name: undefined,
+      native_record: base,
+    });
+  }
+  if (Array.isArray(rawToolCalls)) {
+    const { content: _content, ...toolBase } = base;
+    for (let toolIndex = 0; toolIndex < rawToolCalls.length; toolIndex += 1) {
+      const call = asObject(rawToolCalls[toolIndex]);
+      if (!call) continue;
+      const name = stringValue(call.name);
+      const rawArgs = asObject(call.args);
+      const args = rawArgs ? decodeAntigravityArgs(rawArgs) : undefined;
+      result.push({
+        ...record,
+        category: "tool_call",
+        role: "assistant",
+        tool_call_id:
+          stringValue(call.id) ??
+          `antigravity-tool-${record.ordinal}-${toolIndex}`,
+        tool_name: name,
+        native_record: {
+          ...toolBase,
+          ...(name !== undefined ? { name } : {}),
+          ...(args !== undefined ? { args } : {}),
+        },
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Antigravity transcripts serialize string values inside
+ * `PLANNER_RESPONSE.tool_calls[*].args` as JSON string literals. Unwrap those
+ * while leaving plain strings and non-string values unchanged.
+ */
+function decodeAntigravityArgs(args: JsonObject): JsonObject {
+  const decoded: JsonObject = {};
+  for (const [key, value] of Object.entries(args)) {
+    decoded[key] = decodeAntigravityArgValue(value);
+  }
+  return decoded;
+}
+
+function decodeAntigravityArgValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (
+    trimmed.length < 2 ||
+    !trimmed.startsWith('"') ||
+    !trimmed.endsWith('"')
+  ) {
+    return value;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === "string" ? parsed : value;
+  } catch {
+    return value;
+  }
 }
 
 export function reasoningText(

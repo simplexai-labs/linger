@@ -221,7 +221,9 @@ func StopTask(ctx context.Context, tx pgx.Tx, queries *store.Queries, tenantID, 
 
 // SendSystemInput wakes a delegated Task's AlterEgo with a system notice,
 // such as the result of one of its approval cards, through the same input
-// path as a Meta message. The Agent must be the Task's participant.
+// path as a Meta message. A canceled Task ignores system notices
+// (Delivery: "ignored") instead of restarting. The Agent must be the Task's
+// participant.
 func (s *Service) SendSystemInput(ctx context.Context, agentManagementID, taskID, body string) (ChangeResult, error) {
 	if s == nil || s.pool == nil {
 		return ChangeResult{}, ErrUnavailable

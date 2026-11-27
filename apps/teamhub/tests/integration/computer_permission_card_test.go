@@ -14,9 +14,10 @@ import (
 // the test sets; every action records what the owner's card asked for.
 type permissionLocalComputers struct {
 	recordingLocalComputers
-	mu      sync.Mutex
-	state   string
-	actions []roomagent.LocalComputerPermissionCommand
+	mu            sync.Mutex
+	embeddedReads int
+	state         string
+	actions       []roomagent.LocalComputerPermissionCommand
 }
 
 func (c *permissionLocalComputers) setState(state string) {
@@ -34,10 +35,15 @@ func (c *permissionLocalComputers) LocalComputerPermissions(_ context.Context, c
 	entry := func(id, state string) roomagent.LocalComputerPermissionEntry {
 		return roomagent.LocalComputerPermissionEntry{ID: id, State: state, Prompt: "available"}
 	}
-	return roomagent.LocalComputerPermissionStatus{Platform: "darwin", Host: "desktop", Subjects: []roomagent.LocalComputerPermissionSubject{
+	status := roomagent.LocalComputerPermissionStatus{Platform: "darwin", Host: "desktop", Subjects: []roomagent.LocalComputerPermissionSubject{
 		{Subject: "linger", Permissions: []roomagent.LocalComputerPermissionEntry{entry("screen_recording", c.state), entry("accessibility", "granted")}},
 		{Subject: "computer_use", Permissions: []roomagent.LocalComputerPermissionEntry{entry("screen_recording", "denied"), entry("accessibility", "denied")}},
-	}}, nil
+	}}
+	if c.embeddedReads > 0 {
+		c.embeddedReads--
+		status.Subjects = status.Subjects[:1]
+	}
+	return status, nil
 }
 
 // An Agent missing Screen Recording posts one computer_permission card, reused
@@ -158,4 +164,38 @@ func assertCardStatus(t *testing.T, env *testEnv, decisionID, want string) {
 	if status != want {
 		t.Fatalf("card %s status=%s want %s", decisionID, status, want)
 	}
+}
+
+func TestComputerPermissionCardUsesOwnerAtCreation(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	computers := &permissionLocalComputers{embeddedReads: 1, state: "denied"}
+	env, _, issued, roomID := newAgentCLIIdentity(t, withLocalComputers(computers))
+	request := func(subject string) string {
+		t.Helper()
+		code, body := postAgentInRoom(t, env, issued.AccessToken, roomID, "/api/agent/v1/computer/permissions/request", map[string]any{"subject": subject, "permissions": []string{"screen_recording"}})
+		var result struct {
+			InteractionID string `json:"interaction_id"`
+			Subject       string
+		}
+		decode(t, body, &result)
+		if code != http.StatusOK || result.InteractionID == "" || result.Subject != "linger" {
+			t.Fatalf("request %s: %d %s", subject, code, body)
+		}
+		return result.InteractionID
+	}
+	// The Computer switches to independent mode during the post-creation read.
+	card := request("computer_use")
+	if request("linger") != card {
+		t.Fatal("requests for the same actual subject should reuse the pending card")
+	}
+	var subject string
+	if err := env.pool.QueryRow(t.Context(), `SELECT view->>'subject' FROM decisions WHERE id=$1`, card).Scan(&subject); err != nil || subject != "linger" {
+		t.Fatalf("card owner = %q, err = %v", subject, err)
+	}
+	computers.setState("granted")
+	code, body := postAgentInRoom(t, env, issued.AccessToken, roomID, "/api/agent/v1/computer/permissions/status", map[string]any{})
+	if code != http.StatusOK {
+		t.Fatalf("status: %d %s", code, body)
+	}
+	assertCardStatus(t, env, card, "answered")
 }

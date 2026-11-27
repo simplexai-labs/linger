@@ -22,8 +22,8 @@ func createNonWhitelistedWindowsTemp(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Grant LOCAL SERVICE (S-1-5-19, non-whitelisted ancestor SID) full access
-	// so privatefs ancestor validation rejects any path under badTemp.
+	// Grant LOCAL SERVICE (S-1-5-19) full access so badTemp is broadly
+	// accessible and fails target-level owner-only checks.
 	sd, err := windows.SecurityDescriptorFromString("O:" + sid.String() + "D:P(A;OICI;FA;;;" + sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-19)")
 	if err != nil {
 		t.Fatal(err)
@@ -35,8 +35,8 @@ func createNonWhitelistedWindowsTemp(t *testing.T) string {
 	if err := windows.SetNamedSecurityInfo(badTemp, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := privatefs.EnsureDir(filepath.Join(badTemp, "probe")); err == nil || !strings.Contains(err.Error(), "S-1-5-19") {
-		t.Fatalf("expected non-whitelisted TEMP ancestor error for S-1-5-19, got %v", err)
+	if err := privatefs.CheckPath(badTemp, "directory", true); err == nil || !strings.Contains(err.Error(), "S-1-5-19") {
+		t.Fatalf("expected target-level private check to reject S-1-5-19 on badTemp, got %v", err)
 	}
 	return badTemp
 }
@@ -73,6 +73,9 @@ func TestWindowsPrivateTempDirsAvoidSystemTempWithNonWhitelistedSID(t *testing.T
 		if err := privatefs.CheckPath(filepath.Join(hookDir, ".agents", "hooks.json"), "file", true); err != nil {
 			t.Fatalf("hooks.json ACL: %v", err)
 		}
+		if entries, readErr := os.ReadDir(badTemp); readErr != nil || len(entries) != 0 {
+			t.Fatalf("badTemp entries during newAntigravityHookEndpoint = %v, err = %v", entries, readErr)
+		}
 		if err := ep.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -98,9 +101,16 @@ func TestWindowsPrivateTempDirsAvoidSystemTempWithNonWhitelistedSID(t *testing.T
 		if err := privatefs.CheckPath(path, "file", true); err != nil {
 			t.Fatalf("mcp-config.json ACL: %v", err)
 		}
+		if entries, readErr := os.ReadDir(badTemp); readErr != nil || len(entries) != 0 {
+			t.Fatalf("badTemp entries during claudeWriteMCPConfig = %v, err = %v", entries, readErr)
+		}
 		cleanup()
 		if _, err := os.Stat(opTempDir); !os.IsNotExist(err) {
 			t.Fatalf("mcp temp dir survived cleanup: %v", err)
 		}
 	})
+
+	if entries, readErr := os.ReadDir(badTemp); readErr != nil || len(entries) != 0 {
+		t.Fatalf("badTemp entries after subtests = %v, err = %v", entries, readErr)
+	}
 }

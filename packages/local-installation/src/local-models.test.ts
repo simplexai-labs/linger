@@ -18,6 +18,7 @@ import {
   prepareLocalModels,
   localModelsEnvironment,
   reasonCodeList,
+  restoreByokSource,
   restoreLocalModels,
   stackProgress,
   localModelsLockFile,
@@ -28,7 +29,9 @@ import { writeSetupChoice } from "./setup-selection.js";
 import { runProcess } from "./process.js";
 import {
   localmodelsStateDirectory,
+  readResumeLocalModels,
   runLocalmodels,
+  writeResumeLocalModels,
 } from "./localmodels-tool.js";
 import { expectPrivate } from "./test-support/private.js";
 import { INSTANCE_BUSY, type Instance } from "./instance.js";
@@ -2442,4 +2445,413 @@ test("extracts degraded local model details with valid reason codes only", () =>
     code: "LOCAL_MODELS_RECOVERY_REQUIRED",
     message: "Invalid upstream local model binding.",
   });
+});
+
+test.each(["subscription", "byok"] as const)(
+  "restores multiple previously loaded library models in %s mode without switching model-source.json",
+  async (mode) => {
+    const f = await stoppedLocalSetup(mode);
+    await writeResumeLocalModels(f.home, [
+      "spark-x2.6-4b:Q4_K_M",
+      "qwen3.8-27b:UD-Q4_K_M",
+    ]);
+    const restored: string[][] = [];
+    f.call.mockImplementation(async (...a) => {
+      if (a[1][0] === "library" && a[1][1] === "status") {
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            schema: "localmodels.library-status/v1",
+            models: [
+              { id: "spark-x2.6-4b:Q4_K_M", state: "idle" },
+              { id: "qwen3.8-27b:UD-Q4_K_M", state: "idle" },
+            ],
+          }),
+          stderr: "",
+        };
+      }
+      if (a[1][0] === "library" && a[1][1] === "load") {
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      return { code: 0, stdout: "{}", stderr: "" };
+    });
+    expect(
+      await restoreLocalModels(
+        f.instance,
+        {
+          ...f.options,
+          onRestored: (models) => restored.push(models),
+        },
+        { localmodels: f.call },
+      ),
+    ).toBeUndefined();
+    // Never touches plan binding or overwrites model-source.json to local.
+    expect(commands(f)).toEqual([
+      "library status",
+      "library load",
+      "library load",
+    ]);
+    expect(
+      f.call.mock.calls
+        .filter(([, args]) => args[0] === "library" && args[1] === "load")
+        .map(([, args]) => args[2]),
+    ).toEqual(["spark-x2.6-4b:Q4_K_M", "qwen3.8-27b:UD-Q4_K_M"]);
+    expect(restored).toEqual([
+      ["spark-x2.6-4b:Q4_K_M", "qwen3.8-27b:UD-Q4_K_M"],
+    ]);
+    expect(await readResumeLocalModels(f.home)).toBeUndefined();
+  },
+);
+
+test("recovers crashed loaded models from on-disk library records after a reboot in subscription mode", async () => {
+  const f = await fixture();
+  await writeSetupChoice(f.instance, "claude");
+  const state = localmodelsStateDirectory(f.home);
+  const modelsDir = path.join(state, "library", "models");
+  await mkdir(modelsDir, { recursive: true });
+  await writeFile(
+    path.join(state, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "subscription",
+      runtime: "claude",
+      runtime_model: "",
+      model_label: null,
+      gateway_url: null,
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    path.join(modelsDir, "spark.json"),
+    JSON.stringify({ id: "spark-x2.6-4b:Q4_K_M", state: "loaded" }),
+    { mode: 0o644 },
+  );
+  const restored: string[][] = [];
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            {
+              id: "spark-x2.6-4b:Q4_K_M",
+              state: "failed",
+              error: {
+                code: "HEALTH_CHECK_FAILED",
+                detail: "the model server does not answer",
+              },
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return { code: 0, stdout: "{}", stderr: "" };
+  });
+  expect(
+    await restoreLocalModels(
+      f.instance,
+      { ...f.options, onRestored: (models) => restored.push(models) },
+      { localmodels: f.call },
+    ),
+  ).toBeUndefined();
+  expect(commands(f)).toEqual([
+    "library status",
+    "library unload",
+    "library load",
+  ]);
+  expect(restored).toEqual([["spark-x2.6-4b:Q4_K_M"]]);
+});
+
+test("restores multiple models in local mode, preserves savedRuntimeModel as primary, and ignores unrelated loading models", async () => {
+  const f = await stoppedLocalSetup("local");
+  Object.assign(f.binding, f.ready);
+  const primaryPiModel = "localmodels-library/model-b/Model-B";
+  await writeFile(
+    path.join(f.home, "runtime/localmodels/state/model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: primaryPiModel,
+      model_label: "Model B",
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  await writeResumeLocalModels(f.home, ["model-a:Q4_K_M", "model-b:Q8_0"]);
+  const original = f.call.getMockImplementation()!;
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            {
+              id: "model-a:Q4_K_M",
+              state: "idle",
+              pi_model: "localmodels-library/model-a/Model-A",
+            },
+            {
+              id: "model-b:Q8_0",
+              state: "idle",
+              pi_model: primaryPiModel,
+            },
+            { id: "model-c:Q4_K_M", state: "loading" },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (a[1][0] === "library" && a[1][1] === "load") {
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (a[1][0] === "source" && a[1][1] === "apply") {
+      return { code: 0, stdout: "{}", stderr: "" };
+    }
+    return original(...a);
+  });
+  const restored: string[][] = [];
+  expect(
+    await restoreLocalModels(
+      f.instance,
+      { ...f.options, onRestored: (models) => restored.push(models) },
+      { localmodels: f.call },
+    ),
+  ).toBeUndefined();
+  expect(commands(f)).toEqual([
+    "setup binding",
+    "library status",
+    "library load",
+    "library load",
+    "source apply",
+  ]);
+  const applyArgs = f.call.mock.calls.find(
+    ([, args]) => args[0] === "source" && args[1] === "apply",
+  )?.[1];
+  expect(applyArgs).toContain("--model");
+  expect(applyArgs).toContain("model-b:Q8_0");
+  expect(restored).toEqual([["model-a:Q4_K_M", "model-b:Q8_0"]]);
+  expect(await readResumeLocalModels(f.home)).toBeUndefined();
+});
+
+test("respects an explicit empty resume record from an intentional unload without blocking stack recovery", async () => {
+  // With a saved Quick Install plan stopped at quit, `stack up` still brings
+  // the stack and gateway back up, while `models: []` prevents reloading the
+  // intentionally unloaded library model.
+  const withPlan = await stoppedLocalSetup("local");
+  await writeFile(
+    path.join(withPlan.home, "runtime/localmodels/state/model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: "localmodels-library/model-a/Model-A",
+      model_label: null,
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  await writeResumeLocalModels(withPlan.home, []);
+  expect(
+    await restoreLocalModels(withPlan.instance, withPlan.options, {
+      localmodels: withPlan.call,
+    }),
+  ).toBeUndefined();
+  expect(commands(withPlan)).toContain("stack up");
+  expect(commands(withPlan)).not.toContain("library load");
+  expect(withPlan.call.mock.calls.at(-1)![1]).not.toContain("--model");
+
+  // Without a saved stack plan (library-only local mode), an explicit empty
+  // resume record avoids invoking localmodels altogether.
+  const withoutPlan = await fixture();
+  await writeSetupChoice(withoutPlan.instance, "claude");
+  const state = localmodelsStateDirectory(withoutPlan.home);
+  await mkdir(state, { recursive: true });
+  await writeFile(
+    path.join(state, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "local",
+      runtime: "pi",
+      runtime_model: "localmodels-library/model-a/Model-A",
+      model_label: null,
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  await writeResumeLocalModels(withoutPlan.home, []);
+  expect(
+    await restoreLocalModels(withoutPlan.instance, withoutPlan.options, {
+      localmodels: withoutPlan.call,
+    }),
+  ).toBeUndefined();
+  expect(withoutPlan.call).not.toHaveBeenCalled();
+  expect(await readResumeLocalModels(withoutPlan.home)).toEqual([]);
+});
+
+test("snapshots on-disk loaded library models in restoreByokSource before BYOK source apply unloads them", async () => {
+  const f = await fixture();
+  await writeSetupChoice(f.instance, "claude");
+  const state = localmodelsStateDirectory(f.home);
+  const modelsDir = path.join(state, "library", "models");
+  await mkdir(modelsDir, { recursive: true });
+  await writeFile(
+    path.join(state, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "byok",
+      runtime: "pi",
+      runtime_model: "localmodels-byok/my-model",
+      model_label: "my-model",
+      gateway_url: "http://127.0.0.1:18480",
+      environment: {},
+    }),
+    { mode: 0o600 },
+  );
+  const recordFile = path.join(modelsDir, "spark.json");
+  await writeFile(
+    recordFile,
+    JSON.stringify({ id: "spark-x2.6-4b:Q4_K_M", state: "loaded" }),
+    { mode: 0o644 },
+  );
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "source" && a[1][1] === "apply") {
+      // Simulate `localmodels source apply --mode byok` unloading loaded models
+      // and marking their on-disk library record idle.
+      await writeFile(
+        recordFile,
+        JSON.stringify({ id: "spark-x2.6-4b:Q4_K_M", state: "idle" }),
+        { mode: 0o644 },
+      );
+      return { code: 0, stdout: "{}", stderr: "" };
+    }
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [{ id: "spark-x2.6-4b:Q4_K_M", state: "idle" }],
+        }),
+        stderr: "",
+      };
+    }
+    return { code: 0, stdout: "{}", stderr: "" };
+  });
+
+  const byokFailure = await restoreByokSource(f.home, f.options, {
+    localmodels: f.call,
+    fetch: async () => {
+      throw new Error("connection refused");
+    },
+  });
+  expect(byokFailure).toBeUndefined();
+  expect(await readResumeLocalModels(f.home)).toEqual(["spark-x2.6-4b:Q4_K_M"]);
+
+  const restored: string[][] = [];
+  expect(
+    await restoreLocalModels(
+      f.instance,
+      { ...f.options, onRestored: (models) => restored.push(models) },
+      { localmodels: f.call },
+    ),
+  ).toBeUndefined();
+  expect(commands(f)).toEqual([
+    "source apply",
+    "library status",
+    "library load",
+  ]);
+  expect(restored).toEqual([["spark-x2.6-4b:Q4_K_M"]]);
+  expect(await readResumeLocalModels(f.home)).toBeUndefined();
+});
+
+test("continues restoring remaining models after a partial failure and preserves pending models on abort", async () => {
+  const f = await stoppedLocalSetup("subscription");
+  await writeResumeLocalModels(f.home, [
+    "model-fail:Q4_K_M",
+    "model-ok:Q4_K_M",
+  ]);
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            { id: "model-fail:Q4_K_M", state: "idle" },
+            { id: "model-ok:Q4_K_M", state: "idle" },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (a[1][0] === "library" && a[1][1] === "load") {
+      if (a[1][2] === "model-fail:Q4_K_M") {
+        return {
+          code: 1,
+          stdout: JSON.stringify({
+            event: "error",
+            code: "LOAD_NO_ROOM",
+            detail: "Not enough memory.",
+          }),
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    return { code: 0, stdout: "{}", stderr: "" };
+  });
+  const restored: string[][] = [];
+  const outcome = await restoreLocalModels(
+    f.instance,
+    { ...f.options, onRestored: (models) => restored.push(models) },
+    { localmodels: f.call },
+  );
+  expect(outcome).toMatchObject({
+    code: 1,
+    state: "failed",
+    details: { code: "LOAD_NO_ROOM" },
+  });
+  expect(restored).toEqual([["model-ok:Q4_K_M"]]);
+  expect(await readResumeLocalModels(f.home)).toBeUndefined();
+
+  // Aborting mid-restore retains unloaded models in resume-models.json.
+  const controller = new AbortController();
+  await writeResumeLocalModels(f.home, ["model-1:Q4_K_M", "model-2:Q4_K_M"]);
+  f.call.mockImplementation(async (...a) => {
+    if (a[1][0] === "library" && a[1][1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            { id: "model-1:Q4_K_M", state: "idle" },
+            { id: "model-2:Q4_K_M", state: "idle" },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (a[1][0] === "library" && a[1][1] === "load") {
+      if (a[1][2] === "model-1:Q4_K_M")
+        return { code: 0, stdout: "", stderr: "" };
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    }
+    return { code: 0, stdout: "{}", stderr: "" };
+  });
+  await expect(
+    restoreLocalModels(
+      f.instance,
+      { ...f.options, signal: controller.signal },
+      { localmodels: f.call },
+    ),
+  ).rejects.toThrow();
+  expect(await readResumeLocalModels(f.home)).toEqual(["model-2:Q4_K_M"]);
 });

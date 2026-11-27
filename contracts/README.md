@@ -119,17 +119,23 @@ Progress and outcomes travel back only as snapshots:
    features); otherwise the Daemon strips it. `[]` means localmodels found no
    closeable app, while an absent field means not reported.
    `service_features` also declares `local_model_unavailable`,
-   `model_gateway_unavailable`, and `dynamic_reasoning_efforts` to every
-   Computer that receives the field: a Daemon ignores a feature it does not
-   know, one that knows `local_model_unavailable` reports a Pi Run whose local
-   model it could not load with that Run failure code instead of
-   `model_unavailable`, one that knows `model_gateway_unavailable` reports a
-   Run whose local model gateway it could not start or reach with
-   `model_gateway_unavailable` instead of `execution_failed`, and one that
-   knows `dynamic_reasoning_efforts` publishes model-advertised reasoning
-   efforts beyond the legacy 7-value set in `runner.runtime_diagnostics` (and
-   `ModelSourceStatus`) after filtering `runner.hello` to legacy values for
-   older Agent Services.
+   `model_gateway_unavailable`, `dynamic_reasoning_efforts`, and
+   `antigravity_usage_provider` to every Computer that receives the field: a
+   Daemon ignores a feature it does not know, one that knows
+   `local_model_unavailable` reports a Pi Run whose local model it could not
+   load with that Run failure code instead of `model_unavailable`, one that
+   knows `model_gateway_unavailable` reports a Run whose local model gateway it
+   could not start or reach with `model_gateway_unavailable` instead of
+   `execution_failed`, one that knows `dynamic_reasoning_efforts` publishes
+   model-advertised reasoning efforts beyond the legacy 7-value set in
+   `runner.runtime_diagnostics` (and `ModelSourceStatus`) after filtering
+   `runner.hello` to legacy values for older Agent Services, and one that knows
+   `antigravity_usage_provider` reports Antigravity `RunUsage` entries with
+   `provider: "antigravity"` (downgrading new and retained/replayed entries to
+   `"unknown"` when connected to an older Agent Service that does not advertise
+   it). During rolling deploys, roll out TeamHub accepting `"antigravity"`
+   before the Agent Service advertises `antigravity_usage_provider`, so older
+   TeamHub instances do not skip `"antigravity"` usage entries.
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last
@@ -203,16 +209,17 @@ Agent Service before finishing a turn:
    `kind: "runtime_hook"` and `hook: "stop"`, and waits for an
    `operation.input` `runtime_response` (`{ action: "allow" | "block", reason? }`).
    On `block`, the Runtime continues the turn with that reason (Claude Code and
-   Codex via their native `Stop` hooks; Pi via a follow-up `prompt` RPC on the
-   bound process). Timeout, disconnect, or an invalid decision fails open to
-   `allow`.
+   Codex via their native `Stop` hooks; Antigravity via its managed `Stop` hook
+   returning `{"decision":"continue","reason":...}`; Pi via a follow-up `prompt`
+   RPC on the bound process). Timeout, disconnect, or an invalid decision fails
+   open to `allow`.
 
 ## Model invocation outcomes
 
 `executed` `model_invoke` reports `context_too_long` (prompt exceeded the
 model's context window) and `unsupported` (the target Runtime does not support
-the requested mode, such as Pi workspace calls) only after `runner.welcome`'s
-`service_features` names `model_invoke_outcomes`
+the requested mode, such as Pi or Antigravity workspace calls) only after
+`runner.welcome`'s `service_features` names `model_invoke_outcomes`
 (`FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION`, `0.60.0`); otherwise the
 Daemon downgrades them to `failed` and `runtime_unavailable` for older Agent
 Services.
@@ -230,3 +237,13 @@ or later (`FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION`) and
 (`FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION`), because older
 Computers reject those `SessionCompact.runtime_type` values and close the
 connection.
+
+## Antigravity capability gates (`0.67.0`)
+
+Agent Service sends `execute` `model_invoke` for Antigravity only to Computer
+`0.67.0` or later (`FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION`), and
+treats detached Antigravity native history as readable only on Computer `0.67.0`
+or later (`FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION`). `runner.welcome`'s
+`service_features` advertises `antigravity_history` so a `0.67.0`+ Daemon emits
+`antigravity_transcript` history results only to an Agent Service that accepts
+that source enum value.

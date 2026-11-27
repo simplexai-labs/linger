@@ -47,6 +47,17 @@ func runFixture(name string, args []string) int {
 		code, _ := strconv.Atoi(os.Getenv("FIXTURE_EXIT"))
 		return code
 	case "block":
+		if pidFile := os.Getenv("FIXTURE_PID_FILE"); pidFile != "" {
+			tmp := pidFile + ".tmp"
+			if err := os.WriteFile(tmp, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "write pid file: %v\n", err)
+				return 1
+			}
+			if err := os.Rename(tmp, pidFile); err != nil {
+				fmt.Fprintf(os.Stderr, "rename pid file: %v\n", err)
+				return 1
+			}
+		}
 		time.Sleep(time.Minute)
 		return 0
 	case "claude-catalog":

@@ -94,8 +94,10 @@ func (command BrowserConnectionDecision) draft() (decisionDraft, error) {
 	if err != nil || !browserConnectionComputerPattern.MatchString(command.ComputerID) {
 		return decisionDraft{}, ErrInvalid
 	}
+	// Match computer_permission and connection_auth so an undecided card stops
+	// waiting after 30 minutes and wakes the requester.
 	return decisionDraft{kind: DecisionKindBrowserConnection, text: prompt, request: struct{}{},
-		view: connectionView{Prompt: prompt, ComputerID: command.ComputerID}, connection: true}, nil
+		view: connectionView{Prompt: prompt, ComputerID: command.ComputerID}, lifetime: connectionAuthorizationTTL, connection: true}, nil
 }
 
 // ConnectionAuthorizer keeps credential and grant policy in External Source.
@@ -583,9 +585,23 @@ func providerKeyNoticeText(decisionID string, view connectionView, status string
 }
 
 // browserConnectionNoticeText tells the waiting Agent what the owner did.
-func browserConnectionNoticeText(decisionID, status string) string {
-	if status == "answered" {
-		return "Human interaction " + decisionID + " resolved: the user connected their everyday Chrome. Continue the browser task now."
+func browserConnectionNoticeText(decisionID, status string, alterEgo bool) string {
+	if alterEgo {
+		switch status {
+		case "answered":
+			return "The Sponsor connected their everyday Chrome. Continue the browser task now."
+		case "expired":
+			return "The everyday Chrome connection request expired before the Sponsor connected it. Do not retry browser tools for this task; continue without it and say what you could not finish in your final reply."
+		default:
+			return "The Sponsor declined to connect their everyday Chrome. Do not retry browser tools for this task; continue without it and say what you could not finish in your final reply."
+		}
 	}
-	return "Human interaction " + decisionID + " resolved: the user declined to connect their everyday Chrome. Do not retry browser tools for this task; tell them what you could not finish."
+	switch status {
+	case "answered":
+		return "Human interaction " + decisionID + " resolved: the user connected their everyday Chrome. Continue the browser task now."
+	case "expired":
+		return "Human interaction " + decisionID + " expired: the user did not connect their everyday Chrome. Do not retry browser tools for this task; tell them what you could not finish."
+	default:
+		return "Human interaction " + decisionID + " resolved: the user declined to connect their everyday Chrome. Do not retry browser tools for this task; tell them what you could not finish."
+	}
 }

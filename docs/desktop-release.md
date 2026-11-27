@@ -41,6 +41,10 @@ scripts/ci/desktop-release.sh publish desktop-v0.16.36 --notes-file notes.md
   `scripts/ci/desktop-release.sh publish` validates the uploaded assets,
   attaches the release notes, marks it as the latest release, and cleans up
   matching `desktop-v<version>-rc.*` prereleases and tags.
+- While the desktop app is in Beta, GitHub Releases carry `(Beta)` in the title
+  (`Linger Desktop <version> (Beta)`) and `notes.md` should open with a short
+  Beta notice to set expectations for new users. Keep stable releases
+  non-prerelease so `releases/latest` and auto-updates continue to work.
 - Before publishing a stable release, upgrade the previous stable release to
   the candidate on each platform following the
   [upgrade recipe](../.agents/skills/verify-linger/features/desktop-and-installer.md#upgrade-from-the-previous-release);
@@ -455,7 +459,12 @@ finds `cli/computer-tools/` (with its frozen `manifest.json`) and
 daemon from `resources/computer/`, so every package carries them as
 `resources/cli/computer-tools/` and `resources/runtime/` (on macOS under
 `Contents/Resources/`). Without them the daemon still starts and logs
-`computer_tools.missing` in `computer-daemon.log`.
+`computer_tools.missing` in `computer-daemon.log`. On Windows,
+`packaging/win/package.py` also downloads, SHA-256-verifies, and unpacks
+portable PowerShell 7.6.10 LTS (`PowerShell-7.6.10-win-x64.zip`, cached in
+`~/.cache/linger-desktop`, optional `PWSH_MIRROR` override) into
+`resources/runtime/pwsh/pwsh.exe`, which the Daemon appends to the end of
+Windows Runtime `PATH` as the default `pwsh` fallback.
 
 `build.mjs` stages them for each daemon target into
 `dist/computer-tools/<target>/` (`scripts/stage-computer-tools.mjs`) with
@@ -474,8 +483,18 @@ finished `.tar.gz`, `.zip` or update archive for them; a package without them
 fails.
 On macOS the tools' Node.js is signed with `node-entitlements.plist`, and Cua's
 driver (`CuaDriver.app` and the standalone `cua-driver`) keeps Cua's own
-Developer ID signature, which macOS grants Accessibility and Screen Recording
-to. Compressed, they add about 66 MB to the Linux archive, 73 MB to the
+Developer ID signature. Standalone installations grant permissions to CuaDriver.
+Packaged Linger runs the embedded driver with Linger's permissions.
+Deploy TeamHub before distributing this Desktop build, including on self-hosted
+installations. If an older TeamHub issued a CuaDriver card for this Desktop,
+request a fresh card after upgrading TeamHub.
+
+When enabling Linger in System Settings under Screen Recording, choose
+**Quit & Reopen** if macOS offers it. If you chose **Later** and the card
+still asks you to open Settings, quit Linger completely and reopen it.
+This restarts the embedded driver with the new grant.
+
+Compressed, they add about 66 MB to the Linux archive, 73 MB to the
 Windows zip, 46 MB to the Windows setup program and 115 MB to the macOS disk
 image, most of it Node.js and the universal Cua driver.
 

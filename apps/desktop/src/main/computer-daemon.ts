@@ -13,6 +13,7 @@ import { finished } from "node:stream";
 import {
   localModelsConfig,
   localmodelsToolFromEnvironment,
+  type LocalmodelsComputerTool,
 } from "@linger/local-installation/localmodels-computer";
 
 import type { RuntimeState } from "../shared/api.js";
@@ -21,6 +22,10 @@ import type {
   CredentialStore,
 } from "./computer-credential.js";
 import type { DesktopConfig } from "./config.js";
+import {
+  applyDevLocalmodelsEnvironment,
+  ensureDevLocalmodelsDirectories,
+} from "./dev-localmodels.js";
 import type { Module, ModuleContext } from "./modules.js";
 import {
   SYSTEM_PERMISSION_IDS,
@@ -46,7 +51,14 @@ export type SpawnDaemon = (
   env: Record<string, string>,
 ) => DaemonChild;
 
+interface HostDriver {
+  readonly socket: string;
+  start(ctx: ModuleContext): Promise<void>;
+  stop(): Promise<void>;
+}
+
 export interface ComputerDaemonOptions {
+  readonly createEmbeddedDriver?: (selected: () => boolean) => HostDriver;
   readonly spawn: SpawnDaemon;
   readonly credentials: CredentialStore;
   // Holds the daemon config and, under state/, its own state.
@@ -73,6 +85,9 @@ export interface ComputerDaemonOptions {
   // ACL before the first launch. Only set on Windows, where Node's file modes
   // do nothing and the daemon refuses a config other users could read.
   readonly protect?: (directories: readonly string[]) => Promise<void>;
+  // Development override pointing the daemon's localmodels runner at a local
+  // llm-inference-lab checkout, even when connecting directly to `pnpm dev`.
+  readonly devLocalmodels?: LocalmodelsComputerTool;
 }
 
 // The stdio features this Desktop offers the daemon in its hello line.
@@ -155,6 +170,7 @@ export const daemonConfig = (
     readonly defaultDisplayName?: string;
     readonly env?: Readonly<Record<string, string>>;
     readonly platformPath?: typeof path;
+    readonly cuaSocket?: string;
   },
 ) => {
   const platformPath = options.platformPath ?? path;
@@ -184,9 +200,12 @@ export const daemonConfig = (
       mode: g.access === "read_only" ? "read-only" : "workspace-write",
       scope: "owner",
     })),
-    desktop: options.teamhubCliDirectory
-      ? { teamhub_cli_directory: options.teamhubCliDirectory }
-      : {},
+    desktop: {
+      ...(options.teamhubCliDirectory
+        ? { teamhub_cli_directory: options.teamhubCliDirectory }
+        : {}),
+      ...(options.cuaSocket ? { cua_socket: options.cuaSocket } : {}),
+    },
     ...(localModels ? { local_models: localModelsConfig(localModels) } : {}),
   };
 };
@@ -200,6 +219,8 @@ export class ComputerDaemonModule implements Module {
   readonly #options: ComputerDaemonOptions;
   #ctx: ModuleContext | undefined;
   #child: DaemonChild | undefined;
+  #driver?: HostDriver;
+  #closingDriver?: Promise<void>;
   #state: RuntimeState = "stopped";
   #connection = "disconnected";
   #running = 0;
@@ -209,11 +230,14 @@ export class ComputerDaemonModule implements Module {
   #retry: NodeJS.Timeout | undefined;
   #stopping = false;
   #restartPending = false;
+  #cancelIdleRestart?: () => void;
   #restarting: Promise<void> = Promise.resolve();
   #env: Readonly<Record<string, string>> | undefined;
   #failure: string | undefined;
   // Consecutive launches that never reported a status.
   #startFailures = 0;
+  // Invalidates in-flight async launches when a restart or stop overtakes them.
+  #launchGeneration = 0;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: ComputerDaemonOptions) {
@@ -303,7 +327,12 @@ export class ComputerDaemonModule implements Module {
   // Events that arrive together (enrollment emits computer and grants
   // changes back to back) cause a single restart.
   #requestRestart(whenIdle: boolean): void {
-    if (this.#restartPending) return;
+    if (!whenIdle && this.#cancelIdleRestart) {
+      this.#cancelIdleRestart();
+      this.#cancelIdleRestart = undefined;
+      this.#restartPending = false;
+    }
+    if (!this.#env || this.#restartPending) return;
     this.#restartPending = true;
     const restart = (): void => {
       this.#restartPending = false;
@@ -319,8 +348,10 @@ export class ComputerDaemonModule implements Module {
     const off = this.#ctx!.bus.on("runtime.activity", (running) => {
       if (running !== 0) return;
       off();
+      this.#cancelIdleRestart = undefined;
       restart();
     });
+    this.#cancelIdleRestart = off;
     this.#unsubscribe.push(off);
   }
 
@@ -358,10 +389,37 @@ export class ComputerDaemonModule implements Module {
     this.#retry = setTimeout(() => this.#launch(), delay);
   }
 
-  #launch(): void {
+  #closeDriver(): Promise<void> | undefined {
+    const driver = this.#driver;
+    if (!driver) return this.#closingDriver;
+    this.#driver = undefined;
+    this.#closingDriver = driver
+      .stop()
+      .catch((error: unknown) => {
+        this.#ctx?.log.warn("computer_daemon.driver_stop_failed", {
+          error: String(error),
+        });
+      })
+      .finally(() => {
+        this.#closingDriver = undefined;
+      });
+    return this.#closingDriver;
+  }
+
+  async #launch(): Promise<void> {
+    const generation = ++this.#launchGeneration;
+    if (this.#closingDriver) await this.#closingDriver;
+    if (
+      this.#stopping ||
+      this.#child ||
+      this.#driver ||
+      !this.#env ||
+      generation !== this.#launchGeneration
+    )
+      return;
     const ctx = this.#ctx!;
-    if (this.#stopping || this.#child || !this.#env) return;
     let child: DaemonChild;
+    let startingDriver: HostDriver | undefined;
     try {
       const config = ctx.config.get();
       if (!config.computerId || !config.tenantId) {
@@ -369,7 +427,20 @@ export class ComputerDaemonModule implements Module {
         this.#setState("stopped");
         return;
       }
-      const env = daemonEnvironment(this.#env, config.runtimeEnvironment);
+      const baseEnv = daemonEnvironment(this.#env, config.runtimeEnvironment);
+      const env = this.#options.devLocalmodels
+        ? applyDevLocalmodelsEnvironment(baseEnv, this.#options.devLocalmodels)
+        : baseEnv;
+      if (this.#options.devLocalmodels) {
+        await ensureDevLocalmodelsDirectories(env);
+        if (
+          this.#stopping ||
+          this.#child ||
+          this.#driver ||
+          generation !== this.#launchGeneration
+        )
+          return;
+      }
       const credential = this.#options.credentials.read();
       if (credential?.computerId !== config.computerId) {
         // Reconnecting this computer stores a new credential.
@@ -377,6 +448,29 @@ export class ComputerDaemonModule implements Module {
         this.#setConnection("auth_failed");
         this.#setState("stopped");
         return;
+      }
+      if (this.#options.createEmbeddedDriver) {
+        const selected = (): boolean => {
+          const current = ctx.config.get();
+          return (
+            this.#driver === driver &&
+            !this.#stopping &&
+            current.computerId === config.computerId &&
+            current.tenantId === config.tenantId
+          );
+        };
+        const driver = this.#options.createEmbeddedDriver(selected);
+        startingDriver = driver;
+        this.#driver = driver;
+        await driver.start(ctx);
+        if (this.#driver !== driver) return;
+        if (
+          !selected() ||
+          this.#options.credentials.read()?.token !== credential.token
+        ) {
+          await this.#closeDriver();
+          return;
+        }
       }
       const configFile = this.#writeConfig(config, credential, env);
       this.#setState("starting");
@@ -387,6 +481,8 @@ export class ComputerDaemonModule implements Module {
         [TOKEN_ENV]: credential.token,
       });
     } catch (error) {
+      if (startingDriver && this.#driver !== startingDriver) return;
+      void this.#closeDriver();
       if (this.#stopping) return;
       this.#setConnection("disconnected");
       // Node's invalid argument message can include a credential from env.
@@ -446,6 +542,7 @@ export class ComputerDaemonModule implements Module {
     child.onExit((code, reason) => {
       if (this.#child !== child) return;
       this.#child = undefined;
+      void this.#closeDriver();
       this.#setRunning(0);
       this.#setModelInvokes(0);
       this.#setConnection("disconnected");
@@ -522,8 +619,10 @@ export class ComputerDaemonModule implements Module {
   }
 
   async #terminate(): Promise<void> {
+    this.#launchGeneration += 1;
+    const closingDriver = this.#closeDriver();
     const child = this.#child;
-    if (!child) return;
+    if (!child) return closingDriver;
     this.#child = undefined;
     this.#setRunning(0);
     this.#setModelInvokes(0);
@@ -539,6 +638,7 @@ export class ComputerDaemonModule implements Module {
       });
       child.stop();
     });
+    await closingDriver;
   }
 
   #writeConfig(
@@ -555,6 +655,7 @@ export class ComputerDaemonModule implements Module {
       JSON.stringify(
         daemonConfig(config, credential, {
           directory,
+          cuaSocket: this.#driver?.socket,
           ...(this.#options.teamhubCliDirectory
             ? { teamhubCliDirectory: this.#options.teamhubCliDirectory }
             : {}),

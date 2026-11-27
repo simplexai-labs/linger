@@ -30,36 +30,39 @@ func (m *Manager) ensureCuaService(ctx context.Context) (string, error) {
 	}
 	m.cuaLaunch.Lock()
 	defer m.cuaLaunch.Unlock()
+	if m.options.CuaEmbedded {
+		socket := m.options.CuaSocket
+		if err := privatefs.CheckPath(filepath.Dir(socket), "directory", true); err != nil {
+			return "", fmt.Errorf("embedded Cua socket directory: %w", err)
+		}
+		info, err := os.Lstat(socket)
+		if err != nil {
+			return "", fmt.Errorf("embedded Cua socket: %w", err)
+		}
+		if info.Mode()&os.ModeSocket == 0 {
+			return "", errors.New("embedded Cua path is not a Unix socket")
+		}
+		if !cuaSocketListening(socket) {
+			return "", errors.New("trusted embedding host must start its owned Cua service before binding tools")
+		}
+		return socket, nil
+	}
 	directory := m.cuaServiceDirectory()
 	if err := privatefs.EnsureDir(directory); err != nil {
 		return "", err
 	}
 	socket := filepath.Join(directory, "driver.sock")
-	listening := func() bool {
-		connection, err := net.DialTimeout("unix", socket, 200*time.Millisecond)
-		if err != nil {
-			return false
-		}
-		_ = connection.Close()
-		return true
-	}
-	if m.options.CuaEmbedded {
-		if listening() {
-			return socket, nil
-		}
-		return "", errors.New("trusted embedding host must start its owned Cua service before binding tools")
-	}
 	// The stamp records the settings the running service started with. A
 	// service an earlier Computer started with other settings is replaced.
 	stamp, settings := filepath.Join(directory, "environment"), strings.Join(cuaServiceEnvironment, "\n")
-	if listening() {
+	if cuaSocketListening(socket) {
 		if current, _ := os.ReadFile(stamp); string(current) == settings {
 			return socket, nil
 		}
 		if process, err := os.FindProcess(cuaServicePID(socket)); err == nil && process.Pid > 0 {
 			_ = process.Signal(syscall.SIGTERM)
 		}
-		for stop := time.Now().Add(5 * time.Second); listening(); time.Sleep(100 * time.Millisecond) {
+		for stop := time.Now().Add(5 * time.Second); cuaSocketListening(socket); time.Sleep(100 * time.Millisecond) {
 			if time.Now().After(stop) {
 				return "", errors.New("the earlier Cua service did not stop; quit CuaDriver and try again")
 			}
@@ -79,7 +82,7 @@ func (m *Manager) ensureCuaService(ctx context.Context) (string, error) {
 		return "", errors.New("Cua application could not start without prompting; repair the Computer installation")
 	}
 	// The pid identifies this service when a call later finds it stopped.
-	for !listening() || cuaServicePID(socket) == 0 {
+	for !cuaSocketListening(socket) || cuaServicePID(socket) == 0 {
 		select {
 		case <-launchCtx.Done():
 			return "", errors.New("Cua application did not become ready; no OS permissions were requested")
@@ -90,6 +93,15 @@ func (m *Manager) ensureCuaService(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return socket, nil
+}
+
+func cuaSocketListening(socket string) bool {
+	connection, err := net.DialTimeout("unix", socket, 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = connection.Close()
+	return true
 }
 
 // cuaServiceDirectory holds the service socket and its settings stamp. macOS

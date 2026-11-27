@@ -118,9 +118,8 @@ func (op *operation) linuxComputerCall(ctx context.Context, name string, args js
 	report := map[string]any{}
 	if err = op.perform(lease, action); err == nil {
 		output, state = observe(lease, shot, action.opens(), window, report)
-		if action.command == "open" && report["window_opened"] == false {
-			delete(report, "window_opened")
-			err = errURLNotOpened
+		if action.opens() && report["window_opened"] == false {
+			err = launchFailure(lease, action, report)
 		}
 	} else if !errors.Is(err, errOutcomeUnknown) {
 		state = readWindowState(lease)
@@ -232,10 +231,12 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 			stopped = fmt.Sprintf("waiting after step %d failed (%v); observe before continuing", done, waitErr)
 			break
 		}
-		if !opened && action.command == "open" {
-			done--
-			err = errURLNotOpened
-			break
+		if !opened && action.opens() {
+			if launchErr := launchFailure(lease, action, nil); launchErr != nil {
+				done--
+				err = launchErr
+				break
+			}
 		}
 		current, activeErr := lease.Action("active-window")
 		if activeErr != nil {
@@ -277,11 +278,12 @@ func (op *operation) runActions(ctx context.Context, args json.RawMessage) (json
 	} else if done > 0 && !errors.Is(err, errOutcomeUnknown) {
 		launched := err == nil && done == len(actions) && actions[done-1].opens()
 		output, state = observe(lease, shot, launched, mark, report)
-		if launched && actions[done-1].command == "open" && report["window_opened"] == false {
-			delete(report, "window_opened")
-			done--
-			report["completed_steps"] = done
-			err = errURLNotOpened
+		if launched && report["window_opened"] == false {
+			if launchErr := launchFailure(lease, actions[done-1], report); launchErr != nil {
+				done--
+				report["completed_steps"] = done
+				err = launchErr
+			}
 		}
 	} else if !errors.Is(err, errOutcomeUnknown) {
 		state = readWindowState(lease)
@@ -580,6 +582,29 @@ var (
 // errURLNotOpened reports an open_url the desktop did not act on. The handler
 // ran, so the input is known, but no window or title changed.
 var errURLNotOpened = errors.New("the URL did not open: no window or tab title changed within 8 s; observe before trying again")
+
+// launchFailure inspects any post-launch error recorded by the driver when a
+// launch did not produce a window or title change within launchWait.
+func launchFailure(lease *localLinuxLease, action desktopAction, report map[string]any) error {
+	raw, _ := lease.Action("launch-error", action.command)
+	detail := string(bytes.TrimSpace(raw))
+	if action.command == "open" {
+		if report != nil {
+			delete(report, "window_opened")
+		}
+		if detail != "" {
+			return fmt.Errorf("%w: %s", errURLNotOpened, detail)
+		}
+		return errURLNotOpened
+	}
+	if detail != "" {
+		if report != nil {
+			delete(report, "window_opened")
+		}
+		return errors.New(detail)
+	}
+	return nil
+}
 
 // opens reports an action that should bring up a window or tab, so its
 // result waits for one instead of a fixed pause.

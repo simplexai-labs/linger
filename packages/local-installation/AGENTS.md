@@ -11,36 +11,33 @@ stop unrelated processes, pull mutable images, or delete volumes as recovery.
 Every installation runs natively from a Linger source checkout; Docker is not
 used.
 
-On Windows `windowsPrivatePath` makes a private path owner-only and refuses it
-when another account could put a different folder in its place: an ancestor
-that is a link, that another account owns, or that grants another account the
-right to replace a child, change permissions, or take ownership. Delete on an
-ancestor counts as well, because its holder can rename that folder, except on
-a volume root, which can be neither renamed nor removed. A folder directly on
-a data drive with the stock root ACL therefore passes, and a folder nested in
-one that inherits Modify for Authenticated Users does not. The Daemon's
-`privatefs` treats the volume root and trusted ancestor principals the same
-way: ancestors trust the current user, `SYSTEM`, `BUILTIN\Administrators`,
-`TrustedInstaller`, built-in Administrator/Domain/Enterprise Admin SIDs
-(`S-1-5-21-*-*-*-500|512|519`), direct individual/domain/Entra members of local
-`BUILTIN\Administrators` (never broad groups such as `Everyone`, `Users`, or
-`Authenticated Users`), and Codex Windows sandbox principals on access rules.
-Private targets themselves remain strictly owner-only. `windowsPrivateLocation`
-runs the same check non-destructively without creating folders or changing
-ACLs. The PowerShell script checks `$ExecutionContext.SessionState.LanguageMode`
-first, emits Win32 P/Invoke stubs in memory via `Reflection.Emit` instead of
-compiling C# through `Add-Type`, and reports the offending ancestor path and SID
-or sanitized exception/worker diagnostics (never raw stderr prose). A refusal leaves the installer as its code and reason
-(`windowsPrivateRefusal`), never as its words: in the `startFailure` line on
-stdout when the installer manager cannot start, in the `--user-keys` outcome,
-and in the `--inspect` failure outcome (`inspectSetup` propagates the
-`WINDOWS_PRIVATE_PATH_UNSAFE` refusal instead of wrapping it as
-`LOCALMODELS_SETUP_UNAVAILABLE`). The Desktop setup page branches on `UNSAFE_PARENT_ACCESS` to say where
-to install instead. Repair skips propagation when the protected DACL already
-grants inheritable FullControl to the owner and SYSTEM on a directory, or
-FullControl to both on a file. Private paths with partial rights still receive
-the full repair. Rewriting a directory DACL propagates to its existing children
-and can time out on a large cache tree.
+On Windows `windowsPrivatePath` makes a private target strictly owner-only with
+a protected DACL (`owner + SYSTEM` FullControl), rejecting UNC paths, reparse
+points/links on the target or any existing ancestor directory
+(`UNSAFE_PARENT_LINK`), foreign target ownership (accepting
+`BUILTIN\Administrators` when the current user is an administrator via active
+or UAC-linked token), inherited access, and shared access on the target itself.
+Ancestor directories are checked only for links/reparse points and container
+type, not ancestor ownership or ACLs, so nested folders on Windows data drives
+such as `D:\program\Linger` are accepted. The Daemon's `privatefs` follows the
+same policy while holding ancestor directory handles open without
+`FILE_SHARE_DELETE` during target open to prevent concurrent rename races.
+`windowsPrivateLocation` runs the same check non-destructively without creating
+folders or changing ACLs. The PowerShell script checks
+`$ExecutionContext.SessionState.LanguageMode` first, emits Win32 P/Invoke stubs
+in memory via `Reflection.Emit` instead of compiling C# through `Add-Type`, and
+reports the offending ancestor path or SID or sanitized exception/worker
+diagnostics (never raw stderr prose). A refusal leaves the installer as its
+code and reason (`windowsPrivateRefusal`, keeping legacy parent-owner/access
+reason codes recognized for backward-compatible parsing), never as its words:
+in the `startFailure` line on stdout when the installer manager cannot start,
+in the `--user-keys` outcome, and in the `--inspect` failure outcome
+(`inspectSetup` propagates the `WINDOWS_PRIVATE_PATH_UNSAFE` refusal instead of
+wrapping it as `LOCALMODELS_SETUP_UNAVAILABLE`). Repair skips propagation when
+the protected DACL already grants inheritable FullControl to the owner and
+SYSTEM on a directory, or FullControl to both on a file. Private paths with
+partial rights still receive the full repair. Rewriting a directory DACL
+propagates to its existing children and can time out on a large cache tree.
 
 Launch the fixed private-path scripts with PowerShell `-Command`. Encoding
 the whole script lengthens the Windows command line and can stall startup.
@@ -193,7 +190,13 @@ never served a connection, holds no data, and is initialized again.
 A running PostgreSQL whose configuration changed restarts like LiveKit and
 TeamHub: a release that repins the PostgreSQL archive unpacks it into a new
 component folder, so the server an earlier release left running differs in
-its executable path and must not stop the install. Startup readiness waits up
+its executable path and must not stop the install. On an already-initialized
+cluster (`PG_VERSION` 17 with `postmaster.opts`), `prepareNativeDatabase` first
+runs one combined `psql` probe against `simplexai` (`\gset` + `\if`) that
+proves server readiness, database existence, and whether a pre-Linger schema is
+present in a single subprocess, falling back transparently to the `pg_isready`
+loop, database check/`createdb`, and `preLingerSchema` whenever the probe fails
+or returns unexpected output. Cold startup readiness waits up
 to 120 seconds (logging elapsed progress every 15 seconds) while `postgres`
 stays alive so slow disks and Windows antivirus scanning do not time out during
 initial data-directory fsync, while still failing immediately if `postgres`
@@ -209,7 +212,7 @@ tree, log and stop work as before. What an elevated process creates is owned
 by Administrators; `windowsPrivatePath` accepts that owner as well as the
 user when the user is an administrator (Administrators enabled in the token
 or in the elevated token UAC links to it, as Git for Windows decides), since
-the ancestor check already trusts that group. A standard user is refused.
+an administrator can take ownership of any file. A standard user is refused.
 
 On Windows the installer stages UTF-8 application manifests beside the bundled
 PostgreSQL tools before recording their file hashes. This lets `initdb`
@@ -283,11 +286,14 @@ plan as changed, and the upgraded app could not start.
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.
-The local source is set only by a start whose request chose local models
-(`setupChoice` or a plan approval); a restart or version upgrade from the saved
-choice keeps a source the person switched to on the Models page (leaving the
+The model source is applied only on an explicit setup choice (`setupChoice`,
+`byok`, or a plan approval), which also clears any stale post-stop resume list
+(`<home>/runtime/localmodels/resume-models.json`); a restart or version upgrade
+from the saved choice keeps the saved source (`local`, `subscription`, or
+`byok`) without re-running `source apply --mode subscription` (which would
+unload active local library models during updates) and leaves the Quick Install
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+`subscription` (omitting `--main-plan` from `prepareFoundationServices`, and
 keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
@@ -303,25 +309,30 @@ when `stack up` fails or the binding still needs repair (such as
 `localmodels.stack-up/v1` failures are translated to
 redacted human-readable messages with their `causeCode` in `details.causeCode`,
 and an unreviewable saved plan returns `LOCAL_MODELS_RECOVERY_REQUIRED` with
-`STACK_PLAN_INVALID`. `restoreLocalModels` (`local-models.ts`) brings back a
-local model source's stack and unloaded library model while its services keep
-running (and on cold resume when `model-source.json` says `local`), such as
-after the desktop's quit stopped them, whenever the active model source is
-`local` (or not saved yet on a `local-models` setup): when a saved
-`runtime_model` is recorded, a ready binding checks `library status` so a
-quit-time `library unload` or a `failed` server (`HEALTH_CHECK_FAILED` or other
-non-stopped-download failure, reset with `library unload` first) reloads that
-saved model and re-applies the local source under the same lock (never guessing
-an arbitrary idle model when no `runtime_model` is saved; stopped downloads
-return a degraded outcome without loading), while a stopped plan gets the same
-restore (`stack up`, falling back to `stack apply`), verifies whether a saved
-local model (`localmodels/` or `localmodels-library/`) is loaded, and sets the
-local source again. Quit-time `stopLocalmodels` (`localmodels-tool.ts`) unloads
-both `loaded` models and non-stopped-download `failed` models so a dead server
-resets to `idle` before `stack down`. Library-model reload failures return a
-failure outcome that warm
-and cold resume surface in `details.localModelsDegraded` so startup stays usable
-and the person can still reach the Models page. The first start after an app
+`STACK_PLAN_INVALID`. Quit-time and upgrade `stopLocalmodels`
+(`localmodels-tool.ts`) records all active library models (`loaded`, `loading`,
+and non-stopped-download `failed`) into private `<home>/runtime/localmodels/resume-models.json`
+(`linger.localmodels-resume/v1`) before cancelling loads and unloading models
+into `idle`, merging with any remaining pending list from an interrupted
+restore, preserving a pending non-empty list across chained stops (such as
+Windows setup `--stop` after quit), and recording an empty list when downloaded
+models are all intentionally idle. `restoreLocalModels` (`local-models.ts`)
+brings back previously loaded library models on warm resume, cold resume, and
+app updates across every model source mode (`local`, `subscription`, `byok`, or
+unset) from `resume-models.json` and any on-disk `state: "loaded"` library
+records under `<state>/library/models/*.json` (for crash/reboot recovery),
+without switching a `subscription` or `byok` `model-source.json` back to
+`local`, while respecting an explicit empty `resume-models.json` and falling
+back to a saved local `runtime_model` (`localmodels/` or `localmodels-library/`)
+only when no post-stop record exists (such as upgrading from an earlier release)
+without guessing an arbitrary idle model. Each model settles independently
+under the per-home lock (preserving remaining pending models on abort and
+continuing past partial failures), resets non-stopped-download `failed` records
+via `library unload` before loading, reports restored models through
+`onRestored` (surfaced as `details.localModelsRestored` and
+`details.restoredLocalModels`), and returns any failure outcome for resume
+callers to surface in `details.localModelsDegraded` so startup stays usable and
+the person can still reach the Models page. The first start after an app
 update onto a new checkout passes `degradeLocalModels` without `resume` (it
 installs newer runtimes in full) and degrades the same way, so a stack an
 earlier release left stopped, which the new kit cannot bring back as saved,
@@ -334,9 +345,13 @@ Deployments, that check and the quit-time stop share one lock per home
 `LOCAL_MODELS_BUSY` when restoring a library model without a stack plan).
 `restoreByokSource` (`local-models.ts`) brings back a saved BYOK source's
 Bifrost gateway on every resume (warm, or a restart from the saved choice,
-which then prepares the saved runtime and no other source). Under the same
-lock, waiting as the restore check does, it skips a loopback gateway whose
-`/health` answers, otherwise runs `source apply` from the kit's saved
+which then prepares the saved runtime and no other source) BEFORE restoring
+local library models, because `source apply --mode byok` unloads local models
+before mounting BYOK on Bifrost. Under the same
+lock, waiting as the restore check does, it first snapshots any on-disk
+`state: "loaded"` library records into `resume-models.json` (so crash/reboot
+recovery survives BYOK unloading them to `idle`), then skips a loopback gateway
+whose `/health` answers, otherwise runs `source apply` from the kit's saved
 configuration, so the key never passes through Node. Each re-mount sends
 the kit's one small probe request to the person's endpoint and adds a few
 seconds to a launch after a quit. A failure (`LOCAL_MODELS_BUSY` when the
@@ -383,6 +398,30 @@ health check for a service that could not bind, and a port held by another
 program fails the start after 15 seconds instead of at the deadline. The
 listener lookup streams IPv4 TCP rows from the Windows system netstat in
 parallel with the process listing; process-only inspections need no port lookup.
+Every `windowsProcesses` call runs a fresh PowerShell CIM query so callers after
+a concurrent spawn or kill never observe a pre-mutation snapshot. Multi-service
+inspection (`inspectNativeProcesses`) and shutdown (`stopNativeProcesses`, which
+single-service `stopNativeProcess` also delegates to on Windows) batch
+explicitly across services on Windows: inspection skips PowerShell when no
+records exist and otherwise reuses one snapshot; batch shutdown validates
+identity in dependency order (giving each service its own retry on transient
+empty-command-line CIM rows), writes `.stop` request files sequentially before
+signalling, terminates children leaves-first in dependency order, never
+terminates a supervisor-only tree until a post-`.stop` snapshot confirms no
+child was spawned before `.stop` landed, uses bounded `process.kill(pid, 0)`
+liveness waits for terminated children and fast-exiting supervisors, and at the
+12-second deadline checks cancellation and refreshes each subsequent service's
+snapshot immediately before invoking `taskkill /T /F`. Record-load failures,
+Pass 1 identity-verification failures, and `.stop` write failures truncate
+before signalling so downstream services stay untouched; once Pass 1 enters
+leaves-first child termination across verified services in dependency order, a
+later failure (such as a 12-second deadline timeout or record cleanup error on
+an earlier service) surfaces at that earlier service while verified downstream
+services may already have been terminated. Because Windows stops verified
+services concurrently in one batch, `onServiceDone` durations (and the
+per-service values in `Native stop timings (s)`) measure cumulative elapsed
+time from the start of the batch rather than isolated per-service wall-clock
+time.
 
 On POSIX, a start that finds the recorded supervisor gone but processes
 still carrying its lease (the app was killed with it) ends them as a stop
@@ -392,6 +431,14 @@ stale PID whose `kill(pid, 0)` returns `EPERM` and whose `/proc/<pid>` UID
 differs from the current user is treated as foreign and cleared without
 signalling it, and `EPERM` while signalling a leased process revalidates the
 lease before raising `NATIVE_PROCESS_SIGNAL_DENIED` with the service and PID.
+During POSIX `stopLease`, draining descendants are polled by PID
+(`posixLivePids`: `/bin/ps -p ... -o pid=,stat=` on macOS, `/proc/<pid>/stat`
+on Linux, excluding zombies) with full `nativeLeaseProcesses` refreshes once
+tracked PIDs exit or every 500 ms so newly spawned descendants are caught and
+reused PIDs cannot stall shutdown; after `SIGKILL` to the supervisor,
+`stopLease` waits briefly for the supervisor PID to exit before running the
+post-supervisor lease and process-group confirmation, and skips any extra scan
+once that loop settles cleanly.
 On macOS every identity check reads `ps` start times in the C locale.
 Linger 0.1.2 recorded them in the locale it ran in; such a record is
 converted once to the C-locale birth when `ps` in the installer's own
@@ -417,11 +464,14 @@ An exit within the first 10 seconds of the first run is a startup failure the
 installer reports, never restarted; five exits within a minute end
 supervision with a `gave up restarting` line, the supervisor exits, and the
 next resume starts the service as one that is not running. Every intended
-stop (`stopNativeProcess`, a configuration restart, quit, uninstall,
-`reclaimNativeOrphans`) first writes `<name>.<lease>.stop` beside the record;
-the supervisor reads it before deciding and again right before restarting,
-and the POSIX stop also kills what holds the lease after the supervisor, so a
-restart racing the stop cannot outlive it. PostgreSQL and LiveKit are not
+stop (`stopNativeProcess`, `stopNativeProcesses`, a configuration restart, quit,
+uninstall, `reclaimNativeOrphans`) first writes `<name>.<lease>.stop` beside the
+record; the supervisor reads it before deciding and again right before
+restarting, and on Windows skips its post-exit PowerShell lease check and exits
+immediately once `.stop` is present (since child parent links are already
+severed and the installer stops the tree leaves-first), while the POSIX stop
+also kills what holds the lease after the supervisor, so a restart racing the
+stop cannot outlive it. PostgreSQL and LiveKit are not
 restarted; their exits are logged with `reason=not_supervised`.
 
 Native runtime and localmodels kit verification (`native-runtime.ts` and
@@ -496,11 +546,17 @@ legacy backup was set aside, and no running services) and cold resumes
 `prepareFoundationServices`, and `prepareModelGateway`, holding
 `services`/`account` `succeeded` events and `saveSourceBinding` until both
 branches succeed and aborting and draining both before rollback on failure; on
-upgrades and live re-runs (`!overlapWithRuntime`), `runtime`, `migrate`, and
-`bindLiveKit` still run sequentially first, after which
+upgrades and live re-runs (`!overlapWithRuntime`), blocking `runtime` checks,
+`migrate`, and `bindLiveKit` run sequentially first, after which
 `prepareFoundationServices` and `prepareModelGateway` run concurrently with
 `startAndAwaitServices` and `provisionAccount` under the same
-`Promise.allSettled`, abort, and deferred `saveSourceBinding` barrier. When
+`Promise.allSettled`, abort, and deferred `saveSourceBinding` barrier. On both
+paths, degraded-tolerant runtime recovery (`restoreByokSource`,
+`restoreSavedLocalModel`, and resume `prepareLocalModels`) starts eagerly in
+the background as soon as the blocking runtime check finishes (overlapping
+`release`, `migrate`, and `services` without blocking `migrate` on
+`!overlapWithRuntime`), is awaited before `prepareLocalStackServices`, and is
+aborted and drained alongside `runtime` before rollback on failure. When
 `resume: true`, `prepareRuntime` inspects the selected runtime (or a saved BYOK
 source's runtime) once and skips
 `harness plan` and `harness apply` when it is already installed (falling back to
@@ -516,10 +572,11 @@ otherwise. Within `release`, binary and native-runtime bundle checks run in
 parallel, and per-artifact locks under `tools/native/components/.locks/<key>`
 allow independent native tools to prepare without blocking each other;
 collaboration services (`teamhub`, `node-services`, and `web`) always start
-concurrently via `Promise.allSettled`, even after `node-services` is
-pre-stopped for a TeamHub configuration restart (keeping pre-stopped
-`node-services` and pre-existing `web` and `teamhub` untracked by `started` so
-rollback does not stop previously running services). `runLocalmodels`
+concurrently via `Promise.allSettled`, and when TeamHub's configuration changes
+with `node-services` running, a running `web` whose configuration also changed
+pre-stops concurrently alongside `node-services` (keeping pre-stopped
+`node-services` and `web`, as well as pre-existing `teamhub`, untracked by
+`started` so rollback does not stop previously running services). `runLocalmodels`
 reads the kit's JSON event lines from stdout and stderr alike and forwards
 byte progress (`total: null` without a total) and the download
 `connecting`, `switching` and `retrying` stages of every command, labeled per
@@ -541,7 +598,9 @@ breakdowns (`download`, retries/switches, `extract`, `verify`, `install`,
 `post-download`) alongside its `tool checked in / ran in` line; `waitHealthy`
 logs per-service readiness times and a summary across `web`, `teamhub`,
 `node-services`, and `document-runtime`; `stopNativeSource` and
-`stopLocalmodels` log per-step stop durations and `Native stop timings (s)`.
+`stopLocalmodels` log per-step stop durations and `Native stop timings (s)` (on
+Windows, native service entries report cumulative elapsed time from the start
+of the batched stop rather than isolated per-service wall-clock time).
 
 Run `pnpm --filter @linger/local-installation check` (`make check-packages`
 runs it too); `make check-installer` runs its consumer, the installer, and

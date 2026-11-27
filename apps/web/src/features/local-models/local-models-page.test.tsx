@@ -292,20 +292,18 @@ describe("LocalModelsPage", () => {
       "GPT-OSS 20B: 12.1 GB",
       "Gemma 3 4B: 3.3 GB",
       "Llama 3.3 70B: 42.5 GB · runs slower",
+      "Llama 3.1 405B: Can't download · needs 230 GB",
     ]);
+    expect(
+      within(card("Qwen3 Coder 30B")).getByText("Installed"),
+    ).toBeVisible();
+    expect(within(card("Gemma 3 27B")).getByText("Installed")).toBeVisible();
     expect(within(card("GPT-OSS 20B")).getByText("Recommended")).toBeVisible();
     expect(
       screen.getByText("22.5 GB of 48 GB GPU memory in use"),
     ).toBeVisible();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
-    // Models that don't fit collapse behind a disclosure while usable models exist.
-    fireEvent.click(
-      screen.getByRole("button", { name: "1 model needs more memory" }),
-    );
-    expect(statuses()).toContain(
-      "Llama 3.1 405B: Can't download · needs 230 GB",
-    );
-    // A model that can't be downloaded has no action, only its toggle.
+    // A model that can't be downloaded is dimmed inline under Available with no download action.
     expect(within(card("Llama 3.1 405B")).getAllByRole("button")).toHaveLength(
       1,
     );
@@ -375,9 +373,6 @@ describe("LocalModelsPage", () => {
     expect(details).toHaveTextContent("46 tokens/s");
     expect(details).toHaveTextContent("128K tokens");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "1 model needs more memory" }),
-    );
     fireEvent.click(screen.getByRole("button", { name: "Llama 3.1 405B" }));
     expect(
       screen.queryByRole("region", { name: "Qwen3 Coder 30B details" }),
@@ -1302,9 +1297,6 @@ describe("LocalModelsPage", () => {
     await renderPage(setup());
     await findModels();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "1 model needs more memory" }),
-    );
     expect(statuses()).toContain(
       "Llama 3.1 405B: Can't download · needs 230 GB",
     );
@@ -1314,7 +1306,7 @@ describe("LocalModelsPage", () => {
     )
       .getByText("Memory")
       .closest("div")!;
-    expect(memory).toHaveTextContent(/^Memory230 GB$/);
+    expect(memory).toHaveTextContent(/^Memory230 GBRuntime memory$/);
   });
 
   it("shows a loaded model's endpoint without a gateway model id", async () => {
@@ -1503,7 +1495,8 @@ describe("LocalModelsPage", () => {
     expect(coderCard).toHaveAttribute("data-status", "loaded");
     const qwenTile = coderCard.querySelector('[data-family="qwen"]');
     expect(qwenTile).toBeInTheDocument();
-    expect(qwenTile).toHaveClass("bg-lavender-500/15", "text-lavender-700");
+    expect(qwenTile).toHaveAttribute("data-brand", "qwen");
+    expect(qwenTile?.querySelector("img")).toBeInTheDocument();
     expect(within(coderCard).getByText("2 Agents")).toBeVisible();
     expect(within(coderCard).queryByText("3B active")).not.toBeInTheDocument();
 
@@ -1511,7 +1504,8 @@ describe("LocalModelsPage", () => {
     expect(gemmaCard).toHaveAttribute("data-status", "available");
     const gemmaTile = gemmaCard.querySelector('[data-family="gemma"]');
     expect(gemmaTile).toBeInTheDocument();
-    expect(gemmaTile).toHaveClass("bg-bluebell-500/15", "text-bluebell-700");
+    expect(gemmaTile).toHaveAttribute("data-brand", "gemma");
+    expect(gemmaTile?.querySelector("img")).toBeInTheDocument();
     expect(within(gemmaCard).queryByText("128K")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
@@ -1570,9 +1564,6 @@ describe("LocalModelsPage", () => {
     const failedCard = card("Gemma 3 27B");
     expect(failedCard).toHaveAttribute("data-status", "failed");
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "1 model needs more memory" }),
-    );
     const unavailableCard = card("Llama 3.1 405B");
     expect(unavailableCard).toHaveAttribute("data-status", "unavailable");
   });
@@ -2097,7 +2088,7 @@ describe("Model source", () => {
     return { listings, switches, tests };
   }
 
-  it("opens on the source in use and explains BYOK on hover", async () => {
+  it("opens on the source in use, shows a clean saved BYOK card, and explains BYOK on hover", async () => {
     const fixture = setup([labView()]);
     withSource(fixture, byokStatus);
     await renderPage(fixture);
@@ -2112,18 +2103,102 @@ describe("Model source", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent(
       "Use your own OpenAI- or Anthropic-compatible endpoint.",
     );
+    // Configured BYOK opens on a compact saved connection summary card.
+    const byokRegion = screen.getByRole("region", { name: "BYOK" });
+    expect(
+      within(byokRegion).getByRole("heading", { name: "vendor/model" }),
+    ).toBeInTheDocument();
+    expect(within(byokRegion).getByText("Selected")).toBeInTheDocument();
+    expect(
+      within(byokRegion).getByText("api.example.com · OpenAI Chat Completions"),
+    ).toBeInTheDocument();
+    expect(
+      within(byokRegion).getByText(
+        "https://api.example.com/v1/chat/completions",
+      ),
+    ).toBeInTheDocument();
+    expect(within(byokRegion).getByText("Saved")).toBeInTheDocument();
+    expect(
+      within(byokRegion).queryByRole("button", { name: "Switch" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("API URL")).not.toBeInTheDocument();
+
+    // Clicking Edit opens the 3-field form cleanly with a masked saved key.
+    fireEvent.click(within(byokRegion).getByRole("button", { name: "Edit" }));
     expect(screen.queryByText(/Stored privately/u)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("API format")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Base URL")).toHaveValue(
-      "https://api.example.com",
+    expect(
+      screen.queryByRole("group", { name: "Provider" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Path" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Endpoint" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "AI runtime" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("API URL")).toHaveValue(
+      "https://api.example.com/v1/chat/completions",
     );
-    expect(screen.getByRole("combobox", { name: "Path" })).toHaveValue("/v1");
-    expect(screen.getByRole("combobox", { name: "Endpoint" })).toHaveValue(
-      "/chat/completions",
-    );
+    expect(screen.getByRole("button", { name: "Change" })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Test connection" }),
     ).not.toBeInTheDocument();
+
+    // Cancel returns cleanly to the saved connection summary card.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("API URL")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "vendor/model" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reserves the model source tabs slot and defers mount memory refresh while model-source is pending", async () => {
+    const fixture = setup([labView()]);
+    let releaseSource!: (response: Response) => void;
+    fixture.runtime.server.on(
+      "GET",
+      switchPath,
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseSource = resolve;
+        }),
+    );
+
+    await renderPage(fixture);
+    await findModels();
+
+    // Library renders immediately while model-source is still in flight; the
+    // tabs slot holds a skeleton without exposing a premature tablist, and
+    // mount auto-refresh waits so it does not compete with model-source.
+    expect(
+      document.querySelector("[data-model-source-tabs-loading]"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tablist", { name: "Model source" }),
+    ).not.toBeInTheDocument();
+    expect(fixture.refreshes).toEqual([]);
+
+    await reactAct(async () => {
+      releaseSource(
+        Response.json({
+          computer_id: "computer-lab",
+          online: true,
+          status: { ...byokStatus, mode: "local", runtime: "pi" },
+          viewer_is_owner: true,
+        }),
+      );
+    });
+
+    expect(
+      await screen.findByRole("tablist", { name: "Model source" }),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector("[data-model-source-tabs-loading]"),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
   });
 
   it("asks before ending running tasks and switches only once confirmed", async () => {
@@ -2162,7 +2237,7 @@ describe("Model source", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "Local model" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Switch to Local model" }),
+      await screen.findByRole("button", { name: "Switch to Qwen3 Coder 30B" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "End running tasks?",
@@ -2218,7 +2293,7 @@ describe("Model source", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "Local model" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Switch to Local model" }),
+      await screen.findByRole("button", { name: "Switch to Qwen3 Coder 30B" }),
     );
 
     await waitFor(() =>
@@ -2255,7 +2330,10 @@ describe("Model source", () => {
     await renderPage(fixture);
 
     fireEvent.click(await screen.findByRole("tab", { name: /BYOK/u }));
-    expect(await screen.findByLabelText("Model")).toHaveValue("vendor/model");
+    expect(
+      await screen.findByRole("heading", { name: "vendor/model" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
     const connected = (await screen.findByText("Connected")).closest(
       '[role="status"]',
@@ -2267,11 +2345,14 @@ describe("Model source", () => {
       "https://api.example.com/v1/chat/completions",
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Model")).toHaveValue("vendor/model");
     fireEvent.click(screen.getByRole("button", { name: "List models" }));
     fireEvent.click(
       await screen.findByRole("option", { name: "vendor/other" }),
     );
     expect(screen.getByLabelText("Model")).toHaveValue("vendor/other");
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: "sk-new" },
     });
@@ -2280,9 +2361,15 @@ describe("Model source", () => {
     );
 
     await waitFor(() => expect(switches).toHaveLength(1));
+    expect(
+      await screen.findByRole("heading", { name: "vendor/other" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Selected")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("tab", { name: "Local model" }));
     fireEvent.click(screen.getByRole("tab", { name: /BYOK/u }));
-    expect(await screen.findByLabelText("Model")).toHaveValue("vendor/other");
+    expect(
+      await screen.findByRole("heading", { name: "vendor/other" }),
+    ).toBeInTheDocument();
     const address = {
       base_url: "https://api.example.com",
       endpoint: "/chat/completions",
@@ -2298,60 +2385,54 @@ describe("Model source", () => {
       {
         byok: { ...address, api_key: "sk-new", model_id: "vendor/other" },
         mode: "byok",
-        runtime: "claude",
+        runtime: "pi",
       },
     ]);
   });
 
-  it("sends requests to the base URL, path and endpoint as entered", async () => {
+  it("parses full BYOK URLs directly and rejects malformed addresses", async () => {
     const fixture = setup([labView()]);
-    const { listings, tests } = withSource(fixture, unconfigured);
+    const { listings, switches, tests } = withSource(fixture, unconfigured);
+    fixture.runtime.server.on("POST", switchPath, ({ body }) => {
+      switches.push(body);
+      return Response.json({
+        computer_id: "computer-lab",
+        online: true,
+        status: {
+          byok: {
+            base_url: "https://api.anthropic.com",
+            configured: true,
+            endpoint: "/messages",
+            key_saved: true,
+            model_id: "claude-sonnet-4-6",
+            path: "/v1",
+            protocol: "anthropic",
+          },
+          mode: "byok",
+          runtime: "claude",
+        },
+        viewer_is_owner: true,
+      });
+    });
     await renderPage(fixture);
 
     fireEvent.click(await screen.findByRole("tab", { name: /BYOK/u }));
-    const path = screen.getByRole("combobox", { name: "Path" });
-    const endpoint = screen.getByRole("combobox", { name: "Endpoint" });
-    expect(path).toHaveValue("/v1");
-    expect(path).toHaveClass("text-muted-foreground");
-    expect(endpoint).toHaveValue("/messages");
-
-    const baseUrl = screen.getByLabelText("Base URL");
-    fireEvent.change(baseUrl, {
-      target: { value: " https://open.bigmodel.cn/ " },
+    const urlInput = screen.getByLabelText("API URL");
+    fireEvent.change(urlInput, {
+      target: {
+        value: " https://open.bigmodel.cn/api/paas/v4/chat/completions/ ",
+      },
     });
-    fireEvent.blur(baseUrl);
-    expect(baseUrl).toHaveValue("https://open.bigmodel.cn");
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show Path suggestions" }),
+    fireEvent.blur(urlInput);
+    expect(urlInput).toHaveValue(
+      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
     );
-    fireEvent.click(
-      await screen.findByRole("option", { name: /^\/api\/paas\/v4 /u }),
-    );
-    expect(path).toHaveValue("/api/paas/v4");
-    expect(path).toHaveClass("text-foreground");
-
-    // An endpoint left at its default follows the Runtime.
-    fireEvent.click(screen.getByRole("combobox", { name: "AI runtime" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Pi" }));
-    expect(endpoint).toHaveValue("/chat/completions");
-
-    // Without an endpoint the address names no format, so Pi's own applies.
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show Endpoint suggestions" }),
-    );
-    fireEvent.click(
-      await screen.findByRole("option", {
-        name: "- No endpoint. The base URL is the full address.",
-      }),
-    );
-    expect(endpoint).toHaveValue("");
 
     fireEvent.click(screen.getByRole("button", { name: "List models" }));
     await waitFor(() => expect(listings).toHaveLength(1));
     expect(listings[0]).toEqual({
       base_url: "https://open.bigmodel.cn",
-      endpoint: "",
+      endpoint: "/chat/completions",
       path: "/api/paas/v4",
       protocol: "openai-chat",
     });
@@ -2364,17 +2445,53 @@ describe("Model source", () => {
     expect(tests[0]).toEqual({
       byok: {
         base_url: "https://open.bigmodel.cn",
-        endpoint: "",
+        endpoint: "/chat/completions",
         model_id: "glm-5",
         path: "/api/paas/v4",
         protocol: "openai-chat",
       },
     });
 
-    // A path carries only segments, never a query.
-    fireEvent.change(path, { target: { value: "/v4?beta=1" } });
+    // Anthropic full URLs infer the anthropic wire protocol and Claude runtime.
+    fireEvent.change(urlInput, {
+      target: { value: "https://api.anthropic.com/v1/messages" },
+    });
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: "sk-ant-test" },
+    });
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "claude-sonnet-4-6" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save & Switch to BYOK" }),
+    );
+    await waitFor(() => expect(switches).toHaveLength(1));
+    expect(switches[0]).toEqual({
+      byok: {
+        api_key: "sk-ant-test",
+        base_url: "https://api.anthropic.com",
+        endpoint: "/messages",
+        model_id: "claude-sonnet-4-6",
+        path: "/v1",
+        protocol: "anthropic",
+      },
+      mode: "byok",
+      runtime: "claude",
+    });
+
+    // Query parameters are rejected cleanly when editing the saved endpoint.
     expect(
-      screen.getByText(/Path and endpoint take segments like \/v1/u),
+      await screen.findByRole("heading", { name: "claude-sonnet-4-6" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("API URL")).toHaveValue(
+      "https://api.anthropic.com/v1/messages",
+    );
+    fireEvent.change(screen.getByLabelText("API URL"), {
+      target: { value: "https://open.bigmodel.cn/api/paas/v4?beta=1" },
+    });
+    expect(
+      screen.getByText(/Enter a full http\(s\) URL without query parameters/u),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "List models" })).toBeDisabled();
@@ -2385,7 +2502,8 @@ describe("Model source", () => {
     const { listings } = withSource(fixture, byokStatus);
     await renderPage(fixture);
 
-    const listButton = await screen.findByRole("button", {
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const listButton = screen.getByRole("button", {
       name: "List models",
     });
     expect(listings).toEqual([]);
@@ -2394,6 +2512,22 @@ describe("Model source", () => {
       await screen.findByRole("option", {
         name: "vendor/model Vendor · 128K context",
       }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "vendor/other" }),
+    ).toBeInTheDocument();
+
+    // Typing filters the portaled model list live so long catalogs stay easy to pick from.
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "other" },
+    });
+    expect(
+      screen.queryByRole("option", {
+        name: "vendor/model Vendor · 128K context",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "vendor/other" }),
     ).toBeInTheDocument();
     expect(listings).toEqual([
       {
@@ -2405,6 +2539,7 @@ describe("Model source", () => {
       },
     ]);
 
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: "sk-typed" },
     });
@@ -2429,7 +2564,8 @@ describe("Model source", () => {
     );
     await renderPage(fixture);
 
-    fireEvent.click(await screen.findByRole("button", { name: "List models" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "List models" }));
     expect(
       await screen.findByText(
         "https://api.example.com/v1/models returned HTTP 404: the address or the model was not found.",
@@ -2470,7 +2606,8 @@ describe("Model source", () => {
       }
     }
 
-    fireEvent.click(await screen.findByRole("button", { name: "Test" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
     const failed = await screen.findByRole("alert");
     expect(failed).toHaveTextContent("Couldn't connect");
     expect(failed).toHaveTextContent(
@@ -2497,8 +2634,8 @@ describe("Model source", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     // Editing the address withdraws the result it no longer describes.
-    fireEvent.change(screen.getByRole("combobox", { name: "Path" }), {
-      target: { value: "/v2" },
+    fireEvent.change(screen.getByLabelText("API URL"), {
+      target: { value: "https://api.example.com/v2/chat/completions" },
     });
     expect(screen.queryByText("Couldn't connect")).not.toBeInTheDocument();
 
@@ -2540,7 +2677,7 @@ describe("Model source", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "Local model" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Switch to Local model" }),
+      await screen.findByRole("button", { name: "Switch to Qwen3 Coder 30B" }),
     );
 
     await waitFor(() => expect(switches).toHaveLength(1));
@@ -2829,7 +2966,7 @@ describe("Model source", () => {
     );
   });
 
-  it("lets the owner choose a loaded larger model in SwitchToLocalNotice and Use for Agents", async () => {
+  it("lets the owner switch directly on each installed model row and shows a green Selected indicator", async () => {
     const small = localModel({
       id: "spark-4b:Q4_K_M",
       memory_bytes: gb(4),
@@ -2858,6 +2995,11 @@ describe("Model source", () => {
     });
     fixture.runtime.server.on("POST", switchPath, ({ body }) => {
       switches.push(body);
+      const modelId = (body as { local_model_id?: string }).local_model_id;
+      const runtimeModel =
+        modelId === "qwen3.8-27b:IQ3_S"
+          ? "localmodels-library/qwen3.8-27b"
+          : "localmodels-library/spark-4b";
       return Response.json({
         computer_id: "computer-lab",
         online: true,
@@ -2865,7 +3007,7 @@ describe("Model source", () => {
           ...byokStatus,
           mode: "local",
           runtime: "pi",
-          runtime_model: "localmodels-library/spark-4b",
+          runtime_model: runtimeModel,
         },
         viewer_is_owner: true,
       });
@@ -2873,13 +3015,12 @@ describe("Model source", () => {
     await renderPage(fixture);
 
     fireEvent.click(await screen.findByRole("tab", { name: "Local model" }));
-    const modelSelect = await screen.findByRole("combobox", {
-      name: "Local model",
-    });
-    fireEvent.click(modelSelect);
-    fireEvent.click(await screen.findByRole("option", { name: /Spark 4B/u }));
+    expect(
+      screen.queryByRole("button", { name: "Switch to Local model" }),
+    ).not.toBeInTheDocument();
+
     fireEvent.click(
-      screen.getByRole("button", { name: "Switch to Local model" }),
+      await screen.findByRole("button", { name: "Switch to Spark 4B" }),
     );
     await waitFor(() => expect(switches).toHaveLength(1));
     expect(switches[0]).toEqual({
@@ -2887,22 +3028,24 @@ describe("Model source", () => {
       mode: "local",
     });
 
-    // Once on Local model mode running Spark 4B, loaded Qwen3.8 27B offers Use for Agents.
-    const useLarge = await screen.findByRole("button", {
-      name: "Use Qwen3.8 27B for Agents",
-    });
+    // Once on Local model mode running Spark 4B, Spark 4B shows Selected and Qwen3.8 27B offers Switch.
+    expect(within(card("Spark 4B")).getByText("Selected")).toBeVisible();
     expect(
-      screen.queryByRole("button", { name: "Use Spark 4B for Agents" }),
+      screen.queryByRole("button", { name: "Switch to Spark 4B" }),
     ).toBeNull();
-    fireEvent.click(useLarge);
+    const switchLarge = await screen.findByRole("button", {
+      name: "Switch to Qwen3.8 27B",
+    });
+    fireEvent.click(switchLarge);
     await waitFor(() => expect(switches).toHaveLength(2));
     expect(switches[1]).toEqual({
       local_model_id: "qwen3.8-27b:IQ3_S",
       mode: "local",
     });
+    expect(within(card("Qwen3.8 27B")).getByText("Selected")).toBeVisible();
   });
 
-  it("hides Recheck memory and Use for Agents when read-only or offline while keeping one status notice", async () => {
+  it("hides Recheck memory and Switch when read-only or offline while keeping one status notice", async () => {
     const busyView = labView({
       models: [
         modelView(
@@ -2945,7 +3088,7 @@ describe("Model source", () => {
       screen.queryByRole("button", { name: "Recheck memory" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Use .* for Agents/u }),
+      screen.queryByRole("button", { name: /^Switch to /u }),
     ).not.toBeInTheDocument();
 
     cleanup();
@@ -3028,13 +3171,14 @@ describe("Model source", () => {
     expect(
       await screen.findByRole("tab", { name: /BYOK/u, selected: true }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Base URL")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Test" })).toBeEnabled();
 
-    // Going offline while viewing BYOK shows the offline notice and disables edits.
+    // Going offline while viewing BYOK shows the offline notice and disables actions.
     publishSnapshot(fixture, offlineLab);
     expect(await screen.findByText(/Reconnect it in/u)).toBeInTheDocument();
-    expect(screen.getByLabelText("Base URL")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Test" })).toBeDisabled();
   });
 
   it("auto-refreshes GPU memory on mount and reconnect, and disables BYOK on 503 LOCAL_COMPUTER_OFFLINE", async () => {
@@ -3055,7 +3199,7 @@ describe("Model source", () => {
     await renderPage(fixture);
 
     // Mount auto-refreshes GPU memory once for an online owned Computer.
-    expect(await screen.findByLabelText("Base URL")).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeEnabled();
     await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
 
     // A computers invalidation while the Computer is offline (503 LOCAL_COMPUTER_OFFLINE)
@@ -3067,7 +3211,7 @@ describe("Model source", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Base URL")).toBeDisabled(),
+      expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled(),
     );
     expect(screen.getByText(/Reconnect it in/u)).toBeVisible();
 
@@ -3081,7 +3225,7 @@ describe("Model source", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Base URL")).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled(),
     );
     await waitFor(() => expect(fixture.refreshes).toEqual(["computer-lab"]));
   });
@@ -3102,11 +3246,10 @@ describe("Model source", () => {
 
     const tabs = await screen.findByRole("tablist", { name: "Model source" });
     expect(tabs).toHaveClass("self-start");
-    expect(screen.getByLabelText("API key")).toHaveAttribute(
-      "placeholder",
-      "Saved. Leave blank to keep it.",
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "List models" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "List models" }));
     expect(
       await screen.findByRole("option", { name: /^vendor\/model/u }),
     ).toBeInTheDocument();
@@ -3118,8 +3261,8 @@ describe("Model source", () => {
     expect(await screen.findByText("Connected")).toBeInTheDocument();
 
     // Another origin withdraws the result, the listed models and the saved key.
-    const baseUrl = screen.getByLabelText("Base URL");
-    fireEvent.change(baseUrl, {
+    const urlInput = screen.getByLabelText("API URL");
+    fireEvent.change(urlInput, {
       target: { value: "https://other.example.net" },
     });
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
@@ -3140,16 +3283,24 @@ describe("Model source", () => {
       },
     });
 
-    // Saving while already on BYOK clears the typed API key input cleanly.
-    fireEvent.change(baseUrl, { target: { value: "https://api.example.com" } });
+    // Saving while already on BYOK returns cleanly to the saved connection card.
+    fireEvent.change(urlInput, {
+      target: { value: "https://api.example.com/v1/chat/completions" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByLabelText("API key")).toHaveAttribute(
+      "placeholder",
+      "Saved. Leave blank to keep it.",
+    );
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: "sk-rotate" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(switches).toHaveLength(1));
-    await waitFor(() =>
-      expect(screen.getByLabelText("API key")).toHaveValue(""),
-    );
+    expect(
+      await screen.findByRole("heading", { name: "vendor/model" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
     expect(listings).toHaveLength(1);
   });
 
@@ -3205,7 +3356,7 @@ describe("Model source", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "Local model" }));
     await findModels();
 
-    // A newly loaded model becomes the default target without sticking on the earlier idle one.
+    // A newly loaded model offers Switch right on its row and refreshes Tenant Agents once chosen.
     publishSnapshot(
       fixture,
       labView({
@@ -3214,9 +3365,8 @@ describe("Model source", () => {
       }),
     );
     const readsBeforeSwitch = agentReads;
-    await screen.findByRole("combobox", { name: "Local model" });
     fireEvent.click(
-      screen.getByRole("button", { name: "Switch to Local model" }),
+      await screen.findByRole("button", { name: "Switch to Qwen3.8 27B" }),
     );
     await waitFor(() => expect(switches).toHaveLength(1));
     expect(switches[0]).toEqual({
@@ -3555,7 +3705,7 @@ describe("Model source", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: /BYOK/u }));
     const submit = await screen.findByRole("button", {
-      name: "Save & Switch to BYOK",
+      name: "Switch",
     });
 
     fireEvent.click(submit);
@@ -3623,7 +3773,7 @@ describe("Model source", () => {
 
       fireEvent.click(await screen.findByRole("tab", { name: /BYOK/u }));
       const submit = await screen.findByRole("button", {
-        name: zhCN.localModels.saveAndSwitch,
+        name: zhCN.localModels.switchModel,
       });
 
       fireEvent.click(submit);
@@ -3681,9 +3831,7 @@ describe("Model source", () => {
     fireEvent.click(
       within(banner).getByRole("button", { name: "Switch to BYOK" }),
     );
-    expect(
-      await screen.findByRole("button", { name: "Save & Switch to BYOK" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Switch" })).toBeVisible();
   });
 
   it("shows driver update and missing runtime banners with Recheck memory and RAM detail copy", async () => {
@@ -4056,7 +4204,8 @@ describe("Model source", () => {
       );
     await renderPage(fixture);
 
-    fireEvent.click(await screen.findByRole("button", { name: "List models" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "List models" }));
     expect(
       await screen.findByText(
         "The computer didn't answer in time while checking the endpoint. Try again.",
@@ -4104,17 +4253,18 @@ describe("Model source", () => {
       );
     await renderPage(fixture);
 
-    const listButton = await screen.findByRole("button", {
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const listButton = screen.getByRole("button", {
       name: "List models",
     });
-    const baseUrl = screen.getByLabelText("Base URL");
+    const urlInput = screen.getByLabelText("API URL");
     const modelInput = screen.getByLabelText("Model");
 
     // First models probe is aborted and cleared as soon as the address changes.
     fireEvent.click(listButton);
     await waitFor(() => expect(heldModels).toHaveLength(1));
 
-    fireEvent.change(baseUrl, {
+    fireEvent.change(urlInput, {
       target: { value: "https://other.example.net" },
     });
     expect(heldModels[0]!.signal.aborted).toBe(true);
@@ -4284,6 +4434,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
       "GPT-OSS 20B: 12.1 GB",
       "Gemma 3 4B: 3.3 GB",
       "Llama 3.3 70B: 42.5 GB · runs slower",
+      "Llama 3.1 405B: Can't download · needs 230 GB",
     ]);
     expect(
       screen.getAllByRole("button", { name: "Download Inkling 2 Mini" }),
@@ -4294,10 +4445,8 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(inklingCard).toHaveAttribute("data-featured", "true");
     expect(within(inklingCard).queryByText("Featured")).toBeNull();
     const inklingTile = inklingCard.querySelector('[data-family="other"]');
-    expect(inklingTile).toHaveClass(
-      "bg-[var(--app-mention-surface)]",
-      "text-app-info",
-    );
+    expect(inklingTile).toHaveAttribute("data-brand", "thinkingmachines");
+    expect(inklingTile?.querySelector("img")).toBeInTheDocument();
 
     // Clicking Download in the spotlight runs the real download action.
     fireEvent.click(
@@ -4513,7 +4662,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     );
     expect(spotlight).toHaveTextContent("Loaded · GPU 1 · 19.2 GB");
     const useButton = await within(spotlight).findByRole("button", {
-      name: "Use Inkling 2 Mini for Agents",
+      name: "Switch to Inkling 2 Mini",
     });
     fireEvent.click(useButton);
     await waitFor(() =>
@@ -5026,10 +5175,11 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     await renderPage(setup([mac16]));
     await findModels();
 
-    // Recommended Ornith appears first above the unavailable Inkling spotlight; no redundant llama.cpp badges.
+    // Recommended Ornith appears first, followed by Spark and dimmed unavailable Qwen3.8 under one Available section.
     expect(statuses()).toEqual([
       "Ornith 1.5 9B: 6.2 GB",
       "Spark-X2.6 4B: 3.3 GB",
+      "Qwen3.8 27B: Can't download · needs 21.8 GB",
       "Inkling 2 Mini: Can't download · needs 16.2 GB",
     ]);
     const ornithCard = card("Ornith 1.5 9B");
@@ -5037,15 +5187,9 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(within(ornithCard).queryByText("128K")).not.toBeInTheDocument();
     expect(within(ornithCard).queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByText("llama.cpp")).not.toBeInTheDocument();
-
-    // Unavailable models stay neatly tucked behind the disclosure until expanded.
-    const disclosure = screen.getByRole("button", {
-      name: "1 model needs more memory",
-    });
-    expect(disclosure).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(disclosure);
-    expect(disclosure).toHaveAttribute("aria-expanded", "true");
-    expect(statuses()).toContain("Qwen3.8 27B: Can't download · needs 21.8 GB");
+    expect(
+      screen.queryByRole("button", { name: "1 model needs more memory" }),
+    ).not.toBeInTheDocument();
   });
 
   it("groups multi-quant models on a 128 GB Mac into single cards with smooth in-place version switching", async () => {
@@ -5415,6 +5559,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
 
     expect(statuses()).toEqual([
       "Spark-X2.6 4B: 4.2 GB",
+      "Qwen3.8 27B: Can't download · needs 13.4 GB VRAM",
       "Inkling 2 Mini: Can't download · driver update needed",
     ]);
     expect(
@@ -5422,13 +5567,6 @@ describe("Featured Inkling 2 Mini spotlight", () => {
         name: "Choose version for Inkling 2 Mini",
       }),
     ).toHaveTextContent("UD-Q3_K_XL");
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "1 model needs more memory" }),
-    );
-    expect(statuses()).toContain(
-      "Qwen3.8 27B: Can't download · needs 13.4 GB VRAM",
-    );
   });
 
   it("supports keyboard arrow switching on ModelSourceTabs and keeps BYOK focused without memory clutter", async () => {
@@ -5740,5 +5878,90 @@ describe("Featured Inkling 2 Mini spotlight", () => {
         (window as { lingerDesktop?: unknown }).lingerDesktop = previousDesktop;
       }
     }
+  });
+
+  it("keeps downloadable models in full color and dims only unavailable models inside the single Available section", async () => {
+    const constrainedPool = {
+      ...memoryPool("unified", 14.5),
+      used_bytes: gb(11.9),
+    };
+    const bigModel = localModel({
+      download_bytes: gb(6.2),
+      fit: "unified",
+      id: "ornith-9b:Q4_K_M",
+      memory_bytes: gb(10.4),
+      name: "Ornith 1.5 9B",
+      pool: "unified",
+    });
+    const smallModel = localModel({
+      download_bytes: gb(1.4),
+      fit: "unified",
+      id: "ling-tiny:Q4_K_M",
+      memory_bytes: gb(2.0),
+      name: "Ling 3.0 tiny",
+      pool: "unified",
+    });
+    const unavailableModel = localModel({
+      availability: {
+        downloadable: false,
+        reason: {
+          code: "MEMORY_INSUFFICIENT",
+          have_bytes: gb(14.5),
+          need_bytes: gb(21.8),
+        },
+      },
+      download_bytes: gb(16.2),
+      family: "qwen",
+      fit: "none",
+      id: "qwen3.8-27b:UD-IQ3_S",
+      memory_bytes: gb(21.8),
+      name: "Qwen3.8 27B",
+      pool: undefined,
+    });
+    await renderPage(
+      setup([
+        macView({
+          models: [
+            modelView(bigModel),
+            modelView(smallModel),
+            modelView(unavailableModel),
+          ],
+          pools: [constrainedPool],
+        }),
+      ]),
+    );
+    await findModels();
+
+    const bigCard = card("Ornith 1.5 9B");
+    expect(within(bigCard).getByText("Needs 10.4 GB free")).toBeVisible();
+    expect(
+      within(bigCard).getByRole("button", { name: "Ornith 1.5 9B" }),
+    ).not.toHaveClass("opacity-55");
+    expect(bigCard.querySelector("img")).not.toHaveClass("grayscale");
+
+    const smallCard = card("Ling 3.0 tiny");
+    expect(
+      within(smallCard).queryByText(/Needs .* free/u),
+    ).not.toBeInTheDocument();
+    expect(
+      within(smallCard).getByRole("button", { name: "Ling 3.0 tiny" }),
+    ).not.toHaveClass("opacity-55");
+    expect(smallCard.querySelector("img")).not.toHaveClass("grayscale");
+
+    const blockedCard = card("Qwen3.8 27B");
+    expect(
+      within(blockedCard).getByRole("button", { name: "Qwen3.8 27B" }),
+    ).toHaveClass("opacity-55");
+    expect(blockedCard.querySelector("img")).toHaveClass("grayscale");
+
+    fireEvent.click(
+      within(bigCard).getByRole("button", { name: "Ornith 1.5 9B" }),
+    );
+    const details = screen.getByRole("region", {
+      name: "Ornith 1.5 9B details",
+    });
+    expect(details).not.toHaveTextContent("Close memory-heavy apps");
+    expect(details).toHaveTextContent("10.4 GB");
+    expect(details).toHaveTextContent("Unified memory");
   });
 });

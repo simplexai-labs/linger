@@ -46,9 +46,10 @@ type TaskInput struct {
 }
 
 type TaskInputResult struct {
-	// Delivery is started (a new turn of an idle, waiting, failed or canceled
-	// Task), queued (the next turn of a running Task) or steered (requested
-	// into the running turn; the Agent falls back to queuing it).
+	// Delivery is started (a new turn of an idle, waiting, failed or Meta-
+	// resumed canceled Task), queued (the next turn of a running Task),
+	// steered (requested into the running turn; the Agent falls back to
+	// queuing it), or ignored (a system notice for a canceled Task).
 	Delivery string
 	Status   string
 	// ExecutionRevision is the Task revision this input committed.
@@ -57,8 +58,10 @@ type TaskInputResult struct {
 
 // AppendTaskInput wakes a delegated Task's AlterEgo with one message in the
 // caller's transaction. A Task that is not running starts a new Attempt; a
-// running Task gets the message as its next turn. The Task's own Agent
-// authors the private wake, so the AlterEgo reads it as trusted input.
+// running Task gets the message as its next turn. System notices for a
+// canceled Task are ignored without starting an Attempt, while Meta messages
+// still resume it. The Task's own Agent authors the private wake, so the
+// AlterEgo reads it as trusted input.
 func AppendTaskInput(ctx context.Context, queries *store.Queries, input TaskInput) (TaskInputResult, error) {
 	input.Body = strings.TrimSpace(input.Body)
 	if queries == nil || strings.TrimSpace(input.TaskID) == "" ||
@@ -78,6 +81,13 @@ func AppendTaskInput(ctx context.Context, queries *store.Queries, input TaskInpu
 	}
 	generation := snapshot.TaskExecutionGeneration.Int64
 	status := snapshot.TaskExecutionStatus.String
+	if input.Cause == TaskInputSystem && status == "canceled" {
+		return TaskInputResult{
+			Delivery:          "ignored",
+			Status:            status,
+			ExecutionRevision: snapshot.TaskExecutionRevision.Int64,
+		}, nil
+	}
 	author, err := queries.GetActor(ctx, store.GetActorParams{ID: snapshot.ResultAgentActorID, TenantID: snapshot.TenantID})
 	if err != nil {
 		return TaskInputResult{}, err

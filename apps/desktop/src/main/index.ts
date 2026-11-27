@@ -26,6 +26,7 @@ import {
 } from "./computer-daemon.js";
 import { ConfigStore } from "./config.js";
 import { DesktopIpcModule } from "./desktop-ipc.js";
+import { readDevLocalmodelsOverride } from "./dev-localmodels.js";
 import { dialogMessages } from "./dialogs.messages.js";
 import { DiagnosticsModule } from "./diagnostics.js";
 import { DriverUpdater } from "./driver-updater.js";
@@ -34,6 +35,7 @@ import {
   runWindowsDriverInstaller,
   verifyWindowsAuthenticode,
 } from "./windows-driver-platform.js";
+import { EmbeddedComputerUse } from "./embedded-computer-use.js";
 import { EnrollmentModule } from "./enrollment.js";
 import { LanguageModule } from "./language.js";
 import {
@@ -164,6 +166,24 @@ async function main(): Promise<void> {
 
   // The default LINGER_HOME of the installer.
   const home = lingerHome();
+  let devLocalmodels: ReturnType<typeof readDevLocalmodelsOverride>;
+  try {
+    devLocalmodels = readDevLocalmodelsOverride(process.env, home);
+  } catch (error) {
+    log.error("desktop.start_failed", { error: String(error) });
+    dialog.showErrorBox(
+      "Linger could not start",
+      error instanceof Error ? error.message : String(error),
+    );
+    app.exit(1);
+    return;
+  }
+  if (devLocalmodels)
+    log.info("desktop.dev_localmodels_enabled", {
+      python: devLocalmodels.python,
+      module_dir: devLocalmodels.moduleDirectory,
+      home,
+    });
   // The cookie header of the window's session for a server.
   const webSessionCookie = async (
     serverUrl: string,
@@ -360,6 +380,11 @@ async function main(): Promise<void> {
       defaultDirectory: path.join(app.getPath("home"), "Linger"),
     }),
     new ComputerDaemonModule({
+      createEmbeddedDriver:
+        process.platform === "darwin" && app.isPackaged
+          ? (selected) =>
+              new EmbeddedComputerUse(process.resourcesPath, selected)
+          : undefined,
       spawn: spawnDaemon(
         daemonPath,
         path.join(userData, "logs", "computer-daemon.log"),
@@ -371,6 +396,7 @@ async function main(): Promise<void> {
       teamhubCliDirectory: path.join(here, "../teamhub-cli"),
       defaultDisplayName,
       env: daemonEnv(loginShell),
+      ...(devLocalmodels ? { devLocalmodels } : {}),
       ...(process.platform === "win32"
         ? { protect: protectWithDaemon(daemonPath) }
         : {}),

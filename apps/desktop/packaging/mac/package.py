@@ -92,8 +92,45 @@ CUA_APP = f"{CUA}/CuaDriver.app"
 CUA_VENDOR_SIGNED = ["cua/cua-driver"]
 
 
+SUBMISSION_ID_RE = re.compile(r"created submission ID:\s*([0-9a-fA-F-]{36})")
+
+
 def run(*args, **kwargs):
     subprocess.run(args, check=True, **kwargs)
+
+
+def run_capture(*args, merge_stderr=False, stream=False):
+    """Runs a command and returns stdout, or combined output when merge_stderr is True."""
+    stderr = subprocess.STDOUT if merge_stderr else None
+    errors = "replace" if (stream or merge_stderr) else "strict"
+    if not stream:
+        completed = subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            encoding="utf-8",
+            errors=errors,
+            check=True,
+        )
+        return completed.stdout
+    chunks = []
+    with subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=stderr,
+        encoding="utf-8",
+        errors=errors,
+    ) as process:
+        assert process.stdout is not None
+        for line in process.stdout:
+            chunks.append(line)
+            sys.stderr.write(line)
+            sys.stderr.flush()
+        returncode = process.wait()
+    output = "".join(chunks)
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, args, output=output)
+    return output
 
 
 def dmgtool(workdir, *args):
@@ -396,14 +433,91 @@ class Signing:
         if self.developer_id:
             run(*self.dmg_args(dmg))
 
-    def notarize(self, path):
-        """Waits for Apple's verdict and staples the ticket to path."""
+    def notarize(
+        self,
+        path,
+        submit_attempts=3,
+        wait_attempts=6,
+        log_attempts=3,
+        delay_seconds=5,
+        max_wait_seconds=3600,
+    ):
+        """Submits path to Apple notarization, verifies an Accepted verdict, and staples it."""
         if not self.notary_key:
             return
-        # Submit without --staple and invoke self.staple so both Linger.app
-        # and the DMG reuse CloudKit ticket-lookup retries.
-        run(self.rcodesign, "notary-submit", "--api-key-file", self.notary_key,
-            "--wait", "--max-wait-seconds", "3600", path)
+        # Submit without --wait or --staple so transient polling errors retry
+        # notary-wait on the same submission ID instead of re-uploading, and
+        # check Apple's JSON notary-log because rcodesign notary-wait exits 0
+        # even when Apple's verdict is Invalid or Rejected.
+        submit_output = ""
+        for attempt in range(1, submit_attempts + 1):
+            try:
+                submit_output = run_capture(
+                    self.rcodesign,
+                    "notary-submit",
+                    "--api-key-file",
+                    self.notary_key,
+                    path,
+                    merge_stderr=True,
+                    stream=True,
+                )
+                break
+            except subprocess.CalledProcessError:
+                if attempt == submit_attempts:
+                    raise
+                time.sleep(delay_seconds)
+        match = SUBMISSION_ID_RE.search(submit_output)
+        if not match:
+            raise RuntimeError(f"rcodesign notary-submit did not report a submission ID for {path}")
+        submission_id = match.group(1)
+
+        deadline = time.monotonic() + max_wait_seconds
+        for attempt in range(1, wait_attempts + 1):
+            remaining = max(1, int(deadline - time.monotonic()))
+            try:
+                run(
+                    self.rcodesign,
+                    "notary-wait",
+                    "--api-key-file",
+                    self.notary_key,
+                    "--max-wait-seconds",
+                    str(remaining),
+                    submission_id,
+                )
+                break
+            except subprocess.CalledProcessError:
+                now = time.monotonic()
+                if attempt == wait_attempts or now + delay_seconds >= deadline:
+                    raise
+                time.sleep(delay_seconds)
+
+        log_output = ""
+        for attempt in range(1, log_attempts + 1):
+            try:
+                log_output = run_capture(
+                    self.rcodesign,
+                    "notary-log",
+                    "--api-key-file",
+                    self.notary_key,
+                    submission_id,
+                )
+                break
+            except subprocess.CalledProcessError:
+                if attempt == log_attempts:
+                    raise
+                time.sleep(delay_seconds)
+        try:
+            payload = json.loads(log_output)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                f"Apple notarization log for {path} (submission {submission_id}) was not valid JSON"
+            ) from error
+        status = payload.get("status") if isinstance(payload, dict) else None
+        if status != "Accepted":
+            raise RuntimeError(
+                f"Apple notarization did not accept {path} (submission {submission_id}, status={status!r})"
+            )
+
         self.staple(path)
 
     def staple(self, path, attempts=5, delay_seconds=5):

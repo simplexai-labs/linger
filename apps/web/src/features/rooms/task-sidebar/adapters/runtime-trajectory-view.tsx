@@ -67,7 +67,8 @@ interface TrajectoryCall {
 /**
  * A Runtime's native turn, one row per step: what it thought, each command
  * or tool call with what it acted on, and what it replied. A call opens to
- * its full input and output. Reads Codex, Claude Code and Pi records.
+ * its full input and output. Reads Codex, Claude Code, Pi, and Antigravity
+ * records.
  */
 export function RuntimeTrajectoryView({
   live,
@@ -274,6 +275,7 @@ function trajectoryCall(
   const args =
     asObject(block?.input) ??
     asObject(block?.arguments) ??
+    asObject(payload?.args) ??
     parseObject(payload?.arguments) ??
     asObject(payload?.action);
   // A hosted search reports its own completion and has no result record.
@@ -293,11 +295,18 @@ function trajectoryCall(
       "local_shell_call",
       "bash",
       "powershell",
+      "run_command",
     ].includes(tool)
   )
     return { ...base, detail: command, kind: "command", verb: m.ran };
-  const path = stringValue(args?.path ?? args?.file_path ?? args?.filePath);
-  if (["read", "read_file", "view"].includes(tool) && path)
+  const path = stringValue(
+    args?.AbsolutePath ??
+      args?.Path ??
+      args?.path ??
+      args?.file_path ??
+      args?.filePath,
+  );
+  if (["read", "read_file", "view", "view_file"].includes(tool) && path)
     return { ...base, detail: path, kind: "read", verb: m.read };
   if (tool === "apply_patch") {
     const patch = stringValue(args?.input) ?? rawInput ?? "";
@@ -310,9 +319,14 @@ function trajectoryCall(
     };
   }
   if (
-    ["edit", "multiedit", "write", "str_replace_based_edit_tool"].includes(
-      tool,
-    ) &&
+    [
+      "edit",
+      "edit_file",
+      "multiedit",
+      "write",
+      "write_file",
+      "str_replace_based_edit_tool",
+    ].includes(tool) &&
     path
   )
     return {
@@ -320,21 +334,27 @@ function trajectoryCall(
       detail: path,
       diff: editLines(args) || undefined,
       kind: "file_change",
-      verb: tool === "write" ? m.wrote : m.edited,
+      verb: tool === "write" || tool === "write_file" ? m.wrote : m.edited,
     };
-  const query = stringValue(args?.query ?? args?.pattern);
+  const query = stringValue(
+    args?.Query ?? args?.Pattern ?? args?.query ?? args?.pattern,
+  );
   if (
     [
       "web_search",
       "web_search_call",
       "websearch",
       "grep",
+      "grep_search",
       "glob",
       "find",
+      "find_by_name",
     ].includes(tool) &&
     query
   ) {
-    const scope = stringValue(args?.path);
+    const scope = stringValue(
+      args?.SearchPath ?? args?.SearchDirectory ?? args?.path,
+    );
     return {
       ...base,
       detail: scope ? t(m.searchIn, { query, scope }) : query,
@@ -342,8 +362,13 @@ function trajectoryCall(
       verb: m.searched,
     };
   }
-  if (tool === "ls")
-    return { ...base, detail: path ?? ".", kind: "read", verb: m.listed };
+  if (tool === "ls" || tool === "list_dir")
+    return {
+      ...base,
+      detail: stringValue(args?.DirectoryPath) ?? path ?? ".",
+      kind: "read",
+      verb: m.listed,
+    };
   const url = stringValue(args?.url);
   if (["web_fetch", "webfetch"].includes(tool) && url)
     return { ...base, detail: url, kind: "browse", verb: m.fetched };
@@ -381,13 +406,13 @@ function patchLines(patch: string) {
 
 /**
  * An edit tool's input as removed and added lines: Claude Code's
- * `old_string`/`new_string` (or `edits` of them, or `content` to write) and
- * Pi's `oldText`/`newText`.
+ * `old_string`/`new_string` (or `edits` of them, or `content` to write),
+ * Pi's `oldText`/`newText`, and Antigravity's `Target`/`Replacement`/`Content`.
  */
 function editLines(args: Record<string, unknown> | undefined) {
   const prefix = (text: unknown, mark: string) =>
     typeof text === "string" ? text.split("\n").map((line) => mark + line) : [];
-  const content = args?.content;
+  const content = args?.content ?? args?.Content;
   if (typeof content === "string") return prefix(content, "+").join("\n");
   const listed = args?.edits;
   const edits = Array.isArray(listed) ? listed : [args];
@@ -395,8 +420,8 @@ function editLines(args: Record<string, unknown> | undefined) {
     .flatMap((value) => {
       const edit = asObject(value);
       const lines = [
-        ...prefix(edit?.old_string ?? edit?.oldText, "-"),
-        ...prefix(edit?.new_string ?? edit?.newText, "+"),
+        ...prefix(edit?.old_string ?? edit?.oldText ?? edit?.Target, "-"),
+        ...prefix(edit?.new_string ?? edit?.newText ?? edit?.Replacement, "+"),
       ];
       return lines.length ? [lines.join("\n")] : [];
     })

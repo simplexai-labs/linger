@@ -21,6 +21,7 @@ progress page and starts it again. The zip has no self-update.
 
 The Go daemon goes to resources/computer/ and the browser and computer-control
 tools it loads to resources/cli/ and resources/runtime/ (../computer_tools.py);
+a portable PowerShell 7 runtime goes to resources/runtime/pwsh/ on Windows, and
 the finished zip is checked for them. With a bundled source package, the
 TeamHub binaries and the Native runtime build.mjs built from it must be there
 and match their manifests and that package (../native_bundle.py).
@@ -46,6 +47,11 @@ DAEMON = os.path.join(DESKTOP, "dist", "computer", "win32-x64", "linger-computer
 TEAMHUB_LAUNCHER = os.path.join(DESKTOP, "dist", "teamhub-cli", "teamhub.exe")
 TEAMHUB_ARCHIVE_LAUNCHER = "Linger/resources/app/dist/teamhub-cli/teamhub.exe"
 TEAMHUB_ARCHIVE_LEGACY_CMD = "Linger/resources/app/dist/teamhub-cli/teamhub.cmd"
+PWSH_VERSION = "7.6.10"
+PWSH_ARCHIVE = f"PowerShell-{PWSH_VERSION}-win-x64.zip"
+PWSH_SHA256 = "7d871531806eb1646264e4bbabd9f0c30c23355591bc756bb9909448c29ae166"
+PWSH_ARCHIVE_ENTRY = "Linger/resources/runtime/pwsh/pwsh.exe"
+PWSH_DEFAULT_MIRROR = "https://github.com/PowerShell/PowerShell/releases/download/"
 
 
 def verify_teamhub_cli_archive(archive):
@@ -60,6 +66,18 @@ def verify_teamhub_cli_archive(archive):
         sys.exit(f"{os.path.basename(archive)} is missing non-empty {TEAMHUB_ARCHIVE_LAUNCHER}")
     if TEAMHUB_ARCHIVE_LEGACY_CMD in sizes:
         sys.exit(f"{os.path.basename(archive)} must not contain {TEAMHUB_ARCHIVE_LEGACY_CMD}")
+
+
+def verify_pwsh_archive(archive):
+    """Exits unless the finished zip holds a non-empty bundled pwsh.exe."""
+    with zipfile.ZipFile(archive) as source:
+        sizes = {
+            info.filename.replace("\\", "/"): info.file_size
+            for info in source.infolist()
+            if not info.is_dir()
+        }
+    if not sizes.get(PWSH_ARCHIVE_ENTRY):
+        sys.exit(f"{os.path.basename(archive)} is missing non-empty {PWSH_ARCHIVE_ENTRY}")
 
 
 def run(*args, **kwargs):
@@ -82,6 +100,44 @@ def electron_zip(version, cache):
             shutil.copyfileobj(response, out)
         os.rename(path + ".part", path)
     return path
+
+
+def pwsh_zip(cache):
+    """Returns the cached PowerShell 7 archive path after verifying SHA-256."""
+    os.makedirs(cache, exist_ok=True)
+    path = os.path.join(cache, PWSH_ARCHIVE)
+    if os.path.exists(path):
+        if sha256(path) == PWSH_SHA256:
+            return path
+        os.remove(path)
+    mirror = os.environ.get("PWSH_MIRROR", PWSH_DEFAULT_MIRROR)
+    if mirror and not mirror.endswith("/"):
+        mirror += "/"
+    url = f"{mirror}v{PWSH_VERSION}/{PWSH_ARCHIVE}"
+    part = path + ".part"
+    print(f"downloading {url}")
+    try:
+        with urllib.request.urlopen(url) as response, open(part, "wb") as out:
+            shutil.copyfileobj(response, out)
+        actual = sha256(part)
+        if actual != PWSH_SHA256:
+            sys.exit(f"{PWSH_ARCHIVE} sha256 mismatch: expected {PWSH_SHA256}, got {actual}")
+        os.replace(part, path)
+    except BaseException:
+        if os.path.exists(part):
+            os.remove(part)
+        raise
+    return path
+
+
+def extract_pwsh(archive_path, destination):
+    """Extracts the SHA-256-verified PowerShell archive into destination."""
+    os.makedirs(destination, exist_ok=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(destination)
+    pwsh_exe = os.path.join(destination, "pwsh.exe")
+    if not os.path.isfile(pwsh_exe) or os.path.getsize(pwsh_exe) <= 0:
+        sys.exit(f"{os.path.basename(archive_path)} is missing non-empty pwsh.exe")
 
 
 def write_icon(output):
@@ -121,6 +177,7 @@ def stage_app(version, electron_version, workdir, cache):
     os.makedirs(computer)
     shutil.copy2(DAEMON, computer)
     computer_tools.copy(resources, "win32-x64")
+    extract_pwsh(pwsh_zip(cache), os.path.join(resources, "runtime", "pwsh"))
 
     write_icon(os.path.join(resources, "linger.ico"))
     os.rename(os.path.join(stage, "electron.exe"), os.path.join(stage, "Linger.exe"))
@@ -195,6 +252,7 @@ def main():
             build_zip(stage, archive)
             computer_tools.check_archive(archive, "Linger/resources/", "win32-x64")
             verify_teamhub_cli_archive(archive)
+            verify_pwsh_archive(archive)
             report(archive)
 
         # Both read the finalized stage folder and write distinct outputs.

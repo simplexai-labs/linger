@@ -221,12 +221,12 @@ func modelGatewayInvokeFailure(ctx context.Context, failureCode string, err erro
 	return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: reason}
 }
 
-// normalizeModelInvokeEffort clamps requested reasoning effort for Codex and
-// Claude against the requested model (falling back to the Runtime's discovered
-// default model when omitted). Pi clamps live from its own get_state model
-// metadata inside InvokePiModel.
+// normalizeModelInvokeEffort clamps requested reasoning effort for Codex,
+// Claude, and Antigravity against the requested model (falling back to the
+// Runtime's discovered default model when omitted). Pi clamps live from its
+// own get_state model metadata inside InvokePiModel.
 func (d *Daemon) normalizeModelInvokeEffort(runtimeType, requestedModel, requested string) string {
-	if runtimeType != "codex" && runtimeType != "claude" {
+	if runtimeType != "codex" && runtimeType != "claude" && runtimeType != "antigravity" {
 		return requested
 	}
 	d.inventoryMu.RLock()
@@ -285,7 +285,7 @@ func filterModelInvokeEfforts(runtimeType string, efforts []string) []string {
 
 func validModelInvokeEffort(runtimeType, effort string) bool {
 	switch runtimeType {
-	case "claude", "codex":
+	case "claude", "codex", "antigravity":
 		return provider.ValidRuntimeReasoningEffort(effort)
 	}
 	return false

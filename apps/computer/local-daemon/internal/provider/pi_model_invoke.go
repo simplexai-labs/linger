@@ -21,10 +21,7 @@ func invokePiModel(ctx context.Context, request ModelInvokeRequest, installed Mo
 	if err != nil {
 		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background profile is unavailable"}
 	}
-	instructions := request.Instructions
-	if request.Mode == ModelInvokeStructured {
-		instructions += "\n\nReturn only a JSON object matching this schema:\n" + string(request.OutputSchema)
-	}
+	instructions := structuredModelInvokeInstructions(request)
 	instructionsFile := ""
 	if instructions != "" {
 		instructionsFile = filepath.Join(scratch, "instructions.md")
@@ -65,25 +62,5 @@ func classifyPiModelInvokeFailure(err error, answer native.Outcome) ModelInvokeR
 	if errors.Is(err, native.ErrPiUnsupportedEffort) {
 		return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: "Pi background reasoning effort is unsupported"}
 	}
-	if err != nil {
-		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background runtime failed to start"}
-	}
-	if apiErr, ok := parseStructuredAPIError(answer.Error); ok {
-		if isContextTooLongErrorCode(apiErr.Code) || isContextTooLongErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeContextTooLong, Reason: "Model invocation prompt exceeds the model context window"}
-		}
-		if apiErr.Code == "model_not_found" {
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeIncompatible, Reason: "Pi background model is not available"}
-		}
-		if isAuthErrorCode(apiErr.Code) || isAuthErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeAuthRequired, Reason: "Pi background authentication is required"}
-		}
-		if isUnavailableErrorCode(apiErr.Code) || isUnavailableErrorCode(apiErr.Type) {
-			return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background model service is unavailable"}
-		}
-	}
-	if posixNetworkErrnoPattern.MatchString(answer.Error) {
-		return ModelInvokeResult{Outcome: ModelInvokeRuntimeUnavailable, Reason: "Pi background model service is unavailable"}
-	}
-	return ModelInvokeResult{Outcome: ModelInvokeFailed, Reason: "Pi background call did not complete"}
+	return classifyNativeModelInvokeFailure("Pi", err, answer, false)
 }

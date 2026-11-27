@@ -510,6 +510,7 @@ describe("desktop-release.sh github-release", () => {
 
     expect(result.status).toBe(0);
     const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("--title Linger Desktop 1.0.0 (Beta)");
     expect(calls).toContain("--draft");
     expect(calls).not.toContain("--latest");
     expect(calls).not.toContain("--prerelease");

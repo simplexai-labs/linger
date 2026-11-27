@@ -27,6 +27,8 @@ func PruneOperationTemps(base string, logger *slog.Logger) (int, int64, error) {
 	return removed, bytesFreed, nil
 }
 
+// PrepareOperationTemp allocates a lock-tracked, owner-only temporary directory
+// under base.
 func PrepareOperationTemp(base string) (*OperationTemp, error) {
 	if !filepath.IsAbs(base) {
 		return nil, fmt.Errorf("Operation temp base must be absolute")

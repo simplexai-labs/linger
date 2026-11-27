@@ -1,13 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChromeIcon } from "@hugeicons/core-free-icons";
 import { lazy, Suspense, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { Translate } from "@/i18n/language";
 import { useT } from "@/i18n/use-translation";
 
+import { ChromeBrandIcon } from "../computer-app-brand-icon";
 import { computersMessages } from "../computers.messages";
 import { ComputerRow, ProgressChip, RowMark, StatusDot } from "../computer-row";
 import { browserConnectionQueryOptions } from "./browser-connection-api";
@@ -77,9 +76,9 @@ export function ComputerBrowserConnection({
               ? t(computersMessages.agentsCanUseChrome)
               : t(computersMessages.chromeOptional)
           }
-          icon={ChromeIcon}
           label={connected ? "Chrome" : t(computersMessages.connectChrome)}
-          onClick={connected || !online ? undefined : () => setOpen(true)}
+          leading={<ChromeBrandIcon active={online} size={14} />}
+          onClick={!online ? undefined : () => setOpen(true)}
           state={connected ? "done" : "optional"}
         />
         {dialog}
@@ -104,8 +103,8 @@ export function ComputerBrowserConnection({
         }
         dimmed={!online}
         mark={
-          <RowMark>
-            <Icon icon={ChromeIcon} size={20} />
+          <RowMark tone="card">
+            <ChromeBrandIcon active={online} size={16} />
           </RowMark>
         }
         subtitle={explanation}

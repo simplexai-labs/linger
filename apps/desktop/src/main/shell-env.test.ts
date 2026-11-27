@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   loginShellEnvironment,
@@ -188,6 +188,149 @@ describe.skipIf(process.platform === "win32")("loginShellEnvironment", () => {
     );
     expect(relativeOnlyEnv).toEqual({ PATH: "relative/bin" });
   });
+
+  it("returns as soon as -ilc succeeds without waiting on -lc and still cleans up -lc probe symlinks", async () => {
+    const root = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "linger-shell-fast-"),
+    );
+    try {
+      const nodeBin = path.join(
+        root,
+        "fnm",
+        "node-versions",
+        "v22.0.0",
+        "installation",
+        "bin",
+      );
+      await fsp.mkdir(nodeBin, { recursive: true });
+      const installationDir = path.dirname(nodeBin);
+      const multishellsDir = path.join(root, "state", "fnm_multishells");
+      await fsp.mkdir(multishellsDir, { recursive: true });
+      const interactiveLink = path.join(multishellsDir, "201_1");
+      const loginLink = path.join(multishellsDir, "202_2");
+      await fsp.symlink(installationDir, interactiveLink);
+      await fsp.symlink(installationDir, loginLink);
+
+      let resolveLogin!: (value: {
+        readonly code: number;
+        readonly stdout: string;
+      }) => void;
+      const loginPending = new Promise<{
+        readonly code: number;
+        readonly stdout: string;
+      }>((resolve) => {
+        resolveLogin = resolve;
+      });
+
+      const run: RunShell = async (_shell, args) => {
+        if (args[0] === "-ilc") {
+          return {
+            code: 0,
+            stdout: framed({
+              FNM_MULTISHELL_PATH: interactiveLink,
+              PATH: [path.join(interactiveLink, "bin"), "/usr/bin"].join(
+                path.delimiter,
+              ),
+            }),
+          };
+        }
+        return loginPending;
+      };
+
+      const env = await loginShellEnvironment(
+        { SHELL: "/bin/zsh", HOME: root },
+        run,
+      );
+      expect(env).toEqual({
+        PATH: [nodeBin, "/usr/bin"].join(path.delimiter),
+      });
+      await expect(fsp.lstat(interactiveLink)).rejects.toThrow();
+      // `-lc` has not finished yet, so its probe symlink still exists until it settles.
+      expect((await fsp.lstat(loginLink)).isSymbolicLink()).toBe(true);
+
+      resolveLogin({
+        code: 0,
+        stdout: framed({
+          FNM_MULTISHELL_PATH: loginLink,
+          PATH: [path.join(loginLink, "bin"), "/usr/bin"].join(path.delimiter),
+        }),
+      });
+      await vi.waitFor(async () => {
+        await expect(fsp.lstat(loginLink)).rejects.toThrow();
+      });
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an early-settling -lc probe symlink intact until -ilc fails and -lc PATH is stabilized", async () => {
+    const root = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "linger-shell-fall-"),
+    );
+    try {
+      const nodeBin = path.join(
+        root,
+        "fnm",
+        "node-versions",
+        "v22.0.0",
+        "installation",
+        "bin",
+      );
+      await fsp.mkdir(nodeBin, { recursive: true });
+      const installationDir = path.dirname(nodeBin);
+      const multishellsDir = path.join(root, "state", "fnm_multishells");
+      await fsp.mkdir(multishellsDir, { recursive: true });
+      const loginLink = path.join(multishellsDir, "302_2");
+      await fsp.symlink(installationDir, loginLink);
+
+      let resolveInteractive!: (value: {
+        readonly code: number;
+        readonly stdout: string;
+      }) => void;
+      const interactivePending = new Promise<{
+        readonly code: number;
+        readonly stdout: string;
+      }>((resolve) => {
+        resolveInteractive = resolve;
+      });
+      let markLoginReturned!: () => void;
+      const loginReturned = new Promise<void>((resolve) => {
+        markLoginReturned = resolve;
+      });
+
+      const run: RunShell = async (_shell, args) => {
+        if (args[0] === "-ilc") return interactivePending;
+        markLoginReturned();
+        return {
+          code: 0,
+          stdout: framed({
+            FNM_MULTISHELL_PATH: loginLink,
+            PATH: [path.join(loginLink, "bin"), "/usr/bin"].join(
+              path.delimiter,
+            ),
+          }),
+        };
+      };
+
+      const pending = loginShellEnvironment(
+        { SHELL: "/bin/zsh", HOME: root },
+        run,
+      );
+      await loginReturned;
+      // Give `-lc`'s `.then` a turn to run while `-ilc` is still pending.
+      await Promise.resolve();
+      expect((await fsp.lstat(loginLink)).isSymbolicLink()).toBe(true);
+
+      resolveInteractive({ code: -1, stdout: "" });
+      const env = await pending;
+      expect(env).toEqual({
+        PATH: [nodeBin, "/usr/bin"].join(path.delimiter),
+      });
+      await expect(fsp.lstat(loginLink)).rejects.toThrow();
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe.skipIf(process.platform === "win32")("withLoginShell", () => {
@@ -324,5 +467,53 @@ describe.skipIf(process.platform === "win32")("withLoginShell", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("withLoginShell Windows single PATH key", () => {
+  it("preserves Path without emitting duplicate Path and PATH keys on Windows", () => {
+    const winEnv = withLoginShell(
+      { Path: "C:\\Windows\\System32;C:\\Tools", FOO: "1" },
+      { PATH: "C:\\Extra" },
+      "C:\\Users\\lx",
+      { platform: "win32" },
+    );
+    expect(Object.keys(winEnv).filter((key) => /^path$/i.test(key))).toEqual([
+      "Path",
+    ]);
+    expect(winEnv.Path).toBe("C:\\Extra;C:\\Windows\\System32;C:\\Tools");
+    expect(winEnv.PATH).toBeUndefined();
+    expect(winEnv.FOO).toBe("1");
+
+    const collapser = withLoginShell(
+      {
+        PATH: "C:\\Program Files\\nodejs",
+        Path: "C:\\Windows\\System32",
+        FOO: "1",
+      },
+      undefined,
+      "C:\\Users\\lx",
+      { platform: "win32" },
+    );
+    expect(Object.keys(collapser).filter((key) => /^path$/i.test(key))).toEqual(
+      ["PATH"],
+    );
+    expect(collapser.PATH).toBe(
+      "C:\\Program Files\\nodejs;C:\\Windows\\System32",
+    );
+  });
+
+  it("collapses case-variant Path into PATH on POSIX without duplicate keys", () => {
+    const posixEnv = withLoginShell(
+      { Path: "/custom/bin", FOO: "1" },
+      undefined,
+      "/Users/me",
+      { platform: "darwin" },
+    );
+    expect(Object.keys(posixEnv).filter((key) => /^path$/i.test(key))).toEqual([
+      "PATH",
+    ]);
+    expect(posixEnv.PATH?.split(":")).toContain("/custom/bin");
+    expect(posixEnv.FOO).toBe("1");
   });
 });

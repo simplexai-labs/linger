@@ -237,6 +237,55 @@ describe("CLI input sources", () => {
       parseJsonValue('{"one":{"a":1},"two":{"a":2},"items":[null,true,"a:b"]}'),
     ).toEqual({ one: { a: 1 }, two: { a: 2 }, items: [null, true, "a:b"] });
   });
+  it("hints at the -file twin on inline JSON syntax errors without altering the issue", async () => {
+    const reader = createInputReader({
+      cwd: "/work",
+      readInput: async () => "{bad: 1}",
+    });
+    await expect(
+      jsonSource(
+        parseArguments(["--output", "{bad: 1}"], flags),
+        reader,
+        "--output",
+        "--output-file",
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message:
+        "--output is not valid JSON. Pass JSON through --output-file <path|-> if your shell strips quotes.",
+      details: {
+        issues: [
+          {
+            path: "--output",
+            code: "invalid_json",
+            message:
+              "line 1, column 2: expected a property name in double quotes.",
+          },
+        ],
+      },
+    });
+    await expect(
+      jsonSource(
+        parseArguments(["--output-file", "broken.json"], flags),
+        reader,
+        "--output",
+        "--output-file",
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message: "--output-file is not valid JSON.",
+      details: {
+        issues: [
+          {
+            path: "--output-file",
+            code: "invalid_json",
+            message:
+              "line 1, column 2: expected a property name in double quotes.",
+          },
+        ],
+      },
+    });
+  });
   it("keeps targets bare, never derives a caller Context and rejects ambiguous target flags", () => {
     const selected = targetFromFlags(
       parseArguments(["--thread", "thread_one"], flags),

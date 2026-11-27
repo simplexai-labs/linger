@@ -6478,6 +6478,7 @@ describe("LocalServerModule after a restart", () => {
     readonly region?: boolean;
     readonly fetch?: typeof fetch;
     readonly rename?: LocalServerOptions["rename"];
+    readonly bundledNodePath?: string;
     readonly setup?: (home: string, repo: string) => void;
   }) => {
     const repoName = options.repoName ?? "active";
@@ -6496,6 +6497,9 @@ describe("LocalServerModule after a restart", () => {
           : {}),
         ...(options.fetch ? { fetch: options.fetch } : {}),
         ...(options.rename ? { rename: options.rename } : {}),
+        ...(options.bundledNodePath
+          ? { bundledNodePath: options.bundledNodePath }
+          : {}),
       },
       enrolled,
       (home) => {
@@ -7281,6 +7285,330 @@ describe("LocalServerModule after a restart", () => {
     expect(existsSync(binaryDir)).toBe(false);
     expect(existsSync(stampFile)).toBe(false);
     await f.host.stop("quit");
+  });
+
+  it("pre-stages a newer shared bundled Node.js binary during prepareUpdateTool without touching status", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    try {
+      const root = tempDirectory();
+      const target = `${process.platform}-${process.arch}`;
+      const nextNodeVersion = "99.1.0";
+      const nextArchive = sourceArchive(path.join(root, "node-src"), "next");
+      const { staged, runtimeDir } = buildStagedUpdateBundle(root, {
+        target,
+        source: nextArchive,
+        teamhubDigest: nextArchive.sha256,
+        runtimeDigest: nextArchive.sha256,
+        includeTool: false,
+      });
+
+      const stagedNodePath = path.join(
+        staged,
+        "Contents",
+        "Resources",
+        "runtime",
+        "bin",
+        "node",
+      );
+      mkdirSync(path.dirname(stagedNodePath), { recursive: true });
+      const nodePayload = "#!/bin/sh\necho node-99\n";
+      writeFileSync(stagedNodePath, nodePayload, { mode: 0o755 });
+      const nodeSha = sha256Hex(nodePayload);
+
+      const manifestPath = path.join(runtimeDir, "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      manifest.node = {
+        version: nextNodeVersion,
+        shared: true,
+        binary: "runtime/bin/node",
+        sha256: nodeSha,
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+
+      const currentNodePath = path.join(
+        root,
+        "current-app",
+        "runtime",
+        "bin",
+        "node",
+      );
+      mkdirSync(path.dirname(currentNodePath), { recursive: true });
+      writeFileSync(currentNodePath, "#!/bin/sh\necho node-old\n", {
+        mode: 0o755,
+      });
+
+      const f = await startEnrolledLocalServer({
+        repoName: "active",
+        bundledNodePath: currentNodePath,
+      });
+      const beforeStatus = f.module.status();
+      const changed = vi.fn();
+      const offChanged = f.bus.on("local-server.changed", changed);
+
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      offChanged();
+
+      const expectedNode = path.join(
+        f.home,
+        "desktop",
+        "node",
+        `v${nextNodeVersion}`,
+        "bin",
+        "node",
+      );
+      expect(existsSync(expectedNode)).toBe(true);
+      expect(readFileSync(expectedNode, "utf8")).toBe(nodePayload);
+      expect(changed).not.toHaveBeenCalled();
+      expect(f.module.status()).toEqual(beforeStatus);
+      expect(info).toHaveBeenCalledWith(
+        "local_server.update_node_prepared",
+        expect.objectContaining({
+          version: nextNodeVersion,
+          ms: expect.any(Number),
+        }),
+      );
+
+      // Repeat call skips silently without copying or logging again.
+      info.mockClear();
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      expect(info).not.toHaveBeenCalledWith(
+        "local_server.update_node_prepared",
+        expect.anything(),
+      );
+
+      // Invalid shared node specs (bad version, unexpected binary, empty
+      // sha256, non-shared flag, mismatched target) are ignored without
+      // copying or failing.
+      const invalidSpecs: Array<{
+        readonly label: string;
+        readonly target?: string;
+        readonly node: Record<string, unknown>;
+      }> = [
+        {
+          label: "../escape",
+          node: {
+            version: "../escape",
+            shared: true,
+            binary: "runtime/bin/node",
+            sha256: nodeSha,
+          },
+        },
+        {
+          label: "99.4.0",
+          node: {
+            version: "99.4.0",
+            shared: true,
+            binary: "runtime/bin/node.exe",
+            sha256: nodeSha,
+          },
+        },
+        {
+          label: "99.5.0",
+          node: {
+            version: "99.5.0",
+            shared: true,
+            binary: "runtime/bin/node",
+            sha256: "",
+          },
+        },
+        {
+          label: "99.6.0",
+          node: {
+            version: "99.6.0",
+            shared: false,
+            binary: "runtime/bin/node",
+            sha256: nodeSha,
+          },
+        },
+        {
+          label: "99.7.0",
+          target: "other-arch",
+          node: {
+            version: "99.7.0",
+            shared: true,
+            binary: "runtime/bin/node",
+            sha256: nodeSha,
+          },
+        },
+      ];
+      for (const spec of invalidSpecs) {
+        const nextManifest = {
+          ...manifest,
+          target: spec.target ?? target,
+          node: spec.node,
+        };
+        writeFileSync(manifestPath, JSON.stringify(nextManifest));
+        await expect(
+          f.module.prepareUpdateTool(staged, new AbortController().signal),
+        ).resolves.toBeUndefined();
+        expect(
+          existsSync(path.join(f.home, "desktop", "node", `v${spec.label}`)),
+        ).toBe(false);
+      }
+      expect(info).not.toHaveBeenCalledWith(
+        "local_server.update_node_prepared",
+        expect.anything(),
+      );
+
+      // A staged bundle without a shared Node binary skips without failing and
+      // does not fall back to the current app's bundledNodePath.
+      rmSync(stagedNodePath);
+      const manifestMissing = {
+        ...manifest,
+        target,
+        node: {
+          version: "99.2.0",
+          shared: true,
+          binary: "runtime/bin/node",
+          sha256: nodeSha,
+        },
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifestMissing));
+      await expect(
+        f.module.prepareUpdateTool(staged, new AbortController().signal),
+      ).resolves.toBeUndefined();
+      expect(existsSync(path.join(f.home, "desktop", "node", "v99.2.0"))).toBe(
+        false,
+      );
+
+      await f.host.stop("quit");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("rejects on staged shared Node.js SHA-256 mismatch, cleans up partial, and lets sibling source staging settle", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    const realRemoveRetrying = fsRetry.removeRetrying;
+    const nodeCleanupDone = deferred();
+    const sourceReached = deferred();
+    const allowSourcePublish = deferred();
+    let expectedNodeDir = "";
+    let nodePartialRemovals = 0;
+    const removeSpy = vi
+      .spyOn(fsRetry, "removeRetrying")
+      .mockImplementation(async (targetPath) => {
+        await realRemoveRetrying(targetPath);
+        if (expectedNodeDir && targetPath === `${expectedNodeDir}.partial`) {
+          nodePartialRemovals += 1;
+          if (nodePartialRemovals === 2) nodeCleanupDone.resolve();
+        }
+      });
+    try {
+      const root = tempDirectory();
+      const target = `${process.platform}-${process.arch}`;
+      const nextNodeVersion = "99.3.0";
+      const nextArchive = sourceArchive(
+        path.join(root, "node-mismatch-src"),
+        "next-mismatch",
+      );
+      const { staged, runtimeDir } = buildStagedUpdateBundle(root, {
+        target,
+        source: nextArchive,
+        teamhubDigest: nextArchive.sha256,
+        runtimeDigest: nextArchive.sha256,
+        includeTool: false,
+      });
+
+      const stagedNodePath = path.join(
+        staged,
+        "Contents",
+        "Resources",
+        "runtime",
+        "bin",
+        "node",
+      );
+      mkdirSync(path.dirname(stagedNodePath), { recursive: true });
+      writeFileSync(stagedNodePath, "#!/bin/sh\necho tampered-node\n", {
+        mode: 0o755,
+      });
+
+      const manifestPath = path.join(runtimeDir, "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      manifest.node = {
+        version: nextNodeVersion,
+        shared: true,
+        binary: "runtime/bin/node",
+        sha256: "0".repeat(64),
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+
+      let preStaged = "";
+      const f = await startEnrolledLocalServer({
+        repoName: "active",
+        rename: async (from, to) => {
+          if (preStaged && to === preStaged) {
+            sourceReached.resolve();
+            await allowSourcePublish.promise;
+          }
+          await rename(from, to);
+        },
+      });
+      expectedNodeDir = path.join(
+        f.home,
+        "desktop",
+        "node",
+        `v${nextNodeVersion}`,
+      );
+      preStaged = path.join(
+        f.home,
+        "desktop",
+        "source",
+        nextArchive.sha256.slice(0, 16),
+      );
+
+      let settled = false;
+      const outcome = f.module
+        .prepareUpdateTool(staged, new AbortController().signal)
+        .then(
+          () => {
+            settled = true;
+            return { ok: true as const };
+          },
+          (error: unknown) => {
+            settled = true;
+            return { ok: false as const, error };
+          },
+        );
+
+      // Wait until both #prepareUpdateNode has failed and cleaned up its
+      // .partial directory and #prepareUpdateSource is paused at publish.
+      await Promise.all([sourceReached.promise, nodeCleanupDone.promise]);
+      await delay(10);
+      expect(settled).toBe(false);
+
+      allowSourcePublish.resolve();
+      const result = await outcome;
+      expect(result.ok).toBe(false);
+      expect(result.ok ? undefined : result.error).toBeInstanceOf(Error);
+      expect(result.ok ? "" : (result.error as Error).message).toMatch(
+        /damaged/,
+      );
+      expect(existsSync(`${expectedNodeDir}.partial`)).toBe(false);
+      expect(existsSync(expectedNodeDir)).toBe(false);
+      expect(
+        existsSync(path.join(preStaged, "scripts/source-native.mjs")),
+      ).toBe(true);
+      expect(info).toHaveBeenCalledWith(
+        "local_server.update_source_prepared",
+        expect.objectContaining({ source: nextArchive.sha256.slice(0, 16) }),
+      );
+      expect(info).not.toHaveBeenCalledWith(
+        "local_server.update_node_prepared",
+        expect.anything(),
+      );
+
+      await f.host.stop("quit");
+    } finally {
+      removeSpy.mockRestore();
+      info.mockRestore();
+    }
   });
 
   it("forgets the installation and its enrollment when the person sets up again", async () => {

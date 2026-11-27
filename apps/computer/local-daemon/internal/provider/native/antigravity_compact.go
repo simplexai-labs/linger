@@ -8,8 +8,11 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/runtimehistory"
 )
 
 type antigravityTranscriptEntry struct {
@@ -17,11 +20,34 @@ type antigravityTranscriptEntry struct {
 	StepIndex *int   `json:"step_index"`
 }
 
-func scanAntigravityTranscript(path string, visit func(antigravityTranscriptEntry)) bool {
+func sameAntigravityTranscriptPath(left, right string) bool {
+	cleanLeft := filepath.Clean(left)
+	cleanRight := filepath.Clean(right)
+	if cleanLeft == cleanRight {
+		return true
+	}
+	if filepath.Base(cleanLeft) != filepath.Base(cleanRight) {
+		return false
+	}
+	dirLeft, errLeft := filepath.EvalSymlinks(filepath.Dir(cleanLeft))
+	dirRight, errRight := filepath.EvalSymlinks(filepath.Dir(cleanRight))
+	return errLeft == nil && errRight == nil && dirLeft == dirRight
+}
+
+func scanAntigravityTranscript(path, storeRoot, sessionID string, visit func(antigravityTranscriptEntry)) bool {
 	if path == "" {
 		return false
 	}
-	file, err := os.Open(path)
+	var (
+		file *os.File
+		err  error
+	)
+	if storeRoot != "" && sessionID != "" &&
+		sameAntigravityTranscriptPath(path, filepath.Join(storeRoot, "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")) {
+		file, _, err = runtimehistory.OpenAntigravityTranscript(storeRoot, sessionID)
+	} else {
+		file, _, err = runtimehistory.OpenAntigravityTranscriptPath(path)
+	}
 	if err != nil {
 		return false
 	}
@@ -45,7 +71,11 @@ func scanAntigravityTranscript(path string, visit func(antigravityTranscriptEntr
 }
 
 func inspectAntigravityCheckpoints(path string, minStep *int) (count int, hasAtOrAfter bool, ok bool) {
-	ok = scanAntigravityTranscript(path, func(entry antigravityTranscriptEntry) {
+	return inspectAntigravityCheckpointsInStore(path, "", "", minStep)
+}
+
+func inspectAntigravityCheckpointsInStore(path, storeRoot, sessionID string, minStep *int) (count int, hasAtOrAfter bool, ok bool) {
+	ok = scanAntigravityTranscript(path, storeRoot, sessionID, func(entry antigravityTranscriptEntry) {
 		if entry.Type != "CHECKPOINT" {
 			return
 		}
@@ -83,6 +113,7 @@ func (s *ParkedSession) compactAntigravity(ctx context.Context, instructions str
 	proc.mu.Lock()
 	sessionID := proc.sessionID
 	transcriptPath := proc.transcriptPath
+	storeRoot := proc.storeRoot
 	proc.mu.Unlock()
 	hookEP := proc.hookEP
 
@@ -96,7 +127,7 @@ func (s *ParkedSession) compactAntigravity(ctx context.Context, instructions str
 	}
 
 	prompt := strings.TrimSpace("/compact " + strings.TrimSpace(instructions))
-	baselineCount, _, baselineOK := inspectAntigravityCheckpoints(transcriptPath, nil)
+	baselineCount, _, baselineOK := inspectAntigravityCheckpointsInStore(transcriptPath, storeRoot, sessionID, nil)
 	if ctx.Err() != nil {
 		antigravityResidents.retire(proc)
 		return compactContextResult(ctx)
@@ -128,6 +159,9 @@ func (s *ParkedSession) compactAntigravity(ctx context.Context, instructions str
 			}
 			hookMu.Unlock()
 			proc.noteTranscriptPath(req)
+			if req.HookEventName == "PreToolUse" {
+				return AntigravityHookResponse{Decision: "deny", Reason: "Tools are disabled during compaction."}
+			}
 			return AntigravityHookResponse{}
 		})
 		unregister = func() { unregOnce.Do(unreg) }
@@ -187,7 +221,7 @@ func (s *ParkedSession) compactAntigravity(ctx context.Context, instructions str
 		antigravityResidents.retire(proc)
 		return CompactResult{Outcome: "failed", Reason: "Antigravity compaction transcript was unavailable"}
 	}
-	afterCount, hasCheckpointFromTurn, afterOK := inspectAntigravityCheckpoints(transcriptPath, initialSteps)
+	afterCount, hasCheckpointFromTurn, afterOK := inspectAntigravityCheckpointsInStore(transcriptPath, storeRoot, sessionID, initialSteps)
 	if !afterOK {
 		proc.unbind(turn)
 		antigravityResidents.retire(proc)

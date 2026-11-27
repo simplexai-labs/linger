@@ -21,6 +21,10 @@ func TestShellScriptsAreNamedByTheirSteps(t *testing.T) {
 		{"sleep 60; teamhub message read 2>&1 | head -60", "message_read", []string{"Waiting for replies"}},
 		{"for i in 1 2 3 4; do sleep 45; teamhub message read --json 2>/dev/null | grep -E 'agent'; done", "message_read", []string{"Waiting for replies"}},
 		{"teamhub message emoji message_26abce0f ok_hand", "message", nil},
+		{"teamhub message card --title 'Report' --content 'Ready.'", "message", nil},
+		{"teamhub message ask-user --title 'Choice' --questions '[{\"question\":\"Pick\",\"options\":[\"A\",\"B\"]}]'", "message", nil},
+		{"@'\n[{\"question\":\"Pick\",\"options\":[\"A\",\"B\"]}]\n'@ | teamhub message ask-user --title 'Choice' --questions-file -", "message", nil},
+		{"cat notes.md; teamhub message ask-user --title 'Choice' --questions-file q.json", "read", []string{"Reading notes.md"}},
 		{"teamhub message send --file - <<'EOF'\nOn it; back soon | ok\nEOF", "message", nil},
 		{"cd app && teamhub message send --content hi", "message", nil},
 		{"teamhub message send --content $(cat reply.md)", "message", nil},
@@ -91,6 +95,8 @@ func TestPowerShellToolActivityAndTaskCreation(t *testing.T) {
 		`cd "C:\work\" ; teamhub message send --content "hi"`,
 		"$msg=@'\nDon't split\n'@\n$msg | teamhub message send --file -",
 		"teamhub message send --content 'It''s fine'",
+		"teamhub message card --title 'Report' --content 'Ready.'",
+		"@'\r\n[{\"question\":\"Pick\",\"options\":[\"A\",\"B\"]}]\r\n'@ | teamhub.exe message ask-user --title 'Choice' --questions-file -",
 	} {
 		kind, _, status := activityPresentation(native.Event{
 			Kind:         native.EventToolCall,
@@ -101,6 +107,16 @@ func TestPowerShellToolActivityAndTaskCreation(t *testing.T) {
 		if kind != native.ActivityMessage || status.steps != nil {
 			t.Errorf("powershell %q = %q %q, want %q nil", command, kind, status.steps, native.ActivityMessage)
 		}
+	}
+
+	sleepAskKind, _, sleepAskStatus := activityPresentation(native.Event{
+		Kind:         native.EventToolCall,
+		ToolName:     "exec_command",
+		ActivityKind: native.ActivityCommand,
+		Input:        map[string]any{"command": "sleep 5; teamhub message ask-user --title 'Choice' --questions-file q.json"},
+	})
+	if sleepAskKind != native.ActivityMessage || sleepAskStatus.steps != nil {
+		t.Fatalf("sleep + ask-user = %q %q, want %q nil", sleepAskKind, sleepAskStatus.steps, native.ActivityMessage)
 	}
 
 	taskCmd := "@'\r\nInvestigate it's failing; check logs | tail\r\n'@ | teamhub.cmd task create --name 'Debug' --requirement-file -"
