@@ -20,13 +20,20 @@ import {
   LocalModelsActionTimeoutError,
   type LocalModelActionCommand,
 } from "../../runner-gateway/runner-local-models.js";
+import {
+  LocalAsrTranscribeFailedError,
+  LocalAsrTranscribeTimeoutError,
+  LocalSpeechActionTimeoutError,
+  type LocalSpeechActionCommand,
+} from "../../runner-gateway/runner-local-speech.js";
 import { isRecord } from "@linger/service-kit";
 import {
   isByokProtocol,
   validByokPath,
 } from "@linger/service-kit/byok-endpoint";
 
-type LocalComputerHttpStatus = 400 | 404 | 405 | 409 | 410 | 502 | 503;
+type LocalComputerHttpStatus = 400 | 404 | 405 | 409 | 410 | 502 | 503 | 504;
+const LOCAL_ASR_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 export class LocalComputerHttpError extends Error {
   constructor(
@@ -54,6 +61,8 @@ export interface LocalComputerRouteHandlers {
   getLocalComputerPermissions(context: Context): Promise<Response> | Response;
   actOnLocalComputerPermission(context: Context): Promise<Response> | Response;
   actOnLocalComputerModels(context: Context): Promise<Response> | Response;
+  actOnLocalComputerSpeech(context: Context): Promise<Response> | Response;
+  transcribeLocalAsr(context: Context): Promise<Response> | Response;
   getLocalComputerModelSource(context: Context): Promise<Response> | Response;
   applyLocalComputerModelSource(context: Context): Promise<Response> | Response;
   testLocalComputerByok(context: Context): Promise<Response> | Response;
@@ -63,7 +72,10 @@ export interface LocalComputerRouteHandlers {
 export const createLocalComputerRouteHandlers = (options: {
   readonly localComputerManagement: LocalComputerManagement | undefined;
   readonly pathId: (context: Context, name: string) => string;
-  readonly readJsonBody: (context: Context) => Promise<unknown>;
+  readonly readJsonBody: (
+    context: Context,
+    maxBodyBytes?: number,
+  ) => Promise<unknown>;
 }): LocalComputerRouteHandlers => ({
   removeLocalComputer: async (context) => {
     if (!options.localComputerManagement) {
@@ -225,6 +237,92 @@ export const createLocalComputerRouteHandlers = (options: {
       });
     } catch (error) {
       throw localModelsRequestError(error);
+    }
+  },
+  actOnLocalComputerSpeech: async (context) => {
+    const management = requireLocalComputerManagement(
+      options.localComputerManagement,
+    );
+    if (!management.actOnLocalSpeech) {
+      throw new LocalComputerHttpError(
+        503,
+        "LOCAL_SPEECH_UNAVAILABLE",
+        "Local speech is unavailable",
+      );
+    }
+    const body = parseLocalSpeechActionCommand(
+      await options.readJsonBody(context),
+    );
+    try {
+      const ack = await management.actOnLocalSpeech({
+        tenantId: options.pathId(context, "tenantId"),
+        ownerActorId: options.pathId(context, "ownerActorId"),
+        computerId: options.pathId(context, "computerId"),
+        action: body.action,
+        ...(body.model_id === undefined ? {} : { modelId: body.model_id }),
+        ...(body.use_gpu === undefined ? {} : { useGpu: body.use_gpu }),
+        ...(body.keep_loaded_seconds === undefined
+          ? {}
+          : { keepLoadedSeconds: body.keep_loaded_seconds }),
+        ...(body.language === undefined ? {} : { language: body.language }),
+        ...(body.include_gpu_engine === undefined
+          ? {}
+          : { includeGpuEngine: body.include_gpu_engine }),
+        expiresAt: body.expires_at,
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, {
+        request_id: body.request_id,
+        ...ack,
+      });
+    } catch (error) {
+      throw localSpeechRequestError(error);
+    }
+  },
+  transcribeLocalAsr: async (context) => {
+    const management = requireLocalComputerManagement(
+      options.localComputerManagement,
+    );
+    if (!management.transcribeLocalAsr) {
+      throw new LocalComputerHttpError(
+        503,
+        "LOCAL_SPEECH_UNAVAILABLE",
+        "Local ASR transcription is unavailable",
+      );
+    }
+    const body = parseLocalAsrTranscribeRequest(
+      await options.readJsonBody(context, LOCAL_ASR_MAX_BODY_BYTES),
+    );
+    try {
+      const result = await management.transcribeLocalAsr({
+        tenantId: body.tenant_id,
+        ownerActorId: body.owner_actor_id,
+        computerId: body.computer_id,
+        ...(body.model_id === undefined ? {} : { modelId: body.model_id }),
+        ...(body.language === undefined ? {} : { language: body.language }),
+        ...(body.use_gpu === undefined ? {} : { useGpu: body.use_gpu }),
+        ...(body.keep_loaded_seconds === undefined
+          ? {}
+          : { keepLoadedSeconds: body.keep_loaded_seconds }),
+        audioWavBase64: body.audio_wav_base64,
+        signal: context.req.raw.signal,
+      });
+      return writeJson(context, 200, {
+        text: result.text,
+        ...(result.language === undefined ? {} : { language: result.language }),
+        ...(result.duration === undefined ? {} : { duration: result.duration }),
+        model: result.model,
+        requested_device: result.requestedDevice,
+        ...(result.effectiveDevice === undefined
+          ? {}
+          : { effective_device: result.effectiveDevice }),
+        ...(result.fallbackReason === undefined
+          ? {}
+          : { fallback_reason: result.fallbackReason }),
+        ...(result.segments === undefined ? {} : { segments: result.segments }),
+      });
+    } catch (error) {
+      throw localAsrTranscribeRequestError(error);
     }
   },
   getLocalComputerModelSource: async (context) => {
@@ -649,6 +747,25 @@ export const registerLocalComputerModelRoutes = (
   app.all(path, (context) => methodNotAllowed(context, "POST"));
 };
 
+export const registerLocalComputerSpeechRoutes = (
+  app: Hono,
+  handlers: Pick<LocalComputerRouteHandlers, "actOnLocalComputerSpeech">,
+): void => {
+  const path =
+    "/v1/tenants/:tenantId/owners/:ownerActorId/local-computers/:computerId/local-speech-actions";
+  app.post(path, handlers.actOnLocalComputerSpeech);
+  app.all(path, (context) => methodNotAllowed(context, "POST"));
+};
+
+export const registerLocalAsrTranscribeRoute = (
+  app: Hono,
+  handlers: Pick<LocalComputerRouteHandlers, "transcribeLocalAsr">,
+): void => {
+  const path = "/internal/v1/voice/local-asr/transcribe";
+  app.post(path, handlers.transcribeLocalAsr);
+  app.all(path, (context) => methodNotAllowed(context, "POST"));
+};
+
 const LOCAL_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
 const LOCAL_MODEL_ACTIONS: ReadonlySet<unknown> = new Set([
   "download",
@@ -736,6 +853,200 @@ const localModelsRequestError = (error: unknown): Error => {
   return error instanceof Error
     ? error
     : new Error("Local models action failed");
+};
+
+const LOCAL_SPEECH_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/u;
+const LOCAL_SPEECH_LANGUAGE_PATTERN = /^[a-zA-Z0-9_-]{1,32}$/u;
+const LOCAL_SPEECH_ACTIONS: ReadonlySet<unknown> = new Set([
+  "download",
+  "cancel",
+  "remove",
+  "load",
+  "unload",
+  "configure",
+  "refresh",
+]);
+const LOCAL_SPEECH_MODEL_REQUIRED_ACTIONS: ReadonlySet<unknown> = new Set([
+  "download",
+  "cancel",
+  "remove",
+  "load",
+]);
+
+const isLocalSpeechModelId = (value: unknown): value is string =>
+  typeof value === "string" && LOCAL_SPEECH_MODEL_ID_PATTERN.test(value);
+
+const isLocalSpeechLanguage = (value: unknown): value is string =>
+  typeof value === "string" && LOCAL_SPEECH_LANGUAGE_PATTERN.test(value);
+
+const isKeepLoadedSeconds = (value: unknown): value is number =>
+  typeof value === "number" &&
+  Number.isSafeInteger(value) &&
+  value >= -1 &&
+  value <= 86_400;
+
+const parseLocalSpeechActionCommand = (value: unknown) => {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "request_id",
+          "action",
+          "model_id",
+          "use_gpu",
+          "keep_loaded_seconds",
+          "language",
+          "include_gpu_engine",
+          "expires_at",
+        ].includes(key),
+    ) ||
+    !isProtocolId(value.request_id) ||
+    !LOCAL_SPEECH_ACTIONS.has(value.action) ||
+    !isTimestamp(value.expires_at) ||
+    (LOCAL_SPEECH_MODEL_REQUIRED_ACTIONS.has(value.action) &&
+      !isLocalSpeechModelId(value.model_id)) ||
+    (value.model_id !== undefined && !isLocalSpeechModelId(value.model_id)) ||
+    (value.use_gpu !== undefined && typeof value.use_gpu !== "boolean") ||
+    (value.keep_loaded_seconds !== undefined &&
+      !isKeepLoadedSeconds(value.keep_loaded_seconds)) ||
+    (value.language !== undefined && !isLocalSpeechLanguage(value.language)) ||
+    (value.include_gpu_engine !== undefined &&
+      typeof value.include_gpu_engine !== "boolean")
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_LOCAL_SPEECH_ACTION",
+      "Local speech action is invalid",
+    );
+  }
+  return value as {
+    readonly request_id: string;
+    readonly action: LocalSpeechActionCommand["action"];
+    readonly model_id?: string;
+    readonly use_gpu?: boolean;
+    readonly keep_loaded_seconds?: number;
+    readonly language?: string;
+    readonly include_gpu_engine?: boolean;
+    readonly expires_at: string;
+  };
+};
+
+const parseLocalAsrTranscribeRequest = (value: unknown) => {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "tenant_id",
+          "owner_actor_id",
+          "computer_id",
+          "model_id",
+          "language",
+          "use_gpu",
+          "keep_loaded_seconds",
+          "audio_wav_base64",
+        ].includes(key),
+    ) ||
+    !isProtocolId(value.tenant_id) ||
+    !isProtocolId(value.owner_actor_id) ||
+    !isProtocolId(value.computer_id) ||
+    typeof value.audio_wav_base64 !== "string" ||
+    value.audio_wav_base64.length === 0 ||
+    value.audio_wav_base64.length > LOCAL_ASR_MAX_BODY_BYTES ||
+    (value.model_id !== undefined && !isLocalSpeechModelId(value.model_id)) ||
+    (value.language !== undefined && !isLocalSpeechLanguage(value.language)) ||
+    (value.use_gpu !== undefined && typeof value.use_gpu !== "boolean") ||
+    (value.keep_loaded_seconds !== undefined &&
+      !isKeepLoadedSeconds(value.keep_loaded_seconds))
+  ) {
+    throw new LocalComputerHttpError(
+      400,
+      "INVALID_LOCAL_ASR_REQUEST",
+      "Local ASR transcription request is invalid",
+    );
+  }
+  return value as {
+    readonly tenant_id: string;
+    readonly owner_actor_id: string;
+    readonly computer_id: string;
+    readonly model_id?: string;
+    readonly language?: string;
+    readonly use_gpu?: boolean;
+    readonly keep_loaded_seconds?: number;
+    readonly audio_wav_base64: string;
+  };
+};
+
+const localSpeechRequestError = (error: unknown): Error => {
+  if (error instanceof LocalComputerNotFoundError) {
+    return new LocalComputerHttpError(
+      404,
+      "LOCAL_COMPUTER_NOT_FOUND",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerOfflineError) {
+    return new LocalComputerHttpError(
+      503,
+      "LOCAL_COMPUTER_OFFLINE",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerCapabilityError) {
+    return new LocalComputerHttpError(
+      409,
+      "LOCAL_SPEECH_UNSUPPORTED",
+      error.message,
+    );
+  }
+  if (error instanceof LocalSpeechActionTimeoutError) {
+    return new LocalComputerHttpError(
+      503,
+      "LOCAL_SPEECH_ACTION_TIMEOUT",
+      error.message,
+    );
+  }
+  return error instanceof Error
+    ? error
+    : new Error("Local speech action failed");
+};
+
+const localAsrTranscribeRequestError = (error: unknown): Error => {
+  if (error instanceof LocalComputerNotFoundError) {
+    return new LocalComputerHttpError(
+      404,
+      "LOCAL_COMPUTER_NOT_FOUND",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerOfflineError) {
+    return new LocalComputerHttpError(
+      503,
+      "LOCAL_COMPUTER_OFFLINE",
+      error.message,
+    );
+  }
+  if (error instanceof LocalComputerCapabilityError) {
+    return new LocalComputerHttpError(
+      409,
+      "LOCAL_SPEECH_UNSUPPORTED",
+      error.message,
+    );
+  }
+  if (error instanceof LocalAsrTranscribeTimeoutError) {
+    return new LocalComputerHttpError(504, "LOCAL_ASR_TIMEOUT", error.message);
+  }
+  if (error instanceof LocalAsrTranscribeFailedError) {
+    return new LocalComputerHttpError(
+      error.retryable ? 503 : 502,
+      error.code,
+      error.message,
+    );
+  }
+  return error instanceof Error
+    ? error
+    : new Error("Local ASR transcription failed");
 };
 
 const browserConnection = async (

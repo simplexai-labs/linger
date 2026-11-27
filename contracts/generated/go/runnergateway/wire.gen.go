@@ -36,6 +36,7 @@ const (
 	TypeRunnerHeartbeat             = "runner.heartbeat"
 	TypeRunnerRuntimeDiagnostics    = "runner.runtime_diagnostics"
 	TypeRunnerLocalModels           = "runner.local_models"
+	TypeRunnerLocalSpeech           = "runner.local_speech"
 	TypeRuntimeRegistrationObserved = "runtime.registration.observed"
 	TypeAgentRunnerState            = "agent_runner.state"
 	TypeExecuted                    = "executed"
@@ -56,6 +57,8 @@ const (
 	KindBrowserConnect     = "browser_connect"
 	KindComputerPermission = "computer_permission"
 	KindLocalModels        = "local_models"
+	KindLocalSpeechAction  = "local_speech_action"
+	KindLocalAsrTranscribe = "local_asr_transcribe"
 	KindModelSource        = "model_source"
 	TargetOperation        = "operation"
 	TargetProvider         = "provider"
@@ -95,6 +98,8 @@ var AgentToDaemonMessages = []Message{
 	{Name: "CapabilityBrowserConnect", Type: "execute", Match: map[string]string{"kind": "browser_connect"}},
 	{Name: "CapabilityComputerPermission", Type: "execute", Match: map[string]string{"kind": "computer_permission"}},
 	{Name: "CapabilityLocalModelsExecute", Type: "execute", Match: map[string]string{"kind": "local_models"}},
+	{Name: "CapabilityLocalSpeechActionExecute", Type: "execute", Match: map[string]string{"kind": "local_speech_action"}},
+	{Name: "CapabilityLocalAsrTranscribeExecute", Type: "execute", Match: map[string]string{"kind": "local_asr_transcribe"}},
 	{Name: "CapabilityModelSource", Type: "execute", Match: map[string]string{"kind": "model_source"}},
 	{Name: "OperationPrepare", Type: "prepare", Match: map[string]string{"target": "operation"}},
 	{Name: "ProviderPrepare", Type: "prepare", Match: map[string]string{"target": "provider"}},
@@ -114,6 +119,7 @@ var DaemonToAgentMessages = []Message{
 	{Name: "RunnerHeartbeat", Type: "runner.heartbeat", Match: nil},
 	{Name: "RunnerRuntimeDiagnostics", Type: "runner.runtime_diagnostics", Match: nil},
 	{Name: "RunnerLocalModels", Type: "runner.local_models", Match: nil},
+	{Name: "RunnerLocalSpeech", Type: "runner.local_speech", Match: nil},
 	{Name: "RuntimeRegistrationObserved", Type: "runtime.registration.observed", Match: nil},
 	{Name: "AgentRunnerReady", Type: "agent_runner.state", Match: map[string]string{"state": "ready"}},
 	{Name: "AgentRunnerRemoved", Type: "agent_runner.state", Match: map[string]string{"state": "removed"}},
@@ -129,6 +135,10 @@ var DaemonToAgentMessages = []Message{
 	{Name: "CapabilityComputerPermissionFailed", Type: "executed", Match: map[string]string{"kind": "computer_permission", "outcome": "failed"}},
 	{Name: "CapabilityLocalModelsAccepted", Type: "executed", Match: map[string]string{"kind": "local_models", "outcome": "accepted"}},
 	{Name: "CapabilityLocalModelsRefused", Type: "executed", Match: map[string]string{"kind": "local_models", "outcome": "refused"}},
+	{Name: "CapabilityLocalSpeechActionAccepted", Type: "executed", Match: map[string]string{"kind": "local_speech_action", "outcome": "accepted"}},
+	{Name: "CapabilityLocalSpeechActionRefused", Type: "executed", Match: map[string]string{"kind": "local_speech_action", "outcome": "refused"}},
+	{Name: "CapabilityLocalAsrTranscribeSucceeded", Type: "executed", Match: map[string]string{"kind": "local_asr_transcribe", "outcome": "succeeded"}},
+	{Name: "CapabilityLocalAsrTranscribeFailed", Type: "executed", Match: map[string]string{"kind": "local_asr_transcribe", "outcome": "failed"}},
 	{Name: "CapabilityModelSourceSucceeded", Type: "executed", Match: map[string]string{"kind": "model_source", "outcome": "succeeded"}},
 	{Name: "CapabilityModelSourceFailed", Type: "executed", Match: map[string]string{"kind": "model_source", "outcome": "failed"}},
 	{Name: "OperationPrepared", Type: "prepared", Match: map[string]string{"target": "operation"}},
@@ -1566,6 +1576,351 @@ func (RunnerLocalModels) FixedFields() map[string]string {
 // RequiredFields lists the keys a RunnerLocalModels must carry.
 func (RunnerLocalModels) RequiredFields() []string {
 	return []string{"type", "protocol_version", "runner_id", "sent_at", "revision", "local_models"}
+}
+
+// LocalSpeechDownloadProgress mirrors the LocalSpeechDownloadProgress schema shape.
+type LocalSpeechDownloadProgress struct {
+	Step           string  `json:"step"`
+	DoneBytes      uint64  `json:"done_bytes"`
+	TotalBytes     uint64  `json:"total_bytes"`
+	BytesPerSecond uint64  `json:"bytes_per_second"`
+	Source         string  `json:"source,omitempty"`
+	Connections    *uint64 `json:"connections,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechDownloadProgress.
+func (LocalSpeechDownloadProgress) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechDownloadProgress must carry.
+func (LocalSpeechDownloadProgress) RequiredFields() []string {
+	return []string{"step", "done_bytes", "total_bytes", "bytes_per_second"}
+}
+
+// LocalSpeechError mirrors the LocalSpeechError schema shape.
+type LocalSpeechError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechError.
+func (LocalSpeechError) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechError must carry.
+func (LocalSpeechError) RequiredFields() []string { return []string{"code", "message"} }
+
+// LocalSpeechConfig mirrors the LocalSpeechConfig schema shape.
+type LocalSpeechConfig struct {
+	ModelID           string `json:"model_id,omitempty"`
+	UseGpu            bool   `json:"use_gpu"`
+	KeepLoadedSeconds int64  `json:"keep_loaded_seconds"`
+	Language          string `json:"language"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechConfig.
+func (LocalSpeechConfig) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechConfig must carry.
+func (LocalSpeechConfig) RequiredFields() []string {
+	return []string{"use_gpu", "keep_loaded_seconds", "language"}
+}
+
+// LocalSpeechModel mirrors the LocalSpeechModel schema shape.
+type LocalSpeechModel struct {
+	ID                string                       `json:"id"`
+	Name              string                       `json:"name"`
+	Engine            string                       `json:"engine"`
+	Languages         []string                     `json:"languages"`
+	LanguageCount     uint64                       `json:"language_count"`
+	QualityRating     string                       `json:"quality_rating"`
+	License           string                       `json:"license"`
+	LicenseURL        string                       `json:"license_url"`
+	CommercialNotice  string                       `json:"commercial_notice,omitempty"`
+	DiskSizeBytes     uint64                       `json:"disk_size_bytes"`
+	VramEstimateBytes uint64                       `json:"vram_estimate_bytes"`
+	RamEstimateBytes  uint64                       `json:"ram_estimate_bytes"`
+	GpuSupported      bool                         `json:"gpu_supported"`
+	State             string                       `json:"state"`
+	Active            bool                         `json:"active"`
+	Download          *LocalSpeechDownloadProgress `json:"download,omitempty"`
+	Error             *LocalSpeechError            `json:"error,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechModel.
+func (LocalSpeechModel) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechModel must carry.
+func (LocalSpeechModel) RequiredFields() []string {
+	return []string{"id", "name", "engine", "languages", "language_count", "quality_rating", "license", "license_url", "disk_size_bytes", "vram_estimate_bytes", "ram_estimate_bytes", "gpu_supported", "state", "active"}
+}
+
+// LocalSpeechRuntime mirrors the LocalSpeechRuntime schema shape.
+type LocalSpeechRuntime struct {
+	Running              bool    `json:"running"`
+	State                string  `json:"state"`
+	ActiveModel          string  `json:"active_model,omitempty"`
+	Engine               string  `json:"engine,omitempty"`
+	RequestedDevice      string  `json:"requested_device"`
+	EffectiveDevice      string  `json:"effective_device,omitempty"`
+	FallbackReason       string  `json:"fallback_reason,omitempty"`
+	FallbackDetail       string  `json:"fallback_detail,omitempty"`
+	VramUsedBytes        uint64  `json:"vram_used_bytes"`
+	RamUsedBytes         uint64  `json:"ram_used_bytes"`
+	KeepLoadedSeconds    int64   `json:"keep_loaded_seconds"`
+	IdleRemainingSeconds *uint64 `json:"idle_remaining_seconds,omitempty"`
+	ActiveSessions       uint64  `json:"active_sessions"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechRuntime.
+func (LocalSpeechRuntime) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechRuntime must carry.
+func (LocalSpeechRuntime) RequiredFields() []string {
+	return []string{"running", "state", "requested_device", "vram_used_bytes", "ram_used_bytes", "keep_loaded_seconds", "active_sessions"}
+}
+
+// LocalSpeechUnavailableReason mirrors the LocalSpeechUnavailableReason schema shape.
+type LocalSpeechUnavailableReason struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechUnavailableReason.
+func (LocalSpeechUnavailableReason) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechUnavailableReason must carry.
+func (LocalSpeechUnavailableReason) RequiredFields() []string { return []string{"code"} }
+
+// LocalSpeechSnapshot mirrors the LocalSpeechSnapshot schema shape.
+type LocalSpeechSnapshot struct {
+	Available   bool                          `json:"available"`
+	Reason      *LocalSpeechUnavailableReason `json:"reason,omitempty"`
+	ObservedAt  string                        `json:"observed_at"`
+	ToolVersion string                        `json:"tool_version,omitempty"`
+	Config      *LocalSpeechConfig            `json:"config,omitempty"`
+	Runtime     *LocalSpeechRuntime           `json:"runtime,omitempty"`
+	Models      []LocalSpeechModel            `json:"models"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechSnapshot.
+func (LocalSpeechSnapshot) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechSnapshot must carry.
+func (LocalSpeechSnapshot) RequiredFields() []string {
+	return []string{"available", "observed_at", "models"}
+}
+
+// LocalSpeechActionRefusal mirrors the LocalSpeechActionRefusal schema shape.
+type LocalSpeechActionRefusal struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalSpeechActionRefusal.
+func (LocalSpeechActionRefusal) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalSpeechActionRefusal must carry.
+func (LocalSpeechActionRefusal) RequiredFields() []string { return []string{"code"} }
+
+// LocalAsrTranscribeSegment mirrors the LocalAsrTranscribeSegment schema shape.
+type LocalAsrTranscribeSegment struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+	Text  string  `json:"text"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalAsrTranscribeSegment.
+func (LocalAsrTranscribeSegment) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalAsrTranscribeSegment must carry.
+func (LocalAsrTranscribeSegment) RequiredFields() []string { return []string{"start", "end", "text"} }
+
+// RunnerLocalSpeech mirrors the RunnerLocalSpeech schema shape.
+type RunnerLocalSpeech struct {
+	Type            string              `json:"type"`
+	ProtocolVersion string              `json:"protocol_version"`
+	RunnerID        string              `json:"runner_id"`
+	SentAt          string              `json:"sent_at"`
+	Revision        uint64              `json:"revision"`
+	LocalSpeech     LocalSpeechSnapshot `json:"local_speech"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a RunnerLocalSpeech.
+func (RunnerLocalSpeech) FixedFields() map[string]string {
+	return map[string]string{"type": "runner.local_speech", "protocol_version": "2"}
+}
+
+// RequiredFields lists the keys a RunnerLocalSpeech must carry.
+func (RunnerLocalSpeech) RequiredFields() []string {
+	return []string{"type", "protocol_version", "runner_id", "sent_at", "revision", "local_speech"}
+}
+
+// CapabilityLocalSpeechActionExecute mirrors the CapabilityLocalSpeechActionExecute schema shape.
+type CapabilityLocalSpeechActionExecute struct {
+	ProtocolVersion   string `json:"protocol_version"`
+	CommandID         string `json:"command_id"`
+	RunnerID          string `json:"runner_id"`
+	TenantID          string `json:"tenant_id"`
+	OwnerActorID      string `json:"owner_actor_id"`
+	ConnectionEpoch   uint64 `json:"connection_epoch"`
+	ExpiresAt         string `json:"expires_at"`
+	Type              string `json:"type"`
+	Kind              string `json:"kind"`
+	Action            string `json:"action"`
+	ModelID           string `json:"model_id,omitempty"`
+	UseGpu            *bool  `json:"use_gpu,omitempty"`
+	KeepLoadedSeconds *int64 `json:"keep_loaded_seconds,omitempty"`
+	Language          string `json:"language,omitempty"`
+	IncludeGpuEngine  *bool  `json:"include_gpu_engine,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalSpeechActionExecute.
+func (CapabilityLocalSpeechActionExecute) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "execute", "kind": "local_speech_action"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalSpeechActionExecute must carry.
+func (CapabilityLocalSpeechActionExecute) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action"}
+}
+
+// CapabilityLocalSpeechActionAccepted mirrors the CapabilityLocalSpeechActionAccepted schema shape.
+type CapabilityLocalSpeechActionAccepted struct {
+	ProtocolVersion string `json:"protocol_version"`
+	CommandID       string `json:"command_id"`
+	RunnerID        string `json:"runner_id"`
+	TenantID        string `json:"tenant_id"`
+	OwnerActorID    string `json:"owner_actor_id"`
+	ConnectionEpoch uint64 `json:"connection_epoch"`
+	ExpiresAt       string `json:"expires_at"`
+	Type            string `json:"type"`
+	Kind            string `json:"kind"`
+	Action          string `json:"action"`
+	ModelID         string `json:"model_id,omitempty"`
+	Outcome         string `json:"outcome"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalSpeechActionAccepted.
+func (CapabilityLocalSpeechActionAccepted) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_speech_action", "outcome": "accepted"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalSpeechActionAccepted must carry.
+func (CapabilityLocalSpeechActionAccepted) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action", "outcome"}
+}
+
+// CapabilityLocalSpeechActionRefused mirrors the CapabilityLocalSpeechActionRefused schema shape.
+type CapabilityLocalSpeechActionRefused struct {
+	ProtocolVersion string                   `json:"protocol_version"`
+	CommandID       string                   `json:"command_id"`
+	RunnerID        string                   `json:"runner_id"`
+	TenantID        string                   `json:"tenant_id"`
+	OwnerActorID    string                   `json:"owner_actor_id"`
+	ConnectionEpoch uint64                   `json:"connection_epoch"`
+	ExpiresAt       string                   `json:"expires_at"`
+	Type            string                   `json:"type"`
+	Kind            string                   `json:"kind"`
+	Action          string                   `json:"action"`
+	ModelID         string                   `json:"model_id,omitempty"`
+	Refusal         LocalSpeechActionRefusal `json:"refusal"`
+	Outcome         string                   `json:"outcome"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalSpeechActionRefused.
+func (CapabilityLocalSpeechActionRefused) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_speech_action", "outcome": "refused"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalSpeechActionRefused must carry.
+func (CapabilityLocalSpeechActionRefused) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "action", "refusal", "outcome"}
+}
+
+// CapabilityLocalAsrTranscribeExecute mirrors the CapabilityLocalAsrTranscribeExecute schema shape.
+type CapabilityLocalAsrTranscribeExecute struct {
+	ProtocolVersion   string `json:"protocol_version"`
+	CommandID         string `json:"command_id"`
+	RunnerID          string `json:"runner_id"`
+	TenantID          string `json:"tenant_id"`
+	OwnerActorID      string `json:"owner_actor_id"`
+	ConnectionEpoch   uint64 `json:"connection_epoch"`
+	ExpiresAt         string `json:"expires_at"`
+	Type              string `json:"type"`
+	Kind              string `json:"kind"`
+	ModelID           string `json:"model_id,omitempty"`
+	Language          string `json:"language,omitempty"`
+	UseGpu            *bool  `json:"use_gpu,omitempty"`
+	KeepLoadedSeconds *int64 `json:"keep_loaded_seconds,omitempty"`
+	AudioWavBase64    string `json:"audio_wav_base64"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalAsrTranscribeExecute.
+func (CapabilityLocalAsrTranscribeExecute) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "execute", "kind": "local_asr_transcribe"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalAsrTranscribeExecute must carry.
+func (CapabilityLocalAsrTranscribeExecute) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "audio_wav_base64"}
+}
+
+// CapabilityLocalAsrTranscribeSucceeded mirrors the CapabilityLocalAsrTranscribeSucceeded schema shape.
+type CapabilityLocalAsrTranscribeSucceeded struct {
+	ProtocolVersion string                      `json:"protocol_version"`
+	CommandID       string                      `json:"command_id"`
+	RunnerID        string                      `json:"runner_id"`
+	TenantID        string                      `json:"tenant_id"`
+	OwnerActorID    string                      `json:"owner_actor_id"`
+	ConnectionEpoch uint64                      `json:"connection_epoch"`
+	ExpiresAt       string                      `json:"expires_at"`
+	Type            string                      `json:"type"`
+	Kind            string                      `json:"kind"`
+	Outcome         string                      `json:"outcome"`
+	Text            string                      `json:"text"`
+	Language        string                      `json:"language,omitempty"`
+	Duration        *float64                    `json:"duration,omitempty"`
+	Model           string                      `json:"model"`
+	RequestedDevice string                      `json:"requested_device"`
+	EffectiveDevice string                      `json:"effective_device,omitempty"`
+	FallbackReason  string                      `json:"fallback_reason,omitempty"`
+	Segments        []LocalAsrTranscribeSegment `json:"segments,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalAsrTranscribeSucceeded.
+func (CapabilityLocalAsrTranscribeSucceeded) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_asr_transcribe", "outcome": "succeeded"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalAsrTranscribeSucceeded must carry.
+func (CapabilityLocalAsrTranscribeSucceeded) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "outcome", "text", "model", "requested_device"}
+}
+
+// CapabilityLocalAsrTranscribeFailed mirrors the CapabilityLocalAsrTranscribeFailed schema shape.
+type CapabilityLocalAsrTranscribeFailed struct {
+	ProtocolVersion string `json:"protocol_version"`
+	CommandID       string `json:"command_id"`
+	RunnerID        string `json:"runner_id"`
+	TenantID        string `json:"tenant_id"`
+	OwnerActorID    string `json:"owner_actor_id"`
+	ConnectionEpoch uint64 `json:"connection_epoch"`
+	ExpiresAt       string `json:"expires_at"`
+	Type            string `json:"type"`
+	Kind            string `json:"kind"`
+	Outcome         string `json:"outcome"`
+	ErrorCode       string `json:"error_code"`
+	ErrorMessage    string `json:"error_message,omitempty"`
+	Retryable       *bool  `json:"retryable,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a CapabilityLocalAsrTranscribeFailed.
+func (CapabilityLocalAsrTranscribeFailed) FixedFields() map[string]string {
+	return map[string]string{"protocol_version": "2", "type": "executed", "kind": "local_asr_transcribe", "outcome": "failed"}
+}
+
+// RequiredFields lists the keys a CapabilityLocalAsrTranscribeFailed must carry.
+func (CapabilityLocalAsrTranscribeFailed) RequiredFields() []string {
+	return []string{"protocol_version", "command_id", "runner_id", "tenant_id", "owner_actor_id", "connection_epoch", "expires_at", "type", "kind", "outcome", "error_code"}
 }
 
 // RunnerHelloDaemonIdentity mirrors the RunnerHelloDaemonIdentity schema shape.

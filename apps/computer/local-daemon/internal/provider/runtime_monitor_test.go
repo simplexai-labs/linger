@@ -1319,6 +1319,173 @@ func TestChangedInstallationsRespectsManagedPaths(t *testing.T) {
 	}
 }
 
+func TestChangedInstallationsDetectsFallbackAppearingBehindIncompatibleShim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX scripts and symlinks")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	shimDir := filepath.Join(root, "shims")
+	fallbackDir := filepath.Join(root, "fallback")
+	for _, dir := range []string{home, fallbackDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMiseShimPi(t, filepath.Join(shimDir, "pi"), filepath.Join(root, "mise", "bin", "mise"))
+
+	options := DiscoveryOptions{
+		Runtimes:    []string{"pi"},
+		Environment: map[string]string{"PATH": shimDir + string(os.PathListSeparator) + fallbackDir, "HOME": home},
+		Timeout:     5 * time.Second,
+	}
+	initial, err := Discover(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(initial.Diagnostics) != 1 || initial.Diagnostics[0].Status != "incompatible" {
+		t.Fatalf("initial diagnostic = %+v, want incompatible", initial.Diagnostics)
+	}
+	if changed := changedInstallations(t.Context(), initial.Diagnostics, options, nil); len(changed) != 0 {
+		t.Fatalf("changed = %v before fallback candidate exists", changed)
+	}
+
+	writeFakePiScript(t, filepath.Join(fallbackDir, "pi"), "1.5.2")
+	if changed := changedInstallations(t.Context(), initial.Diagnostics, options, nil); !reflect.DeepEqual(changed, []string{"pi"}) {
+		t.Fatalf("changed = %v after fallback pi appears behind shim, want [pi]", changed)
+	}
+}
+
+// A usable selection is watched only through its own executable; changes to
+// candidates behind it never start a rediscovery. Without one, any candidate
+// may become the first usable one.
+func TestRuntimeWatchIgnoresCandidatesBehindTheSelectedOne(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX scripts and symlinks")
+	}
+	rewrite := func(t *testing.T, target string) {
+		t.Helper()
+		writeFakePiScript(t, target, "1.5.20")
+	}
+	changed := func(t *testing.T, diagnostics []RuntimeDiagnostic, options DiscoveryOptions) []string {
+		t.Helper()
+		return changedInstallations(t.Context(), diagnostics, options, nil)
+	}
+	unchanged := func(t *testing.T, diagnostics []RuntimeDiagnostic, options DiscoveryOptions, after string) {
+		t.Helper()
+		if got := changed(t, diagnostics, options); len(got) != 0 {
+			t.Fatalf("changed = %v after %s", got, after)
+		}
+		if runtimeExecutablesChanged(diagnostics) {
+			t.Fatalf("selected executable reported changed after %s", after)
+		}
+	}
+
+	t.Run("first candidate selected", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		pathDir := filepath.Join(root, "path-bin")
+		pathPi := filepath.Join(pathDir, "pi")
+		writeFakePiScript(t, pathPi, "1.5.2")
+		managedPi := filepath.Join(root, "managed", "pi")
+		bundledPi := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, bundledPi, "1.5.2")
+		options := DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			ManagedPaths: map[string]string{"pi": managedPi},
+			BundledPaths: map[string]string{"pi": bundledPi},
+			Environment:  map[string]string{"PATH": pathDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		}
+		initial, err := Discover(t.Context(), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := initial.Diagnostics[0]; d.Status != "ready" || d.EntryPath != pathPi || len(d.candidatePaths) != 2 {
+			t.Fatalf("initial diagnostic = %+v, want ready PATH pi with two candidates", d)
+		}
+		rewrite(t, bundledPi)
+		unchanged(t, initial.Diagnostics, options, "a lower-priority candidate changed")
+		writeFakePiScript(t, managedPi, "1.6.0")
+		unchanged(t, initial.Diagnostics, options, "a lower-priority candidate appeared")
+		if err := os.Remove(pathPi); err != nil {
+			t.Fatal(err)
+		}
+		if !runtimeExecutablesChanged(initial.Diagnostics) {
+			t.Fatal("removing the selected executable was not noticed")
+		}
+	})
+
+	t.Run("fallback behind an incompatible shim selected", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		shimDir := filepath.Join(root, "shims")
+		writeMiseShimPi(t, filepath.Join(shimDir, "pi"), filepath.Join(root, "mise", "bin", "mise"))
+		fallbackDir := filepath.Join(root, "fallback")
+		fallbackPi := filepath.Join(fallbackDir, "pi")
+		writeFakePiScript(t, fallbackPi, "1.5.2")
+		bundledPi := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, bundledPi, "1.5.2")
+		options := DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			BundledPaths: map[string]string{"pi": bundledPi},
+			Environment:  map[string]string{"PATH": shimDir + string(os.PathListSeparator) + fallbackDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		}
+		initial, err := Discover(t.Context(), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := initial.Diagnostics[0]; d.Status != "ready" || d.EntryPath != fallbackPi || len(d.candidatePaths) != 3 {
+			t.Fatalf("initial diagnostic = %+v, want ready fallback pi with three candidates", d)
+		}
+		rewrite(t, bundledPi)
+		unchanged(t, initial.Diagnostics, options, "a candidate behind the fallback changed")
+		if err := os.Remove(fallbackPi); err != nil {
+			t.Fatal(err)
+		}
+		if !runtimeExecutablesChanged(initial.Diagnostics) {
+			t.Fatal("removing the selected fallback was not noticed")
+		}
+	})
+
+	t.Run("no usable candidate", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		if err := os.MkdirAll(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		shimDir := filepath.Join(root, "shims")
+		writeMiseShimPi(t, filepath.Join(shimDir, "pi"), filepath.Join(root, "mise", "bin", "mise"))
+		oldBundled := filepath.Join(root, "bundled", "pi")
+		writeFakePiScript(t, oldBundled, "0.5.0")
+		options := DiscoveryOptions{
+			Runtimes:     []string{"pi"},
+			BundledPaths: map[string]string{"pi": oldBundled},
+			Environment:  map[string]string{"PATH": shimDir, "HOME": home},
+			Timeout:      5 * time.Second,
+		}
+		initial, err := Discover(t.Context(), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := initial.Diagnostics[0]; d.Status != "incompatible" {
+			t.Fatalf("initial diagnostic = %+v, want incompatible", d)
+		}
+		// Any candidate, however low its priority, may become the usable one.
+		writeFakePiScript(t, oldBundled, "1.5.2")
+		if got := changed(t, initial.Diagnostics, options); !reflect.DeepEqual(got, []string{"pi"}) {
+			t.Fatalf("changed = %v after the last candidate changed, want [pi]", got)
+		}
+	})
+}
+
 func TestRuntimeMonitorBackfillsDeferredRuntimesImmediately(t *testing.T) {
 	if got, want := AllRuntimeTypes(), []string{"codex", "claude", "pi", "antigravity"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("AllRuntimeTypes() = %v, want %v", got, want)

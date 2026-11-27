@@ -941,6 +941,213 @@ func (e LocalSkillScanCommandRequestRuntimeType) Valid() bool {
 	}
 }
 
+// Defines values for LocalSpeechActionAckOutcome.
+const (
+	LocalSpeechActionAcceptedOutcome LocalSpeechActionAckOutcome = "accepted"
+	LocalSpeechActionRefusedOutcome  LocalSpeechActionAckOutcome = "refused"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechActionAckOutcome enum.
+func (e LocalSpeechActionAckOutcome) Valid() bool {
+	switch e {
+	case LocalSpeechActionAcceptedOutcome:
+		return true
+	case LocalSpeechActionRefusedOutcome:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechActionKind.
+const (
+	LocalSpeechActionKindCancel    LocalSpeechActionKind = "cancel"
+	LocalSpeechActionKindConfigure LocalSpeechActionKind = "configure"
+	LocalSpeechActionKindDownload  LocalSpeechActionKind = "download"
+	LocalSpeechActionKindLoad      LocalSpeechActionKind = "load"
+	LocalSpeechActionKindRefresh   LocalSpeechActionKind = "refresh"
+	LocalSpeechActionKindRemove    LocalSpeechActionKind = "remove"
+	LocalSpeechActionKindUnload    LocalSpeechActionKind = "unload"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechActionKind enum.
+func (e LocalSpeechActionKind) Valid() bool {
+	switch e {
+	case LocalSpeechActionKindCancel:
+		return true
+	case LocalSpeechActionKindConfigure:
+		return true
+	case LocalSpeechActionKindDownload:
+		return true
+	case LocalSpeechActionKindLoad:
+		return true
+	case LocalSpeechActionKindRefresh:
+		return true
+	case LocalSpeechActionKindRemove:
+		return true
+	case LocalSpeechActionKindUnload:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechActionRefusalCode.
+const (
+	LocalSpeechRefusalCancelled           LocalSpeechActionRefusalCode = "CANCELLED"
+	LocalSpeechRefusalChecksumMismatch    LocalSpeechActionRefusalCode = "CHECKSUM_MISMATCH"
+	LocalSpeechRefusalDiskInsufficient    LocalSpeechActionRefusalCode = "DISK_INSUFFICIENT"
+	LocalSpeechRefusalDownloadFailed      LocalSpeechActionRefusalCode = "DOWNLOAD_FAILED"
+	LocalSpeechRefusalEngineStartFailed   LocalSpeechActionRefusalCode = "ENGINE_START_FAILED"
+	LocalSpeechRefusalInvalidState        LocalSpeechActionRefusalCode = "INVALID_STATE"
+	LocalSpeechRefusalJobRunning          LocalSpeechActionRefusalCode = "JOB_RUNNING"
+	LocalSpeechRefusalMemoryInsufficient  LocalSpeechActionRefusalCode = "MEMORY_INSUFFICIENT"
+	LocalSpeechRefusalModelFilesMissing   LocalSpeechActionRefusalCode = "MODEL_FILES_MISSING"
+	LocalSpeechRefusalModelUnknown        LocalSpeechActionRefusalCode = "MODEL_UNKNOWN"
+	LocalSpeechRefusalNetworkUnavailable  LocalSpeechActionRefusalCode = "NETWORK_UNAVAILABLE"
+	LocalSpeechRefusalPlatformUnsupported LocalSpeechActionRefusalCode = "PLATFORM_UNSUPPORTED"
+	LocalSpeechRefusalSpeechUnsupported   LocalSpeechActionRefusalCode = "SPEECH_UNSUPPORTED"
+	LocalSpeechRefusalToolFailed          LocalSpeechActionRefusalCode = "TOOL_FAILED"
+	LocalSpeechRefusalToolNotInstalled    LocalSpeechActionRefusalCode = "TOOL_NOT_INSTALLED"
+	LocalSpeechRefusalUnknownError        LocalSpeechActionRefusalCode = "UNKNOWN_ERROR"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechActionRefusalCode enum.
+func (e LocalSpeechActionRefusalCode) Valid() bool {
+	switch e {
+	case LocalSpeechRefusalCancelled:
+		return true
+	case LocalSpeechRefusalChecksumMismatch:
+		return true
+	case LocalSpeechRefusalDiskInsufficient:
+		return true
+	case LocalSpeechRefusalDownloadFailed:
+		return true
+	case LocalSpeechRefusalEngineStartFailed:
+		return true
+	case LocalSpeechRefusalInvalidState:
+		return true
+	case LocalSpeechRefusalJobRunning:
+		return true
+	case LocalSpeechRefusalMemoryInsufficient:
+		return true
+	case LocalSpeechRefusalModelFilesMissing:
+		return true
+	case LocalSpeechRefusalModelUnknown:
+		return true
+	case LocalSpeechRefusalNetworkUnavailable:
+		return true
+	case LocalSpeechRefusalPlatformUnsupported:
+		return true
+	case LocalSpeechRefusalSpeechUnsupported:
+		return true
+	case LocalSpeechRefusalToolFailed:
+		return true
+	case LocalSpeechRefusalToolNotInstalled:
+		return true
+	case LocalSpeechRefusalUnknownError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechEffectiveDevice.
+const (
+	LocalSpeechEffectiveDeviceCpu      LocalSpeechEffectiveDevice = "cpu"
+	LocalSpeechEffectiveDeviceCuda     LocalSpeechEffectiveDevice = "cuda"
+	LocalSpeechEffectiveDeviceDirectml LocalSpeechEffectiveDevice = "directml"
+	LocalSpeechEffectiveDeviceMetal    LocalSpeechEffectiveDevice = "metal"
+	LocalSpeechEffectiveDeviceVulkan   LocalSpeechEffectiveDevice = "vulkan"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechEffectiveDevice enum.
+func (e LocalSpeechEffectiveDevice) Valid() bool {
+	switch e {
+	case LocalSpeechEffectiveDeviceCpu:
+		return true
+	case LocalSpeechEffectiveDeviceCuda:
+		return true
+	case LocalSpeechEffectiveDeviceDirectml:
+		return true
+	case LocalSpeechEffectiveDeviceMetal:
+		return true
+	case LocalSpeechEffectiveDeviceVulkan:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechFallbackReason.
+const (
+	LocalSpeechFallbackCpuOptimalForInt8         LocalSpeechFallbackReason = "cpu_optimal_for_int8"
+	LocalSpeechFallbackDriverUpdateRequired      LocalSpeechFallbackReason = "driver_update_required"
+	LocalSpeechFallbackGpuEngineUnavailable      LocalSpeechFallbackReason = "gpu_engine_unavailable"
+	LocalSpeechFallbackGpuInitFailed             LocalSpeechFallbackReason = "gpu_init_failed"
+	LocalSpeechFallbackGpuUnsupportedPlatform    LocalSpeechFallbackReason = "gpu_unsupported_platform"
+	LocalSpeechFallbackInsufficientUnifiedMemory LocalSpeechFallbackReason = "insufficient_unified_memory"
+	LocalSpeechFallbackInsufficientVram          LocalSpeechFallbackReason = "insufficient_vram"
+	LocalSpeechFallbackMemoryPressureCritical    LocalSpeechFallbackReason = "memory_pressure_critical"
+	LocalSpeechFallbackMemoryPressureWarn        LocalSpeechFallbackReason = "memory_pressure_warn"
+	LocalSpeechFallbackNoSupportedGpu            LocalSpeechFallbackReason = "no_supported_gpu"
+	LocalSpeechFallbackRuntimeOomFallback        LocalSpeechFallbackReason = "runtime_oom_fallback"
+	LocalSpeechFallbackVulkanUnavailable         LocalSpeechFallbackReason = "vulkan_unavailable"
+	LocalSpeechFallbackYieldedToLlm              LocalSpeechFallbackReason = "yielded_to_llm"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechFallbackReason enum.
+func (e LocalSpeechFallbackReason) Valid() bool {
+	switch e {
+	case LocalSpeechFallbackCpuOptimalForInt8:
+		return true
+	case LocalSpeechFallbackDriverUpdateRequired:
+		return true
+	case LocalSpeechFallbackGpuEngineUnavailable:
+		return true
+	case LocalSpeechFallbackGpuInitFailed:
+		return true
+	case LocalSpeechFallbackGpuUnsupportedPlatform:
+		return true
+	case LocalSpeechFallbackInsufficientUnifiedMemory:
+		return true
+	case LocalSpeechFallbackInsufficientVram:
+		return true
+	case LocalSpeechFallbackMemoryPressureCritical:
+		return true
+	case LocalSpeechFallbackMemoryPressureWarn:
+		return true
+	case LocalSpeechFallbackNoSupportedGpu:
+		return true
+	case LocalSpeechFallbackRuntimeOomFallback:
+		return true
+	case LocalSpeechFallbackVulkanUnavailable:
+		return true
+	case LocalSpeechFallbackYieldedToLlm:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalSpeechRequestedDevice.
+const (
+	LocalSpeechRequestedDeviceCpu LocalSpeechRequestedDevice = "cpu"
+	LocalSpeechRequestedDeviceGpu LocalSpeechRequestedDevice = "gpu"
+)
+
+// Valid indicates whether the value is a known member of the LocalSpeechRequestedDevice enum.
+func (e LocalSpeechRequestedDevice) Valid() bool {
+	switch e {
+	case LocalSpeechRequestedDeviceCpu:
+		return true
+	case LocalSpeechRequestedDeviceGpu:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MemoryCalendarFailureTask.
 const (
 	MemoryCalendarFailureTaskDaily        MemoryCalendarFailureTask = "daily"
@@ -1908,6 +2115,47 @@ type InsertDocumentBlocksSemanticOperationPosition string
 // InternalErrorCode defines model for InternalErrorCode.
 type InternalErrorCode string
 
+// LocalAsrTranscribeRequest defines model for LocalAsrTranscribeRequest.
+type LocalAsrTranscribeRequest struct {
+	AudioWavBase64 string `json:"audio_wav_base64"`
+
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId        Id   `json:"computer_id"`
+	KeepLoadedSeconds *int `json:"keep_loaded_seconds,omitempty"`
+
+	// Language Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue.
+	Language *LocalSpeechLanguage `json:"language,omitempty"`
+
+	// ModelId Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+	ModelId *LocalSpeechModelId `json:"model_id,omitempty"`
+
+	// OwnerActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	OwnerActorId Id `json:"owner_actor_id"`
+
+	// TenantId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	TenantId Id    `json:"tenant_id"`
+	UseGpu   *bool `json:"use_gpu,omitempty"`
+}
+
+// LocalAsrTranscribeResponse defines model for LocalAsrTranscribeResponse.
+type LocalAsrTranscribeResponse struct {
+	Duration        *float32                     `json:"duration,omitempty"`
+	EffectiveDevice *LocalSpeechEffectiveDevice  `json:"effective_device,omitempty"`
+	FallbackReason  *LocalSpeechFallbackReason   `json:"fallback_reason,omitempty"`
+	Language        *string                      `json:"language,omitempty"`
+	Model           string                       `json:"model"`
+	RequestedDevice LocalSpeechRequestedDevice   `json:"requested_device"`
+	Segments        *[]LocalAsrTranscribeSegment `json:"segments,omitempty"`
+	Text            string                       `json:"text"`
+}
+
+// LocalAsrTranscribeSegment defines model for LocalAsrTranscribeSegment.
+type LocalAsrTranscribeSegment struct {
+	End   float32 `json:"end"`
+	Start float32 `json:"start"`
+	Text  string  `json:"text"`
+}
+
 // LocalComputerToolCall defines model for LocalComputerToolCall.
 type LocalComputerToolCall struct {
 	AgentId    string                 `json:"agent_id"`
@@ -2041,6 +2289,65 @@ type LocalSkillScanCommandRequest struct {
 
 // LocalSkillScanCommandRequestRuntimeType defines model for LocalSkillScanCommandRequest.RuntimeType.
 type LocalSkillScanCommandRequestRuntimeType string
+
+// LocalSpeechActionAck defines model for LocalSpeechActionAck.
+type LocalSpeechActionAck struct {
+	Outcome LocalSpeechActionAckOutcome `json:"outcome"`
+	Refusal *LocalSpeechActionRefusal   `json:"refusal,omitempty"`
+
+	// RequestId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RequestId Id `json:"request_id"`
+}
+
+// LocalSpeechActionAckOutcome defines model for LocalSpeechActionAck.Outcome.
+type LocalSpeechActionAckOutcome string
+
+// LocalSpeechActionCommand TeamHub asks Agent Service to send one execute local_speech_action frame to an owned Computer.
+type LocalSpeechActionCommand struct {
+	Action LocalSpeechActionKind `json:"action"`
+
+	// ExpiresAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ExpiresAt         Timestamp `json:"expires_at"`
+	IncludeGpuEngine  *bool     `json:"include_gpu_engine,omitempty"`
+	KeepLoadedSeconds *int      `json:"keep_loaded_seconds,omitempty"`
+
+	// Language Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue.
+	Language *LocalSpeechLanguage `json:"language,omitempty"`
+
+	// ModelId Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+	ModelId *LocalSpeechModelId `json:"model_id,omitempty"`
+
+	// RequestId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RequestId Id    `json:"request_id"`
+	UseGpu    *bool `json:"use_gpu,omitempty"`
+}
+
+// LocalSpeechActionKind defines model for LocalSpeechActionKind.
+type LocalSpeechActionKind string
+
+// LocalSpeechActionRefusal defines model for LocalSpeechActionRefusal.
+type LocalSpeechActionRefusal struct {
+	Code   LocalSpeechActionRefusalCode `json:"code"`
+	Detail *string                      `json:"detail,omitempty"`
+}
+
+// LocalSpeechActionRefusalCode defines model for LocalSpeechActionRefusalCode.
+type LocalSpeechActionRefusalCode string
+
+// LocalSpeechEffectiveDevice defines model for LocalSpeechEffectiveDevice.
+type LocalSpeechEffectiveDevice string
+
+// LocalSpeechFallbackReason defines model for LocalSpeechFallbackReason.
+type LocalSpeechFallbackReason string
+
+// LocalSpeechLanguage Speech recognition language: auto (default) or an ISO-639-1 / BCP-47 language tag such as zh, en, ja, ko, or yue.
+type LocalSpeechLanguage = string
+
+// LocalSpeechModelId Stable localmodels speech catalog id, such as sensevoice-small or whisper-large-v3-turbo.
+type LocalSpeechModelId = string
+
+// LocalSpeechRequestedDevice defines model for LocalSpeechRequestedDevice.
+type LocalSpeechRequestedDevice string
 
 // ManifestEntries defines model for ManifestEntries.
 type ManifestEntries = []ManifestEntry
@@ -2962,6 +3269,9 @@ type QueryPersonalKnowledgeJSONRequestBody = PersonalKnowledgeQueryRequest
 // StartMemoryRebuildJSONRequestBody defines body for StartMemoryRebuild for application/json ContentType.
 type StartMemoryRebuildJSONRequestBody = MemoryRebuildRequest
 
+// TranscribeLocalAsrJSONRequestBody defines body for TranscribeLocalAsr for application/json ContentType.
+type TranscribeLocalAsrJSONRequestBody = LocalAsrTranscribeRequest
+
 // GenerateWikiRefreshCandidatesJSONRequestBody defines body for GenerateWikiRefreshCandidates for application/json ContentType.
 type GenerateWikiRefreshCandidatesJSONRequestBody = WikiRefreshCandidateGenerationRequest
 
@@ -2985,6 +3295,9 @@ type ConfigureLocalComputerBrowserConnectionJSONRequestBody = BrowserConnectionC
 
 // ActOnLocalComputerModelsJSONRequestBody defines body for ActOnLocalComputerModels for application/json ContentType.
 type ActOnLocalComputerModelsJSONRequestBody = LocalModelActionCommand
+
+// ActOnLocalComputerSpeechJSONRequestBody defines body for ActOnLocalComputerSpeech for application/json ContentType.
+type ActOnLocalComputerSpeechJSONRequestBody = LocalSpeechActionCommand
 
 // ApplyLocalComputerModelSourceJSONRequestBody defines body for ApplyLocalComputerModelSource for application/json ContentType.
 type ApplyLocalComputerModelSourceJSONRequestBody = ModelSourceApplyCommand
@@ -3950,6 +4263,11 @@ type ClientInterface interface {
 
 	StartMemoryRebuild(ctx context.Context, body StartMemoryRebuildJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// TranscribeLocalAsrWithBody request with any body
+	TranscribeLocalAsrWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	TranscribeLocalAsr(ctx context.Context, body TranscribeLocalAsrJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GenerateWikiRefreshCandidatesWithBody request with any body
 	GenerateWikiRefreshCandidatesWithBody(ctx context.Context, wikiRefreshId TeamHubId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4007,6 +4325,11 @@ type ClientInterface interface {
 	ActOnLocalComputerModelsWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ActOnLocalComputerModels(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ActOnLocalComputerSpeechWithBody request with any body
+	ActOnLocalComputerSpeechWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ActOnLocalComputerSpeech(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerSpeechJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetLocalComputerModelSource request
 	GetLocalComputerModelSource(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4391,6 +4714,30 @@ func (c *Client) StartMemoryRebuild(ctx context.Context, body StartMemoryRebuild
 	return c.Client.Do(req)
 }
 
+func (c *Client) TranscribeLocalAsrWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTranscribeLocalAsrRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TranscribeLocalAsr(ctx context.Context, body TranscribeLocalAsrJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTranscribeLocalAsrRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GenerateWikiRefreshCandidatesWithBody(ctx context.Context, wikiRefreshId TeamHubId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGenerateWikiRefreshCandidatesRequestWithBody(c.Server, wikiRefreshId, contentType, body)
 	if err != nil {
@@ -4645,6 +4992,30 @@ func (c *Client) ActOnLocalComputerModelsWithBody(ctx context.Context, tenantId 
 
 func (c *Client) ActOnLocalComputerModels(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActOnLocalComputerModelsRequest(c.Server, tenantId, ownerActorId, computerId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ActOnLocalComputerSpeechWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActOnLocalComputerSpeechRequestWithBody(c.Server, tenantId, ownerActorId, computerId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ActOnLocalComputerSpeech(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerSpeechJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActOnLocalComputerSpeechRequest(c.Server, tenantId, ownerActorId, computerId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5584,6 +5955,46 @@ func NewStartMemoryRebuildRequestWithBody(server string, contentType string, bod
 	return req, nil
 }
 
+// NewTranscribeLocalAsrRequest calls the generic TranscribeLocalAsr builder with application/json body
+func NewTranscribeLocalAsrRequest(server string, body TranscribeLocalAsrJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewTranscribeLocalAsrRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewTranscribeLocalAsrRequestWithBody generates requests for TranscribeLocalAsr with any type of body
+func NewTranscribeLocalAsrRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/v1/voice/local-asr/transcribe")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGenerateWikiRefreshCandidatesRequest calls the generic GenerateWikiRefreshCandidates builder with application/json body
 func NewGenerateWikiRefreshCandidatesRequest(server string, wikiRefreshId TeamHubId, body GenerateWikiRefreshCandidatesJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -6227,6 +6638,67 @@ func NewActOnLocalComputerModelsRequestWithBody(server string, tenantId TenantId
 	return req, nil
 }
 
+// NewActOnLocalComputerSpeechRequest calls the generic ActOnLocalComputerSpeech builder with application/json body
+func NewActOnLocalComputerSpeechRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerSpeechJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewActOnLocalComputerSpeechRequestWithBody(server, tenantId, ownerActorId, computerId, "application/json", bodyReader)
+}
+
+// NewActOnLocalComputerSpeechRequestWithBody generates requests for ActOnLocalComputerSpeech with any type of body
+func NewActOnLocalComputerSpeechRequestWithBody(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenantId", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "ownerActorId", ownerActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "computerId", computerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/owners/%s/local-computers/%s/local-speech-actions", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetLocalComputerModelSourceRequest generates requests for GetLocalComputerModelSource
 func NewGetLocalComputerModelSourceRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId) (*http.Request, error) {
 	var err error
@@ -6773,6 +7245,11 @@ type ClientWithResponsesInterface interface {
 
 	StartMemoryRebuildWithResponse(ctx context.Context, body StartMemoryRebuildJSONRequestBody, reqEditors ...RequestEditorFn) (*StartMemoryRebuildResponse, error)
 
+	// TranscribeLocalAsrWithBodyWithResponse request with any body
+	TranscribeLocalAsrWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*TranscribeLocalAsrResponse, error)
+
+	TranscribeLocalAsrWithResponse(ctx context.Context, body TranscribeLocalAsrJSONRequestBody, reqEditors ...RequestEditorFn) (*TranscribeLocalAsrResponse, error)
+
 	// GenerateWikiRefreshCandidatesWithBodyWithResponse request with any body
 	GenerateWikiRefreshCandidatesWithBodyWithResponse(ctx context.Context, wikiRefreshId TeamHubId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*GenerateWikiRefreshCandidatesResponse, error)
 
@@ -6830,6 +7307,11 @@ type ClientWithResponsesInterface interface {
 	ActOnLocalComputerModelsWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActOnLocalComputerModelsResponse, error)
 
 	ActOnLocalComputerModelsWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*ActOnLocalComputerModelsResponse, error)
+
+	// ActOnLocalComputerSpeechWithBodyWithResponse request with any body
+	ActOnLocalComputerSpeechWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActOnLocalComputerSpeechResponse, error)
+
+	ActOnLocalComputerSpeechWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerSpeechJSONRequestBody, reqEditors ...RequestEditorFn) (*ActOnLocalComputerSpeechResponse, error)
 
 	// GetLocalComputerModelSourceWithResponse request
 	GetLocalComputerModelSourceWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, reqEditors ...RequestEditorFn) (*GetLocalComputerModelSourceResponse, error)
@@ -7417,6 +7899,43 @@ func (r StartMemoryRebuildResponse) ContentType() string {
 	return ""
 }
 
+type TranscribeLocalAsrResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LocalAsrTranscribeResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON502      *BadGateway
+	JSON503      *ServiceUnavailable
+	JSON504      *ErrorResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r TranscribeLocalAsrResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TranscribeLocalAsrResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r TranscribeLocalAsrResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GenerateWikiRefreshCandidatesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7895,6 +8414,42 @@ func (r ActOnLocalComputerModelsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ActOnLocalComputerModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ActOnLocalComputerSpeechResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LocalSpeechActionAck
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON502      *BadGateway
+	JSON503      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ActOnLocalComputerSpeechResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ActOnLocalComputerSpeechResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ActOnLocalComputerSpeechResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8430,6 +8985,23 @@ func (c *ClientWithResponses) StartMemoryRebuildWithResponse(ctx context.Context
 	return ParseStartMemoryRebuildResponse(rsp)
 }
 
+// TranscribeLocalAsrWithBodyWithResponse request with arbitrary body returning *TranscribeLocalAsrResponse
+func (c *ClientWithResponses) TranscribeLocalAsrWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*TranscribeLocalAsrResponse, error) {
+	rsp, err := c.TranscribeLocalAsrWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTranscribeLocalAsrResponse(rsp)
+}
+
+func (c *ClientWithResponses) TranscribeLocalAsrWithResponse(ctx context.Context, body TranscribeLocalAsrJSONRequestBody, reqEditors ...RequestEditorFn) (*TranscribeLocalAsrResponse, error) {
+	rsp, err := c.TranscribeLocalAsr(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTranscribeLocalAsrResponse(rsp)
+}
+
 // GenerateWikiRefreshCandidatesWithBodyWithResponse request with arbitrary body returning *GenerateWikiRefreshCandidatesResponse
 func (c *ClientWithResponses) GenerateWikiRefreshCandidatesWithBodyWithResponse(ctx context.Context, wikiRefreshId TeamHubId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*GenerateWikiRefreshCandidatesResponse, error) {
 	rsp, err := c.GenerateWikiRefreshCandidatesWithBody(ctx, wikiRefreshId, contentType, body, reqEditors...)
@@ -8618,6 +9190,23 @@ func (c *ClientWithResponses) ActOnLocalComputerModelsWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseActOnLocalComputerModelsResponse(rsp)
+}
+
+// ActOnLocalComputerSpeechWithBodyWithResponse request with arbitrary body returning *ActOnLocalComputerSpeechResponse
+func (c *ClientWithResponses) ActOnLocalComputerSpeechWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActOnLocalComputerSpeechResponse, error) {
+	rsp, err := c.ActOnLocalComputerSpeechWithBody(ctx, tenantId, ownerActorId, computerId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActOnLocalComputerSpeechResponse(rsp)
+}
+
+func (c *ClientWithResponses) ActOnLocalComputerSpeechWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerSpeechJSONRequestBody, reqEditors ...RequestEditorFn) (*ActOnLocalComputerSpeechResponse, error) {
+	rsp, err := c.ActOnLocalComputerSpeech(ctx, tenantId, ownerActorId, computerId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActOnLocalComputerSpeechResponse(rsp)
 }
 
 // GetLocalComputerModelSourceWithResponse request returning *GetLocalComputerModelSourceResponse
@@ -9449,6 +10038,81 @@ func ParseStartMemoryRebuildResponse(rsp *http.Response) (*StartMemoryRebuildRes
 	return response, nil
 }
 
+// ParseTranscribeLocalAsrResponse parses an HTTP response from a TranscribeLocalAsrWithResponse call
+func ParseTranscribeLocalAsrResponse(rsp *http.Response) (*TranscribeLocalAsrResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TranscribeLocalAsrResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LocalAsrTranscribeResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGenerateWikiRefreshCandidatesResponse parses an HTTP response from a GenerateWikiRefreshCandidatesWithResponse call
 func ParseGenerateWikiRefreshCandidatesResponse(rsp *http.Response) (*GenerateWikiRefreshCandidatesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10182,6 +10846,74 @@ func ParseActOnLocalComputerModelsResponse(rsp *http.Response) (*ActOnLocalCompu
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest LocalModelActionAck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseActOnLocalComputerSpeechResponse parses an HTTP response from a ActOnLocalComputerSpeechWithResponse call
+func ParseActOnLocalComputerSpeechResponse(rsp *http.Response) (*ActOnLocalComputerSpeechResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ActOnLocalComputerSpeechResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LocalSpeechActionAck
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

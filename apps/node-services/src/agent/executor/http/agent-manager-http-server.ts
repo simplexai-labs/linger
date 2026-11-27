@@ -26,10 +26,12 @@ import { logAgentEvent } from "../../observability/agent-log.js";
 import {
   createLocalComputerRouteHandlers,
   LocalComputerHttpError,
+  registerLocalAsrTranscribeRoute,
   registerLocalComputerCompatibilityRoutes,
   registerLocalComputerModelRoutes,
   registerLocalComputerModelSourceRoutes,
   registerLocalComputerPermissionRoutes,
+  registerLocalComputerSpeechRoutes,
 } from "./local-computer-http.js";
 import {
   readBodyWithLimit,
@@ -221,7 +223,7 @@ export const createAgentManagerHttpServer = <TRuntimeSettings>(
       httpHost = ownedHost;
     }
     unmountRoutes = httpHost.mount({
-      prefixes: ["/v1/"],
+      prefixes: ["/v1/", "/internal/v1/voice/local-asr/transcribe"],
       fetch: (request) => app.fetch(request),
       readiness,
     });
@@ -356,7 +358,10 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
   computerTools?: Pick<RunnerGateway, "callComputerTool">,
 ): Hono => {
   const app = new Hono();
-  app.use("/v1/*", async (context, next) => {
+  const admissionGuard = async (
+    context: Context,
+    next: () => Promise<void>,
+  ) => {
     // These authenticated/signed channels belong to already active Runs.
     const control = /^\/v1\/(context-content|local-mcp-relay)\//.test(
       context.req.path,
@@ -376,7 +381,9 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
     } finally {
       leave?.();
     }
-  });
+  };
+  app.use("/v1/*", admissionGuard);
+  app.use("/internal/v1/voice/local-asr/transcribe", admissionGuard);
   const agentLifecycle = new AgentLifecycleCoordinator();
   if (contextViewContent) {
     app.all("/v1/context-content/:token/:kind/:id", (context) =>
@@ -393,7 +400,7 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
       localMcpRelay.handle(pathId(context, "relayId"), context.req.raw),
     );
   }
-  app.use("/v1/*", async (context, next) => {
+  const bearerGuard = async (context: Context, next: () => Promise<void>) => {
     if (!isReady()) {
       return writeProtocolError(
         context,
@@ -411,7 +418,9 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
       );
     }
     await next();
-  });
+  };
+  app.use("/v1/*", bearerGuard);
+  app.use("/internal/v1/voice/local-asr/transcribe", bearerGuard);
 
   const localComputerHandlers = createLocalComputerRouteHandlers({
     localComputerManagement,
@@ -655,6 +664,8 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
   registerLocalComputerCompatibilityRoutes(app, handlers);
   registerLocalComputerPermissionRoutes(app, handlers);
   registerLocalComputerModelRoutes(app, handlers);
+  registerLocalComputerSpeechRoutes(app, handlers);
+  registerLocalAsrTranscribeRoute(app, handlers);
   registerLocalComputerModelSourceRoutes(app, handlers);
 
   app.notFound((context) =>

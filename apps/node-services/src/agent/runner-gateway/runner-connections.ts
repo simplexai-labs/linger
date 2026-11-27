@@ -35,6 +35,7 @@ import {
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
   FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
   FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
+  FIRST_LOCAL_VOICE_ASR_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
   type LocalPlacementRequirement,
@@ -59,6 +60,10 @@ import {
 } from "./runner-gateway-principal.js";
 import { isLocalSkillOutcome } from "./runner-local-capabilities.js";
 import { isLocalModelsOutcome } from "./runner-local-models.js";
+import {
+  isLocalAsrTranscribeOutcome,
+  isLocalSpeechActionOutcome,
+} from "./runner-local-speech.js";
 import {
   RunnerGatewayError,
   RunnerGatewayProtocolError,
@@ -98,6 +103,7 @@ export class RunnerConnections {
       | "modelInvocation"
       | "computerTools"
       | "localModels"
+      | "localSpeech"
       | "operations"
       | "preparation"
       | "queue"
@@ -435,11 +441,13 @@ export class RunnerConnections {
       operationReconciled: false,
       runtimeDiagnosticsRevision: 0,
       localModelsRevision: 0,
+      localSpeechRevision: 0,
     };
     this.#connections.set(hello.runner_id, connection);
     if (previous?.connected) {
       this.owners.capabilities().rejectConnectionWaiters(previous);
       this.owners.localModels().disconnected(previous);
+      this.owners.localSpeech().disconnected(previous);
       this.#clearHeartbeat(previous);
       previous.connected = false;
       previous.peer.close(1012, "Runner connection replaced");
@@ -511,6 +519,12 @@ export class RunnerConnections {
                 FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
               )
                 ? (["local_models_concurrency_probe"] as const)
+                : []),
+              ...(isComputerVersionAtLeast(
+                connection.hello.daemon_version,
+                FIRST_LOCAL_VOICE_ASR_COMPUTER_VERSION,
+              )
+                ? (["local_voice_asr"] as const)
                 : []),
               // A Computer ignores a feature it does not know, so these
               // need no release gate.
@@ -799,6 +813,18 @@ export class RunnerConnections {
     }
     if (isLocalModelsOutcome(envelope)) {
       this.owners.localModels().receiveOutcome(connection, envelope);
+      return;
+    }
+    if (envelope.type === "runner.local_speech") {
+      this.owners.localSpeech().receiveSnapshot(connection, envelope);
+      return;
+    }
+    if (isLocalSpeechActionOutcome(envelope)) {
+      this.owners.localSpeech().receiveActionOutcome(connection, envelope);
+      return;
+    }
+    if (isLocalAsrTranscribeOutcome(envelope)) {
+      this.owners.localSpeech().receiveTranscribeOutcome(connection, envelope);
       return;
     }
     if (envelope.type === "prepared" && envelope.target === "provider") {
@@ -1096,6 +1122,7 @@ export class RunnerConnections {
   disconnect(connection: ConnectedRunner): void {
     this.owners.capabilities().rejectConnectionWaiters(connection);
     this.owners.localModels().disconnected(connection);
+    this.owners.localSpeech().disconnected(connection);
     this.#clearHeartbeat(connection);
     connection.connected = false;
     this.owners.operations().wakeCapacityWaiters();

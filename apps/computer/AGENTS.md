@@ -22,6 +22,15 @@
   the downloaded model a Run names, never downloads a model, and never
   unloads another one to make room. Fit, placement and recommendation come
   from `localmodels`.
+- When `runner.welcome`'s `service_features` includes `local_voice_asr`, it
+  runs the parallel `localmodels speech` catalog and sidecar bridge
+  (`internal/localmodels/speech.go`, `internal/daemon/local_speech.go`):
+  reporting sanitized `runner.local_speech` snapshots (never sending `base_url`
+  or `key_file` over the wire), handling `execute:local_speech_action`, and
+  relaying `execute:local_asr_transcribe` to the local loopback speech sidecar.
+  If the installed `localmodels` build does not yet support `speech`, it
+  reports `available: false` (`SPEECH_UNSUPPORTED`) without affecting LLM
+  `local_models`.
 
 ## Structure
 

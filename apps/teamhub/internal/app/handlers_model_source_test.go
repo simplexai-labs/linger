@@ -126,6 +126,16 @@ func TestWriteModelSourceFailureMapsByokGatewayFailedWithComputerDetail(t *testi
 		t.Fatalf("BYOK_AUTH_FAILED: status=%d body=%+v", status, body)
 	}
 
+	status, body = run(&roomagent.ModelSourceError{
+		Code:    "MODEL_SOURCE_FAILED",
+		Message: "The Computer could not switch to the requested local model.",
+	})
+	if status != http.StatusBadGateway || body.Error.Code != "MODEL_SOURCE_FAILED" ||
+		body.Error.Message != modelSourceErrorMessages[httpapi.ModelSourceErrorCodeModelSourceFailed] ||
+		body.Error.Details != nil {
+		t.Fatalf("MODEL_SOURCE_FAILED refusal: status=%d body=%+v", status, body)
+	}
+
 	status, body = run(&roomagent.ModelSourceError{Code: "UNEXPECTED_INTERNAL", Message: "private stack trace"})
 	if status != http.StatusBadGateway || body.Error.Code != "MODEL_SOURCE_FAILED" ||
 		body.Error.Message != modelSourceErrorMessages[httpapi.ModelSourceErrorCodeModelSourceFailed] ||

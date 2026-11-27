@@ -2,6 +2,7 @@ package voicemedia
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -51,6 +52,19 @@ type VoiceSession struct {
 	ClosedAt             *time.Time
 }
 
+// SpeechDispatchConfig is embedded in LiveKit job dispatch metadata so
+// voice-runtime selects the resolved transcription provider and parameters.
+type SpeechDispatchConfig struct {
+	Provider          string `json:"provider"`
+	ComputerID        string `json:"computer_id,omitempty"`
+	ModelID           string `json:"model_id,omitempty"`
+	Language          string `json:"language,omitempty"`
+	UseGPU            *bool  `json:"use_gpu,omitempty"`
+	KeepLoadedSeconds *int   `json:"keep_loaded_seconds,omitempty"`
+	TenantID          string `json:"tenant_id,omitempty"`
+	OwnerActorID      string `json:"owner_actor_id,omitempty"`
+}
+
 type CreateVoiceSessionRequest struct {
 	AccountID string
 	// AuthSessionID is the login session the VoiceSession belongs to.
@@ -59,6 +73,9 @@ type CreateVoiceSessionRequest struct {
 	Purpose       string
 	// Client is ClientWeb or ClientMobile; empty means ClientWeb.
 	Client string
+	// SpeechConfig is optional serialized SpeechDispatchConfig persisted with
+	// the session so reconnects and reconciles emit identical dispatch metadata.
+	SpeechConfig json.RawMessage
 }
 
 type PublisherGrant struct {
@@ -147,6 +164,7 @@ type providerSession struct {
 	ParticipantIdentity string
 	CreatedAt           time.Time
 	LastInputStartedAt  time.Time
+	SpeechConfig        json.RawMessage
 }
 
 type providerCapture struct {

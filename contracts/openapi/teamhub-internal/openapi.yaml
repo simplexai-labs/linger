@@ -256,6 +256,32 @@ paths:
           $ref: "../components/common.yaml#/components/responses/NotFound"
         "500":
           $ref: "../components/common.yaml#/components/responses/InternalError"
+  /v0/agent-runtime/local-computers/local-speech:
+    post:
+      tags: [Local Computers]
+      operationId: recordAgentRuntimeLocalSpeech
+      summary: Store the latest local speech snapshot a Computer reported.
+      description: >-
+        Agent Service forwards every runner.local_speech snapshot. TeamHub replaces the
+        Computer's stored snapshot, keeps it while the Computer is offline, and publishes a
+        local-speech invalidation hint with the Computer ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../components/local-speech.yaml#/components/schemas/RecordLocalSpeechRequest"
+      responses:
+        "204":
+          description: Stored.
+        "400":
+          $ref: "../components/common.yaml#/components/responses/BadRequest"
+        "401":
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+        "404":
+          $ref: "../components/common.yaml#/components/responses/NotFound"
+        "500":
+          $ref: "../components/common.yaml#/components/responses/InternalError"
   /v0/agents/{agentId}/identity:
     parameters:
       - $ref: "#/components/parameters/AgentId"
@@ -1237,6 +1263,14 @@ components:
         xai_api_key:
           type: string
           minLength: 1
+        local_asr_enabled:
+          type: boolean
+          description: True when local speech transcription is enabled for at least one enrolled Computer or via deployment override, so node-services starts ASR and recorder workers without a Soniox key.
+        local_asr_url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Optional direct OpenAI-compatible speech transcription base URL for headless deployments without an enrolled Computer.
     VoiceObservationReceipt:
       type: object
       additionalProperties: false

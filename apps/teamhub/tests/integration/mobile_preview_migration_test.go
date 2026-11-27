@@ -16,7 +16,8 @@ import (
 
 // Databases that recorded the mobile migrations under other versions upgrade
 // cleanly: the mobile preview desktop build put them at 00894 to 00896, and
-// earlier builds of the mobile branch at 00895 to 00899 or 00897 to 00901.
+// earlier builds of the mobile branch at 00895 to 00899, 00897 to 00901 or
+// 00898 to 00902.
 // Goose then skips the main-line migrations that took those numbers, so the
 // repair must do what they do, and the renumbered mobile migrations must run
 // again harmlessly.
@@ -29,9 +30,10 @@ func TestMobileMigrationsUpgradeEarlierVersionHistories(t *testing.T) {
 		// under the versions it recorded them.
 		recorded map[int64]int64
 	}{
-		{"preview build", 893, map[int64]int64{894: 898, 895: 899, 896: 900}},
-		{"earlier branch", 894, map[int64]int64{895: 898, 896: 899, 897: 900, 898: 902, 899: 901}},
-		{"branch before templates were dropped", 896, map[int64]int64{897: 898, 898: 899, 899: 900, 900: 902, 901: 901}},
+		{"preview build", 893, map[int64]int64{894: 899, 895: 900, 896: 901}},
+		{"earlier branch", 894, map[int64]int64{895: 899, 896: 900, 897: 901, 898: 903, 899: 902}},
+		{"branch before templates were dropped", 896, map[int64]int64{897: 899, 898: 900, 899: 901, 900: 903, 901: 902}},
+		{"branch before voice settings", 897, map[int64]int64{898: 899, 899: 900, 900: 901, 901: 902, 902: 903}},
 	} {
 		t.Run(history.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -66,6 +68,9 @@ func TestMobileMigrationsUpgradeEarlierVersionHistories(t *testing.T) {
 				`SELECT count(*) FROM paired_phones WHERE push_replies`,
 				`SELECT count(*) FROM voice_sessions WHERE client = 'mobile'`,
 				`SELECT count(*) FROM mobile_relay_nodes`,
+				`SELECT count(*) FROM voice_settings`,
+				`SELECT count(*) FROM local_computer_speech_snapshots`,
+				`SELECT count(*) FROM voice_sessions WHERE speech_config IS NOT NULL`,
 			} {
 				var count int
 				if err := db.QueryRowContext(ctx, check).Scan(&count); err != nil {

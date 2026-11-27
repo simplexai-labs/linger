@@ -22,7 +22,8 @@ import { DictationASRStream } from "./dictation-asr.js";
 import { asError } from "@linger/service-kit";
 import { VoiceFailure } from "./voice-failure.js";
 
-const asrFlushTimeoutMs = 5_000;
+const defaultAsrFlushTimeoutMs = 5_000;
+export const localAsrFlushTimeoutMs = 20_000;
 const teamHubCallbackBudgetMs = 8_000;
 export const teamHubCallbackRetryDelaysMs = [
   100, 250, 500, 1_000, 2_000, 4_000,
@@ -63,13 +64,19 @@ export class VoiceTrackWorker {
   private poisonedGeneration = -1;
   private readonly dictationCommitIds = new Set<string>();
 
+  private readonly asrFlushTimeoutMs: number;
+
   constructor(
     private readonly client: TeamHubVoiceRuntimeClient,
     private readonly asr: ASRProvider,
     private readonly onUnconfirmedShutdown: () => never = () => {
       throw new Error("Voice Runtime shutdown has unconfirmed transcript");
     },
-  ) {}
+    options?: { readonly asrFlushTimeoutMs?: number },
+  ) {
+    this.asrFlushTimeoutMs =
+      options?.asrFlushTimeoutMs ?? defaultAsrFlushTimeoutMs;
+  }
 
   async run(ctx: JobContext): Promise<void> {
     const roomName = ctx.job.room?.name;
@@ -374,7 +381,7 @@ export class VoiceTrackWorker {
       await waitForASRFlush(
         opened,
         eventTask,
-        this.dictation ? 20_000 : asrFlushTimeoutMs,
+        this.dictation ? 20_000 : this.asrFlushTimeoutMs,
         30_000,
       );
       await this.reportTrackEnded(
@@ -1146,6 +1153,55 @@ export function voicePurposeFromMetadata(
     return "hardware_control";
   if (purpose === "chat_dictation" || purpose === "chat_live") return purpose;
   throw new Error("Voice Runtime dispatch purpose is invalid");
+}
+
+export interface VoiceSpeechDispatchMetadata {
+  readonly provider: "local" | "cloud";
+  readonly computerId?: string;
+  readonly modelId?: string;
+  readonly language?: string;
+  readonly useGpu?: boolean;
+  readonly keepLoadedSeconds?: number;
+  readonly tenantId?: string;
+  readonly ownerActorId?: string;
+}
+
+export function voiceSpeechFromMetadata(
+  metadata: string,
+): VoiceSpeechDispatchMetadata | undefined {
+  let speech: unknown;
+  try {
+    speech = (JSON.parse(metadata) as { speech?: unknown }).speech;
+  } catch {
+    throw new Error("Voice Runtime dispatch metadata is invalid");
+  }
+  if (speech === undefined || speech === null) return undefined;
+  if (typeof speech !== "object" || Array.isArray(speech)) {
+    throw new Error("Voice Runtime dispatch speech metadata is invalid");
+  }
+  const record = speech as Record<string, unknown>;
+  if (record.provider !== "local" && record.provider !== "cloud") {
+    throw new Error("Voice Runtime dispatch speech provider is invalid");
+  }
+  const optionalString = (value: unknown): string | undefined =>
+    typeof value === "string" && value.trim().length > 0
+      ? value.trim()
+      : undefined;
+  const keepLoadedSeconds =
+    typeof record.keep_loaded_seconds === "number" &&
+    Number.isSafeInteger(record.keep_loaded_seconds)
+      ? record.keep_loaded_seconds
+      : undefined;
+  return {
+    provider: record.provider,
+    computerId: optionalString(record.computer_id),
+    modelId: optionalString(record.model_id),
+    language: optionalString(record.language),
+    useGpu: typeof record.use_gpu === "boolean" ? record.use_gpu : undefined,
+    keepLoadedSeconds,
+    tenantId: optionalString(record.tenant_id),
+    ownerActorId: optionalString(record.owner_actor_id),
+  };
 }
 
 export function serverDictationCommitRequest(

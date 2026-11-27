@@ -1,7 +1,7 @@
 -- +goose Up
 -- Every statement here may run again: the mobile preview desktop build
 -- (0.1.9-mobile.1) recorded these objects under 00894, and earlier builds of
--- this branch under 00895 or 00897, so goose can run this on a database that
+-- this branch under 00895, 00897 or 00898, so goose can run this on a database that
 -- has them.
 -- Phones pair with this computer through the Mobile Gateway. A Pairing Invite
 -- works once and only for ten minutes. A Paired Phone is identified by the

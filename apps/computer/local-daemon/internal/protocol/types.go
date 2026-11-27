@@ -125,6 +125,8 @@ const (
 	CommandCapabilityBrowserConnect     = wire.TypeExecute + ":" + wire.KindBrowserConnect
 	CommandCapabilityComputerPermission = wire.TypeExecute + ":" + wire.KindComputerPermission
 	CommandCapabilityLocalModels        = wire.TypeExecute + ":" + wire.KindLocalModels
+	CommandCapabilityLocalSpeechAction  = wire.TypeExecute + ":" + wire.KindLocalSpeechAction
+	CommandCapabilityLocalAsrTranscribe = wire.TypeExecute + ":" + wire.KindLocalAsrTranscribe
 	CommandCapabilityModelSource        = wire.TypeExecute + ":" + wire.KindModelSource
 	CommandSessionCompact               = wire.TypeExecute + ":" + wire.KindSessionCompact
 	CommandModelInvoke                  = wire.TypeExecute + ":" + wire.KindModelInvoke
@@ -145,6 +147,7 @@ const (
 	EventRuntimeObserved                       = wire.TypeRuntimeRegistrationObserved
 	EventRuntimeDiagnostics                    = wire.TypeRunnerRuntimeDiagnostics
 	EventLocalModels                           = wire.TypeRunnerLocalModels
+	EventLocalSpeech                           = wire.TypeRunnerLocalSpeech
 	EventAgentRunnerReady                      = wire.TypeAgentRunnerState + ":" + wire.StateReady
 	EventAgentRunnerRemoved                    = wire.TypeAgentRunnerState + ":" + wire.StateRemoved
 	EventAgentRunnerFailed                     = wire.TypeAgentRunnerState + ":" + wire.StateFailed
@@ -159,6 +162,10 @@ const (
 	EventCapabilityComputerPermissionFailed    = wire.TypeExecuted + ":" + wire.KindComputerPermission + ":" + wire.OutcomeFailed
 	EventCapabilityLocalModelsAccepted         = wire.TypeExecuted + ":" + wire.KindLocalModels + ":" + wire.OutcomeAccepted
 	EventCapabilityLocalModelsRefused          = wire.TypeExecuted + ":" + wire.KindLocalModels + ":" + wire.OutcomeRefused
+	EventCapabilityLocalSpeechActionAccepted   = wire.TypeExecuted + ":" + wire.KindLocalSpeechAction + ":" + wire.OutcomeAccepted
+	EventCapabilityLocalSpeechActionRefused    = wire.TypeExecuted + ":" + wire.KindLocalSpeechAction + ":" + wire.OutcomeRefused
+	EventCapabilityLocalAsrTranscribeSucceeded = wire.TypeExecuted + ":" + wire.KindLocalAsrTranscribe + ":" + wire.OutcomeSucceeded
+	EventCapabilityLocalAsrTranscribeFailed    = wire.TypeExecuted + ":" + wire.KindLocalAsrTranscribe + ":" + wire.OutcomeFailed
 	EventCapabilityModelSourceSucceeded        = wire.TypeExecuted + ":" + wire.KindModelSource + ":" + wire.OutcomeSucceeded
 	EventCapabilityModelSourceFailed           = wire.TypeExecuted + ":" + wire.KindModelSource + ":" + wire.OutcomeFailed
 	EventSessionCompacted                      = wire.TypeExecuted + ":" + wire.KindSessionCompact

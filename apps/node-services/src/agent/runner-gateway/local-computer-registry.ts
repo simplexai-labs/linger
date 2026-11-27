@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   LocalModelsSnapshot,
+  LocalSpeechSnapshot,
   RunnerHello,
   RuntimeDiagnostics,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -88,6 +89,11 @@ export interface LocalComputerRegistry {
     computerId: string,
     snapshot: LocalModelsSnapshot,
   ): Promise<void>;
+  /** Replaces the Computer's stored local speech catalog with its latest snapshot. */
+  recordLocalSpeech?(
+    computerId: string,
+    snapshot: LocalSpeechSnapshot,
+  ): Promise<void>;
   remove(
     input: LocalComputerOwner & { readonly computerId: string },
   ): Promise<LocalComputerRemovalResult>;
@@ -100,7 +106,8 @@ type TeamHubLocalComputerClient = Pick<
   | "touchLocalComputer"
   | "removeLocalComputer"
   | "recordLocalModels"
->;
+> &
+  Partial<Pick<TeamHubRuntimeStateClient, "recordLocalSpeech">>;
 
 export const createTeamHubLocalComputerRegistry = (
   client: TeamHubLocalComputerClient,
@@ -213,6 +220,12 @@ const buildTeamHubLocalComputerRegistry = (
   },
   async recordLocalModels(computerId, snapshot) {
     await client.recordLocalModels({
+      computer_id: computerId,
+      snapshot: structuredClone(snapshot),
+    });
+  },
+  async recordLocalSpeech(computerId, snapshot) {
+    await client.recordLocalSpeech?.({
       computer_id: computerId,
       snapshot: structuredClone(snapshot),
     });

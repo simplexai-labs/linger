@@ -79,9 +79,9 @@ func voiceProviderKeyModel(status voicekey.Status) httpapi.VoiceProviderKeyStatu
 	return httpapi.VoiceProviderKeyStatus{Source: httpapi.VoiceProviderKeyStatusSource(status.Source), CanSave: status.CanSave}
 }
 
-// getVoiceProviderKeys returns the effective voice provider keys to the Voice
-// Runtime; a provider without a key is absent, and both are while voice media
-// is off.
+// getVoiceProviderKeys returns the effective voice provider keys and local ASR
+// enablement to Node Services; a provider without a key is absent, and all
+// voice capabilities are off while voice media is off.
 func (a *App) getVoiceProviderKeys(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	var keys teamhubinternal.VoiceRuntimeProviderKeys
@@ -94,6 +94,25 @@ func (a *App) getVoiceProviderKeys(c *gin.Context) {
 		}
 		if key != "" {
 			*target = &key
+		}
+	}
+	if a.voiceMedia != nil && a.voiceKeys.Enabled() {
+		localEnabled := a.voiceLocalASRURL != ""
+		if !localEnabled && a.voice != nil {
+			enabled, err := a.voice.HasLocalSpeechEnabled(c.Request.Context())
+			if err != nil {
+				a.logger.Error("voice.local_speech_state_read_failed", "error", err)
+				c.JSON(http.StatusInternalServerError, teamhubinternal.VoiceError{Code: "INTERNAL_ERROR", Message: "Voice local speech state could not be read"})
+				return
+			}
+			localEnabled = enabled
+		}
+		if localEnabled {
+			keys.LocalAsrEnabled = &localEnabled
+		}
+		if a.voiceLocalASRURL != "" {
+			url := a.voiceLocalASRURL
+			keys.LocalAsrUrl = &url
 		}
 	}
 	c.JSON(http.StatusOK, keys)

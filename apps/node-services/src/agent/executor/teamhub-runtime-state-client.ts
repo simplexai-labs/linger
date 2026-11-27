@@ -188,6 +188,10 @@ export interface TeamHubRuntimeStateClient {
     body: RuntimeStateSchemas["RecordLocalModelsRequest"],
     signal?: AbortSignal,
   ): Promise<void>;
+  recordLocalSpeech(
+    body: RuntimeStateSchemas["RecordLocalSpeechRequest"],
+    signal?: AbortSignal,
+  ): Promise<void>;
   recordRunOperation(
     body: RuntimeStateSchemas["RecordAgentLocalRunOperationRequest"],
     signal?: AbortSignal,
@@ -447,6 +451,8 @@ export const createTeamHubRuntimeStateClient = (
       ),
     recordLocalModels: (body, signal) =>
       request<void>(raw.recordLocalModels(body, signal), signal),
+    recordLocalSpeech: (body, signal) =>
+      request<void>(raw.recordLocalSpeech(body, signal), signal),
     recordRunOperation: (body, signal) =>
       request<RuntimeStateSchemas["AgentRuntimeSuccessResult"]>(
         raw.recordRunOperation(body, signal),

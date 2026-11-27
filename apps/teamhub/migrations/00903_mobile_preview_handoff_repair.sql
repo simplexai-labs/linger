@@ -1,11 +1,11 @@
 -- +goose Up
 -- The mobile preview desktop build (0.1.9-mobile.1) recorded its own
 -- migrations under versions 00894 to 00896, and earlier builds of this branch
--- under 00895 to 00899 or 00897 to 00901. On such a database goose treats the
+-- under 00895 to 00899, 00897 to 00901 or 00898 to 00902. On such a database goose treats the
 -- main-line migrations with those numbers as applied and never runs them, so
 -- this does what 00894_room_handoff_reports, 00895_runtime_local_computers,
--- 00896_message_continues and 00897_drop_agent_templates do where it is
--- missing. Everywhere else it is already done and nothing changes.
+-- 00896_message_continues, 00897_drop_agent_templates and
+-- 00898_voice_settings do where it is missing. Everywhere else it is already done and nothing changes.
 CREATE TABLE IF NOT EXISTS room_handoffs (
   id text PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
   tenant_id text NOT NULL,
@@ -61,6 +61,34 @@ ALTER TABLE agent_registrations
     DROP COLUMN IF EXISTS template_routines,
     DROP COLUMN IF EXISTS template_installed_at;
 DROP TABLE IF EXISTS agent_templates;
+
+-- 00898_voice_settings.
+CREATE TABLE IF NOT EXISTS public.voice_settings (
+    account_id text NOT NULL REFERENCES public.accounts(id) ON DELETE CASCADE,
+    tenant_id text NOT NULL,
+    speech_provider text NOT NULL DEFAULT 'auto'
+        CHECK (speech_provider IN ('auto', 'local', 'cloud')),
+    local_computer_id text,
+    local_model_id text,
+    language text NOT NULL DEFAULT 'auto',
+    silence_timeout_seconds integer NOT NULL DEFAULT 0
+        CHECK (silence_timeout_seconds >= 0 AND silence_timeout_seconds <= 300),
+    use_gpu boolean NOT NULL DEFAULT true,
+    keep_loaded_seconds integer NOT NULL DEFAULT 900
+        CHECK (keep_loaded_seconds >= -1 AND keep_loaded_seconds <= 86400),
+    updated_at timestamp with time zone NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (account_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.local_computer_speech_snapshots (
+    computer_id text PRIMARY KEY REFERENCES public.local_computers(computer_id) ON DELETE CASCADE,
+    snapshot jsonb NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
+    observed_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone NOT NULL DEFAULT clock_timestamp()
+);
+
+ALTER TABLE public.voice_sessions
+    ADD COLUMN IF NOT EXISTS speech_config jsonb CHECK (speech_config IS NULL OR jsonb_typeof(speech_config) = 'object');
 
 -- +goose Down
 -- +goose StatementBegin

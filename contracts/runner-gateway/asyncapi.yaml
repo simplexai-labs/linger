@@ -21,7 +21,7 @@ info:
     prepared (target operation or provider), cancel (target operation or
     model_invoke), execute and executed (kind session_compact, model_invoke,
     computer_tool, skills_scan, browser_connect, computer_permission,
-    local_models, model_source, debug_history or
+    local_models, local_speech_action, local_asr_transcribe, model_source, debug_history or
     cli_credential), agent_runner.state (state ready, removed or failed) and
     operation.input_result (outcome accepted, rejected or closed); the
     Operation family carries operation.start, operation.input, operation.ack,
@@ -107,6 +107,10 @@ info:
     "unknown") only after a runner.welcome whose service_features names
     antigravity_usage_provider, so older Agent Services that do not accept
     "antigravity" in RunUsage.provider never close the connection.
+    execute with kind local_speech_action and local_asr_transcribe plus
+    runner.local_speech snapshots travel only after a runner.welcome whose
+    service_features names local_voice_asr, advertised to Computer 0.68.0 and
+    later.
 x-frame-limits:
   maxBytes: 4194304
   maxDepth: 32

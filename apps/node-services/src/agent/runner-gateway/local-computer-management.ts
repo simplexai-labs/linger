@@ -7,6 +7,12 @@ import type {
   LocalModelActionCommand,
 } from "./runner-local-models.js";
 import type {
+  LocalAsrTranscribeCommand,
+  LocalAsrTranscribeResult,
+  LocalSpeechActionAck,
+  LocalSpeechActionCommand,
+} from "./runner-local-speech.js";
+import type {
   BrowserConnectionStatus,
   ByokConfigInput,
   ByokModelList,
@@ -98,6 +104,11 @@ export const FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION = "0.67.0";
 
 // The first release that decodes Antigravity as a `model_invoke` Runtime.
 export const FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION = "0.67.0";
+
+// The first release that understands the `local_voice_asr` welcome feature and
+// handles `runner.local_speech`, `execute:local_speech_action`, and
+// `execute:local_asr_transcribe`.
+export const FIRST_LOCAL_VOICE_ASR_COMPUTER_VERSION = "0.68.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
@@ -211,6 +222,14 @@ export interface LocalComputerManagement {
   actOnLocalModels?(
     command: LocalModelActionCommand,
   ): Promise<LocalModelActionAck>;
+
+  actOnLocalSpeech?(
+    command: LocalSpeechActionCommand,
+  ): Promise<LocalSpeechActionAck>;
+
+  transcribeLocalAsr?(
+    command: LocalAsrTranscribeCommand,
+  ): Promise<LocalAsrTranscribeResult>;
 
   modelSource?(command: LocalModelSourceCommand): Promise<{
     readonly status?: ModelSourceStatus;

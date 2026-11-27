@@ -335,16 +335,12 @@ func TestWindowsDiscoverFollowsStandaloneCodexJunctions(t *testing.T) {
 	if err := workspace.CreateDirectoryLink(filepath.Join(root, "current", "bin"), bin); err != nil {
 		t.Fatal(err)
 	}
-	entry, err := resolveExecutableEntry(t.Context(), "codex", "codex", DiscoveryOptions{Environment: map[string]string{"PATH": bin}})
-	if err != nil {
-		t.Fatalf("junctioned codex was not found: %v", err)
-	}
-	resolved, err := canonicalExecutable(entry)
-	if err != nil {
-		t.Fatal(err)
+	candidates := resolveExecutableCandidates(t.Context(), "codex", "codex", DiscoveryOptions{Environment: map[string]string{"PATH": bin}})
+	if len(candidates) == 0 {
+		t.Fatal("junctioned codex was not found")
 	}
 	direct, err := canonicalExecutable(filepath.Join(release, "bin", "codex.exe"))
-	if err != nil || resolved != direct {
-		t.Fatalf("resolved=%q direct=%q error=%v", resolved, direct, err)
+	if err != nil || candidates[0].canonical != direct {
+		t.Fatalf("resolved=%q direct=%q error=%v", candidates[0].canonical, direct, err)
 	}
 }

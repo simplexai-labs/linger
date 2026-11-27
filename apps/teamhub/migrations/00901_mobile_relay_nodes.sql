@@ -4,7 +4,7 @@
 -- official nodes at start; the Human adds custom ones and turns any of them
 -- off. A node only forwards end-to-end encrypted bytes. IF NOT EXISTS lets a
 -- database from the mobile preview build (this migration under 00896) or an
--- earlier build of this branch (00897 or 00899) run it again harmlessly.
+-- earlier build of this branch (00897, 00899 or 00900) run it again harmlessly.
 CREATE TABLE IF NOT EXISTS mobile_relay_nodes (
     id text PRIMARY KEY,
     url text NOT NULL UNIQUE,

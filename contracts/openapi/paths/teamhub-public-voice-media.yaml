@@ -384,6 +384,46 @@ tenantVoiceMediaPolicy:
       "404":
         $ref: "../components/common.yaml#/components/responses/NotFound"
 
+tenantVoiceSettings:
+  get:
+    tags: [Capture]
+    operationId: getVoiceSettings
+    summary: Read the caller's voice transcription settings in one Tenant.
+    responses:
+      "200":
+        description: Current voice transcription settings (defaults when not saved yet).
+        content:
+          application/json:
+            schema:
+              $ref: "../components/voice-media.yaml#/components/schemas/VoiceSettings"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "404":
+        $ref: "../components/common.yaml#/components/responses/NotFound"
+  put:
+    tags: [Capture]
+    operationId: updateVoiceSettings
+    summary: Update the caller's voice transcription settings in one Tenant.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/voice-media.yaml#/components/schemas/UpdateVoiceSettingsRequest"
+    responses:
+      "200":
+        description: Updated voice transcription settings.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/voice-media.yaml#/components/schemas/VoiceSettings"
+      "400":
+        $ref: "../components/common.yaml#/components/responses/BadRequest"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "404":
+        $ref: "../components/common.yaml#/components/responses/NotFound"
+
 voiceProviderKey:
   put:
     tags: [Capture]

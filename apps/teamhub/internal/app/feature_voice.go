@@ -34,13 +34,15 @@ func (e voiceReconcileStatusError) Error() string {
 // registerVoice builds voice media while TEAMHUB_VOICE_MEDIA is on, or takes
 // the plane a test injects; without LINGER_SECRET_SEED or ffmpeg it runs
 // with voice off. Whether a provider can be used is decided at each
-// use from the key in effect then: the environment key, else the one saved in
-// the product. Soniox enables transcription (Recording, dictation and Pocket
-// Notes) with archive recovery; xAI enables Live alone. With voice media off
-// voice stays off: the Voice Runtime callbacks answer not found, the Voice
-// media policy reports nothing available, and no voice retention rule or job
-// exists. With voice on and no key the voice jobs and rules are registered
-// but find no work, because no voice session can start without a key.
+// use from the configuration in effect then: an enrolled Computer with ready
+// local speech (or VOICE_LOCAL_ASR_URL) or a Soniox key (environment, else
+// saved in the product) enables transcription (Recording, dictation and Pocket
+// Notes), with Soniox also backing archive recovery; xAI enables Live alone.
+// With voice media off voice stays off: the Voice Runtime callbacks answer not
+// found, the Voice media policy reports nothing available, and no voice
+// retention rule or job exists. With voice on and neither local speech nor any
+// provider key configured, the voice jobs and rules are registered but find no
+// work until a transcription backend or Live key becomes available.
 func (a *App) registerVoice(cfg config.Config, deps Deps, objects artifactstore.ObjectStore) error {
 	box, err := secretBox(cfg.ExternalApps.SecretEncryptionKey)
 	if err != nil {
@@ -62,6 +64,7 @@ func (a *App) registerVoice(cfg config.Config, deps Deps, objects artifactstore.
 	// This is the one place voice is decided on or off for the process: the
 	// key service's Enabled drives the policy, saves and the key read.
 	a.voiceMedia = media
+	a.voiceLocalASRURL = cfg.Voice.LocalASRURL
 	a.voiceKeys = voicekey.New(a.queries, checker, voicekey.Config{
 		Enabled: media != nil,
 		Environment: map[voicekey.Provider]string{

@@ -192,6 +192,15 @@ func (d *Daemon) handleModelSourceCommand(ctx context.Context, stream transport.
 		if !d.dynamicReasoningEfforts.Load() && status.ReasoningEffort != "" && !provider.LegacyRuntimeReasoningEffort(status.ReasoningEffort) {
 			status.ReasoningEffort = ""
 		}
+		if request.Action == "apply" {
+			slog.Info("model_source.command_succeeded",
+				"action", request.Action,
+				"mode", status.Mode,
+				"runtime", status.Runtime,
+				"requested_model", redact.Text(request.LocalModelID),
+				"resolved_model", redact.Text(status.RuntimeModel),
+			)
+		}
 	}
 	frame := wire.CapabilityModelSourceSucceeded{
 		ProtocolVersion: request.ProtocolVersion,

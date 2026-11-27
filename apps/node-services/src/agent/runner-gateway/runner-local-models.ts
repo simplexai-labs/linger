@@ -10,7 +10,6 @@ import {
   RUNNER_GATEWAY_PROTOCOL_VERSION,
   parseAgentToDaemonEnvelope,
 } from "@linger/wire-contracts/runner-gateway/validator";
-import { TeamHubRuntimeStateError } from "../executor/teamhub-runtime-state-client.js";
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
   LocalComputerCapabilityError,
@@ -24,6 +23,7 @@ import type {
   RunnerGatewayControllers,
 } from "./runner-gateway-context.js";
 import { RunnerGatewayProtocolError } from "./runner-operation.js";
+import { RunnerSnapshotRelay } from "./runner-snapshot-relay.js";
 
 export type LocalModelActionKind =
   | "download"
@@ -72,16 +72,6 @@ interface ActionWaiter {
   readonly reject: (error: unknown) => void;
 }
 
-interface SnapshotQueue {
-  next: LocalModelsSnapshot | undefined;
-  /** Ends a retry delay early: a newer snapshot is written at once. */
-  wake?: () => void;
-}
-
-// A snapshot TeamHub failed to store is written again after these delays.
-const FIRST_RECORD_RETRY_MS = 1_000;
-const MAX_RECORD_RETRY_MS = 60_000;
-
 // The Computer answers once localmodels has validated the action, which can
 // take a few seconds. Past the command's expiry (and never past this bound)
 // the action is unconfirmed, not refused: the Computer may still run it, and
@@ -97,7 +87,7 @@ const MAX_ACTION_ACK_WAIT_MS = 30_000;
 export class RunnerLocalModels {
   readonly #waiters = new Map<string, ActionWaiter>();
 
-  readonly #queues = new Map<string, SnapshotQueue>();
+  readonly #snapshotRelay: RunnerSnapshotRelay<LocalModelsSnapshot>;
 
   constructor(
     private readonly context: RunnerGatewayContext,
@@ -105,7 +95,17 @@ export class RunnerLocalModels {
       RunnerGatewayControllers,
       "connections" | "queue"
     >,
-  ) {}
+  ) {
+    this.#snapshotRelay = new RunnerSnapshotRelay(
+      "runner.local_models.record_failed",
+      async (computerId, snapshot) => {
+        await this.context.computerRegistry?.recordLocalModels(
+          computerId,
+          snapshot,
+        );
+      },
+    );
+  }
 
   receiveSnapshot(
     connection: ConnectedRunner,
@@ -125,58 +125,7 @@ export class RunnerLocalModels {
       computerId: connection.runnerId,
       runtimeType: "pi",
     });
-    const queue = this.#queues.get(connection.runnerId);
-    if (queue) {
-      queue.next = frame.local_models;
-      queue.wake?.();
-      return;
-    }
-    const started: SnapshotQueue = { next: frame.local_models };
-    this.#queues.set(connection.runnerId, started);
-    void this.#drain(connection.runnerId, started);
-  }
-
-  async #drain(computerId: string, queue: SnapshotQueue): Promise<void> {
-    let retryMs = FIRST_RECORD_RETRY_MS;
-    for (
-      let snapshot = queue.next;
-      snapshot !== undefined;
-      snapshot = queue.next
-    ) {
-      queue.next = undefined;
-      try {
-        await this.context.computerRegistry?.recordLocalModels(
-          computerId,
-          snapshot,
-        );
-        retryMs = FIRST_RECORD_RETRY_MS;
-      } catch (error) {
-        const retryable = !(
-          error instanceof TeamHubRuntimeStateError && !error.retryable
-        );
-        logAgentEvent("warn", "runner.local_models.record_failed", {
-          runnerId: computerId,
-          retryable,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        // The Computer reports again only when its library changes, so the
-        // unsaved snapshot is kept until TeamHub stores it; a newer one that
-        // arrives meanwhile replaces it.
-        if (!retryable || queue.next !== undefined) continue;
-        queue.next = snapshot;
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, retryMs);
-          timer.unref();
-          queue.wake = () => {
-            clearTimeout(timer);
-            resolve();
-          };
-        });
-        queue.wake = undefined;
-        retryMs = Math.min(2 * retryMs, MAX_RECORD_RETRY_MS);
-      }
-    }
-    this.#queues.delete(computerId);
+    this.#snapshotRelay.enqueue(connection.runnerId, frame.local_models);
   }
 
   /**

@@ -1,10 +1,12 @@
 package localmodels
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -299,6 +301,7 @@ func TestAgentRuntimeModelPrefersTargetThenCatalogDefault(t *testing.T) {
 	for _, test := range []struct {
 		name, mode, runtime, target string
 		catalog                     []RuntimeModelOption
+		explicitLocalTarget         bool
 		model, effort               string
 	}{
 		{name: "target offered", mode: "byok", runtime: "claude", target: "localmodels-byok", catalog: catalog, model: "localmodels-byok"},
@@ -314,10 +317,15 @@ func TestAgentRuntimeModelPrefersTargetThenCatalogDefault(t *testing.T) {
 		{name: "local mode returns empty instead of pi-default when catalog and target are empty", mode: "local", runtime: "pi", target: "", catalog: nil, model: ""},
 		{name: "local mode keeps non-byok local target when catalog only has cloud models", mode: "local", runtime: "pi", target: "localmodels/qwen", catalog: []RuntimeModelOption{{ID: "anthropic/claude-fable-5", IsDefault: true}}, model: "localmodels/qwen"},
 		{name: "local mode drops non-local cloud target when catalog has no local model", mode: "local", runtime: "pi", target: "anthropic/claude-fable-5", catalog: []RuntimeModelOption{{ID: "anthropic/claude-fable-5", IsDefault: true}}, model: ""},
+		{name: "explicit local target matches requested model in catalog", mode: "local", runtime: "pi", target: "localmodels-library/zeta-27b", catalog: []RuntimeModelOption{{ID: "localmodels-library/alpha-4b", IsDefault: true}, {ID: "localmodels-library/zeta-27b", AllowedReasoningEffort: []string{"low", "medium"}, DefaultReasoningEffort: "medium"}}, explicitLocalTarget: true, model: "localmodels-library/zeta-27b", effort: "medium"},
+		{name: "explicit local target refuses fallback to default local model when missing", mode: "local", runtime: "pi", target: "localmodels-library/zeta-27b", catalog: []RuntimeModelOption{{ID: "localmodels-library/alpha-4b", IsDefault: true}}, explicitLocalTarget: true, model: ""},
+		{name: "explicit local target refuses empty discovered catalog", mode: "local", runtime: "pi", target: "localmodels-library/zeta-27b", catalog: []RuntimeModelOption{}, explicitLocalTarget: true, model: ""},
+		{name: "explicit local target refuses cloud-only discovered catalog", mode: "local", runtime: "pi", target: "localmodels-library/zeta-27b", catalog: []RuntimeModelOption{{ID: "anthropic/claude-fable-5", IsDefault: true}}, explicitLocalTarget: true, model: ""},
+		{name: "explicit local target preserves valid target when discovery returned no catalog", mode: "local", runtime: "pi", target: "localmodels-library/zeta-27b", catalog: nil, explicitLocalTarget: true, model: "localmodels-library/zeta-27b"},
 		{name: "subscription mode ignores stale byok entry", mode: "subscription", runtime: "claude", target: "localmodels-byok", catalog: catalog, model: "default", effort: "medium"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			model, effort := agentRuntimeModel(test.mode, test.runtime, test.target, test.catalog)
+			model, effort := agentRuntimeModel(test.mode, test.runtime, test.target, test.catalog, test.explicitLocalTarget)
 			if model != test.model || effort != test.effort {
 				t.Fatalf("agentRuntimeModel = %q, %q; want %q, %q", model, effort, test.model, test.effort)
 			}
@@ -1281,4 +1289,139 @@ func TestSanitizeModelSourceMessageRedactsURLQueryStrings(t *testing.T) {
 	if got := sanitizeModelSourceMessage(plain, "fallback", ""); got != plain {
 		t.Fatalf("non-query message altered: got %q, want %q", got, plain)
 	}
+}
+
+func TestModelSourceApplyVerifiesExplicitLocalModelTarget(t *testing.T) {
+	snapshot := &wire.LocalModelsSnapshot{
+		Available: true,
+		Models: []wire.LocalModel{
+			{ID: "alpha-4b:Q4_K_M", State: "loaded", PiModel: "localmodels-library/alpha-4b"},
+			{ID: "zeta-27b:IQ3_S", State: "loaded", PiModel: "localmodels-library/zeta-27b"},
+		},
+	}
+
+	writeApplyStatus := func(t *testing.T, ft *fakeTool, mode, runtimeName, runtimeModel string) {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{
+			"schema":        modelSourceStatusSchema,
+			"mode":          mode,
+			"runtime":       runtimeName,
+			"runtime_model": runtimeModel,
+			"gateway_url":   "http://127.0.0.1:18480",
+			"environment":   map[string]string{},
+			"byok":          map[string]any{"configured": false, "key_saved": false},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ft.state, "source-apply.json"), payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("succeeds when applied runtime model matches requested library row and Pi catalog", func(t *testing.T) {
+		ft := newFakeTool(t)
+		writeApplyStatus(t, ft, "local", "pi", "localmodels-library/zeta-27b")
+		ms := NewModelSource(ModelSourceOptions{
+			Tool:            &ft.tool,
+			Environment:     map[string]string{"LOCALMODELS_FAKE_TOOL": "1"},
+			JobDirectory:    filepath.Join(t.TempDir(), "jobs"),
+			LibrarySnapshot: func() *wire.LocalModelsSnapshot { return snapshot },
+			OnApplied: func(context.Context) map[string][]RuntimeModelOption {
+				return map[string][]RuntimeModelOption{
+					"pi": {
+						{ID: "localmodels-library/alpha-4b", IsDefault: true},
+						{ID: "localmodels-library/zeta-27b", AllowedReasoningEffort: []string{"low", "medium"}, DefaultReasoningEffort: "medium"},
+					},
+				}
+			},
+		})
+
+		got, err := ms.Apply(t.Context(), ModelSourceApply{Mode: "local", LocalModelID: "zeta-27b:IQ3_S"})
+		if err != nil {
+			t.Fatalf("Apply returned unexpected error: %v", err)
+		}
+		if got.RuntimeModel != "localmodels-library/zeta-27b" || got.ReasoningEffort != "medium" {
+			t.Fatalf("Apply status = %+v, want runtime_model=localmodels-library/zeta-27b effort=medium", got)
+		}
+	})
+
+	t.Run("refuses when source apply returns a different loaded model", func(t *testing.T) {
+		var logs bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+
+		ft := newFakeTool(t)
+		writeApplyStatus(t, ft, "local", "pi", "localmodels-library/alpha-4b")
+		ms := NewModelSource(ModelSourceOptions{
+			Tool:            &ft.tool,
+			Environment:     map[string]string{"LOCALMODELS_FAKE_TOOL": "1"},
+			JobDirectory:    filepath.Join(t.TempDir(), "jobs"),
+			LibrarySnapshot: func() *wire.LocalModelsSnapshot { return snapshot },
+			OnApplied: func(context.Context) map[string][]RuntimeModelOption {
+				return map[string][]RuntimeModelOption{
+					"pi": {
+						{ID: "localmodels-library/alpha-4b", IsDefault: true},
+						{ID: "localmodels-library/zeta-27b"},
+					},
+				}
+			},
+		})
+
+		_, err := ms.Apply(t.Context(), ModelSourceApply{Mode: "local", LocalModelID: "zeta-27b:IQ3_S"})
+		var sourceErr *ModelSourceError
+		if !errors.As(err, &sourceErr) || sourceErr.Code != "MODEL_SOURCE_FAILED" || !sourceErr.Retryable {
+			t.Fatalf("Apply err = %v (%+v), want retryable MODEL_SOURCE_FAILED", err, sourceErr)
+		}
+		logText := logs.String()
+		for _, want := range []string{`"msg":"model_source.target_mismatch"`, `"requested_model":"zeta-27b:IQ3_S"`, `"expected_runtime_model":"localmodels-library/zeta-27b"`, `"returned_runtime_model":"localmodels-library/alpha-4b"`} {
+			if !strings.Contains(logText, want) {
+				t.Fatalf("logs missing %s:\n%s", want, logText)
+			}
+		}
+	})
+
+	t.Run("refuses when Pi catalog omits the requested model instead of falling back to default", func(t *testing.T) {
+		ft := newFakeTool(t)
+		writeApplyStatus(t, ft, "local", "pi", "localmodels-library/zeta-27b")
+		ms := NewModelSource(ModelSourceOptions{
+			Tool:            &ft.tool,
+			Environment:     map[string]string{"LOCALMODELS_FAKE_TOOL": "1"},
+			JobDirectory:    filepath.Join(t.TempDir(), "jobs"),
+			LibrarySnapshot: func() *wire.LocalModelsSnapshot { return snapshot },
+			OnApplied: func(context.Context) map[string][]RuntimeModelOption {
+				return map[string][]RuntimeModelOption{
+					"pi": {
+						{ID: "localmodels-library/alpha-4b", IsDefault: true},
+					},
+				}
+			},
+		})
+
+		_, err := ms.Apply(t.Context(), ModelSourceApply{Mode: "local", LocalModelID: "zeta-27b:IQ3_S"})
+		var sourceErr *ModelSourceError
+		if !errors.As(err, &sourceErr) || sourceErr.Code != "MODEL_SOURCE_FAILED" || !sourceErr.Retryable {
+			t.Fatalf("Apply err = %v (%+v), want retryable MODEL_SOURCE_FAILED", err, sourceErr)
+		}
+	})
+
+	t.Run("refuses when source apply returns empty or non-local model", func(t *testing.T) {
+		for _, returned := range []string{"", "anthropic/claude-opus-4-6", "localmodels/localmodels-byok"} {
+			ft := newFakeTool(t)
+			writeApplyStatus(t, ft, "local", "pi", returned)
+			ms := NewModelSource(ModelSourceOptions{
+				Tool:            &ft.tool,
+				Environment:     map[string]string{"LOCALMODELS_FAKE_TOOL": "1"},
+				JobDirectory:    filepath.Join(t.TempDir(), "jobs"),
+				LibrarySnapshot: func() *wire.LocalModelsSnapshot { return snapshot },
+			})
+
+			_, err := ms.Apply(t.Context(), ModelSourceApply{Mode: "local", LocalModelID: "zeta-27b:IQ3_S"})
+			var sourceErr *ModelSourceError
+			if !errors.As(err, &sourceErr) || sourceErr.Code != "MODEL_SOURCE_FAILED" {
+				t.Fatalf("returned=%q: Apply err = %v (%+v), want MODEL_SOURCE_FAILED", returned, err, sourceErr)
+			}
+		}
+	})
 }

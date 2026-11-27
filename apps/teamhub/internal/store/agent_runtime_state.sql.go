@@ -571,6 +571,16 @@ func (q *Queries) DeleteLocalComputerModelSnapshot(ctx context.Context, computer
 	return err
 }
 
+const deleteLocalComputerSpeechSnapshot = `-- name: DeleteLocalComputerSpeechSnapshot :exec
+DELETE FROM local_computer_speech_snapshots
+WHERE computer_id=$1::text
+`
+
+func (q *Queries) DeleteLocalComputerSpeechSnapshot(ctx context.Context, computerID string) error {
+	_, err := q.db.Exec(ctx, deleteLocalComputerSpeechSnapshot, computerID)
+	return err
+}
+
 const deletePendingAgentRuntimeLocalComputerEnrollments = `-- name: DeletePendingAgentRuntimeLocalComputerEnrollments :exec
 DELETE FROM local_computer_enrollments
 WHERE tenant_id=$1::text
@@ -1336,6 +1346,19 @@ func (q *Queries) GetLocalComputerModelSnapshot(ctx context.Context, computerID 
 	var i GetLocalComputerModelSnapshotRow
 	err := row.Scan(&i.Snapshot, &i.Host)
 	return i, err
+}
+
+const getLocalComputerSpeechSnapshot = `-- name: GetLocalComputerSpeechSnapshot :one
+SELECT snapshot
+FROM local_computer_speech_snapshots
+WHERE computer_id=$1::text
+`
+
+func (q *Queries) GetLocalComputerSpeechSnapshot(ctx context.Context, computerID string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getLocalComputerSpeechSnapshot, computerID)
+	var snapshot []byte
+	err := row.Scan(&snapshot)
+	return snapshot, err
 }
 
 const getMaterializableAgentRuntimeRegistrationByManagementID = `-- name: GetMaterializableAgentRuntimeRegistrationByManagementID :one
@@ -4685,5 +4708,26 @@ func (q *Queries) UpsertLocalComputerModelSnapshot(ctx context.Context, arg Upse
 		arg.Host,
 		arg.ObservedAt,
 	)
+	return err
+}
+
+const upsertLocalComputerSpeechSnapshot = `-- name: UpsertLocalComputerSpeechSnapshot :exec
+INSERT INTO local_computer_speech_snapshots(computer_id,snapshot,observed_at,updated_at)
+VALUES($1::text,$2::jsonb,
+       $3::timestamptz,clock_timestamp())
+ON CONFLICT (computer_id) DO UPDATE
+SET snapshot=EXCLUDED.snapshot,
+    observed_at=EXCLUDED.observed_at,
+    updated_at=EXCLUDED.updated_at
+`
+
+type UpsertLocalComputerSpeechSnapshotParams struct {
+	ComputerID string             `json:"computer_id"`
+	Snapshot   []byte             `json:"snapshot"`
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+}
+
+func (q *Queries) UpsertLocalComputerSpeechSnapshot(ctx context.Context, arg UpsertLocalComputerSpeechSnapshotParams) error {
+	_, err := q.db.Exec(ctx, upsertLocalComputerSpeechSnapshot, arg.ComputerID, arg.Snapshot, arg.ObservedAt)
 	return err
 }

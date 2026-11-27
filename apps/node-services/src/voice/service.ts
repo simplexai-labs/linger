@@ -37,18 +37,52 @@ export interface VoiceWorkerSpawn {
   readonly env: NodeJS.ProcessEnv;
 }
 
-/** Soniox runs transcription and recording; xAI runs Live on its own. */
+export interface VoiceWorkerActivation {
+  readonly env: Readonly<Record<string, string>>;
+  readonly digest: string;
+}
+
+/**
+ * Computes which voice workers should run and the sanitized provider env each
+ * receives. Soniox or local speech turns on both ASR and recorder workers;
+ * xAI turns on Live independently.
+ */
 export function workerKeys(
   keys: ProviderKeys,
-): Map<VoiceWorker, { variable: string; key: string }> {
-  const soniox = keys.soniox_api_key?.trim();
-  const xai = keys.xai_api_key?.trim();
-  const workers = new Map<VoiceWorker, { variable: string; key: string }>();
-  if (soniox) {
-    workers.set("asr", { variable: "SONIOX_API_KEY", key: soniox });
-    workers.set("recorder", { variable: "SONIOX_API_KEY", key: soniox });
+): Map<VoiceWorker, VoiceWorkerActivation> {
+  const soniox = keys.soniox_api_key?.trim() ?? "";
+  const xai = keys.xai_api_key?.trim() ?? "";
+  const localAsrEnabled = keys.local_asr_enabled === true;
+  const localAsrUrl = keys.local_asr_url?.trim() ?? "";
+  const workers = new Map<VoiceWorker, VoiceWorkerActivation>();
+  if (soniox || localAsrEnabled) {
+    const asrEnv: Record<string, string> = {
+      SONIOX_API_KEY: soniox,
+      XAI_API_KEY: "",
+      VOICE_LOCAL_ASR_URL: localAsrUrl,
+    };
+    workers.set("asr", {
+      env: asrEnv,
+      digest: sha256Hex(JSON.stringify([soniox, localAsrUrl])),
+    });
+    const recorderEnv: Record<string, string> = {
+      SONIOX_API_KEY: soniox,
+      XAI_API_KEY: "",
+    };
+    workers.set("recorder", {
+      env: recorderEnv,
+      digest: sha256Hex(JSON.stringify([soniox])),
+    });
   }
-  if (xai) workers.set("live", { variable: "XAI_API_KEY", key: xai });
+  if (xai) {
+    workers.set("live", {
+      env: {
+        SONIOX_API_KEY: "",
+        XAI_API_KEY: xai,
+      },
+      digest: sha256Hex(xai),
+    });
+  }
   return workers;
 }
 
@@ -85,10 +119,17 @@ async function fetchProviderKeys(
     return { ok: false, reason: "invalid_response" };
   }
   if (!isRecord(body)) return { ok: false, reason: "invalid_response" };
-  const { soniox_api_key: soniox, xai_api_key: xai } = body;
+  const {
+    soniox_api_key: soniox,
+    xai_api_key: xai,
+    local_asr_enabled: localAsrEnabled,
+    local_asr_url: localAsrUrl,
+  } = body;
   if (
     (soniox !== undefined && typeof soniox !== "string") ||
-    (xai !== undefined && typeof xai !== "string")
+    (xai !== undefined && typeof xai !== "string") ||
+    (localAsrEnabled !== undefined && typeof localAsrEnabled !== "boolean") ||
+    (localAsrUrl !== undefined && typeof localAsrUrl !== "string")
   )
     return { ok: false, reason: "invalid_response" };
   return {
@@ -96,6 +137,10 @@ async function fetchProviderKeys(
     keys: {
       ...(soniox ? { soniox_api_key: soniox } : {}),
       ...(xai ? { xai_api_key: xai } : {}),
+      ...(localAsrEnabled !== undefined
+        ? { local_asr_enabled: localAsrEnabled }
+        : {}),
+      ...(localAsrUrl ? { local_asr_url: localAsrUrl } : {}),
     },
   };
 }
@@ -172,8 +217,8 @@ export async function startVoiceService(options: {
   const entries = new Map<
     VoiceWorker,
     {
-      /** The key this worker should run with; absent means stopped. */
-      key?: { variable: string; key: string };
+      /** The activation env this worker should run with; absent means stopped. */
+      activation?: VoiceWorkerActivation;
       digest?: string;
       generation: number;
       child?: ChildProcess;
@@ -218,8 +263,8 @@ export async function startVoiceService(options: {
   };
   const start = (worker: VoiceWorker) => {
     const entry = entries.get(worker)!;
-    const key = entry.key;
-    if (stopping || !key) return;
+    const activation = entry.activation;
+    if (stopping || !activation) return;
     const generation = entry.generation;
     const current = () => !stopping && generation === entry.generation;
     const startedAt = Date.now();
@@ -242,16 +287,29 @@ export async function startVoiceService(options: {
       return;
     }
     allocatePort().then((port) => {
-      if (current()) spawnWorker(port, key);
+      if (current()) spawnWorker(port, activation);
     }, restart);
-    function spawnWorker(port: number, key: { variable: string; key: string }) {
+    function spawnWorker(port: number, activation: VoiceWorkerActivation) {
       const workerEntry = fileURLToPath(
         import.meta.resolve("@linger/voice-runtime/worker"),
       );
       let child: ChildProcess;
       try {
-        // Keys travel only in the child's environment. Both provider variables
-        // are set explicitly, so a key inherited by node-services never wins.
+        // Keys travel only in the child's environment. Provider variables are
+        // set explicitly, so a key inherited by node-services never wins.
+        const localRelayEnv =
+          worker === "asr"
+            ? {
+                ...(options.http.url
+                  ? { NODE_SERVICES_INTERNAL_URL: options.http.url }
+                  : {}),
+                ...(config.managementCredential
+                  ? {
+                      NODE_SERVICES_INTERNAL_TOKEN: config.managementCredential,
+                    }
+                  : {}),
+              }
+            : {};
         child = launch(worker, {
           args: [
             ...(workerEntry.endsWith(".ts")
@@ -266,7 +324,8 @@ export async function startVoiceService(options: {
             ...modelPath,
             SONIOX_API_KEY: "",
             XAI_API_KEY: "",
-            [key.variable]: key.key,
+            ...localRelayEnv,
+            ...activation.env,
             TEAMHUB_BASE_URL: config.teamHubBaseUrl,
             VOICE_WORKER_PORT: String(port),
           },
@@ -297,20 +356,20 @@ export async function startVoiceService(options: {
     const wanted = workerKeys(keys);
     for (const worker of PROVIDER_WORKERS) {
       const entry = entries.get(worker)!;
-      const key = wanted.get(worker);
-      const digest = key ? sha256Hex(key.key) : undefined;
-      // An unchanged key leaves a running, restarting or installing worker alone.
+      const activation = wanted.get(worker);
+      const digest = activation?.digest;
+      // An unchanged activation leaves a running, restarting or installing worker alone.
       if (digest === entry.digest) continue;
       entry.generation += 1;
       const generation = entry.generation;
       clearTimeout(entry.retry);
       entry.retry = undefined;
-      entry.key = key;
+      entry.activation = activation;
       entry.digest = digest;
       entry.failures = 0;
       options.logger.log("info", "voice.worker_reconciled", {
         worker,
-        action: !key ? "stop" : entry.child ? "replace" : "start",
+        action: !activation ? "stop" : entry.child ? "replace" : "start",
       });
       const child = entry.child;
       if (!child) {
@@ -367,7 +426,10 @@ export async function startVoiceService(options: {
   // process and the Bridge know; TeamHub's reconcile never touches it.
   const bridgeToken = randomBytes(32).toString("base64url");
   const bridge = entries.get("bridge")!;
-  bridge.key = { variable: "VOICE_BRIDGE_TOKEN", key: bridgeToken };
+  bridge.activation = {
+    env: { VOICE_BRIDGE_TOKEN: bridgeToken },
+    digest: "bridge",
+  };
   start("bridge");
   const bridgeTarget = () =>
     bridge.child && bridge.childGeneration === bridge.generation
@@ -385,7 +447,7 @@ export async function startVoiceService(options: {
   // Readiness and the reconcile answer track the provider workers that a
   // voice session dispatch needs.
   const wantedWorkers = () =>
-    PROVIDER_WORKERS.filter((worker) => entries.get(worker)!.key);
+    PROVIDER_WORKERS.filter((worker) => entries.get(worker)!.activation);
   const workersReady = async () =>
     (
       await Promise.all(

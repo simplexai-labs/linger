@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"os"
 	"os/exec"
@@ -675,6 +676,10 @@ type ModelSourceOptions struct {
 	// Apply returns to the caller. It returns each Runtime's model catalog as
 	// that discovery found it, nil when discovery failed.
 	OnApplied func(context.Context) map[string][]RuntimeModelOption
+	// LibrarySnapshot returns the latest local-models library snapshot so Apply
+	// can verify that an explicit local-model switch resolves to the requested
+	// model's pi_model instead of silently keeping another loaded model.
+	LibrarySnapshot func() *wire.LocalModelsSnapshot
 }
 
 // RuntimeModelOption is one model a Runtime offers, as Runtime discovery
@@ -689,16 +694,17 @@ type RuntimeModelOption struct {
 // ModelSource inspects, tests and switches the Computer's active model source
 // (local models, native subscriptions, or BYOK mounted on Bifrost).
 type ModelSource struct {
-	tool          *Tool
-	environment   map[string]string
-	jobDirectory  string
-	harnessRoot   string
-	nodePath      string
-	statusTimeout time.Duration
-	testTimeout   time.Duration
-	applyTimeout  time.Duration
-	onApplied     func(context.Context) map[string][]RuntimeModelOption
-	mu            sync.Mutex
+	tool            *Tool
+	environment     map[string]string
+	jobDirectory    string
+	harnessRoot     string
+	nodePath        string
+	statusTimeout   time.Duration
+	testTimeout     time.Duration
+	applyTimeout    time.Duration
+	onApplied       func(context.Context) map[string][]RuntimeModelOption
+	librarySnapshot func() *wire.LocalModelsSnapshot
+	mu              sync.Mutex
 	// remountedAt and remountErr are the last gateway remount's finish time
 	// and outcome, under mu, so Runs that waited for it share its outcome.
 	remountedAt time.Time
@@ -727,15 +733,16 @@ func NewModelSource(options ModelSourceOptions) *ModelSource {
 		applyTimeout = defaultModelSourceTimeout
 	}
 	return &ModelSource{
-		tool:          options.Tool,
-		environment:   maps.Clone(options.Environment),
-		jobDirectory:  options.JobDirectory,
-		harnessRoot:   harnessRoot,
-		nodePath:      options.NodePath,
-		statusTimeout: statusTimeout,
-		testTimeout:   testTimeout,
-		applyTimeout:  applyTimeout,
-		onApplied:     options.OnApplied,
+		tool:            options.Tool,
+		environment:     maps.Clone(options.Environment),
+		jobDirectory:    options.JobDirectory,
+		harnessRoot:     harnessRoot,
+		nodePath:        options.NodePath,
+		statusTimeout:   statusTimeout,
+		testTimeout:     testTimeout,
+		applyTimeout:    applyTimeout,
+		onApplied:       options.OnApplied,
+		librarySnapshot: options.LibrarySnapshot,
 	}
 }
 
@@ -1014,8 +1021,66 @@ func (m *ModelSource) Apply(ctx context.Context, apply ModelSourceApply) (wire.M
 			refreshCancel()
 		}
 	}
-	status.RuntimeModel, status.ReasoningEffort = agentRuntimeModel(status.Mode, status.Runtime, status.RuntimeModel, catalogs[status.Runtime])
+	explicitLocalTarget := apply.Mode == "local" && apply.LocalModelID != ""
+	returnedModel := strings.TrimSpace(status.RuntimeModel)
+	expectedPiModel, snapshotMismatch := m.verifyLocalModelTarget(apply.LocalModelID, returnedModel)
+	resolvedModel, resolvedEffort := agentRuntimeModel(status.Mode, status.Runtime, returnedModel, catalogs[status.Runtime], explicitLocalTarget)
+	if explicitLocalTarget {
+		if status.Mode != "local" || !isLocalRuntimeModel(returnedModel) || snapshotMismatch ||
+			resolvedModel == "" || resolvedModel != returnedModel ||
+			(expectedPiModel != "" && resolvedModel != expectedPiModel) {
+			slog.Warn("model_source.target_mismatch",
+				"mode", apply.Mode,
+				"runtime", status.Runtime,
+				"requested_model", redact.Text(apply.LocalModelID),
+				"expected_runtime_model", redact.Text(expectedPiModel),
+				"returned_runtime_model", redact.Text(returnedModel),
+				"resolved_runtime_model", redact.Text(resolvedModel),
+			)
+			return wire.ModelSourceStatus{}, &ModelSourceError{
+				Code:      "MODEL_SOURCE_FAILED",
+				Message:   "The Computer could not switch to the requested local model.",
+				Retryable: true,
+			}
+		}
+	}
+	status.RuntimeModel, status.ReasoningEffort = resolvedModel, resolvedEffort
 	return status, nil
+}
+
+// verifyLocalModelTarget checks the runtime_model returned by `source apply`
+// against the refreshed library snapshot for an explicit local model ID. It
+// returns the requested model's expected pi_model (when known) and whether the
+// returned runtime_model contradicts the library state.
+func (m *ModelSource) verifyLocalModelTarget(requestedID, returnedModel string) (string, bool) {
+	if requestedID == "" || m.librarySnapshot == nil {
+		return "", false
+	}
+	snapshot := m.librarySnapshot()
+	if snapshot == nil || !snapshot.Available {
+		return "", false
+	}
+	var expectedPiModel string
+	foundRequested := false
+	otherClaimsReturned := false
+	for _, row := range snapshot.Models {
+		piModel := strings.TrimSpace(row.PiModel)
+		if row.ID == requestedID {
+			foundRequested = true
+			expectedPiModel = piModel
+			continue
+		}
+		if returnedModel != "" && piModel != "" && piModel == returnedModel {
+			otherClaimsReturned = true
+		}
+	}
+	if foundRequested {
+		if expectedPiModel == "" || returnedModel != expectedPiModel {
+			return expectedPiModel, true
+		}
+		return expectedPiModel, false
+	}
+	return "", otherClaimsReturned
 }
 
 // applyArgs builds one `source apply`. Without a configuration on stdin, a
@@ -1058,16 +1123,38 @@ func isLocalRuntimeModel(id string) bool {
 // the target model when the Runtime's catalog offers it, else a mode-compatible
 // default or catalog entry. In local mode only localmodels/ and
 // localmodels-library/ models are eligible; if none exist, an empty model ID is
-// returned so TeamHub refuses rather than routing Agents to a cloud model. In
+// returned so TeamHub refuses rather than routing Agents to a cloud model. When
+// explicitLocalTarget is true, local mode refuses to fall back to another local
+// model if the requested target is missing from a discovered catalog. In
 // subscription mode stale localmodels-byok entries are excluded. A non-local
 // Runtime without a catalog runs the target model, or its host default under
 // the id Agent Service and TeamHub use for it. The effort is the model's
 // default, else its first allowed one, because a model that offers efforts
 // needs one.
-func agentRuntimeModel(mode, runtime, target string, catalog []RuntimeModelOption) (string, string) {
+func agentRuntimeModel(mode, runtime, target string, catalog []RuntimeModelOption, explicitLocalTarget bool) (string, string) {
 	if mode == "local" {
 		if !isLocalRuntimeModel(target) {
 			target = ""
+		}
+		if explicitLocalTarget {
+			if target == "" {
+				return "", ""
+			}
+			if catalog == nil {
+				return target, ""
+			}
+			index := slices.IndexFunc(catalog, func(model RuntimeModelOption) bool {
+				return isLocalRuntimeModel(model.ID) && model.ID == target
+			})
+			if index < 0 {
+				return "", ""
+			}
+			model := catalog[index]
+			effort := model.DefaultReasoningEffort
+			if effort == "" && len(model.AllowedReasoningEffort) > 0 {
+				effort = model.AllowedReasoningEffort[0]
+			}
+			return model.ID, effort
 		}
 		localCandidates := make([]RuntimeModelOption, 0, len(catalog))
 		for _, model := range catalog {
