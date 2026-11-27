@@ -607,4 +607,137 @@ describe("VoiceKeyDialog", () => {
       }),
     );
   });
+
+  it("keeps watching a retried download while the cached snapshot still shows the previous failure", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const computerId = runtime.seed.localComputers[0]!.computer_id;
+    const localPolicy: TeamHubVoiceMediaPolicy = {
+      active_speech_provider: "none",
+      live_supported: false,
+      local_speech_available: true,
+      local_speech_ready: false,
+      soniox_key: missing,
+      voice_available: true,
+      voice_media_supported: false,
+      xai_key: missing,
+    };
+    const readyPolicy: TeamHubVoiceMediaPolicy = {
+      ...localPolicy,
+      active_speech_provider: "local",
+      local_speech_ready: true,
+      voice_media_supported: true,
+    };
+    // The previous attempt failed. After the retry is requested, TeamHub
+    // still serves that snapshot once before the Computer reports again.
+    let downloadRequested = false;
+    let readsAfterRequest = 0;
+
+    runtime.server
+      .on(
+        "GET",
+        "/v0/tenants/{tenantId}/local-computers/{computerId}/local-speech",
+        () => {
+          if (downloadRequested) readsAfterRequest += 1;
+          const current =
+            readsAfterRequest > 1
+              ? { observed_at: "2026-11-27T10:05:00Z", state: "idle" as const }
+              : {
+                  observed_at: "2026-11-27T10:00:00Z",
+                  state: "failed" as const,
+                };
+          return {
+            available: true,
+            computer: {
+              computer_id: computerId,
+              display_name: "Studio Mac",
+              status: "online" as const,
+            },
+            models: [
+              {
+                active: false,
+                commercial_notice: null,
+                disk_size_bytes: 601_882_624,
+                engine: "whisper.cpp" as const,
+                error:
+                  current.state === "failed"
+                    ? {
+                        code: "DOWNLOAD_FAILED",
+                        message: "Previous attempt failed",
+                      }
+                    : undefined,
+                gpu_supported: true,
+                id: "whisper-large-v3-turbo",
+                language_count: 99,
+                languages: ["auto"],
+                license: "MIT",
+                license_url:
+                  "https://github.com/openai/whisper/blob/main/LICENSE",
+                name: "Whisper Large v3 Turbo (Q5_0)",
+                quality_rating: "high-multilingual" as const,
+                ram_estimate_bytes: 1_288_490_188,
+                state: current.state,
+                vram_estimate_bytes: 1_073_741_824,
+              },
+            ],
+            observed_at: current.observed_at,
+            viewer_is_owner: true,
+          };
+        },
+      )
+      .on(
+        "POST",
+        "/v0/tenants/{tenantId}/local-computers/{computerId}/local-speech/actions",
+        ({ body }) => {
+          downloadRequested = true;
+          return Response.json(
+            {
+              action: (body as { action: string }).action,
+              computer_id: computerId,
+              model_id: (body as { model_id?: string }).model_id,
+            },
+            { status: 202 },
+          );
+        },
+      )
+      .on("PUT", "/v0/tenants/{tenantId}/voice-settings", () => ({
+        keep_loaded_seconds: 900,
+        language: "auto",
+        local_computer_id: computerId,
+        local_model_id: "whisper-large-v3-turbo",
+        silence_timeout_seconds: 0,
+        speech_provider: "local" as const,
+        use_gpu: true,
+      }))
+      .on(
+        "GET",
+        "/v0/tenants/{tenantId}/voice-media-policy",
+        () => readyPolicy,
+      );
+
+    const onReady = vi.fn();
+    renderWithRuntime(
+      runtime,
+      <MemoryRouter>
+        <VoiceKeyDialog
+          onClose={() => undefined}
+          onReady={onReady}
+          policy={localPolicy}
+          providers={["xai", "soniox"]}
+          tenantId="tenant-1"
+        />
+      </MemoryRouter>,
+    );
+
+    const row = (
+      await screen.findByText("Whisper Large v3 Turbo (Q5_0)")
+    ).closest("[data-quick-speech-model]") as HTMLElement;
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Download & enable" }),
+    );
+
+    await waitFor(() =>
+      expect(onReady).toHaveBeenCalledWith("soniox", readyPolicy),
+    );
+    expect(screen.queryByText("Previous attempt failed")).toBeNull();
+  });
 });

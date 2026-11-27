@@ -73,20 +73,12 @@ export type TeamHubVoiceMediaPolicy = components["schemas"]["VoiceMediaPolicy"];
 export type TeamHubVoiceSettings = components["schemas"]["VoiceSettings"];
 export type TeamHubUpdateVoiceSettingsRequest =
   components["schemas"]["UpdateVoiceSettingsRequest"];
-export type TeamHubVoiceSpeechProvider =
-  components["schemas"]["VoiceSpeechProvider"];
 export type TeamHubLocalSpeechView = components["schemas"]["LocalSpeechView"];
 export type TeamHubLocalSpeechModel = components["schemas"]["LocalSpeechModel"];
 export type TeamHubLocalSpeechRuntime =
   components["schemas"]["LocalSpeechRuntime"];
-export type TeamHubLocalSpeechConfig =
-  components["schemas"]["LocalSpeechConfig"];
 export type TeamHubLocalSpeechActionRequest =
   components["schemas"]["LocalSpeechActionRequest"];
-export type TeamHubLocalSpeechActionAccepted =
-  components["schemas"]["LocalSpeechActionAccepted"];
-export type TeamHubLocalSpeechRefreshAccepted =
-  components["schemas"]["LocalSpeechRefreshAccepted"];
 export type TeamHubLocalSpeechFallbackReason =
   components["schemas"]["LocalSpeechFallbackReason"];
 export type TeamHubLocalSpeechEffectiveDevice =

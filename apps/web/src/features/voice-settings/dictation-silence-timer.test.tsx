@@ -135,7 +135,7 @@ describe("dictation Stop after silence timer", () => {
     timer.dispose();
   });
 
-  it("auto-stops Pocket Notes dictation after speech even when smoothVoiceLevel emits decaying sub-threshold ticks every 50 ms", async () => {
+  it("auto-stops Pocket Notes dictation after speech even when smoothVoiceLevel emits decaying sub-threshold ticks every 50 ms, keeping the pending words", async () => {
     vi.useFakeTimers();
     const runtime = createTestTeamHubRuntime();
     runtime.server.on("GET", "/v0/tenants/{tenantId}/voice-settings", () => ({
@@ -154,13 +154,21 @@ describe("dictation Stop after silence timer", () => {
       </QueryClientProvider>
     );
 
+    // Wired the way the Pocket Note panel wires it: auto-stop takes the same
+    // stop path as the Stop button and inserts the words stop returns.
+    const insertSpoken = vi.fn();
     const { result, unmount } = renderHook(
-      () =>
-        usePocketDictation({
+      () => {
+        const dictation = usePocketDictation({
+          onAutoStop: () => {
+            void dictation.stop().then(insertSpoken);
+          },
           onTurn: vi.fn(),
           roomId: "room-1",
           tenantId: "tenant-1",
-        }),
+        });
+        return dictation;
+      },
       { wrapper },
     );
 
@@ -182,6 +190,13 @@ describe("dictation Stop after silence timer", () => {
     await act(async () => {
       vi.advanceTimersByTime(4_000);
       connection.level?.(0.35);
+      // Recognized but not yet a finished turn when the user goes quiet.
+      connection.receive({
+        kind: "speech",
+        id: "pending",
+        text: "Buy milk",
+        endOffsetMs: 900,
+      });
       // Decay via smoothVoiceLevel(prev, 0) until below the activity threshold.
       let level = 0.35;
       while (level >= VOICE_SILENCE_ACTIVITY_THRESHOLD) {
@@ -203,6 +218,7 @@ describe("dictation Stop after silence timer", () => {
     });
     expect(connection.close).toHaveBeenCalledTimes(1);
     expect(result.current.active).toBe(false);
+    expect(insertSpoken).toHaveBeenCalledExactlyOnceWith("Buy milk");
     unmount();
   });
 

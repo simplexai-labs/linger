@@ -33,22 +33,26 @@ const idle: VoiceModeState = {
 /**
  * Soniox dictation for the Pocket Note, carried by the Another Me Direct
  * Room's chat dictation session: each finished turn goes to `onTurn`, and the
- * words still being recognized stay in `liveText`.
+ * words still being recognized stay in `liveText`. A silence auto-stop calls
+ * `onAutoStop`, which must stop through the same path as a manual stop so the
+ * words `stop` returns are kept.
  */
 export function usePocketDictation({
+  onAutoStop,
   onTurn,
   roomId,
   tenantId,
 }: {
+  onAutoStop: () => void;
   onTurn: (text: string) => void;
   roomId?: string;
   tenantId: string;
 }) {
   const runtime = useOptionalTeamHubRuntime();
   const hardware = useOptionalVoiceControl();
-  const latest = useRef({ hardware, onTurn });
+  const latest = useRef({ hardware, onAutoStop, onTurn });
   useLayoutEffect(() => {
-    latest.current = { hardware, onTurn };
+    latest.current = { hardware, onAutoStop, onTurn };
   });
   // Dictation transcribes with Soniox. A deployment that runs voice offers it
   // before the key exists; older servers only once Soniox is configured.
@@ -65,7 +69,6 @@ export function usePocketDictation({
   const abortRef = useRef<AbortController | undefined>(undefined);
   const startOnRenew = useRef(false);
   const silenceTimerRef = useRef<DictationSilenceTimer | undefined>(undefined);
-  const stopRef = useRef<() => Promise<string>>(async () => "");
 
   const voiceSettingsQuery = useQuery({
     ...(runtime
@@ -88,7 +91,7 @@ export function usePocketDictation({
   useEffect(() => {
     if (!runtime || !roomId) return;
     const timer = createDictationSilenceTimer(() => {
-      void stopRef.current();
+      latest.current.onAutoStop();
     });
     silenceTimerRef.current = timer;
     return () => {
@@ -203,10 +206,6 @@ export function usePocketDictation({
       setSessionKey((key) => key + 1);
     }
   }
-
-  useLayoutEffect(() => {
-    stopRef.current = stop;
-  });
 
   return {
     available: offered && Boolean(roomId),

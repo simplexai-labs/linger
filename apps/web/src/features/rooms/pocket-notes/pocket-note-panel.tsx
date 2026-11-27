@@ -274,6 +274,7 @@ function TodayPocketNote({
 
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const dictation = usePocketDictation({
+    onAutoStop: () => void stopDictation(),
     onTurn: insertSpoken,
     roomId: anotherMeRoomId,
     tenantId,

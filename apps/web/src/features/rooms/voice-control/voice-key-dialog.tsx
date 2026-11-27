@@ -357,6 +357,9 @@ function LocalQuickSetupPanel({
   const [error, setError] = useState<string | null>(null);
   const [enablingModelId, setEnablingModelId] = useState<string | null>(null);
   const activatingRef = useRef(false);
+  // The snapshot cached when a download was requested. Its model states
+  // predate the request, so a `failed` there is the previous attempt's.
+  const requestedFromObservedAtRef = useRef<string | undefined>(undefined);
 
   const computersQuery = useQuery(localComputersQueryOptions(client, tenantId));
   const settingsQuery = useQuery(voiceSettingsQueryOptions(client, tenantId));
@@ -443,6 +446,7 @@ function LocalQuickSetupPanel({
     },
     onMutate: (model) => {
       setError(null);
+      requestedFromObservedAtRef.current = speechQuery.data?.observed_at;
       setEnablingModelId(model.id);
     },
     onSettled: () => {
@@ -479,6 +483,7 @@ function LocalQuickSetupPanel({
   const watchedModel = enablingModelId
     ? speechQuery.data?.models.find((model) => model.id === enablingModelId)
     : undefined;
+  const watchedObservedAt = speechQuery.data?.observed_at;
   const { mutate: triggerActivate } = activateModel;
 
   useEffect(() => {
@@ -489,13 +494,16 @@ function LocalQuickSetupPanel({
     ) {
       activatingRef.current = true;
       triggerActivate(enablingModelId);
-    } else if (watchedModel.state === "failed") {
+    } else if (
+      watchedModel.state === "failed" &&
+      watchedObservedAt !== requestedFromObservedAtRef.current
+    ) {
       setEnablingModelId(null);
       setError(
         watchedModel.error?.message || speechActionErrorCopy(undefined, t),
       );
     }
-  }, [enablingModelId, t, triggerActivate, watchedModel]);
+  }, [enablingModelId, t, triggerActivate, watchedModel, watchedObservedAt]);
 
   const models = speechQuery.data?.models ?? [];
 
