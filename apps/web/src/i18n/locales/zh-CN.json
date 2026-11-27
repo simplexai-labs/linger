@@ -1159,7 +1159,6 @@
     "computerEmptyOnline": "当前没有在线的电脑。",
     "computerEmptyOffline": "当前没有离线的电脑。",
     "computerClearFilters": "清除筛选",
-    "agentsUse": "{computer} 上 Agent 的模型来源：{source}",
     "memoryInUse": "内存已用 {used}，共 {total}",
     "gpuMemoryInUse": "显存已用 {used}，共 {total}",
     "memoryFree": "可用 {free}",

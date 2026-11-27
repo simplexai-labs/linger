@@ -24,7 +24,6 @@ export const localModelsMessages = defineMessages("localModels", {
   computerEmptyOnline: "No online computers.",
   computerEmptyOffline: "No offline computers.",
   computerClearFilters: "Clear filters",
-  agentsUse: "Agents on {computer} use {source}",
   memoryInUse: "{used} of {total} memory in use",
   gpuMemoryInUse: "{used} of {total} GPU memory in use",
   memoryFree: "{free} free",

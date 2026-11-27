@@ -18,7 +18,6 @@ import { FormFeedback } from "@/components/ui/form-feedback";
 import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { relativeTime } from "@/features/local-computer/computer-relative-time";
-import { StatusDot } from "@/features/local-computer/computer-row";
 import { useDesktopComputer } from "@/features/local-computer/desktop-computer";
 import { localComputersQueryOptions } from "@/features/local-computer/local-computer-queries";
 import {
@@ -107,11 +106,7 @@ import {
   type ModelStatus,
 } from "./local-models-rules";
 import { ByokPanel } from "./byok-panel";
-import {
-  activeSourceLabel,
-  ModelSourceTabs,
-  useModelSourceSwitch,
-} from "./model-source-panel";
+import { ModelSourceTabs, useModelSourceSwitch } from "./model-source-panel";
 import {
   type ModelSourceMode,
   modelSourceQueryKey,
@@ -792,18 +787,6 @@ function ComputerModels({
       <header className="flex flex-wrap items-start justify-between gap-3 sm:gap-4">
         <div className="min-w-48 flex-1">
           <h1 className="text-2xl text-foreground">{t(m.title)}</h1>
-          {status?.mode === "subscription" ? (
-            // Neither tab carries the in-use dot for a subscription source.
-            <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <StatusDot tone={offline ? "neutral" : "success"} />
-              <span>
-                {t(m.agentsUse, {
-                  computer: computerName,
-                  source: activeSourceLabel(status, t),
-                })}
-              </span>
-            </p>
-          ) : null}
         </div>
         {computerPicker || showHeaderUtilities ? (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
