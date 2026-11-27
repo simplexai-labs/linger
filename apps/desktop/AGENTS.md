@@ -817,7 +817,12 @@ building a package.
   section, which the daemon's model library runs. Every `--resume` reports
   the runtime again; a change updates `runtimeEnvironment` and restarts the
   daemon once its tasks end (`computer.runtime`), so an install from before
-  the daemon knew the tool gains it.
+  the daemon knew the tool gains it. When `--resume` reports
+  `details.localModelsRestored` or `details.restoredLocalModels` (reloaded
+  library models or a revived local stack) without changing
+  `runtimeEnvironment`, the desktop logs `local_server.local_models_restored`
+  and emits `computer.runtime` once so an already-running daemon refreshes its
+  library snapshot and Pi model catalog.
 - `LINGER_LOCALMODELS_DEV_PYTHON`, `LINGER_LOCALMODELS_DEV_MODULE_DIR`:
   absolute Python and module directory for running a local `localmodels`
   checkout in Quick Install and the Desktop Computer without fetching the

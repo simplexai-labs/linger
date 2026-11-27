@@ -426,6 +426,61 @@ describe("LocalServerModule resume coordination", () => {
     await f.host.stop("quit");
   });
 
+  it("notifies the Computer Daemon once when resume restores local models with an unchanged runtime environment", async () => {
+    const f = setupResumeFixture(`
+      process.stdout.write(JSON.stringify({
+        code: 0,
+        details: {
+          origin: "http://localhost:3000",
+          localModelsRestored: true,
+          restoredLocalModels: ["spark-x2.6-4b:Q4_K_M"],
+        },
+      }) + "\\n");
+    `);
+    const runtimeEvents = vi.fn();
+    f.bus.on("computer.runtime", runtimeEvents);
+
+    await f.host.start();
+
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(runtimeEvents).toHaveBeenCalledTimes(1);
+    expect(
+      f.logs.find(
+        (entry) => entry.event === "local_server.local_models_restored",
+      ),
+    ).toEqual({
+      level: "info",
+      event: "local_server.local_models_restored",
+      fields: { models: ["spark-x2.6-4b:Q4_K_M"] },
+    });
+    await f.host.stop("quit");
+  });
+
+  it("does not emit computer.runtime twice when resume both updates runtimeEnvironment and restores local models", async () => {
+    const f = setupResumeFixture(`
+      process.stdout.write(JSON.stringify({
+        code: 0,
+        details: {
+          origin: "http://localhost:3000",
+          localModelsRestored: true,
+          restoredLocalModels: ["spark-x2.6-4b:Q4_K_M"],
+        },
+        runtime: {
+          setupChoice: "claude",
+          environment: { LINGER_CLAUDE_PATH: "/mock/claude" },
+        },
+      }) + "\\n");
+    `);
+    const runtimeEvents = vi.fn();
+    f.bus.on("computer.runtime", runtimeEvents);
+
+    await f.host.start();
+
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(runtimeEvents).toHaveBeenCalledTimes(1);
+    await f.host.stop("quit");
+  });
+
   it("redacts query, hash, and secrets and bounds resume_failed errors to 500 chars", async () => {
     const longPadding = "x".repeat(600);
     const f = setupResumeFixture(`
