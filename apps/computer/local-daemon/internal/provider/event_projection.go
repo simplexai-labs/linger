@@ -18,8 +18,8 @@ type eventProjection struct {
 	tools                  map[string]string
 	// quiet holds tool calls that stay in history without a Room activity.
 	quiet map[string]bool
-	// receipts holds the tool calls that create a Task, whose output is
-	// published so the Room can link the step to that Task.
+	// receipts holds the tool calls that create a Task; the Task ID in their
+	// output is published so the Room can link the step to that Task.
 	receipts      map[string]bool
 	thinking      bool
 	thinkingTitle string
@@ -275,19 +275,21 @@ func (projection *eventProjection) projectActivity(message native.Event) []any {
 			}
 			finished := map[string]any{"type": "activity.finished", "activity_id": stableEventID("activity", projection.operationID+"\x00"+callID), "outcome": outcome}
 			// A failure's text tells the user why the step failed, and a Task's
-			// creation receipt names the Task the step links to. Other successful
-			// outputs stay private: they can be whole files or accessibility trees.
-			label := ""
+			// creation receipt names the Task the step links to. Of the receipt
+			// only the Task ID is published: createsTask can miss other commands
+			// in the script, and their output would come with it. Other
+			// successful outputs stay private: they can be whole files or
+			// accessibility trees.
+			output, _ := event["output"].(string)
+			label, text := "", ""
 			switch {
 			case outcome == "failed":
-				label = "Error"
+				label, text = "Error", strings.TrimSpace(toolResultText(output))
 			case receipt:
-				label = "Output"
+				label, text = "Output", taskID.FindString(toolResultText(output))
 			}
-			if output, _ := event["output"].(string); label != "" {
-				if text := strings.TrimSpace(toolResultText(output)); text != "" {
-					finished["content"] = []map[string]any{{"label": label, "format": "text", "content": clip(redact.Text(text), 500)}}
-				}
+			if text != "" {
+				finished["content"] = []map[string]any{{"label": label, "format": "text", "content": clip(redact.Text(text), 500)}}
 			}
 			return []any{event, finished}
 		}
@@ -315,6 +317,10 @@ func toolResultText(output string) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// taskID is TeamHub's Task ID format, by which the Web finds the Task a
+// receipt names.
+var taskID = regexp.MustCompile(`\bworkitem_[0-9a-f]{32}\b`)
 
 // gatewayID is the Runner Gateway Id format; a native identifier outside it
 // is left out of a model record rather than failing the event.

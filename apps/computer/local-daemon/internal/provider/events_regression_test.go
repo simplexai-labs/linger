@@ -142,7 +142,7 @@ func TestTaskCreationPublishesItsReceipt(t *testing.T) {
 	}
 	receipt := "Task created and running\nTask ID: workitem_0123456789abcdef0123456789abcdef"
 	content, _ := finish(`teamhub task create --name "Rivals" --requirement "Compare"`, receipt)["content"].([]map[string]any)
-	if len(content) != 1 || content[0]["label"] != "Output" || content[0]["content"] != receipt {
+	if len(content) != 1 || content[0]["label"] != "Output" || content[0]["content"] != "workitem_0123456789abcdef0123456789abcdef" {
 		t.Fatalf("task creation lost its receipt: %v", content)
 	}
 	// Any other output, including a script that also creates a Task, stays private.
@@ -150,6 +150,35 @@ func TestTaskCreationPublishesItsReceipt(t *testing.T) {
 		if event := finish(command, receipt); event["content"] != nil {
 			t.Fatalf("published the output of %q: %v", command, event)
 		}
+	}
+}
+
+func TestTaskReceiptKeepsOtherOutputPrivate(t *testing.T) {
+	finish := func(command, output string) any {
+		projection := eventProjection{operationID: "operation"}
+		projection.project(native.Event{Kind: native.EventToolCall, InvocationID: "tool-1", ToolName: "Bash", ActivityKind: native.ActivityCommand, Input: map[string]any{"command": command}})
+		events := projection.project(native.Event{Kind: native.EventToolOutput, InvocationID: "tool-1", Status: "completed", Output: output})
+		return events[len(events)-1].(map[string]any)["content"]
+	}
+	output := "Fares: 120 to Rivals\nTask created and running\nTask ID: workitem_0123456789abcdef0123456789abcdef\nNotes: Bob's plans"
+	// simpleCommands reads each of these as one Task creation, while bash
+	// also runs cat notes.md after it. The output has other lines on both
+	// sides of the receipt. Nothing but the Task ID may be published,
+	// whether or not the script counts as a receipt.
+	for _, command := range []string{
+		"teamhub task create --name Rivals # it's done\ncat notes.md # Bob's notes",
+		"teamhub task create --name $'it\\'s'; cat notes.md # Bob's",
+		`teamhub task create --name "$(echo "it's")"; cat notes.md # Bob's`,
+		"teamhub task create --name Rivals # note \\\ncat notes.md",
+		"teamhub task create --name Rivals --requirement-file - <<END-REQ\nCompare fares\nEND-REQ\ncat notes.md",
+	} {
+		content, _ := finish(command, output).([]map[string]any)
+		if content != nil && (len(content) != 1 || content[0]["content"] != "workitem_0123456789abcdef0123456789abcdef") {
+			t.Errorf("%q published %v", command, content)
+		}
+	}
+	if content := finish("teamhub task create --name Rivals", "Fares: 120 to Rivals"); content != nil {
+		t.Errorf("published output that names no Task: %v", content)
 	}
 }
 
