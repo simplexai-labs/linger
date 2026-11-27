@@ -345,7 +345,10 @@ const cloneSections = (sections: UserMemorySections) =>
 const eventDatePrefix =
   /^\d{4}-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?(?=[\s:,.–—]|$)/u;
 const eventDate = (entry: UserMemoryEntry) =>
-  eventDatePrefix.exec(entry.text)![0];
+  // A stored revision written before the date-prefix rule may still hold an
+  // undated milestone; sort it before every dated one so trimming evicts it
+  // first instead of crashing on a null exec match.
+  eventDatePrefix.exec(entry.text)?.[0] ?? "";
 function keepRecentMilestones(sections: UserMemorySections): void {
   const milestones = sections.milestones;
   while (milestones.length > USER_MEMORY_SECTION_LIMITS.milestones) {

@@ -285,6 +285,38 @@ describe("applyUserMemoryEdits", () => {
     expect(sections.milestones.at(-1)?.text).toBe("2026-10-20 Launched v2");
   });
 
+  it("evicts an undated legacy milestone instead of crashing when trimming", () => {
+    // A revision written before the date-prefix rule may still hold undated
+    // milestones; trimming must evict them first, not throw.
+    const current = {
+      ...emptyUserMemory(),
+      milestones: [
+        { text: "Planted the orchard", date: "2026-01-10" },
+        ...Array.from({ length: 7 }, (_, i) => ({
+          text: `2026-0${i + 1}-1${i} Partner milestone ${i}`,
+          date: "2026-10-01",
+        })),
+      ],
+    };
+    const { sections } = applyUserMemoryEdits(
+      current,
+      [edit({ section: "milestones", text: "2026-11-27 Launched the beta" })],
+      "2026-11-27",
+      [daily],
+    );
+    expect(sections.milestones).toHaveLength(
+      USER_MEMORY_SECTION_LIMITS.milestones,
+    );
+    expect(
+      sections.milestones.some((e) => e.text === "Planted the orchard"),
+    ).toBe(false);
+    expect(
+      sections.milestones.some(
+        (e) => e.text === "2026-11-27 Launched the beta",
+      ),
+    ).toBe(true);
+  });
+
   it("rejects a section growing past its limit, but lets one over it shrink", () => {
     const full = {
       ...emptyUserMemory(),
