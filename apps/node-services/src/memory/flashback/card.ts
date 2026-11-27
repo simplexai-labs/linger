@@ -191,6 +191,13 @@ function clean(text: string) {
     .trim();
 }
 
+/** A cut between characters, never inside one: a limit counts characters. */
 function clip(text: string, limit: number) {
-  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
+  const characters = [...text];
+  return characters.length <= limit
+    ? text
+    : `${characters
+        .slice(0, limit - 1)
+        .join("")
+        .trimEnd()}…`;
 }

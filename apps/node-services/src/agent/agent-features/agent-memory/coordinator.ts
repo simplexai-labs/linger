@@ -127,15 +127,34 @@ function bytes(value: string): number {
  * and `consolidate` then merges every waiting candidate once.
  */
 type PassMode = "resume" | "extract" | "consolidate";
+/** Counts characters, not UTF-16 code units: one astral character is one. */
+function characterCount(text: string): number {
+  let count = 0;
+  for (const _ of text) count += 1;
+  return count;
+}
+
+/** A long source string keeps its head, cut between characters, and the
+ * omitted count is characters so the note agrees with its own wording. */
+export function clipSourceText(
+  value: string,
+  maxText = MAX_SOURCE_TEXT,
+): string {
+  if (value.length <= maxText) return value;
+  let end = maxText;
+  const last = value.charCodeAt(end - 1);
+  // Never keep half of a surrogate pair.
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  const kept = value.slice(0, end);
+  const omitted = characterCount(value) - characterCount(kept);
+  return `${kept}… [${omitted} characters omitted]`;
+}
 
 function clip(
   value: RuntimeHistoryJsonValue,
   maxText = MAX_SOURCE_TEXT,
 ): RuntimeHistoryJsonValue {
-  if (typeof value === "string")
-    return value.length > maxText
-      ? `${value.slice(0, maxText)}… [${value.length - maxText} characters omitted]`
-      : value;
+  if (typeof value === "string") return clipSourceText(value, maxText);
   if (Array.isArray(value)) return value.map((item) => clip(item, maxText));
   if (value && typeof value === "object")
     return Object.fromEntries(

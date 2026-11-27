@@ -69,7 +69,7 @@ function items(block: string): string[] {
 }
 
 function frontmatter(content: string) {
-  return /^---\n([\s\S]*?)\n---\n/u.exec(content)?.[1] ?? "";
+  return /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(content)?.[1] ?? "";
 }
 
 function unquote(value: string) {
@@ -82,7 +82,10 @@ export function parseDailyReport(
   t: Translate = translate,
 ): DailyReportParts {
   const meta = frontmatter(entry.content);
-  const markdown = entry.content.replace(/^---\n[\s\S]*?\n---\n/u, "");
+  const markdown = entry.content.replace(
+    /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u,
+    "",
+  );
   const description = unquote(/^description:(.*)$/mu.exec(meta)?.[1] ?? "");
   const work = items(
     section(markdown, [

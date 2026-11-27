@@ -6,6 +6,7 @@ import {
   type WikiGraph,
   type WikiNode,
 } from "openwiki/dist/visualize/graph.js";
+import { parseOkfFrontmatter } from "@linger/knowledge-format";
 import { mentionEdges, type InferredEdge } from "./inferred-edges.js";
 
 // Revision is publication metadata, not a second graph model. All nodes and
@@ -118,20 +119,14 @@ function linkNodes(nodes: WikiNode[]): WikiEdge[] {
 }
 
 function frontmatterAliases(raw: string): string[] {
-  if (!raw.startsWith("---")) return [];
-  const end = raw.indexOf("\n---", 3);
-  if (end === -1) return [];
-  const block = raw.slice(3, end).trim();
-  try {
-    const meta = JSON.parse(block) as { aliases?: unknown };
-    return Array.isArray(meta.aliases)
-      ? meta.aliases.filter(
-          (alias): alias is string => typeof alias === "string",
-        )
-      : [];
-  } catch {
-    return [];
-  }
+  // One YAML reader for a published page: the OKF parser that the entity
+  // registry uses on the same files, so the two cannot disagree on a page.
+  const fields = parseOkfFrontmatter(raw).fields ?? {};
+  return Array.isArray(fields.aliases)
+    ? fields.aliases.filter(
+        (alias): alias is string => typeof alias === "string",
+      )
+    : [];
 }
 
 function withoutPeriodReports(nodes: WikiNode[]): WikiNode[] {

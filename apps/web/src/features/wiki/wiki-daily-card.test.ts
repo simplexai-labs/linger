@@ -77,3 +77,32 @@ it("skips None observed sections and keeps an unbolded lead whole", () => {
     next: "",
   });
 });
+
+it("reads a Daily Memory saved with CRLF line endings the same way", () => {
+  const lines = [
+    "---",
+    "type: Daily Memory",
+    "description: Notes on audio and AI hardware supplier talks and follow-ups.",
+    "---",
+    "",
+    "## Daily Work",
+    "- **Supplier capability review**: Zhang Bo's side explained the needs.",
+    "",
+    "## Tomorrow Focus",
+    "- Suggested focus: Re-evaluate with the new ID.",
+    "",
+  ];
+  const lf = parseDailyReport({
+    summary: "A different summary the card must not prefer.",
+    content: lines.join("\n"),
+  });
+  const crlf = parseDailyReport({
+    summary: "A different summary the card must not prefer.",
+    content: lines.join("\r\n"),
+  });
+  expect(crlf).toEqual(lf);
+  expect(crlf.summary).toBe(
+    "Notes on audio and AI hardware supplier talks and follow-ups.",
+  );
+  expect(crlf.next).toBe("Re-evaluate with the new ID.");
+});
