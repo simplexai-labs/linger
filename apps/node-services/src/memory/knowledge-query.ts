@@ -552,8 +552,13 @@ async function readRawEvidence(
       share,
     );
     // A page never ends inside a surrogate pair, and never ends empty while
-    // text remains.
-    if (isHighSurrogate(chunk.content.charCodeAt(offset + length - 1)))
+    // text remains. An empty window has no last code unit, so the check
+    // must not look at the one before the window; the recovery below keeps
+    // the page moving instead of repeating the same offset forever.
+    if (
+      length > 0 &&
+      isHighSurrogate(chunk.content.charCodeAt(offset + length - 1))
+    )
       length -= 1;
     if (length === 0 && offset < chunk.content.length)
       length = isHighSurrogate(chunk.content.charCodeAt(offset)) ? 2 : 1;
