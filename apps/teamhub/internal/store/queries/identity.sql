@@ -4,6 +4,13 @@ SELECT id, email, password_hash, created_at
 FROM accounts
 WHERE lower(email) = lower(sqlc.arg(email));
 
+-- name: GetOwnerAccount :one
+-- Local installations have a single owner Account provisioned first.
+SELECT id, email, password_hash, created_at
+FROM accounts
+ORDER BY created_at, id
+LIMIT 1;
+
 -- name: LockAccountPasswordHash :one
 -- Login rechecks the verified hash under the Account row lock that password
 -- changes and set-password take, so an old password never signs in after a change.

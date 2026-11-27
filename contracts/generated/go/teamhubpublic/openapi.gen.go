@@ -7425,6 +7425,18 @@ type LocalRuntimeDiagnosticStatus string
 // LocalRuntimeType defines model for LocalRuntimeType.
 type LocalRuntimeType string
 
+// LocalSessionRequest defines model for LocalSessionRequest.
+type LocalSessionRequest struct {
+	// Nonce 32 fresh random bytes in unpadded base64url.
+	Nonce string `json:"nonce"`
+
+	// Proof Unpadded base64url HMAC-SHA256 of the local session proof payload.
+	Proof string `json:"proof"`
+
+	// Timestamp Unix timestamp in seconds UTC when the proof was created.
+	Timestamp int64 `json:"timestamp"`
+}
+
 // LocalSkillCandidate defines model for LocalSkillCandidate.
 type LocalSkillCandidate struct {
 	// CandidateRef Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -10947,6 +10959,9 @@ type ExchangeLocalComputerEnrollmentJSONRequestBody = LocalComputerEnrollmentExc
 
 // ProveLocalIdentityJSONRequestBody defines body for ProveLocalIdentity for application/json ContentType.
 type ProveLocalIdentityJSONRequestBody = LocalIdentityChallenge
+
+// CreateLocalSessionJSONRequestBody defines body for CreateLocalSession for application/json ContentType.
+type CreateLocalSessionJSONRequestBody = LocalSessionRequest
 
 // UpdateRoomJSONRequestBody defines body for UpdateRoom for application/json ContentType.
 type UpdateRoomJSONRequestBody = RoomUpdateRequest

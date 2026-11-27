@@ -64,6 +64,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/local/session": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create a Session for the local installation's owner account using the installation identity key.
+     * @description Answers only on a local installation that has TEAMHUB_LOCAL_IDENTITY_KEY; elsewhere 404. The proof is the unpadded base64url HMAC-SHA256, keyed with that 32-byte key, of "linger-local-session", the fresh nonce, the Unix timestamp in seconds UTC, and the server's web origin, joined with newlines. Replayed nonces and timestamps outside the allowed window are rejected with 401.
+     */
+    post: operations["createLocalSession"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/session": {
     parameters: {
       query?: never;
@@ -4248,6 +4268,17 @@ export interface components {
     };
     LocalIdentityProof: {
       /** @description Unpadded base64url HMAC-SHA256 of the challenge. */
+      proof: string;
+    };
+    LocalSessionRequest: {
+      /** @description 32 fresh random bytes in unpadded base64url. */
+      nonce: string;
+      /**
+       * Format: int64
+       * @description Unix timestamp in seconds UTC when the proof was created.
+       */
+      timestamp: number;
+      /** @description Unpadded base64url HMAC-SHA256 of the local session proof payload. */
       proof: string;
     };
     PasswordChangeRequest: {
@@ -8784,6 +8815,35 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  createLocalSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalSessionRequest"];
+      };
+    };
+    responses: {
+      /** @description Authenticated. The HttpOnly Session cookie is set in Set-Cookie. */
+      200: {
+        headers: {
+          /** @description Secure, HttpOnly, SameSite Session cookie; Secure may be disabled only locally. */
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Session"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
     };
   };

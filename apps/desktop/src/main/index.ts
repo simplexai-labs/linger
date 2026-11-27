@@ -40,6 +40,7 @@ import { EnrollmentModule } from "./enrollment.js";
 import { LanguageModule } from "./language.js";
 import {
   LocalServerModule,
+  signInWithLocalIdentity,
   signInWithPassword,
   type SourceArchive,
   type SourceDependencies,
@@ -220,6 +221,10 @@ async function main(): Promise<void> {
     // The window's session is the default one, which enrollment reads too.
     signIn: (server, email, password) =>
       signInWithPassword(server, email, password, (cookie) =>
+        session.defaultSession.cookies.set({ url: server.origin, ...cookie }),
+      ),
+    signInLocal: (server) =>
+      signInWithLocalIdentity(server, (cookie) =>
         session.defaultSession.cookies.set({ url: server.origin, ...cookie }),
       ),
     sessionCookie: webSessionCookie,

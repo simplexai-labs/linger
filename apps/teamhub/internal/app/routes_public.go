@@ -86,6 +86,7 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodGet, "/v0/library/documents/search", httpapi.SearchLibraryDocumentsParams{}, session, a.searchLibraryDocuments),
 		route(http.MethodPost, "/v0/local-computer-enrollments/:enrollmentId/exchange", nil, a.exchangeLocalComputerEnrollment),
 		route(http.MethodPost, "/v0/local/identity", nil, a.proveLocalIdentity),
+		route(http.MethodPost, "/v0/local/session", nil, a.createLocalSession),
 		route(http.MethodGet, "/v0/me", nil, session, a.getCurrentIdentity),
 		route(http.MethodDelete, "/v0/rooms/:roomId", nil, session, a.deleteRoom),
 		route(http.MethodGet, "/v0/rooms/:roomId", nil, session, a.getRoom),

@@ -14,12 +14,14 @@ export function startTeamHubAuthenticationRuntime({
   navigate,
   probeSession,
   queryClient,
+  recoverSession,
   signals = teamHubAuthenticationSignals,
 }: {
   currentLocation?: () => { pathname: string; search: string };
   navigate: (to: string, options: { replace: boolean }) => Promise<void> | void;
   probeSession?: () => Promise<void>;
   queryClient: QueryClient;
+  recoverSession?: () => Promise<boolean>;
   signals?: TeamHubAuthenticationSignals;
 }) {
   let probe: Promise<void> | null = null;
@@ -66,7 +68,29 @@ export function startTeamHubAuthenticationRuntime({
           error instanceof TeamHubError &&
           error.status === 401
         ) {
-          invalidate("session-expired");
+          if (recoverSession && currentLocation?.().pathname !== "/login") {
+            const recovered = await recoverSession().catch(() => false);
+            if (currentLocation?.().pathname === "/login") {
+              return;
+            }
+            if (recovered && probeGeneration === generation) {
+              try {
+                await probeSession();
+                if (
+                  probeGeneration === generation &&
+                  currentLocation?.().pathname !== "/login"
+                ) {
+                  void queryClient.invalidateQueries();
+                }
+                return;
+              } catch {
+                // Recovery sign-in did not yield a valid session; fall through to /login.
+              }
+            }
+          }
+          if (probeGeneration === generation) {
+            invalidate("session-expired");
+          }
         }
       } finally {
         probe = null;

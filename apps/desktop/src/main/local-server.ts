@@ -31,6 +31,7 @@ import { createZstdDecompress } from "node:zlib";
 
 import {
   LocalIdentityError,
+  localSessionProof,
   proveLocalIdentity,
   readLocalIdentity,
   readLocalLogin,
@@ -417,6 +418,9 @@ export interface LocalServerOptions {
     email: string,
     password: string,
   ) => Promise<void>;
+  // Signs the app's web session in to the local server using the installation
+  // identity key without a password (signInWithLocalIdentity).
+  readonly signInLocal?: (server: LocalServerIdentity) => Promise<void>;
   // The installed server's identity; read from its private files by default.
   readonly serverIdentity?: (
     home: string,
@@ -2338,6 +2342,29 @@ export class LocalServerModule implements Module {
         }
       };
       const signInOwner = async (): Promise<void> => {
+        if (this.#options.signInLocal) {
+          try {
+            await this.#timed("sign_in_as", async () => {
+              await this.#options.signInLocal!(
+                await this.#serverIdentity(home, job.origin),
+              );
+            });
+            return;
+          } catch (error) {
+            if (error instanceof LocalServerUnverifiedError) {
+              this.#ctx?.log.warn("local_server.identity_unverified", {
+                reason: error.reason,
+              });
+              this.#serverCheck = undefined;
+              throw error;
+            }
+            if (
+              !(error instanceof SignInRejectedError && error.status === 404)
+            ) {
+              throw error;
+            }
+          }
+        }
         const login = await installer.login();
         await this.#timed("sign_in_as", () =>
           this.#signInAs(home, job.origin, login.email, login.password),
@@ -2580,14 +2607,38 @@ export class LocalServerModule implements Module {
     );
   }
 
-  // Signs the window in to the installed Linger with its owner account; the
-  // password goes from the file to the server and nowhere else.
+  // Signs the window in to the installed Linger with its owner account.
+  // Prefers passwordless local identity sign-in (POST /v0/local/session) and
+  // falls back to local-account.json on 404 for older TeamHub builds.
   async signInWithAccount(): Promise<void> {
     const record = await this.#windowRecord();
     if (!record)
       throw new Error(
         "This window is not showing the Linger on this computer.",
       );
+    if (this.#options.signInLocal) {
+      try {
+        await this.#options.signInLocal(
+          await this.#serverIdentity(record.home, record.origin),
+        );
+        return;
+      } catch (error) {
+        if (error instanceof LocalServerUnverifiedError) {
+          this.#ctx?.log.warn("local_server.identity_unverified", {
+            reason: error.reason,
+          });
+          this.#serverCheck = undefined;
+          throw new Error(signInFailure(error, "local-identity"), {
+            cause: error,
+          });
+        }
+        if (!(error instanceof SignInRejectedError && error.status === 404)) {
+          throw new Error(signInFailure(error, "local-identity"), {
+            cause: error,
+          });
+        }
+      }
+    }
     const account = await this.account();
     try {
       await this.#signInAs(
@@ -6074,9 +6125,14 @@ export class SignInRejectedError extends Error {
 }
 
 // What a person can do about a failed sign-in with this computer's account.
-export const signInFailure = (error: unknown): string => {
+export const signInFailure = (
+  error: unknown,
+  mode: "password" | "local-identity" = "password",
+): string => {
   if (error instanceof SignInRejectedError && error.status === 401)
-    return "The saved password no longer works. Log in with your email and password.";
+    return mode === "local-identity"
+      ? "Could not verify this computer's session with Linger. Log in with your email and password."
+      : "The saved password no longer works. Log in with your email and password.";
   // fetch rejects with a TypeError when nothing answers, and with a
   // TimeoutError or AbortError when the answer takes too long. What answers
   // without proving it is this installation's server is not Linger either.
@@ -6145,6 +6201,43 @@ export const proveLocalServer = async (
     throw error;
   }
 };
+
+// Signs in to the local server using the installation's shared identity key
+// (POST /v0/local/session) without reading or transmitting the owner password.
+export async function signInWithLocalIdentity(
+  server: LocalServerIdentity,
+  setCookie: (cookie: SetCookie) => Promise<void>,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  await proveLocalServer(server, fetcher);
+  const nonce = randomBytes(32).toString("base64url");
+  const timestamp = Math.floor(Date.now() / 1000);
+  const proof = localSessionProof(
+    server.key,
+    nonce,
+    timestamp,
+    server.origin,
+  ).toString("base64url");
+  const response = await fetcher(new URL("/v0/local/session", server.teamhub), {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      origin: server.origin,
+    },
+    body: JSON.stringify({ nonce, timestamp, proof }),
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+  });
+  await response.body?.cancel();
+  if (!response.ok) throw new SignInRejectedError(response.status);
+  const cookies = response.headers
+    .getSetCookie()
+    .map(parseSetCookie)
+    .filter((cookie) => cookie !== undefined);
+  if (!cookies.length) throw new Error("Signing in to Linger failed");
+  for (const cookie of cookies) await setCookie(cookie);
+}
 
 // Signs in to the local server with its owner and hands the session cookies
 // to the app's web session; the password is never stored, and is sent only

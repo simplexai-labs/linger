@@ -249,6 +249,33 @@ func (q *Queries) GetHumanActor(ctx context.Context, arg GetHumanActorParams) (A
 	return i, err
 }
 
+const getOwnerAccount = `-- name: GetOwnerAccount :one
+SELECT id, email, password_hash, created_at
+FROM accounts
+ORDER BY created_at, id
+LIMIT 1
+`
+
+type GetOwnerAccountRow struct {
+	ID           string             `json:"id"`
+	Email        string             `json:"email"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+// Local installations have a single owner Account provisioned first.
+func (q *Queries) GetOwnerAccount(ctx context.Context) (GetOwnerAccountRow, error) {
+	row := q.db.QueryRow(ctx, getOwnerAccount)
+	var i GetOwnerAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listActorsForAccount = `-- name: ListActorsForAccount :many
 SELECT actors.id,actors.tenant_id,actors.kind,actors.display_name,
        actors.account_id,actors.handle,actors.created_at

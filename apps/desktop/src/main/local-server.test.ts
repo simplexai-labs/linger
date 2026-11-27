@@ -64,11 +64,15 @@ import {
   RUNTIME_LOOKUP_LIMIT_MS,
   SignInRejectedError,
   signInFailure,
+  signInWithLocalIdentity,
   signInWithPassword,
   type LocalServerIdentity,
   type LocalServerOptions,
 } from "./local-server.js";
-import { localIdentityProof } from "@linger/local-installation/account";
+import {
+  localIdentityProof,
+  localSessionProof,
+} from "@linger/local-installation/account";
 import * as fsRetry from "@linger/local-installation/fs-retry";
 import { ensureLocalmodelsTool } from "@linger/local-installation/localmodels-tool";
 import * as nativeProcess from "@linger/local-installation/native-process";
@@ -8119,10 +8123,81 @@ describe("signInWithPassword", () => {
   });
 });
 
+describe("signInWithLocalIdentity", () => {
+  it("proves the server, posts a valid session proof, and sets cookies", async () => {
+    const set = vi.fn(async () => {});
+    const fetcher = teamhub();
+    await signInWithLocalIdentity(
+      server(WEB_ORIGIN),
+      set,
+      fetcher as typeof fetch,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [url, init] = fetcher.mock.calls[1]!;
+    expect(String(url)).toBe(`${TEAMHUB}/v0/local/session`);
+    expect(init?.headers).toMatchObject({ origin: WEB_ORIGIN });
+    const body = JSON.parse(String(init?.body)) as {
+      nonce: string;
+      timestamp: number;
+      proof: string;
+    };
+    expect(body.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(body.proof).toBe(
+      localSessionProof(KEY, body.nonce, body.timestamp, WEB_ORIGIN).toString(
+        "base64url",
+      ),
+    );
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "linger_session",
+        value: "v",
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+      }),
+    );
+  });
+
+  it("rejects without posting a session proof when server identity is unverified", async () => {
+    const fetcher = teamhub(() => Response.json({ proof: "A".repeat(43) }));
+    await expect(
+      signInWithLocalIdentity(
+        server(WEB_ORIGIN),
+        async () => {},
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toBeInstanceOf(LocalServerUnverifiedError);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("throws SignInRejectedError on 401", async () => {
+    const fetcher = teamhub();
+    fetcher.mockImplementationOnce(async (_input, init) => {
+      const { nonce } = JSON.parse(String(init?.body)) as { nonce: string };
+      return Response.json({
+        proof: localIdentityProof(KEY, nonce, WEB_ORIGIN).toString("base64url"),
+      });
+    });
+    fetcher.mockImplementationOnce(
+      async () => new Response("{}", { status: 401 }),
+    );
+    await expect(
+      signInWithLocalIdentity(
+        server(WEB_ORIGIN),
+        async () => {},
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toEqual(new SignInRejectedError(401));
+  });
+});
+
 describe("signInFailure", () => {
   it("says what to do by status and error kind, not by message", () => {
     expect(signInFailure(new SignInRejectedError(401))).toBe(
       "The saved password no longer works. Log in with your email and password.",
+    );
+    expect(signInFailure(new SignInRejectedError(401), "local-identity")).toBe(
+      "Could not verify this computer's session with Linger. Log in with your email and password.",
     );
     const refused = new TypeError("fetch failed", {
       cause: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }),
@@ -8421,6 +8496,93 @@ describe("LocalServerModule owner account", () => {
       OWNER.password,
     );
     await f.host.stop("quit");
+  });
+
+  it("uses passwordless local identity sign-in without reading local-account.json", async () => {
+    const signInLocal = vi.fn(async () => {});
+    const f = fixture({ signInLocal }, enrolled, installed());
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    await f.module.signInWithAccount();
+    expect(signInLocal).toHaveBeenCalledWith(server(ORIGIN));
+    expect(f.signIn).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("falls back to password sign-in when /v0/local/session returns 404", async () => {
+    const signInLocal = vi.fn(async () => {
+      throw new SignInRejectedError(404);
+    });
+    const f = fixture({ signInLocal }, enrolled, installed(OWNER));
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    await f.module.signInWithAccount();
+    expect(signInLocal).toHaveBeenCalledWith(server(ORIGIN));
+    expect(f.signIn).toHaveBeenCalledWith(
+      server(ORIGIN),
+      OWNER.email,
+      OWNER.password,
+    );
+    await f.host.stop("quit");
+  });
+
+  it("reports a local-identity failure message when /v0/local/session returns 401", async () => {
+    const signInLocal = vi.fn(async () => {
+      throw new SignInRejectedError(401);
+    });
+    const f = fixture({ signInLocal }, enrolled, installed(OWNER));
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    await expect(f.module.signInWithAccount()).rejects.toThrow(
+      "Could not verify this computer's session with Linger. Log in with your email and password.",
+    );
+    expect(f.signIn).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("prefers passwordless local identity sign-in during setup and falls back on 404", async () => {
+    const api = installerApi([], {
+      state: "succeeded",
+      origin: ORIGIN,
+      runtime: {
+        setupChoice: "pi",
+        environment: { LINGER_PI_PATH: "/managed/pi" },
+      },
+    });
+    const loginSpy = vi.spyOn(InstallerApi.prototype, "login");
+    try {
+      const signInLocal = vi.fn(async () => {});
+      const f = fixture(
+        (home) => ({ ...withCheckout(home), signInLocal }),
+        {},
+        checkout,
+        api,
+      );
+      await f.host.start();
+      await f.module.begin();
+      expect(signInLocal).toHaveBeenCalledWith(server(ORIGIN));
+      expect(loginSpy).not.toHaveBeenCalled();
+      expect(f.signIn).not.toHaveBeenCalled();
+      await f.host.stop("quit");
+
+      const signInLocal404 = vi.fn(async () => {
+        throw new SignInRejectedError(404);
+      });
+      const fallback = fixture(
+        (home) => ({ ...withCheckout(home), signInLocal: signInLocal404 }),
+        {},
+        checkout,
+        api,
+      );
+      await fallback.host.start();
+      await fallback.module.begin();
+      expect(signInLocal404).toHaveBeenCalledWith(server(ORIGIN));
+      expect(loginSpy).toHaveBeenCalledOnce();
+      expect(fallback.signIn).toHaveBeenCalledOnce();
+      await fallback.host.stop("quit");
+    } finally {
+      loginSpy.mockRestore();
+    }
   });
 
   it("does not offer the account while the services are not running", async () => {

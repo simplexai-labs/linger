@@ -15,6 +15,10 @@ import { translate } from "@/i18n/language";
 
 import { authMessages } from "./auth.messages";
 import { safeAuthenticationReturnTo } from "./authentication-return-to";
+import {
+  clearDesktopLocalAccountSignedOut,
+  markDesktopLocalAccountSignedOut,
+} from "./desktop-local-account";
 import { clearLocalAuthenticatedState } from "./local-authenticated-state";
 
 /** The English source; the confirmation itself follows the language on screen. */
@@ -33,7 +37,13 @@ export function useLogout({ returnTo }: { returnTo?: string } = {}) {
         teamHubIdentityQueryOptions(client),
       );
       await browserRoomMessageOutbox.clearAccount(identity.account.id);
-      await teamHubDone(client.api.POST("/v0/auth/logout"));
+      markDesktopLocalAccountSignedOut();
+      try {
+        await teamHubDone(client.api.POST("/v0/auth/logout"));
+      } catch (error) {
+        clearDesktopLocalAccountSignedOut();
+        throw error;
+      }
       const safeReturnTo = safeAuthenticationReturnTo(returnTo ?? null);
       await navigate(
         safeReturnTo
