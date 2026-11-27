@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"reflect"
+	"runtime"
 	"slices"
 	"time"
 
@@ -190,7 +191,7 @@ func MonitorRuntimeDiagnostics(ctx context.Context, options RuntimeMonitorOption
 			// so its rediscovery waits neither for the full cadence nor for
 			// active Operations to finish.
 			if err == nil {
-				if changed := changedInstallations(ctx, next.Diagnostics, activeDiscovery); len(changed) > 0 {
+				if changed := changedInstallations(ctx, next.Diagnostics, activeDiscovery, termCache); len(changed) > 0 {
 					targeted := activeDiscovery
 					targeted.Runtimes = changed
 					var found DiscoveryResult
@@ -414,27 +415,39 @@ func refreshAuthenticationProbe(ctx context.Context, diagnostic RuntimeDiagnosti
 // too old whose executable has since appeared or been replaced, by searching
 // the PATH that discovery searched. It only stats files, so it runs on every
 // tick; the rediscovery it asks for runs the probes.
-func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, options DiscoveryOptions) []string {
+func changedInstallations(ctx context.Context, diagnostics []RuntimeDiagnostic, options DiscoveryOptions, termCache *TerminalEnvironmentCache) []string {
 	environment := platformEnvironment(maps.Clone(options.Environment))
+	if runtime.GOOS == "windows" && termCache != nil {
+		environment = termCache.Resolve(ctx, environment, false)
+	}
 	if environment == nil {
 		environment = make(map[string]string)
 	}
+	refreshedWindowsPath := environment["PATH"]
 	var changed []string
 	for _, diagnostic := range diagnostics {
-		if diagnostic.Status != "not_installed" && diagnostic.Status != "incompatible" || diagnostic.searchPath == "" {
+		if diagnostic.Status != "not_installed" && diagnostic.Status != "incompatible" {
+			continue
+		}
+		searchPath := diagnostic.searchPath
+		if runtime.GOOS == "windows" && refreshedWindowsPath != "" {
+			searchPath = mergeWindowsSearchPath(refreshedWindowsPath, "", diagnostic.searchPath)
+		}
+		if searchPath == "" {
 			continue
 		}
 		definition := slices.IndexFunc(runtimeDefinitions, func(definition runtimeDefinition) bool { return definition.Type == diagnostic.Type })
 		if definition < 0 {
 			continue
 		}
-		environment["PATH"] = diagnostic.searchPath
+		diagnosticEnv := maps.Clone(environment)
+		diagnosticEnv["PATH"] = searchPath
 		entry, err := resolveExecutableEntry(ctx, diagnostic.Type, runtimeDefinitions[definition].Command,
 			DiscoveryOptions{
 				ConfiguredPaths: options.ConfiguredPaths,
 				ManagedPaths:    options.ManagedPaths,
 				BundledPaths:    options.BundledPaths,
-				Environment:     environment,
+				Environment:     diagnosticEnv,
 			})
 		canonical := ""
 		if err == nil {

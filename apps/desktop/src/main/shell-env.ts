@@ -271,6 +271,51 @@ const parseEnv = (text: string): Record<string, string> => {
   return variables;
 };
 
+export interface SearchPathOptions {
+  readonly platform?: NodeJS.Platform;
+}
+
+function pathImplForPlatform(
+  platform: NodeJS.Platform,
+): typeof path.posix | typeof path.win32 {
+  if (platform === process.platform) return path;
+  return platform === "win32" ? path.win32 : path.posix;
+}
+
+function resolveSearchPathKeyConfig(
+  source: Readonly<Record<string, string>>,
+  login: Readonly<Record<string, string>> | undefined,
+  platform: NodeJS.Platform,
+  delimiter: string,
+): {
+  readonly pathKey: string;
+  readonly currentPath: string | undefined;
+  readonly loginPath: string | undefined;
+} {
+  let pathKey = "PATH";
+  let matchedKey = false;
+  const currentEntries: string[] = [];
+  for (const [key, value] of Object.entries(source)) {
+    if (!/^path$/i.test(key)) continue;
+    if (!matchedKey && platform === "win32") {
+      pathKey = key;
+      matchedKey = true;
+    }
+    if (value) currentEntries.push(value);
+  }
+  const loginEntries: string[] = [];
+  for (const [key, value] of Object.entries(login ?? {})) {
+    if (/^path$/i.test(key) && value) loginEntries.push(value);
+  }
+  return {
+    pathKey,
+    currentPath:
+      currentEntries.length > 0 ? currentEntries.join(delimiter) : undefined,
+    loginPath:
+      loginEntries.length > 0 ? loginEntries.join(delimiter) : undefined,
+  };
+}
+
 // The login shell's PATH first, so `codex` and `claude` resolve to the same
 // executables as in the user's terminal, then the inherited PATH, then the
 // common install directories.
@@ -278,25 +323,28 @@ export const runtimeSearchPath = (
   current: string | undefined,
   login: string | undefined,
   home = os.homedir(),
+  options?: SearchPathOptions,
 ): string => {
+  const platform = options?.platform ?? process.platform;
+  const pathImpl = pathImplForPlatform(platform);
   const directories = [
-    ...(login ?? "").split(path.delimiter),
-    ...(current ?? "").split(path.delimiter),
-    ...(process.platform === "win32"
+    ...(login ?? "").split(pathImpl.delimiter),
+    ...(current ?? "").split(pathImpl.delimiter),
+    ...(platform === "win32"
       ? []
       : COMMON_DIRECTORIES.map((directory) =>
           directory.startsWith("~/")
-            ? path.join(home, directory.slice(2))
+            ? pathImpl.join(home, directory.slice(2))
             : directory,
         )),
   ]
-    .filter((directory) => directory && path.isAbsolute(directory))
+    .filter((directory) => directory && pathImpl.isAbsolute(directory))
     .map((directory) =>
-      process.platform === "win32"
+      platform === "win32"
         ? directory
         : resolveFnmMultishellEntrySync(directory),
     );
-  return [...new Set(directories)].join(path.delimiter);
+  return [...new Set(directories)].join(pathImpl.delimiter);
 };
 
 // An app opened from an agent session's terminal (e.g. `open -a` inside
@@ -323,11 +371,27 @@ export const withLoginShell = (
   env: Readonly<Record<string, string>>,
   login: Readonly<Record<string, string>> | undefined,
   home = os.homedir(),
+  options?: SearchPathOptions,
 ): Record<string, string> => {
+  const platform = options?.platform ?? process.platform;
+  const pathImpl = pathImplForPlatform(platform);
   const merged = withoutParentAgentSession(env);
   for (const [key, value] of Object.entries(login ?? {}))
-    if (merged[key] === undefined && !SHELL_ONLY_VARIABLES.has(key))
+    if (
+      merged[key] === undefined &&
+      !SHELL_ONLY_VARIABLES.has(key) &&
+      !/^path$/i.test(key)
+    )
       merged[key] = value;
-  merged.PATH = runtimeSearchPath(env.PATH, login?.PATH, home);
+  const { pathKey, currentPath, loginPath } = resolveSearchPathKeyConfig(
+    env,
+    login,
+    platform,
+    pathImpl.delimiter,
+  );
+  for (const key of Object.keys(merged)) {
+    if (/^path$/i.test(key)) delete merged[key];
+  }
+  merged[pathKey] = runtimeSearchPath(currentPath, loginPath, home, options);
   return merged;
 };

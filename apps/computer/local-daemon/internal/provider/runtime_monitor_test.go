@@ -223,7 +223,7 @@ func TestChangedInstallationsNoticesAnInstallOrUpgrade(t *testing.T) {
 	agy := filepath.Join(directory, "agy")
 	options := DiscoveryOptions{Environment: map[string]string{"HOME": t.TempDir()}}
 	missing := RuntimeDiagnostic{Type: "antigravity", Status: "not_installed", searchPath: directory}
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options, nil); len(changed) != 0 {
 		t.Fatalf("changed = %v before any install", changed)
 	}
 	writeExecutable := func(content string) {
@@ -238,7 +238,7 @@ func TestChangedInstallationsNoticesAnInstallOrUpgrade(t *testing.T) {
 		}
 	}
 	writeExecutable("#!/bin/sh\necho 1.5.0\n")
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"antigravity"}) {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options, nil); !reflect.DeepEqual(changed, []string{"antigravity"}) {
 		t.Fatalf("changed = %v after install, want antigravity", changed)
 	}
 	canonical, err := canonicalExecutable(agy)
@@ -250,11 +250,11 @@ func TestChangedInstallationsNoticesAnInstallOrUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := RuntimeDiagnostic{Type: "antigravity", Status: "incompatible", searchPath: directory, ExecutablePath: canonical, executable: info}
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{old}, options); len(changed) != 0 {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{old}, options, nil); len(changed) != 0 {
 		t.Fatalf("changed = %v for an untouched old install", changed)
 	}
 	writeExecutable("#!/bin/sh\necho 1.5.16\n")
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{old}, options); !reflect.DeepEqual(changed, []string{"antigravity"}) {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{old}, options, nil); !reflect.DeepEqual(changed, []string{"antigravity"}) {
 		t.Fatalf("changed = %v after an upgrade in place, want antigravity", changed)
 	}
 }
@@ -1270,13 +1270,13 @@ func TestChangedInstallationsRespectsBundledPaths(t *testing.T) {
 		BundledPaths: map[string]string{"pi": bundledPi},
 		Environment:  map[string]string{"HOME": filepath.Join(root, "home")},
 	}
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options, nil); len(changed) != 0 {
 		t.Fatalf("changed = %v before bundled pi exists", changed)
 	}
 	if err := os.WriteFile(bundledPi, []byte("#!/bin/sh\necho 1.5.2\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"pi"}) {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options, nil); !reflect.DeepEqual(changed, []string{"pi"}) {
 		t.Fatalf("changed = %v after bundled pi appears, want [pi]", changed)
 	}
 }
@@ -1299,13 +1299,13 @@ func TestChangedInstallationsRespectsManagedPaths(t *testing.T) {
 		ManagedPaths: map[string]string{"pi": managedPi},
 		Environment:  map[string]string{"HOME": filepath.Join(root, "home")},
 	}
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); len(changed) != 0 {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options, nil); len(changed) != 0 {
 		t.Fatalf("changed = %v before managed pi exists", changed)
 	}
 	if err := os.WriteFile(managedPi, []byte("#!/bin/sh\necho 1.7.0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options); !reflect.DeepEqual(changed, []string{"pi"}) {
+	if changed := changedInstallations(t.Context(), []RuntimeDiagnostic{missing}, options, nil); !reflect.DeepEqual(changed, []string{"pi"}) {
 		t.Fatalf("changed = %v after managed pi appears, want [pi]", changed)
 	}
 }

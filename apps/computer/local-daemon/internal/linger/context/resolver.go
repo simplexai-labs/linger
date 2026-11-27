@@ -78,6 +78,10 @@ const teamHubWebOverOwnTools = "Use them instead of your built-in web search and
 // PowerShell syntax rather than POSIX bash heredocs.
 const piWindowsPowerShellGuide = "Shell on Windows: your shell tool is `powershell` (PowerShell), not bash. Run `teamhub` with the `powershell` tool and PowerShell syntax; do not use POSIX heredocs (`<<'EOF'`). For `teamhub` text containing newlines, `$`, `%`, `&`, backticks, or quotes, pass `--file -` using a PowerShell single-quoted here-string (`@'` on its own line, the text, then `'@ | teamhub ... --file -` with `'@` at column 0)."
 
+// WindowsHostEnvironmentGuide describes Windows shell and Python
+// conventions for Operations running on a Windows Local Computer.
+const WindowsHostEnvironmentGuide = "Windows environment: prefer `python` or `py -3` over `python3`, because Windows Python and Miniconda installs often lack `python3.exe` and `python3` may hit the Microsoft Store stub (`Python was not found`). If Python is not on PATH, check `py -3` or common Miniconda/Anaconda paths such as `%USERPROFILE%\\miniconda3\\python.exe`. Avoid piping commands whose failure matters through `| head` or `| tail`, because pipes can mask non-zero exit codes."
+
 // staticPrefixEndMarker is the internal insertion slot emitted between the
 // static prefix and volatile context sections by node-services. It is consumed
 // and removed by assembleResolvedInstructions so the model never sees it.
@@ -115,14 +119,15 @@ func webToolGuide(runtimeType string, apiLink, modelGateway, teamHubCLI bool) st
 
 type ExecutionResolver struct {
 	// Bound by the local launcher; never accepted from a wire request.
-	ServiceCommand     []string
-	TeamHubCLIBin      string
-	ToolGuide          string // describes the Computer's local tools to every Operation
-	Providers          map[string]ProviderInstallation
-	ProviderLookup     func(context.Context, string) (ProviderInstallation, bool, error)
-	WorkspaceGrants    map[string]WorkspaceGrant
-	Registrations      map[string]RegistrationBinding
-	RegistrationLookup func(context.Context, string) (RegistrationBinding, bool, error)
+	ServiceCommand       []string
+	TeamHubCLIBin        string
+	ToolGuide            string // describes the Computer's local tools to every Operation
+	HostEnvironmentGuide string // describes host OS environment caveats to every Operation
+	Providers            map[string]ProviderInstallation
+	ProviderLookup       func(context.Context, string) (ProviderInstallation, bool, error)
+	WorkspaceGrants      map[string]WorkspaceGrant
+	Registrations        map[string]RegistrationBinding
+	RegistrationLookup   func(context.Context, string) (RegistrationBinding, bool, error)
 	// CLICredentials finds the Agent-level TeamHub CLI credential the Daemon
 	// stored. Nil leaves every Operation without a TeamHub CLI profile.
 	CLICredentials CLICredentialLookup
@@ -216,6 +221,9 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 	}
 	if r.ToolGuide != "" {
 		daemonStaticGuides = append(daemonStaticGuides, r.ToolGuide)
+	}
+	if r.HostEnvironmentGuide != "" {
+		daemonStaticGuides = append(daemonStaticGuides, r.HostEnvironmentGuide)
 	}
 	cliInstalled, err := r.cliCredentialInstalled(command.TenantID, command.AgentID)
 	if err != nil {

@@ -50,6 +50,7 @@ func codexMismatch(profile Profile, spec RunSpec, executable string) func(*codex
 		add(p.model != spec.Model, "model")
 		add(p.effort != spec.Effort, "thinking")
 		add(p.executable != executable, "exec_path")
+		add(p.pathEnv != profile.Env["PATH"], "path")
 		add(p.authPrint != codexAuthFingerprint(home), "auth")
 		add(p.skillPrint != profile.ResidentSkillDigest, "skills")
 		add(p.withoutWebTools != spec.WithoutNativeWebTools, "web_tools")

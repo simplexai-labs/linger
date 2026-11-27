@@ -65,6 +65,7 @@ type codexProcess struct {
 	key        string
 	home       string
 	executable string
+	pathEnv    string
 	configArgs []string
 	// withoutWebTools records that web_search was launched disabled.
 	withoutWebTools bool
@@ -175,7 +176,7 @@ func codexLaunch(profile Profile, spec RunSpec, executable, home, key string, at
 		stderr:    newErrorTail(nil, defaultStderrTail),
 		stdout:    stdoutR, stderrR: stderrR, release: release,
 		baseLog: logger,
-		key:     key, home: home, executable: executable,
+		key:     key, home: home, executable: executable, pathEnv: profile.Env["PATH"],
 		configArgs:      append([]string(nil), profile.CodexConfigArgs...),
 		withoutWebTools: spec.WithoutNativeWebTools,
 		dir:             spec.Dir, model: spec.Model, effort: spec.Effort,

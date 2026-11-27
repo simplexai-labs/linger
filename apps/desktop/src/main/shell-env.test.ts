@@ -326,3 +326,51 @@ describe.skipIf(process.platform === "win32")("withLoginShell", () => {
     }
   });
 });
+
+describe("withLoginShell Windows single PATH key", () => {
+  it("preserves Path without emitting duplicate Path and PATH keys on Windows", () => {
+    const winEnv = withLoginShell(
+      { Path: "C:\\Windows\\System32;C:\\Tools", FOO: "1" },
+      { PATH: "C:\\Extra" },
+      "C:\\Users\\lx",
+      { platform: "win32" },
+    );
+    expect(Object.keys(winEnv).filter((key) => /^path$/i.test(key))).toEqual([
+      "Path",
+    ]);
+    expect(winEnv.Path).toBe("C:\\Extra;C:\\Windows\\System32;C:\\Tools");
+    expect(winEnv.PATH).toBeUndefined();
+    expect(winEnv.FOO).toBe("1");
+
+    const collapser = withLoginShell(
+      {
+        PATH: "C:\\Program Files\\nodejs",
+        Path: "C:\\Windows\\System32",
+        FOO: "1",
+      },
+      undefined,
+      "C:\\Users\\lx",
+      { platform: "win32" },
+    );
+    expect(Object.keys(collapser).filter((key) => /^path$/i.test(key))).toEqual(
+      ["PATH"],
+    );
+    expect(collapser.PATH).toBe(
+      "C:\\Program Files\\nodejs;C:\\Windows\\System32",
+    );
+  });
+
+  it("collapses case-variant Path into PATH on POSIX without duplicate keys", () => {
+    const posixEnv = withLoginShell(
+      { Path: "/custom/bin", FOO: "1" },
+      undefined,
+      "/Users/me",
+      { platform: "darwin" },
+    );
+    expect(Object.keys(posixEnv).filter((key) => /^path$/i.test(key))).toEqual([
+      "PATH",
+    ]);
+    expect(posixEnv.PATH?.split(":")).toContain("/custom/bin");
+    expect(posixEnv.FOO).toBe("1");
+  });
+});

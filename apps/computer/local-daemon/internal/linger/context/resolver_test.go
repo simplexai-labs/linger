@@ -680,3 +680,53 @@ func TestValidReasoningEffortAcceptsDynamicTokens(t *testing.T) {
 		t.Fatal("Resolve(-minimal) succeeded, want error")
 	}
 }
+
+func TestExecutionResolverPlacesHostEnvironmentGuideInStaticPrefix(t *testing.T) {
+	root := t.TempDir()
+	resolver := ExecutionResolver{
+		ToolGuide:            "StaticToolGuide",
+		HostEnvironmentGuide: WindowsHostEnvironmentGuide,
+		Providers: map[string]ProviderInstallation{
+			"codex": {Type: "codex", ExecutablePath: "/local/bin/codex"},
+		},
+		WorkspaceGrants: map[string]WorkspaceGrant{
+			"grant-local": {GrantID: "grant-local", TenantID: "tenant", Path: root},
+		},
+		Views: testContextViews{root: root},
+		Registrations: map[string]RegistrationBinding{
+			"registration-codex": {RegistrationID: "registration-codex", TenantID: "tenant", OwnerActorID: "actor-alice", ProviderType: "codex", Status: registration.StatusOnline},
+		},
+	}
+	cmd := protocol.Command{
+		TenantID: "tenant", AgentID: "agent", RegistrationID: "registration-codex", AssignmentRevision: 1,
+		WorkspaceGrantID: "grant-local", RuntimeType: "codex",
+		ContextViewRef: json.RawMessage(`{"receipt_ref":"receipt-1"}`),
+	}
+	req := json.RawMessage(`{
+		"kind":"run.start",
+		"runtime":{"type":"codex","model":"gpt-5"},
+		"session_options":{"thread_name":"Agent A","base_instructions":"StaticCore\n\n` + staticPrefixEndMarker + `\n\nDynamicTail"},
+		"session":{"threadId":""},
+		"input":{"type":"text","text":"Hi"}
+	}`)
+	spec, err := resolver.Resolve(context.Background(), cmd, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := strings.Join([]string{"StaticCore", "StaticToolGuide", WindowsHostEnvironmentGuide}, "\n\n")
+	if spec.BaseInstructions == nil || *spec.BaseInstructions != wantPrefix+"\n\nDynamicTail" {
+		t.Fatalf("BaseInstructions = %v, want prefix %q", spec.BaseInstructions, wantPrefix)
+	}
+	if !strings.Contains(spec.SystemPrompt, wantPrefix) {
+		t.Fatalf("SystemPrompt missing HostEnvironmentGuide in static prefix: %q", spec.SystemPrompt)
+	}
+
+	resolver.HostEnvironmentGuide = ""
+	withoutGuide, err := resolver.Resolve(context.Background(), cmd, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(withoutGuide.SystemPrompt, WindowsHostEnvironmentGuide) {
+		t.Fatalf("empty HostEnvironmentGuide still emitted WindowsHostEnvironmentGuide: %q", withoutGuide.SystemPrompt)
+	}
+}
