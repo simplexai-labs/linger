@@ -209,3 +209,132 @@ func TestGatewaySlowLargeCommandIsNotALivenessTimeout(t *testing.T) {
 		t.Fatalf("command=%+v, want snapshot-slow", command)
 	}
 }
+
+func TestGatewayProbeLivenessDropsSilentPeerFastAndKeepsLivePeer(t *testing.T) {
+	// Live peer: immediate wake probe sends Ping, peer answers Pong and restores
+	// the read deadline so the stream stays open and receives a later command.
+	livePingSeen := make(chan struct{}, 1)
+	liveUpgrader := websocket.Upgrader{}
+	liveServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		peer, err := liveUpgrader.Upgrade(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer peer.Close()
+		peer.SetPingHandler(func(data string) error {
+			if err := peer.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(time.Second)); err != nil {
+				return err
+			}
+			select {
+			case livePingSeen <- struct{}{}:
+			default:
+			}
+			return peer.WriteMessage(websocket.TextMessage, []byte(
+				`{"type":"runtime.registration.snapshot","protocol_version":"2","command_id":"after-wake","runner_id":"computer-local","connection_epoch":1,"registrations":[]}`,
+			))
+		})
+		for {
+			if _, _, err := peer.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(liveServer.Close)
+	liveRaw, err := (GatewayControlPlane{
+		URL: "ws" + strings.TrimPrefix(liveServer.URL, "http"), BearerToken: "test-token",
+		PingInterval: 10 * time.Second, ReadTimeout: 10 * time.Second,
+	}).Connect(t.Context(), Hello{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := liveRaw.(*gatewayStream)
+	t.Cleanup(func() { _ = live.Close() })
+
+	liveResult := make(chan struct {
+		commandID string
+		err       error
+	}, 1)
+	go func() {
+		cmd, recvErr := live.Receive(t.Context())
+		liveResult <- struct {
+			commandID string
+			err       error
+		}{commandID: cmd.CommandID, err: recvErr}
+	}()
+	if err := live.ProbeLiveness(2 * time.Second); err != nil {
+		t.Fatalf("ProbeLiveness on live peer: %v", err)
+	}
+	select {
+	case <-livePingSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("live peer did not receive wake ping")
+	}
+	select {
+	case res := <-liveResult:
+		if res.err != nil || res.commandID != "after-wake" {
+			t.Fatalf("live peer Receive = (%q, %v), want (after-wake, nil)", res.commandID, res.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("live peer did not deliver command after wake probe")
+	}
+
+	// Silent peer with a long read timeout: wake probe shortens the deadline so
+	// Receive fails fast instead of waiting out the long read timeout.
+	silentPingSeen := make(chan struct{}, 1)
+	silentUpgrader := websocket.Upgrader{}
+	silentServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		peer, upgradeErr := silentUpgrader.Upgrade(writer, request, nil)
+		if upgradeErr != nil {
+			return
+		}
+		defer peer.Close()
+		peer.SetPingHandler(func(string) error {
+			select {
+			case silentPingSeen <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+		for {
+			if _, _, readErr := peer.ReadMessage(); readErr != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(silentServer.Close)
+	silentRaw, err := (GatewayControlPlane{
+		URL: "ws" + strings.TrimPrefix(silentServer.URL, "http"), BearerToken: "test-token",
+		PingInterval: 10 * time.Second, ReadTimeout: 10 * time.Second,
+	}).Connect(t.Context(), Hello{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	silent := silentRaw.(*gatewayStream)
+	t.Cleanup(func() { _ = silent.Close() })
+
+	silentDone := make(chan error, 1)
+	go func() {
+		_, recvErr := silent.Receive(context.Background())
+		silentDone <- recvErr
+	}()
+	started := time.Now()
+	if err := silent.ProbeLiveness(80 * time.Millisecond); err != nil {
+		t.Fatalf("ProbeLiveness on silent peer: %v", err)
+	}
+	select {
+	case <-silentPingSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("silent peer did not receive wake ping")
+	}
+	select {
+	case recvErr := <-silentDone:
+		if recvErr == nil {
+			t.Fatal("expected error from silent peer after ProbeLiveness")
+		}
+		if elapsed := time.Since(started); elapsed > 2*time.Second {
+			t.Fatalf("silent peer took %v to time out after 80ms ProbeLiveness", elapsed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("silent peer did not time out after ProbeLiveness")
+	}
+}

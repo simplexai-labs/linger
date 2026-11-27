@@ -89,7 +89,13 @@ func (d *Daemon) handleOperationStart(ctx context.Context, stream transport.Stre
 			prepared.cancelFrom("operation_lifecycle")
 		}
 	}
-	active := &activeOperation{identity: identity, ctx: operationCtx, cancel: cancel}
+	active := &activeOperation{
+		identity:  identity,
+		model:     spec.Model,
+		startedAt: d.now(),
+		ctx:       operationCtx,
+		cancel:    cancel,
+	}
 	emitEvent := d.operationEventEmitter(command, identity, active)
 	if spec.OperationKind == "run.start" {
 		// Only run.start rewrites the per-run CLI files, after the Context

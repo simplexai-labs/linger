@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/awaketime"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
@@ -717,7 +718,9 @@ type ModelSource struct {
 	remountErr  error
 	// waiting, when set, runs once a Run has noted when it started waiting
 	// for mu, so a test can release the lock after every Run waits on it.
-	waiting func()
+	waiting     func()
+	healthCheck func(ctx context.Context, healthURL string) bool
+	awakeClock  awaketime.Clock
 }
 
 // NewModelSource constructs a ModelSource controller for the given localmodels Tool.

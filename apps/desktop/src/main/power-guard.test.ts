@@ -13,7 +13,11 @@ afterEach(() => {
 
 const setup = async (
   preventSleep = false,
-  initial: { readonly running?: number; readonly modelInvokes?: number } = {},
+  initial: {
+    readonly running?: number;
+    readonly modelInvokes?: number;
+    readonly now?: () => number;
+  } = {},
 ) => {
   const blocks: number[] = [];
   let powerListener: ((kind: "suspend" | "resume") => void) | undefined;
@@ -37,7 +41,7 @@ const setup = async (
     running: () => initial.running ?? 0,
     modelInvokes: () => initial.modelInvokes ?? 0,
   };
-  const guard = new PowerGuardModule(power);
+  const guard = new PowerGuardModule(power, initial.now);
   const host = testHost([daemon, guard], {
     preventSleep,
   });
@@ -181,5 +185,28 @@ describe("PowerGuard module", () => {
     expect(power()).toBeDefined();
     await host.stop("quit");
     expect(power()).toBeUndefined();
+  });
+
+  it("emits power.suspend and power.resume with measured sleep duration", async () => {
+    let clock = 1_000;
+    const { host, power } = await setup(false, { now: () => clock });
+    const events: Array<{ kind: string; sleepMs?: number }> = [];
+    host.ctx.bus.on("power.suspend", () => events.push({ kind: "suspend" }));
+    host.ctx.bus.on("power.resume", (info) =>
+      events.push({ kind: "resume", sleepMs: info.sleepMs }),
+    );
+
+    power()!("suspend");
+    clock += 300_000;
+    power()!("resume");
+    // A resume without a preceding suspend omits sleepMs.
+    power()!("resume");
+
+    expect(events).toEqual([
+      { kind: "suspend" },
+      { kind: "resume", sleepMs: 300_000 },
+      { kind: "resume", sleepMs: undefined },
+    ]);
+    await host.stop("quit");
   });
 });

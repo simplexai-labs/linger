@@ -36,6 +36,8 @@ export interface BusEvents {
   // The window could not load the server it shows.
   "local-server.unreachable": [];
   "power.changed": [];
+  "power.suspend": [];
+  "power.resume": [info: { readonly sleepMs?: number }];
   "runtime.activity": [running: number];
   "runtime.model_activity": [running: number];
   "runtime.state": [state: string];

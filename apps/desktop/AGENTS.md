@@ -521,14 +521,23 @@ Gateway and runs Agents. The daemon exits with the app.
   the window shows can still stop: its supervisor restarts it, and the
   desktop resumes it like a launch when it does not answer
   (`local_server.unreachable_resume` with `trigger`): at once on
-  `local-server.retry`, and after `UNREACHABLE_GRACE_MS` (longer than the
-  supervisor's restart delays) on `local-server.unreachable` (WindowManager
-  emits it when it shows `offline.html` for a failed load) or the
-  `WATCH_MS` watch. Those two resume at most once a minute, and only after
-  `UNREACHABLE_PROBES` checks in a row spread over the grace went unanswered,
-  each allowed `UNREACHABLE_PROBE_TIMEOUT_MS` (longer than the launch's 1 s
-  fast check), so a server slowed by heavy load is not taken for a stopped
-  one; a resume that fails shows the start failure page as on launch.
+  `local-server.retry`, promptly with a short grace on `power_resume` after a
+  debounced post-wake probe (`local_server.wake_checked`) finds the local server
+  unresponsive (a healthy local server stays untouched), and after
+  `UNREACHABLE_GRACE_MS` (longer than the supervisor's restart delays) on
+  `local-server.unreachable` (WindowManager emits it when it shows
+  `offline.html` for a failed load) or the `WATCH_MS` watch. Those two resume
+  at most once a minute, and only after `UNREACHABLE_PROBES` checks in a row
+  spread over the grace went unanswered, each allowed
+  `UNREACHABLE_PROBE_TIMEOUT_MS` (longer than the launch's 1 s fast check), so
+  a server slowed by heavy load is not taken for a stopped one; a resume that
+  fails shows the start failure page as on launch. `PowerGuard` emits
+  `power.suspend` and `power.resume` (with `sleepMs`) on the module bus;
+  `ComputerDaemon` forwards `{"type":"power.event","kind":"suspend"|"resume",...}`
+  to the running Go daemon over stdin so it probes Gateway liveness, checks
+  previously loaded local models and the local/BYOK Bifrost gateway, settles
+  pre-wake in-flight Runs backed by an unhealthy component cleanly, and reloads
+  only unhealthy components without reviving user-stopped models.
 - `src/main/voice-window.ts`: the floating voice window. Electron cannot open
   Document Picture-in-Picture windows, so the SPA opens a small native window
   with `window.open("")` under the target `linger-voice-window-<n>`

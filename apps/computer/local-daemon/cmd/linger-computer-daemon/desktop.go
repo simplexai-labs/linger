@@ -56,6 +56,8 @@ type desktopLine struct {
 	OK          bool                          `json:"ok"`
 	Permissions []localtools.LingerPermission `json:"permissions"`
 	Error       string                        `json:"error"`
+	Kind        string                        `json:"kind"`
+	SleepMS     *int64                        `json:"sleep_ms,omitempty"`
 }
 
 // desktopChannel is the stdio channel to the Desktop app that runs this
@@ -69,9 +71,10 @@ type desktopChannel struct {
 	mu sync.Mutex
 	// permissions is set once the app's hello announced permission requests;
 	// an app without it never answers them.
-	permissions bool
-	closed      bool
-	pending     map[string]chan desktopLine
+	permissions  bool
+	closed       bool
+	pending      map[string]chan desktopLine
+	onPowerEvent func(kind string, sleepDuration time.Duration)
 }
 
 func newDesktopChannel(stdout io.Writer) *desktopChannel {
@@ -115,9 +118,16 @@ func (c *desktopChannel) read(stdin io.Reader, shutdown func()) {
 	shutdown()
 }
 
-func (c *desktopChannel) receive(line desktopLine) {
+func (c *desktopChannel) setPowerEventHandler(handler func(kind string, sleepDuration time.Duration)) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.onPowerEvent = handler
+	c.mu.Unlock()
+}
+
+func (c *desktopChannel) receive(line desktopLine) {
+	var powerHandler func(kind string, sleepDuration time.Duration)
+	var sleepDuration time.Duration
+	c.mu.Lock()
 	switch line.Type {
 	case "hello":
 		c.permissions = slices.Contains(line.Features, desktopPermissionsFeature)
@@ -127,6 +137,17 @@ func (c *desktopChannel) receive(line desktopLine) {
 			delete(c.pending, line.ID)
 			reply <- line
 		}
+	case "power.event":
+		if line.Kind == "suspend" || line.Kind == "resume" {
+			powerHandler = c.onPowerEvent
+			if line.SleepMS != nil && *line.SleepMS > 0 {
+				sleepDuration = time.Duration(*line.SleepMS) * time.Millisecond
+			}
+		}
+	}
+	c.mu.Unlock()
+	if powerHandler != nil {
+		powerHandler(line.Kind, sleepDuration)
 	}
 }
 

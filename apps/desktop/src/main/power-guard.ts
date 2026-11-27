@@ -14,12 +14,14 @@ export interface PowerApi {
 export const MODEL_ACTIVITY_TAIL_MS = 3 * 60_000;
 
 // Keeps the system awake while operations, background model invocations, or
-// installations run, or in always-on mode. The daemon reconnects by itself
-// after a resume.
+// installations run, or in always-on mode, and forwards OS suspend/resume
+// events onto the module bus so the daemon and local server can verify and
+// recover their state after wake.
 export class PowerGuardModule implements Module {
   readonly name = "PowerGuard";
   readonly dependsOn = ["ComputerDaemon"];
   readonly #power: PowerApi;
+  readonly #now: () => number;
   #ctx: ModuleContext | undefined;
   #running = 0;
   #modelInvokes = 0;
@@ -27,13 +29,15 @@ export class PowerGuardModule implements Module {
   #installing = false;
   #updatingDriver = false;
   #blocker: number | undefined;
+  #suspendedAt: number | undefined;
   #lastEmitted:
     | { readonly active: boolean; readonly alwaysOn: boolean }
     | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
-  constructor(power: PowerApi) {
+  constructor(power: PowerApi, now: () => number = Date.now) {
     this.#power = power;
+    this.#now = now;
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -62,7 +66,22 @@ export class PowerGuardModule implements Module {
         this.#apply();
       }),
       this.#power.onPowerEvent((kind) => {
-        ctx.log.info("power.event", { kind });
+        if (kind === "suspend") {
+          this.#suspendedAt = this.#now();
+          ctx.log.info("power.event", { kind });
+          ctx.bus.emit("power.suspend");
+          return;
+        }
+        const sleepMs =
+          this.#suspendedAt !== undefined
+            ? Math.max(0, this.#now() - this.#suspendedAt)
+            : undefined;
+        this.#suspendedAt = undefined;
+        ctx.log.info("power.event", {
+          kind,
+          ...(sleepMs !== undefined ? { sleep_ms: sleepMs } : {}),
+        });
+        ctx.bus.emit("power.resume", sleepMs !== undefined ? { sleepMs } : {});
       }),
     );
     this.#apply();
@@ -70,6 +89,7 @@ export class PowerGuardModule implements Module {
 
   async stop(): Promise<void> {
     for (const off of this.#unsubscribe.splice(0)) off();
+    this.#suspendedAt = undefined;
     this.#clearModelTail();
     this.#release();
   }

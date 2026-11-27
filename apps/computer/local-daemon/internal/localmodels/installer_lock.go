@@ -85,11 +85,11 @@ func (l *Library) awaitInstallerIdle(ctx context.Context) {
 	if path == "" {
 		return
 	}
-	started := time.Now()
+	started := l.awakeNow()
 	waiting := false
 	for {
 		if !l.installerLockBusy(ctx, path) {
-			slog.Info("local_models.installer_lock", "phase", "idle", "ms", time.Since(started).Milliseconds())
+			slog.Info("local_models.installer_lock", "phase", "idle", "ms", (l.awakeNow() - started).Milliseconds())
 			return
 		}
 		if l.testInstallerBusy != nil {
@@ -99,8 +99,8 @@ func (l *Library) awaitInstallerIdle(ctx context.Context) {
 			waiting = true
 			slog.Info("local_models.installer_lock", "phase", "waiting")
 		}
-		if time.Since(started) >= l.installerLockWait {
-			slog.Warn("local_models.installer_lock", "phase", "timeout", "ms", time.Since(started).Milliseconds())
+		if l.awakeNow()-started >= l.installerLockWait {
+			slog.Warn("local_models.installer_lock", "phase", "timeout", "ms", (l.awakeNow() - started).Milliseconds())
 			return
 		}
 		select {

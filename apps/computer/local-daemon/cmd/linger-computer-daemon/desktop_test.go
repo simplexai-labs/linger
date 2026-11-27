@@ -314,3 +314,38 @@ func TestDesktopChannelFailsPendingRequestsAtEOF(t *testing.T) {
 	}
 	<-desktop.done
 }
+
+func TestDesktopChannelDispatchesPowerEvents(t *testing.T) {
+	desktop := startFakeDesktop(t, time.Second)
+	type powerEvent struct {
+		kind  string
+		sleep time.Duration
+	}
+	received := make(chan powerEvent, 4)
+	desktop.channel.setPowerEventHandler(func(kind string, sleepDuration time.Duration) {
+		received <- powerEvent{kind: kind, sleep: sleepDuration}
+	})
+
+	desktop.send(t, `{"type":"power.event","kind":"suspend"}`)
+	desktop.send(t, `{"type":"power.event","kind":"resume","sleep_ms":300000}`)
+	desktop.send(t, `{"type":"power.event","kind":"unknown"}`)
+
+	for _, want := range []powerEvent{
+		{kind: "suspend", sleep: 0},
+		{kind: "resume", sleep: 5 * time.Minute},
+	} {
+		select {
+		case got := <-received:
+			if got != want {
+				t.Fatalf("got = %+v, want %+v", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %+v", want)
+		}
+	}
+	select {
+	case extra := <-received:
+		t.Fatalf("unexpected power event: %+v", extra)
+	case <-time.After(30 * time.Millisecond):
+	}
+}

@@ -532,6 +532,12 @@ func run(args []string) (resultErr error) {
 		_ = controlServer.Close(closeCtx)
 	}()
 	if desktop != nil {
+		desktop.setPowerEventHandler(func(kind string, sleepDuration time.Duration) {
+			slog.Info("desktop.power_event", "kind", kind, "sleep_ms", sleepDuration.Milliseconds())
+			if kind == "resume" {
+				go localDaemon.HandlePowerResume(ctx, sleepDuration)
+			}
+		})
 		go desktop.read(os.Stdin, controller.Shutdown)
 		go reportDesktopStatus(ctx, desktop.encode, localDaemon, desktopStatusInterval)
 	}

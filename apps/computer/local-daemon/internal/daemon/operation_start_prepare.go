@@ -144,7 +144,7 @@ func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Co
 		if err == nil {
 			d.activeMu.Lock()
 			active := d.activeOperations[command.OperationID]
-			active.execution, active.mcpProxies = execution, proxies
+			active.execution, active.mcpProxies, active.running = execution, proxies, true
 			d.activeMu.Unlock()
 		}
 		d.admissionMu.Unlock()

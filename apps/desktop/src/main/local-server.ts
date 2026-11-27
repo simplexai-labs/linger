@@ -455,6 +455,9 @@ export interface LocalServerOptions {
   // WATCH_MS and UNREACHABLE_GRACE_MS by default.
   readonly watchMs?: number;
   readonly unreachableGraceMs?: number;
+  // Settle delay before probing the local server after OS resume;
+  // WAKE_CHECK_DELAY_MS by default.
+  readonly wakeDelayMs?: number;
 }
 
 // The starter Room the server makes for a new owner, with their Agents.
@@ -478,6 +481,11 @@ const UNREACHABLE_PROBE_TIMEOUT_MS = 5_000;
 // A server that keeps going away is resumed at most this often on its own;
 // Retry is never held back.
 const RECOVERY_INTERVAL_MS = 60_000;
+// Short settle delay after OS resume so rapid duplicate wake events coalesce
+// and local listeners finish waking before probing.
+const WAKE_CHECK_DELAY_MS = 1_500;
+// Bounded grace when the local server does not answer right after wake.
+const WAKE_UNREACHABLE_GRACE_MS = 5_000;
 
 // Short initial polling interval while fast setup steps settle, before
 // relaxing back to the caller's steady-state interval.
@@ -612,7 +620,11 @@ export class LocalServerModule implements Module {
   readonly #bifrostPrefetchSettling = new Map<string, Promise<unknown>>();
   #offRetry: (() => void) | undefined;
   #offUnreachable: (() => void) | undefined;
+  #offPowerSuspend: (() => void) | undefined;
+  #offPowerResume: (() => void) | undefined;
   #watch: ReturnType<typeof setInterval> | undefined;
+  #wakeTimer: ReturnType<typeof setTimeout> | undefined;
+  #wakeChecking = false;
   #recovering = false;
   #recoveredAt: number | undefined;
   #offReset: (() => void) | undefined;
@@ -727,6 +739,12 @@ export class LocalServerModule implements Module {
     this.#offUnreachable = ctx.bus.on("local-server.unreachable", () => {
       void this.#recoverUnreachable("load_failed", grace, true);
     });
+    this.#offPowerSuspend = ctx.bus.on("power.suspend", () => {
+      this.#clearWakeTimer();
+    });
+    this.#offPowerResume = ctx.bus.on("power.resume", (info) => {
+      this.#scheduleWakeCheck(info.sleepMs);
+    });
     this.#watch = setInterval(
       () => void this.#recoverUnreachable("watch", grace, true),
       this.#options.watchMs ?? WATCH_MS,
@@ -737,6 +755,9 @@ export class LocalServerModule implements Module {
   async stop(reason: StopReason): Promise<void> {
     this.#offRetry?.();
     this.#offUnreachable?.();
+    this.#offPowerSuspend?.();
+    this.#offPowerResume?.();
+    this.#clearWakeTimer();
     clearInterval(this.#watch);
     this.#offReset?.();
     this.#offServerChanged?.();
@@ -4245,13 +4266,72 @@ export class LocalServerModule implements Module {
     ctx.bus.emit("setup.open");
   }
 
+  #clearWakeTimer(): void {
+    if (!this.#wakeTimer) return;
+    clearTimeout(this.#wakeTimer);
+    this.#wakeTimer = undefined;
+  }
+
+  // Coalesces duplicate OS resume events and verifies the managed local server
+  // once the machine has settled. A healthy server is left untouched so
+  // user-stopped local models are never reloaded; an unreachable server enters
+  // recovery promptly instead of waiting for the 30 s watch interval.
+  #scheduleWakeCheck(sleepMs?: number): void {
+    if (this.#abort.signal.aborted) return;
+    this.#clearWakeTimer();
+    const delayMs = this.#options.wakeDelayMs ?? WAKE_CHECK_DELAY_MS;
+    this.#wakeTimer = setTimeout(() => {
+      this.#wakeTimer = undefined;
+      void this.#checkAfterWake(sleepMs);
+    }, delayMs);
+    this.#wakeTimer.unref?.();
+  }
+
+  async #checkAfterWake(sleepMs?: number): Promise<void> {
+    if (
+      this.#abort.signal.aborted ||
+      this.#wakeChecking ||
+      this.#recovering ||
+      this.#resuming ||
+      this.#phase !== "ready"
+    )
+      return;
+    this.#wakeChecking = true;
+    try {
+      const record = await this.#windowRecord();
+      if (!record || this.#abort.signal.aborted) return;
+      const healthy = await this.#stillAnswers(record.origin);
+      if (this.#abort.signal.aborted) return;
+      const fields = {
+        healthy,
+        ...(sleepMs !== undefined ? { sleep_ms: sleepMs } : {}),
+      };
+      if (healthy) {
+        this.#ctx?.log.info("local_server.wake_checked", fields);
+        return;
+      }
+      this.#ctx?.log.warn("local_server.wake_checked", fields);
+    } catch {
+      // Aborted by stop.
+      return;
+    } finally {
+      this.#wakeChecking = false;
+    }
+    if (this.#abort.signal.aborted) return;
+    const grace = Math.min(
+      this.#options.unreachableGraceMs ?? UNREACHABLE_GRACE_MS,
+      WAKE_UNREACHABLE_GRACE_MS,
+    );
+    await this.#recoverUnreachable("power_resume", grace, false);
+  }
+
   // The services can stop while the window shows them. Their supervisors
   // restart them, so one that does not answer first gets `graceMs` to come
   // back, checked again during it; one still silent after that (its
   // supervisor gave up or was ended too) is resumed like a launch: the
   // installer starts what is not running.
   async #recoverUnreachable(
-    trigger: "retry" | "load_failed" | "watch",
+    trigger: "retry" | "load_failed" | "watch" | "power_resume",
     graceMs: number,
     throttled: boolean,
   ): Promise<void> {

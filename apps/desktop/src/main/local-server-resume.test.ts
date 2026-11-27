@@ -62,6 +62,7 @@ function setupResumeFixture(
     resolveProxy?: (url: string) => Promise<string>;
     watchMs?: number;
     unreachableGraceMs?: number;
+    wakeDelayMs?: number;
     withRecord?: boolean;
     initialConfig?: Parameters<ConfigStore["update"]>[0];
   } = {},
@@ -128,8 +129,11 @@ function setupResumeFixture(
       }) as typeof fetch),
     resolveProxy: options.resolveProxy,
     ...(options.watchMs ? { watchMs: options.watchMs } : {}),
-    ...(options.unreachableGraceMs
+    ...(options.unreachableGraceMs !== undefined
       ? { unreachableGraceMs: options.unreachableGraceMs }
+      : {}),
+    ...(options.wakeDelayMs !== undefined
+      ? { wakeDelayMs: options.wakeDelayMs }
       : {}),
   });
 
@@ -1524,5 +1528,123 @@ describe("orphaned local server recovery during LocalServerModule.start()", () =
         preferredRuntime: "codex",
       }),
     ).toBe(false);
+  });
+});
+
+describe("LocalServerModule sleep/wake recovery", () => {
+  const resumeCountingScript = (markerFile: string): string => `
+    const fs = require("node:fs");
+    if (process.argv.includes("--resume")) {
+      const count = fs.existsSync(${JSON.stringify(markerFile)})
+        ? Number(fs.readFileSync(${JSON.stringify(markerFile)}, "utf8")) + 1
+        : 1;
+      fs.writeFileSync(${JSON.stringify(markerFile)}, String(count));
+    }
+    console.log(JSON.stringify({ code: 0, state: "ready", details: { origin: "http://localhost:3000", source: "/source" } }));
+  `;
+
+  it("logs a healthy wake check without re-running installer resume when the local server answers", async () => {
+    const markerFile = path.join(tempDirectory(), "resume-count.txt");
+    const fetchSpy = vi.fn(async () => new Response("ok", { status: 200 }));
+    const f = setupResumeFixture(resumeCountingScript(markerFile), {
+      fetch: fetchSpy as unknown as typeof fetch,
+      watchMs: 60_000,
+      unreachableGraceMs: 0,
+      wakeDelayMs: 15,
+    });
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(Number(readFileSync(markerFile, "utf8"))).toBe(1);
+
+    f.bus.emit("power.resume", { sleepMs: 300_000 });
+    await vi.waitFor(() =>
+      expect(f.logs).toContainEqual(
+        expect.objectContaining({
+          level: "info",
+          event: "local_server.wake_checked",
+          fields: { healthy: true, sleep_ms: 300_000 },
+        }),
+      ),
+    );
+    expect(Number(readFileSync(markerFile, "utf8"))).toBe(1);
+    await f.host.stop("quit");
+  });
+
+  it("recovers an unreachable local server promptly on power.resume and coalesces duplicate wakes", async () => {
+    const markerFile = path.join(tempDirectory(), "resume-count.txt");
+    let healthy = true;
+    const fetchSpy = vi.fn(async () => {
+      if (!healthy) throw new Error("ECONNREFUSED");
+      return new Response("ok", { status: 200 });
+    });
+    const f = setupResumeFixture(resumeCountingScript(markerFile), {
+      fetch: fetchSpy as unknown as typeof fetch,
+      watchMs: 60_000,
+      unreachableGraceMs: 0,
+      wakeDelayMs: 25,
+    });
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+    expect(Number(readFileSync(markerFile, "utf8"))).toBe(1);
+
+    healthy = false;
+    // Duplicate wakes within the debounce window coalesce into one recovery.
+    f.bus.emit("power.resume", { sleepMs: 60_000 });
+    f.bus.emit("power.resume", { sleepMs: 60_050 });
+    await vi.waitFor(() =>
+      expect(Number(readFileSync(markerFile, "utf8"))).toBe(2),
+    );
+    expect(f.logs).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "local_server.wake_checked",
+        fields: { healthy: false, sleep_ms: 60_050 },
+      }),
+    );
+    expect(f.logs).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "local_server.unreachable_resume",
+        fields: { trigger: "power_resume" },
+      }),
+    );
+    await f.host.stop("quit");
+  });
+
+  it("cancels a pending wake check on suspend or stop and ignores wakes for remote servers", async () => {
+    const markerFile = path.join(tempDirectory(), "resume-count.txt");
+    let healthy = true;
+    const fetchSpy = vi.fn(async () => {
+      if (!healthy) throw new Error("ECONNREFUSED");
+      return new Response("ok", { status: 200 });
+    });
+    const f = setupResumeFixture(resumeCountingScript(markerFile), {
+      fetch: fetchSpy as unknown as typeof fetch,
+      watchMs: 60_000,
+      unreachableGraceMs: 0,
+      wakeDelayMs: 80,
+    });
+    await f.host.start();
+    await vi.waitFor(() => expect(f.module.status().phase).toBe("ready"));
+
+    // Suspend right after resume cancels the pending wake check.
+    healthy = false;
+    f.bus.emit("power.resume", { sleepMs: 10_000 });
+    f.bus.emit("power.suspend");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(Number(readFileSync(markerFile, "utf8"))).toBe(1);
+
+    // Switching to a remote server makes wake a clean no-op.
+    f.config.update({ serverUrl: "https://team.example.com" });
+    f.bus.emit("server.changed", "https://team.example.com");
+    f.bus.emit("power.resume", { sleepMs: 10_000 });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(Number(readFileSync(markerFile, "utf8"))).toBe(1);
+
+    // Stop also cancels any armed wake timer cleanly.
+    f.bus.emit("power.resume", { sleepMs: 10_000 });
+    await f.host.stop("quit");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(Number(readFileSync(markerFile, "utf8"))).toBe(1);
   });
 });

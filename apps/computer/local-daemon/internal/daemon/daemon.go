@@ -228,10 +228,18 @@ type Daemon struct {
 	// an earlier Daemon process.
 	welcomedEpochs map[uint64]bool
 	locallyStopped map[string]bool
+	// wakeMu serializes and coalesces post-wake health checks and recovery.
+	wakeMu      sync.Mutex
+	wakeRunning bool
+	wakePending bool
+	wakeSleep   time.Duration
 }
 
 type activeOperation struct {
 	identity          OperationIdentity
+	model             string
+	startedAt         time.Time
+	running           bool
 	ctx               context.Context
 	cancel            context.CancelFunc
 	execution         *provider.Execution

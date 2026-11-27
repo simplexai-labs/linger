@@ -117,9 +117,11 @@ type gatewayStream struct {
 	writeMu      *sync.Mutex
 	writeTimeout time.Duration
 	readTimeout  time.Duration
-	// contextDeadline is the current Receive context's deadline; only the
-	// reader goroutine (Receive and the Pong handler it runs) touches it.
+	// deadlineMu serializes read-deadline updates across Receive, Pong
+	// handling, and post-wake ProbeLiveness calls.
+	deadlineMu      sync.Mutex
 	contextDeadline time.Time
+	probeDeadline   time.Time
 	done            chan struct{}
 	closed          atomic.Bool
 	close           sync.Once
@@ -139,13 +141,19 @@ func (s *gatewayStream) Receive(ctx context.Context) (protocol.Command, error) {
 		}
 	}()
 	defer close(readDone)
-	s.contextDeadline, _ = ctx.Deadline()
-	if err := s.extendReadDeadline(); err != nil {
+	ctxDeadline, _ := ctx.Deadline()
+	s.deadlineMu.Lock()
+	s.contextDeadline = ctxDeadline
+	err := s.applyReadDeadlineLocked()
+	s.deadlineMu.Unlock()
+	if err != nil {
 		return protocol.Command{}, err
 	}
 	encoded, err := s.readMessage()
+	s.deadlineMu.Lock()
 	contextDeadline := s.contextDeadline
 	s.contextDeadline = time.Time{}
+	s.deadlineMu.Unlock()
 	if err != nil {
 		var networkError net.Error
 		if errors.As(err, &networkError) && networkError.Timeout() &&
@@ -743,12 +751,23 @@ func (s *gatewayStream) runnerHello() (wire.RunnerHello, error) {
 	return hello, nil
 }
 
-// extendReadDeadline gives the peer another readTimeout to send any frame,
-// bounded by the current Receive context's deadline, which applies to that call only.
+// extendReadDeadline clears any active post-wake liveness probe deadline and
+// gives the peer another readTimeout to send any frame, bounded by the current
+// Receive context's deadline, which applies to that call only.
 func (s *gatewayStream) extendReadDeadline() error {
+	s.deadlineMu.Lock()
+	defer s.deadlineMu.Unlock()
+	s.probeDeadline = time.Time{}
+	return s.applyReadDeadlineLocked()
+}
+
+func (s *gatewayStream) applyReadDeadlineLocked() error {
 	deadline := time.Now().Add(s.readTimeout)
 	if !s.contextDeadline.IsZero() && s.contextDeadline.Before(deadline) {
 		deadline = s.contextDeadline
+	}
+	if !s.probeDeadline.IsZero() && s.probeDeadline.Before(deadline) {
+		deadline = s.probeDeadline
 	}
 	return s.socket.SetReadDeadline(deadline)
 }
@@ -795,6 +814,36 @@ func (s *gatewayStream) pingLoop(interval time.Duration) {
 			}
 		}
 	}
+}
+
+// ProbeLiveness sends an immediate WebSocket Ping and tightens the read
+// deadline to timeout so a connection dropped during system sleep fails fast
+// and redials instead of waiting out the full readTimeout. A live peer's Pong
+// restores the normal readTimeout via SetPongHandler.
+func (s *gatewayStream) ProbeLiveness(timeout time.Duration) error {
+	if s.closed.Load() {
+		return nil
+	}
+	if timeout <= 0 || timeout > s.readTimeout {
+		timeout = s.readTimeout
+	}
+	writeTimeout := min(s.writeTimeout, timeout)
+	probeDeadline := time.Now().Add(timeout)
+	s.deadlineMu.Lock()
+	if s.probeDeadline.IsZero() || probeDeadline.Before(s.probeDeadline) {
+		s.probeDeadline = probeDeadline
+	}
+	err := s.applyReadDeadlineLocked()
+	s.deadlineMu.Unlock()
+	if err != nil {
+		_ = s.Close()
+		return err
+	}
+	if err := s.socket.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeTimeout)); err != nil {
+		_ = s.Close()
+		return err
+	}
+	return nil
 }
 
 func (s *gatewayStream) Close() error {
