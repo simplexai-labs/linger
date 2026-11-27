@@ -28,19 +28,32 @@ type activityStatus struct {
 // names it for the Room status line. A shell script gets the kind of its
 // last shown step, the same for every Runtime's shell tool, and its input
 // carries the script rather than the shell wrapper Codex reports around it.
+// A PowerShell or cmd script names the steps but keeps its wrapper in the
+// input: the receipt check reads a Codex command with the POSIX quoting,
+// which only approximates theirs, so createsTaskFor must not judge it and
+// publish a step's output.
 func activityPresentation(message native.Event) (string, map[string]any, activityStatus) {
 	kind, input := message.ActivityKind, message.Input
 	if kind == "" {
 		kind = native.ActivityTool
 	}
 	key, command := inputCommand(input)
-	if script := shellScript(command); script != command {
+	script, posix, powerShell := shellScript(command)
+	if posix && script != command {
 		input = maps.Clone(input)
-		input[key], command = script, script
+		input[key] = script
+	}
+	if !posix {
+		// PowerShell and cmd take a backslash as it is, and in a path it
+		// separates names. Steps name a file or a program by what follows
+		// its last /, and a cmd script is read with the POSIX quoting, which
+		// drops a backslash before some characters, so every backslash is
+		// read as /, including one in a search pattern.
+		script = strings.ReplaceAll(script, `\`, "/")
 	}
 	var steps []step
 	if kind == native.ActivityCommand {
-		steps = scriptStepsFor(command, strings.EqualFold(message.ToolName, "powershell"))
+		steps = scriptStepsFor(script, powerShell || strings.EqualFold(message.ToolName, "powershell"))
 	} else if next, ok := toolStep(kind, message.ToolName, input); ok {
 		steps = []step{next}
 	}

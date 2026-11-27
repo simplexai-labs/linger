@@ -145,8 +145,14 @@ func TestTaskCreationPublishesItsReceipt(t *testing.T) {
 	if len(content) != 1 || content[0]["label"] != "Output" || content[0]["content"] != receipt {
 		t.Fatalf("task creation lost its receipt: %v", content)
 	}
-	// Any other output, including a script that also creates a Task, stays private.
-	for _, command := range []string{"teamhub task check", `teamhub task create --name x && cat notes.md`} {
+	// Any other output, including a script that also creates a Task, stays
+	// private, and so does a script in a PowerShell wrapper, whose input
+	// keeps the wrapper.
+	for _, command := range []string{
+		"teamhub task check",
+		`teamhub task create --name x && cat notes.md`,
+		`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'teamhub task create --name Rivals --requirement Compare'`,
+	} {
 		if event := finish(command, receipt); event["content"] != nil {
 			t.Fatalf("published the output of %q: %v", command, event)
 		}
