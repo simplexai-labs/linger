@@ -94,10 +94,11 @@ heading, so no text field may contain Markdown headings (a line starting with
     that transition, such as graduating and then joining, as in `–2025`
     even when the later role's own period reads `Present`. A later year
     that only proves an entry was over by then is an upper bound, not its
-    end year: write it as `≤2020`, and never copy one bound onto several
-    earlier entries as their end year. Never leave a school or organization
-    out of the timeline because its years are unclear, and mention the
-    experience only in the overview when no year can be supported at all.
+    end year: write it with a leading dash, as `–2020`, and never copy one
+    bound onto several earlier entries as their end year. Never leave a
+    school or organization out of the timeline because its years are
+    unclear, and mention the experience only in the overview when no year
+    can be supported at all.
     Do not prefix roles with "Former"; the period shows it. Never guess a
     year. Required.
   - `organization`: the school or organization. Required.

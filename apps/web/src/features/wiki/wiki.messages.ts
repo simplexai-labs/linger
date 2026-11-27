@@ -105,7 +105,7 @@ export const wikiMessages = defineMessages("wiki", {
   editYourProfile: "Edit your profile",
   editProfileForm: "Edit Profile",
   editHint:
-    "Keep the five <code>##</code> sections. Under Background, <code>### Timeline</code> lists <code>- years · organization</code> entries with years only (<code>2019</code> start, <code>–2013</code> end, <code>≤2013</code> ended by then, <code>Present</code> ongoing); any other <code>###</code> starts a point.",
+    "Keep the five <code>##</code> sections. Under Background, <code>### Timeline</code> lists <code>- years · organization</code> entries with years only (<code>2019</code> start, <code>–2013</code> end or ended by then, <code>Present</code> ongoing); any other <code>###</code> starts a point.",
   profileMarkdown: "Profile Markdown",
 
   // The Sources row of the Profile infobox.
