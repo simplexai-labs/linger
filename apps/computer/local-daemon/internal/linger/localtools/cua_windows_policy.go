@@ -39,10 +39,10 @@ func windowsInputRefusal(name string, arguments map[string]any, chromium func() 
 		return nil
 	}
 	if mode, ok := arguments["delivery_mode"]; ok && mode != "background" {
-		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: on Windows the Computer sends input only in the background, because foreground input reaches whichever app the user brings forward: %w", errNotSent)
+		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: on Windows the Computer sends input only in the background, because foreground input reaches whichever app the user brings forward. Do not retry with foreground delivery; omit delivery_mode, try another control or route, or tell the user what you could not do: %w", errNotSent)
 	}
 	if scope, ok := arguments["scope"]; ok && scope != "window" {
-		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: on Windows input goes to one window named by pid and window_id, never to a desktop point: %w", errNotSent)
+		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: on Windows input goes to one window named by pid and window_id, never to a desktop point. Omit scope and target a window with pid and window_id from list_windows, or tell the user what you could not do: %w", errNotSent)
 	}
 	if windowsChromiumPointerTools[name] && chromium() {
 		return fmt.Errorf("COMPUTER_INPUT_NOT_SENT: %s in a Chrome, Edge or Electron window uses the user's real mouse on Windows; click the element, or use the page's own buttons and menus: %w", name, errNotSent)
