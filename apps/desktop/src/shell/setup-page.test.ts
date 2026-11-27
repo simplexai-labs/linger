@@ -353,7 +353,8 @@ describe("setup page two-step welcome", () => {
       welcome({ state: "checking" }),
       "welcome",
       "en",
-      40,
+      // Long enough to look at the intro on a busy machine.
+      1500,
     );
     expect(stage()).toBe("intro");
     // The orb and a welcome: no words about the check.
@@ -375,8 +376,10 @@ describe("setup page two-step welcome", () => {
     // The runtime rows are read once, for step 2.
     expect(run).toHaveBeenCalledWith({ op: "local.runtimes.check" });
     // The intro hands off by itself; the check is still running.
-    await vi.waitFor(() => expect(stage()).toBe("choose"));
+    await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 5000 });
     expect($("step-label").textContent).toBe("Step 1 of 2");
+    // No step marks in the corner; the step is read out, not drawn.
+    expect(document.querySelector("#pips, .pips")).toBeNull();
     expect($("welcome-checking").hidden).toBe(true);
     expect($("source-grid").hidden).toBe(false);
     // The local model can be picked and says, quietly, that it is checked.

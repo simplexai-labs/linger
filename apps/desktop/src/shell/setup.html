@@ -1147,9 +1147,9 @@
       }
 
       /* ---------- Wizard look (welcome, installing, ready) ----------
-         One 760x660 window: a quiet wash, the logo and two step pips on
-         top, a 440px stage, and the orb that carries the eye from the
-         welcome through step 1, the settings and the install. Ported from
+         One 760x660 window: a quiet wash, the logo on top, a 440px
+         stage, and the orb that carries the eye from the welcome through
+         step 1, the settings and the install. Ported from
          the round-4 prototype; motion is transform and opacity only. */
       body[data-look="wizard"] {
         --ink: #1a1a16;
@@ -1213,29 +1213,6 @@
       }
       body[data-look="wizard"] .topbar .brand {
         height: 21px;
-      }
-      .pips {
-        display: none;
-      }
-      body[data-look="wizard"] .pips {
-        display: flex;
-        gap: 5px;
-        align-items: center;
-        transition: opacity 0.45s var(--ease);
-      }
-      .pips i {
-        display: block;
-        height: 4px;
-        width: 6px;
-        border-radius: 4px;
-        background: #dcdcd5;
-        transition:
-          width 0.45s var(--ease),
-          background 0.45s var(--ease);
-      }
-      .pips i[data-on="true"] {
-        width: 18px;
-        background: var(--ink);
       }
       body[data-look="wizard"] #step-label {
         position: absolute;
@@ -2861,7 +2838,6 @@
     <div class="drag" aria-hidden="true"></div>
     <header class="topbar">
       <img class="brand" src="logo.png" alt="Linger" />
-      <span class="pips" id="pips" aria-hidden="true"><i></i><i></i></span>
       <span id="step-label"></span>
     </header>
     <!-- The install scene: one orb between two cards, one saying Linger
@@ -6562,17 +6538,10 @@
           step === "welcome" && local.available && stage === "intro";
         if (intro) body.chrome = "off";
         else delete body.chrome;
-        const pips =
-          step === "welcome" &&
-          local.available &&
-          (stage === "choose" || stage === "settings");
-        $("pips").hidden = !pips;
-        const [first, second] = $("pips").children;
-        first.dataset.on = String(pips);
-        second.dataset.on = String(pips && stage === "settings");
         const at = ORDER.indexOf(step);
         // Setting up this computer takes two steps: a source, then its
-        // settings.
+        // settings. The wizard shows no step marks; the step is only read
+        // out to screen readers.
         $("step-label").textContent =
           at >= 0
             ? t("stepOf", { step: at + 1, total: ORDER.length })
