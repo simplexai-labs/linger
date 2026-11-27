@@ -869,13 +869,15 @@ describe("setup page two-step welcome", () => {
     );
   });
 
-  it("keeps step 2 to the source: no More options, location or app keys", async () => {
+  it("keeps step 2 to the source and where it installs: no More options or app keys", async () => {
     await openPage(welcome(capable), "welcome");
     $("source-continue").click();
     expect(document.getElementById("local-customize")).toBeNull();
     expect(document.getElementById("local-options")).toBeNull();
     expect(document.getElementById("key-composio")).toBeNull();
-    expect($("location-row").hidden).toBe(true);
+    expect($("location-row").hidden).toBe(false);
+    expect($("location-path").textContent).toBe("~/.simplexai");
+    expect($("location-reset").hidden).toBe(true);
     expect(document.body.textContent).not.toContain("More options");
     expect(document.body.textContent).not.toContain("Private to this computer");
   });
@@ -898,8 +900,8 @@ describe("setup page two-step welcome", () => {
     );
     $("source-continue").click();
     expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    // The location shows only when it is what stops Install.
-    expect($("location-row").hidden).toBe(false);
+    // The row says what stops Install.
+    expect($("location-row").dataset.warn).toBe("true");
     expect($("location-change").hidden).toBe(false);
     expect($("location-sub").textContent).toBe(
       "Not enough free space on this drive.",
@@ -2419,15 +2421,30 @@ describe("setup page install location and free space", () => {
     minFreeBytes: 20 * GB,
   };
 
-  it("stays out of the way while the disk has room, custom folder or not", async () => {
+  const calm = () => {
+    expect($("location-row").hidden).toBe(false);
+    expect($("location-row").dataset.warn).toBe("false");
+    expect($("location-sub").hidden).toBe(true);
+    expect($("location-change").hidden).toBe(false);
+  };
+
+  it("shows where Linger installs for every source, quietly while the disk has room", async () => {
+    for (const value of ["local", "byok", "subscription"]) {
+      await openPage(withLocation(capable, roomy), "welcome");
+      open(value);
+      calm();
+      expect($("location-path").textContent).toBe("~/.linger");
+      expect($("location-path").title).toBe("~/.linger");
+      // The default needs no Reset.
+      expect($("location-reset").hidden).toBe(true);
+    }
+
     const { run, push } = await openPage(
       withLocation(capable, roomy),
       "welcome",
     );
     open("local");
-    expect($("location-row").hidden).toBe(true);
     expect(button("local-install").disabled).toBe(false);
-
     push(
       withLocation(capable, {
         path: "/Volumes/Data/Linger",
@@ -2436,9 +2453,41 @@ describe("setup page install location and free space", () => {
         minFreeBytes: 20 * GB,
       }),
     );
-    expect($("location-row").hidden).toBe(true);
+    calm();
+    expect($("location-path").textContent).toBe("/Volumes/Data/Linger");
+    expect($("location-reset").hidden).toBe(false);
     expect(button("local-install").disabled).toBe(false);
     expect(run).not.toHaveBeenCalledWith({ op: "local.location.pick" });
+    $("location-change").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.pick" }),
+    );
+  });
+
+  it("shortens a long Windows path in the middle and keeps all of it in the tooltip", async () => {
+    const long =
+      "D:\\Users\\someone.with.a.long.name\\AppData\\Local\\Programs\\Linger Workspace\\data";
+    await openPage(
+      {
+        ...withLocation(small, {
+          path: long,
+          custom: true,
+          freeBytes: 200 * GB,
+          minFreeBytes: 20 * GB,
+        }),
+        platform: "win32",
+      },
+      "welcome",
+    );
+    open("byok");
+    calm();
+    const shown = $("location-path").textContent!;
+    expect(shown.length).toBeLessThan(long.length);
+    expect(shown).toContain("…");
+    expect(shown.startsWith("D:\\Users\\")).toBe(true);
+    expect(shown.endsWith("\\data")).toBe(true);
+    expect($("location-path").title).toBe(long);
+    expect($("location-reset").hidden).toBe(false);
   });
 
   it("warns and holds Install when the disk is below what the services need, in EN and zh-CN", async () => {
@@ -2453,7 +2502,6 @@ describe("setup page install location and free space", () => {
     expect($("location-row").hidden).toBe(false);
     expect($("location-row").dataset.warn).toBe("true");
     expect($("location-path").textContent).toBe("C:\\Users\\demo\\.linger");
-    expect($("location-sub").dataset.warn).toBe("true");
     expect($("location-sub").textContent).toBe(
       "Needs 20 GB free; this disk has 10 GB.",
     );
@@ -2492,7 +2540,7 @@ describe("setup page install location and free space", () => {
 
     await openPage(withLocation(capable, roomForServices), "welcome");
     open("byok");
-    expect($("location-row").hidden).toBe(true);
+    calm();
     type("byok-url", "https://api.example.com");
     type("byok-key", "sk-test");
     type("byok-model", "claude-sonnet-4-6");
@@ -2513,7 +2561,8 @@ describe("setup page install location and free space", () => {
     );
     open("local");
     expect($("location-row").hidden).toBe(false);
-    expect($("location-path").textContent).toBe("/Volumes/ReadOnly/Linger");
+    // Beside Reset the path is shortened in the middle; the tooltip has it all.
+    expect($("location-path").textContent).toBe("/Volumes/…dOnly/Linger");
     expect($("location-path").title).toBe("/Volumes/ReadOnly/Linger");
     expect($("location-sub").textContent).toBe(errorMessage);
     expect($("location-reset").hidden).toBe(false);
@@ -2525,8 +2574,9 @@ describe("setup page install location and free space", () => {
     );
 
     push(withLocation(capable, roomy));
-    expect($("location-row").hidden).toBe(true);
+    calm();
     expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-reset").hidden).toBe(true);
     expect(button("local-install").disabled).toBe(false);
   });
 
@@ -2556,7 +2606,7 @@ describe("setup page install location and free space", () => {
       "welcome",
     );
     open("local");
-    expect($("location-row").hidden).toBe(true);
+    calm();
     expect(button("local-install").disabled).toBe(false);
   });
 });

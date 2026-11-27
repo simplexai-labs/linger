@@ -1520,18 +1520,21 @@
         top: 54px;
         height: 330px;
       }
-      /* A location problem takes the title orb's room and the model's
-         one-line pitch, so the step still fits above the fixed buttons. */
-      section[data-stage="settings"]:has(#location-row:not([hidden]))
+      /* Under the local model's card, a location problem takes the title
+         orb's room and the model's one-line pitch, so the step still fits
+         above the fixed buttons. The other sources have room as they are. */
+      section[data-stage="settings"]:has(
+          #local-row:not([hidden]) ~ #location-row[data-warn="true"]
+        )
         :is(.wz-hd .slot, .m-why[data-tone=""]) {
         display: none;
       }
-      section[data-stage="settings"]:has(#location-row:not([hidden])) .wz-body {
+      section[data-stage="settings"]:has(
+          #local-row:not([hidden]) ~ #location-row[data-warn="true"]
+        )
+        .wz-body {
         top: 54px;
         height: 330px;
-      }
-      section[data-stage="settings"]:has(#location-row:not([hidden])) .mcard {
-        height: 232px;
       }
       .wz-act {
         position: absolute;
@@ -2423,16 +2426,99 @@
       .rt .sub[data-warn="true"] {
         color: var(--error);
       }
-      /* The location's warning reads whole; its path stays one line. */
-      #location-sub {
-        white-space: normal;
+      /* Step 2's panel: the source's settings, then the install location
+         pinned to the bottom, 12px or more below them. The model card
+         takes the room the location leaves. */
+      .source-panel:not([hidden]) {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        height: 100%;
       }
-      #location-row {
-        margin-top: 12px;
-      }
-      #location-row .rt {
+      .source-panel > .mcard {
+        flex: 1 1 auto;
+        height: auto;
         min-height: 0;
-        padding: 12px 20px;
+      }
+      .loc {
+        flex: none;
+        margin-top: auto;
+        padding: 8px 10px 8px 14px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: inset 0 0 0 1px var(--line);
+        transition:
+          background-color 0.16s ease,
+          box-shadow 0.16s ease;
+      }
+      .loc-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        height: 24px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .loc-icon {
+        flex: none;
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linejoin: round;
+        color: var(--faint);
+      }
+      .loc-label {
+        flex: none;
+      }
+      .loc-path {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--body);
+      }
+      .loc-btn {
+        flex: none;
+        height: 24px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 7px;
+        background: #fff;
+        box-shadow: inset 0 0 0 1px #e4e4de;
+        color: var(--body);
+        font-size: 12px;
+        font-weight: 550;
+        white-space: nowrap;
+      }
+      .loc-btn:hover:not(:disabled) {
+        box-shadow: inset 0 0 0 1px #c4c4bc;
+        color: var(--ink);
+      }
+      .loc[data-warn="true"] {
+        background: #fdf6f3;
+        box-shadow: inset 0 0 0 1px #f3dfd6;
+      }
+      .loc[data-warn="true"] .loc-icon {
+        color: var(--error);
+      }
+      .loc[data-warn="true"] .loc-label {
+        color: var(--ink);
+        font-weight: 550;
+      }
+      .loc-warn {
+        margin: 4px 0 0 22px;
+        font-size: 12px;
+        line-height: 17px;
+        color: var(--error);
+        overflow-wrap: anywhere;
+        user-select: text;
+        -webkit-user-select: text;
       }
       .runtime-act {
         display: flex;
@@ -3227,33 +3313,32 @@
               <div class="byok-box" id="byok-row" data-in hidden>
                 <div class="grp byok-fields" id="byok-fields"></div>
               </div>
-              <div class="grp" id="location-row" hidden>
-                <div class="rt">
-                  <div class="text">
-                    <strong data-t="installLocation"></strong
-                    ><span class="sub path" id="location-path"></span
-                    ><span
-                      class="sub"
-                      id="location-sub"
-                      data-warn="true"
-                    ></span>
-                  </div>
-                  <div class="runtime-act">
-                    <button
-                      type="button"
-                      class="change"
-                      id="location-reset"
-                      data-t="resetLocation"
-                      hidden
-                    ></button>
-                    <button
-                      type="button"
-                      class="change"
-                      id="location-change"
-                      data-t="changeLocation"
-                    ></button>
-                  </div>
+              <!-- Where Linger installs, for every source: one quiet line,
+                   with a disk or folder problem said inside it. -->
+              <div class="loc" id="location-row" data-warn="false">
+                <div class="loc-line">
+                  <svg class="loc-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+                    />
+                  </svg>
+                  <span class="loc-label" data-t="installLocation"></span>
+                  <span class="loc-path" id="location-path"></span>
+                  <button
+                    type="button"
+                    class="loc-btn"
+                    id="location-reset"
+                    data-t="resetLocation"
+                    hidden
+                  ></button>
+                  <button
+                    type="button"
+                    class="loc-btn"
+                    id="location-change"
+                    data-t="changeLocation"
+                  ></button>
                 </div>
+                <p class="loc-warn" id="location-sub" role="alert" hidden></p>
               </div>
             </div>
           </div>
@@ -4138,6 +4223,13 @@
         bytes < 1024 ** 3
           ? Math.max(0, Math.round(bytes / 1024 ** 2)) + " MB"
           : (bytes / 1024 ** 3).toFixed(1) + " GB";
+      // A long folder keeps its start (the drive or home) and its end (the
+      // folder itself), with … between, in about `max` characters.
+      const shortPath = (value, max = 34) => {
+        if (value.length <= max) return value;
+        const head = Math.ceil((max - 1) * 0.4);
+        return value.slice(0, head) + "…" + value.slice(-(max - 1 - head));
+      };
       // Why the installation stopped: in the page's words when the main
       // process names the reason, else the message it passed on.
       const failureText = (local) =>
@@ -6052,9 +6144,9 @@
         renderRuntimes(rows, busy);
         mainByok.sync(busy || byokTesting);
 
-        // The install location shows only when it is the problem, with
-        // what is wrong and a way to change it: a folder Linger cannot use,
-        // or a disk without room for the services and the local model.
+        // Where Linger installs, for every source, with a way to change it.
+        // A folder Linger cannot use, or a disk without room for the
+        // services and the local model, is said inside the row.
         const location = local.location;
         const modelCheck = local.modelCheck;
         const modelDisk =
@@ -6081,10 +6173,15 @@
             : "");
         const shownPath =
           (location.error && location.rejectedPath) || location.path;
-        $("location-row").hidden = !locationWarning;
         $("location-row").dataset.warn = String(Boolean(locationWarning));
-        $("location-path").textContent = shownPath;
-        $("location-path").title = shownPath;
+        // Shortened in the middle so the drive and the folder's own name
+        // both stay; the whole path is in the tooltip.
+        const pathEl = $("location-path");
+        let budget = location.custom || location.error ? 22 : 32;
+        pathEl.textContent = shortPath(shownPath, budget);
+        while (pathEl.scrollWidth > pathEl.clientWidth && budget > 12)
+          pathEl.textContent = shortPath(shownPath, (budget -= 2));
+        pathEl.title = shownPath;
         $("location-sub").textContent = locationWarning;
         $("location-sub").hidden = !locationWarning;
         $("location-reset").hidden = !location.custom && !location.error;
