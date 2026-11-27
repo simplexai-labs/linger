@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdtemp,
   realpath,
@@ -13,9 +14,17 @@ import type { FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeMessageSend } from "./message-send-executor.js";
+import {
+  executeMessageSend,
+  resolveDocumentImagePath,
+} from "./message-send-executor.js";
 import { createTeamHubClient, type TeamHubHttpClient } from "./http-client.js";
 import { displayText } from "./display-text.js";
+import { TeamHubWorkingCopies } from "./files/teamhub-working-copies.js";
+import {
+  createHostTeamHubWorkingCopyStateFiles,
+  createHostTeamHubWorkspaceFiles,
+} from "./files/teamhub-workspace-files.js";
 
 const roots: string[] = [];
 async function root() {
@@ -401,4 +410,140 @@ describe("atomic message resource execution", () => {
       ],
     });
   });
+
+  const specialMarkdownFilenames = [
+    "Sprint 12.md",
+    "Sprint #12.md",
+    "Progress 50%.md",
+    "#12.md",
+    "Rate 5%2B.md",
+    ...(process.platform === "win32" ? [] : ["What?.md", "Q1:Summary.md"]),
+  ];
+
+  it.each(specialMarkdownFilenames)(
+    "round-trips extracted working-copy images through message send for %s",
+    async (filename) => {
+      const cwd = await root();
+      const gifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+      const gifUri = `data:image/gif;base64,${gifBase64}`;
+      const gifSha = createHash("sha256")
+        .update(Buffer.from(gifBase64, "base64"))
+        .digest("hex");
+      const source = Buffer.from(`![Chart](${gifUri})\n`);
+      const sourceSha = createHash("sha256").update(source).digest("hex");
+      const signal = new AbortController().signal;
+
+      const workingCopies = new TeamHubWorkingCopies({
+        stateFiles: createHostTeamHubWorkingCopyStateFiles({
+          workspacePath: cwd,
+          signal,
+        }),
+        stateBinding: "test-context",
+        integrityKey: "test-integrity-key-0000000000000000",
+        files: createHostTeamHubWorkspaceFiles({
+          workspacePath: cwd,
+          runtimeWorkspacePath: cwd,
+          readOnlyPaths: ["documents"],
+          signal,
+        }),
+        backend: {
+          download: async () => ({
+            documentId: "doc-1",
+            versionId: "version-1",
+            name: filename,
+            sha256: sourceSha,
+            readOnly: false,
+            content: source,
+          }),
+          replace: async () => {
+            throw new Error("unexpected replace");
+          },
+        },
+      });
+
+      await workingCopies.get("doc-1", path.join(cwd, filename));
+
+      const sidecar = `${Array.from(filename).slice(0, 20).join("")}.image-${gifSha}.gif`;
+      const entries = await readdir(cwd);
+      expect(entries).toContain(filename);
+      expect(entries).toContain(sidecar);
+
+      const payloads: string[] = [];
+      const transport = client(async (body) => {
+        payloads.push(await (body.get("file") as File).text());
+        return result(body);
+      });
+
+      await executeMessageSend(
+        {
+          inbox_id: "room_example",
+          message_segments: [{ type: "document", "content-path": filename }],
+        },
+        {
+          client: transport,
+          cwd,
+          stateRoot: cwd,
+          operationId: "send-special-filename",
+          target: { type: "room", id: "room_example" },
+        },
+      );
+
+      expect(payloads).toHaveLength(1);
+      expect(payloads[0]).toContain(gifUri);
+    },
+  );
+});
+
+describe("document image path containment", () => {
+  it.each([
+    "./playground/C:/secret.png",
+    "./playground/D:secret.png",
+    "./playground/photo.png:stream",
+    "./playground/../secret.png",
+    "./playground/sub/../../secret.png",
+    "./playground/\\secret.png",
+    "./playground/",
+    "../secret.png",
+  ])("rejects escaping or Windows-special path %s on win32", (relative) => {
+    expect(() =>
+      resolveDocumentImagePath("C:\\workspace\\docs", relative, "win32"),
+    ).toThrow(/inside the document directory/i);
+  });
+
+  it("allows nested relative paths on win32", () => {
+    expect(
+      resolveDocumentImagePath(
+        "C:\\workspace\\docs",
+        "./playground/nested/my photo.png",
+        "win32",
+      ),
+    ).toBe("C:\\workspace\\docs\\nested\\my photo.png");
+  });
+
+  it.each(["linux", "darwin"] as const)(
+    "allows colon filenames and nested relative paths on %s",
+    (platform) => {
+      expect(
+        resolveDocumentImagePath(
+          "/workspace/docs",
+          "./playground/Q1:Summary.md.image-abc.gif",
+          platform,
+        ),
+      ).toBe("/workspace/docs/Q1:Summary.md.image-abc.gif");
+      expect(
+        resolveDocumentImagePath(
+          "/workspace/docs",
+          "./playground/nested/my photo.png",
+          platform,
+        ),
+      ).toBe("/workspace/docs/nested/my photo.png");
+      expect(() =>
+        resolveDocumentImagePath(
+          "/workspace/docs",
+          "./playground/../secret.png",
+          platform,
+        ),
+      ).toThrow(/inside the document directory/i);
+    },
+  );
 });
