@@ -941,3 +941,5 @@ Daily/Weekly are indexed after they are generated. Generation does not wait for 
 indexed at a time per process, and a database advisory lock serializes processes.
 
 Historical Wiki and Daily/Weekly rebuilds use the separate entry in "Production history rebuild".
+
+Raw workspace reads accept regular files only. They reject FIFOs before opening and use a nonblocking descriptor check for a final path that changes during inspection, so a source read cannot wait indefinitely for a pipe writer.
