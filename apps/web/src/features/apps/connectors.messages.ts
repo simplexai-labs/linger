@@ -127,11 +127,13 @@ export const connectorMessages = defineMessages("connectors", {
   notConfigured:
     "Connecting apps needs a Composio API key. Set <code>COMPOSIO_API_KEY</code> on the server.",
 
-  // API key form and status.
+  // API key form and status. Read All and Write All are labels in Composio.
   getAKey: "Get a key",
   apiKeyPlaceholder: "Paste your API key",
   showApiKey: "Show API key",
   hideApiKey: "Hide API key",
+  composioKeyReminder:
+    "Select <perm>Read All</perm> and <perm>Write All</perm> when creating your key.",
   composioApiKey: "Composio API key",
   checkingKey: "Checking key...",
   saveKey: "Save key",

@@ -8,13 +8,21 @@ import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { commonMessages } from "@/i18n/common.messages";
-import { useT } from "@/i18n/use-translation";
+import { RichMessage, useT } from "@/i18n/use-translation";
 
 import { externalAppsQueryOptions } from "./connected-apps-queries";
 import { connectorMessages as m } from "./connectors.messages";
 
 export const COMPOSIO_KEYS_URL =
   "https://dashboard.composio.dev/~/project/settings/api-keys";
+
+const PERM_TAGS = {
+  perm: (text: string) => (
+    <span className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">
+      {text}
+    </span>
+  ),
+};
 
 export function ProviderKeyLink({ href }: { href: string }) {
   const t = useT();
@@ -160,6 +168,7 @@ export function useComposioKeyForm({
   const queryClient = useQueryClient();
   const t = useT();
   return useProviderKeyForm({
+    helper: <RichMessage message={m.composioKeyReminder} tags={PERM_TAGS} />,
     label: t(m.composioApiKey),
     labelAction: <ProviderKeyLink href={COMPOSIO_KEYS_URL} />,
     onCancel,
