@@ -55,6 +55,7 @@ import {
   InstallerApi,
   installLocation,
   legacyMigrationResult,
+  localModelsStopEnv,
   parseSetCookie,
   pollDelayMs,
   LocalServerUnverifiedError,
@@ -4769,6 +4770,70 @@ describe("LocalServerModule after a restart", () => {
     await delay(300);
     for (const home of [update.home, none.home])
       expect(existsSync(path.join(home, "stop-local-models.json"))).toBe(false);
+  });
+
+  it("stops the local models on OS logout and deduplicates synchronous session-end stop", async () => {
+    const stopped = (home: string) => path.join(home, "stop-local-models.json");
+    const logout = fixture({}, enrolled, record);
+    await logout.host.start();
+    await waitForInstaller(() =>
+      expect(logout.module.status().phase).toBe("ready"),
+    );
+    expect(logout.module.localModelsStopSpec()).toMatchObject({
+      executable: process.execPath,
+      logFile: path.join(logout.home, "installer", "local-models-stop.log"),
+      env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: "1" }),
+    });
+    await logout.host.stop("logout");
+    await waitForInstaller(() =>
+      expect(existsSync(stopped(logout.home))).toBe(true),
+    );
+
+    const sessionEnd = fixture({}, enrolled, record);
+    const infoSpy = vi.spyOn(sessionEnd.host.ctx.log, "info");
+    await sessionEnd.host.start();
+    await waitForInstaller(() =>
+      expect(sessionEnd.module.status().phase).toBe("ready"),
+    );
+    sessionEnd.module.stopLocalModelsNow();
+    await sessionEnd.host.stop("logout");
+    await waitForInstaller(() =>
+      expect(
+        readFileSync(
+          path.join(sessionEnd.home, "installer", "local-models-stop.log"),
+          "utf8",
+        ),
+      ).toBe('{"failed":[]}\n'),
+    );
+    const stopLogs = infoSpy.mock.calls.filter(
+      ([event]) => event === "local_server.local_models_stopping",
+    );
+    expect(stopLogs).toHaveLength(1);
+
+    const none = fixture();
+    await none.host.start();
+    expect(none.module.localModelsStopSpec()).toBeUndefined();
+    none.module.stopLocalModelsNow();
+    await none.host.stop("logout");
+    await delay(200);
+    expect(existsSync(stopped(none.home))).toBe(false);
+  });
+
+  it("localModelsStopEnv carries only non-secret localmodels overrides", () => {
+    expect(
+      localModelsStopEnv({
+        LINGER_COMPUTER_TOKEN: "sr1.secret",
+        COMPOSIO_API_KEY: "secret-key",
+        LOCALMODELS_DEBUG: "tiny",
+        SIMPLEX_REGION: "global",
+        LINGER_LOCALMODELS_DEV_PYTHON: "/opt/python3",
+      }),
+    ).toEqual({
+      ELECTRON_RUN_AS_NODE: "1",
+      LOCALMODELS_DEBUG: "tiny",
+      SIMPLEX_REGION: "global",
+      LINGER_LOCALMODELS_DEV_PYTHON: "/opt/python3",
+    });
   });
 
   it("moves the keys of the unpacked source's .env into the instance's user.env once", async () => {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  BaseWindow,
   Notification,
   app,
   desktopCapturer,
@@ -17,6 +18,7 @@ import {
 
 import { lingerHome } from "@linger/local-installation/home";
 
+import { DesktopShutdownController } from "./app-lifecycle.js";
 import { quitRequested } from "./app-window.js";
 import { CredentialStore } from "./computer-credential.js";
 import {
@@ -277,10 +279,21 @@ async function main(): Promise<void> {
     systemLanguages: () => app.getPreferredSystemLanguages(),
   });
   const status = new StatusModule();
-  // Set once the bundle was swapped, so quitting relaunches the new version.
-  let relaunch = false;
-  // Set once the setup program of an update runs; it starts the new version.
-  let updating = false;
+  // On Windows, Electron does not emit `before-quit` on logoff or shutdown; a
+  // hidden, renderer-less BaseWindow receives `session-end` (WM_ENDSESSION)
+  // even when Linger started with `--background` and has no visible window.
+  const sessionWindow =
+    process.platform === "win32" &&
+    app.commandLine.getSwitchValue("ozone-platform") !== "headless"
+      ? new BaseWindow({
+          show: false,
+          width: 0,
+          height: 0,
+          frame: false,
+          skipTaskbar: true,
+          focusable: false,
+        })
+      : undefined;
   const updater = new UpdaterModule({
     version: VERSION,
     platform: process.platform,
@@ -298,11 +311,11 @@ async function main(): Promise<void> {
       notice.show();
     },
     restart: async () => {
-      relaunch = true;
+      shutdown.markRelaunch();
       app.quit();
     },
     quit: async () => {
-      updating = true;
+      shutdown.markUpdating();
       app.quit();
     },
     openExternal: (url) => shell.openExternal(url),
@@ -327,7 +340,7 @@ async function main(): Promise<void> {
           openExternal: (url: string) => shell.openExternal(url),
           // The same quit and relaunch path an installed update takes.
           relaunch: () => {
-            relaunch = true;
+            shutdown.markRelaunch();
             app.quit();
           },
         }
@@ -374,6 +387,7 @@ async function main(): Promise<void> {
       ...(process.platform === "win32"
         ? { protect: protectWithDaemon(daemonPath) }
         : {}),
+      localModelsStop: () => localServer.localModelsStopSpec(),
       ...desktopPermissions,
     }),
     status,
@@ -400,35 +414,34 @@ async function main(): Promise<void> {
     }),
   ];
   const host = new ModuleHost(modules, { config, log, bus });
+  const shutdown = new DesktopShutdownController({
+    prepareQuit: () => windows.prepareQuit(),
+    stopLocalModelsNow: () => localServer.stopLocalModelsNow(),
+    stopHost: (reason) => host.stop(reason),
+    destroySessionWindow: () => {
+      if (sessionWindow && !sessionWindow.isDestroyed())
+        sessionWindow.destroy();
+    },
+    relaunch: () => app.relaunch(),
+    exit: (code) => app.exit(code),
+    log,
+  });
 
   const showApp = (): void => setup.showApp();
-  // The uninstaller, or setup replacing this release, asked to quit.
-  let replacing = false;
   app.on("second-instance", (_event, argv) => {
     // Without asking: the uninstaller is removing the app.
     if (quitRequested(argv)) {
-      replacing = true;
+      shutdown.markReplacing();
       app.quit();
     } else showApp();
   });
   app.on("activate", showApp);
   // Closing the window only hides it; the tray keeps the app running.
   app.on("window-all-closed", () => {});
-  let quitting = false;
-  app.on("before-quit", (event) => {
-    windows.prepareQuit();
-    if (quitting) return;
-    quitting = true;
-    event.preventDefault();
-    // Setup and the uninstaller stop the services and the local models
-    // themselves right after --quit; a stop from here would race theirs.
-    void host
-      .stop(relaunch || updating || replacing ? "update" : "quit")
-      .finally(() => {
-        if (relaunch) app.relaunch();
-        app.exit(0);
-      });
-  });
+  app.on("before-quit", (event) => shutdown.onBeforeQuit(event));
+  sessionWindow?.on("session-end", (event) =>
+    shutdown.onSessionEnd(event.reasons),
+  );
 
   // Tasks run in the app, so quitting takes the computer offline; ask first
   // only when that cancels running tasks.

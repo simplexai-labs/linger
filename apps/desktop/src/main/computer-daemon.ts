@@ -21,11 +21,21 @@ import type {
   CredentialStore,
 } from "./computer-credential.js";
 import type { DesktopConfig } from "./config.js";
-import type { Module, ModuleContext } from "./modules.js";
+import type { Module, ModuleContext, StopReason } from "./modules.js";
 import {
   SYSTEM_PERMISSION_IDS,
   type SystemPermissions,
 } from "./system-permissions.js";
+
+// The detached local-models stop command Desktop arms the daemon with so an
+// unexpected Desktop crash (stdin EOF without a planned shutdown line) still
+// stops local model engines and the Bifrost gateway.
+export interface LocalModelsStopSpec {
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly logFile: string;
+  readonly env: Readonly<Record<string, string>>;
+}
 
 // The child process seam; tests use a fake child.
 export interface DaemonChild {
@@ -73,6 +83,9 @@ export interface ComputerDaemonOptions {
   // ACL before the first launch. Only set on Windows, where Node's file modes
   // do nothing and the daemon refuses a config other users could read.
   readonly protect?: (directories: readonly string[]) => Promise<void>;
+  // Returns the detached `--stop-local-models` command to arm the daemon with
+  // for crash cleanup whenever this Desktop manages a local installation.
+  readonly localModelsStop?: () => LocalModelsStopSpec | undefined;
 }
 
 // The stdio features this Desktop offers the daemon in its hello line.
@@ -214,6 +227,8 @@ export class ComputerDaemonModule implements Module {
   #failure: string | undefined;
   // Consecutive launches that never reported a status.
   #startFailures = 0;
+  // Serialized local_models_stop.arm payload last sent to the active child.
+  #armedStopKey: string | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: ComputerDaemonOptions) {
@@ -257,6 +272,13 @@ export class ComputerDaemonModule implements Module {
       ctx.bus.on("computer.renamed", () => this.#requestRestart(true)),
       ctx.bus.on("computer.runtime", () => this.#requestRestart(true)),
     );
+    if (this.#options.localModelsStop) {
+      this.#unsubscribe.push(
+        ctx.bus.on("local-server.changed", () => {
+          if (this.#child) this.#syncLocalModelsStop(this.#child);
+        }),
+      );
+    }
     const env = this.#options.env ?? {};
     const protect = this.#protect();
     if (!(env instanceof Promise) && !protect) {
@@ -292,11 +314,11 @@ export class ComputerDaemonModule implements Module {
     );
   }
 
-  async stop(): Promise<void> {
+  async stop(reason: StopReason = "quit"): Promise<void> {
     this.#stopping = true;
     for (const off of this.#unsubscribe.splice(0)) off();
     clearTimeout(this.#retry);
-    await this.#terminate();
+    await this.#terminate(reason);
     this.#setState("stopped");
   }
 
@@ -330,7 +352,7 @@ export class ComputerDaemonModule implements Module {
       .then(async () => {
         // An earlier restart can arm a retry while this one is queued.
         clearTimeout(this.#retry);
-        await this.#terminate();
+        await this.#terminate("restart");
         this.#launch();
       })
       .catch((error: unknown) => {
@@ -405,8 +427,10 @@ export class ComputerDaemonModule implements Module {
       return;
     }
     this.#child = child;
+    this.#armedStopKey = undefined;
     if (this.#options.permissions)
       this.#send(child, { type: "hello", features: DAEMON_FEATURES });
+    this.#syncLocalModelsStop(child);
     child.onLine((line) => {
       if (this.#child !== child) return;
       let status: {
@@ -446,6 +470,7 @@ export class ComputerDaemonModule implements Module {
     child.onExit((code, reason) => {
       if (this.#child !== child) return;
       this.#child = undefined;
+      this.#armedStopKey = undefined;
       this.#setRunning(0);
       this.#setModelInvokes(0);
       this.#setConnection("disconnected");
@@ -511,6 +536,30 @@ export class ComputerDaemonModule implements Module {
     if (request.op === "relaunch") this.#options.relaunch!();
   }
 
+  #syncLocalModelsStop(child: DaemonChild): void {
+    const provider = this.#options.localModelsStop;
+    if (!provider) return;
+    const spec = provider();
+    if (!spec) {
+      if (this.#armedStopKey !== undefined) {
+        this.#armedStopKey = undefined;
+        this.#send(child, { type: "local_models_stop.disarm" });
+      }
+      return;
+    }
+    const payload = {
+      type: "local_models_stop.arm",
+      executable: spec.executable,
+      args: [...spec.args],
+      log_file: spec.logFile,
+      env: { ...spec.env },
+    };
+    const key = JSON.stringify(payload);
+    if (this.#armedStopKey === key) return;
+    this.#armedStopKey = key;
+    this.#send(child, payload);
+  }
+
   #send(child: DaemonChild, message: object): void {
     try {
       child.write(JSON.stringify(message));
@@ -521,10 +570,11 @@ export class ComputerDaemonModule implements Module {
     }
   }
 
-  async #terminate(): Promise<void> {
+  async #terminate(reason: StopReason | "restart"): Promise<void> {
     const child = this.#child;
     if (!child) return;
     this.#child = undefined;
+    this.#armedStopKey = undefined;
     this.#setRunning(0);
     this.#setModelInvokes(0);
     this.#setConnection("disconnected");
@@ -537,6 +587,9 @@ export class ComputerDaemonModule implements Module {
         clearTimeout(timer);
         resolve();
       });
+      // Announce planned teardown before EOF so the daemon does not run its
+      // crash-only local-models stop on normal quit, restart, or update.
+      this.#send(child, { type: "shutdown", reason });
       child.stop();
     });
   }
@@ -618,9 +671,12 @@ export const spawnDaemon =
     const child = spawn(executable, ["--config", configFile], {
       env,
       stdio: ["pipe", "pipe", "pipe"],
-      // The daemon must lead its own process group, which it stops with its
-      // runtimes. It still exits with the app: its stdin closes then.
-      detached: process.platform !== "win32",
+      // Detach on every platform: on POSIX the daemon leads its own process
+      // group; on Windows detaching keeps libuv from putting the daemon in
+      // Electron's kill-on-close Job Object, so a Desktop crash closes stdin
+      // cleanly and lets the daemon trigger crash-only local-models cleanup
+      // before exiting (windowsHide suppresses any console window).
+      detached: true,
       windowsHide: true,
     });
     const log = createWriteStream(logFile, { flags: "a", mode: 0o600 });
