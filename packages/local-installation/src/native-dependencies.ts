@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
+import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
   chmod,
@@ -7,13 +8,12 @@ import {
   readFile,
   readdir,
   rename,
-  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { x as extract } from "tar";
+import { x as extract, type ReadEntry } from "tar";
 import { orderByRegion } from "@linger/service-kit";
 import { downloadVerified } from "./download.js";
 import {
@@ -34,7 +34,7 @@ import {
 import { runProcess } from "./process.js";
 import { validatePublishedServiceSource } from "./published-source.js";
 import type { InstallerEvent } from "./events.js";
-import { renameRetrying } from "./fs-retry.js";
+import { removeRetrying, renameRetrying } from "./fs-retry.js";
 import {
   readSettledStamps,
   runBounded,
@@ -265,7 +265,15 @@ async function collectTreeEntries(
   return out;
 }
 
-async function hashTree(directory: string): Promise<{
+export interface StreamedFileHash {
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
+export async function hashTree(
+  directory: string,
+  precomputedHashes?: ReadonlyMap<string, StreamedFileHash>,
+): Promise<{
   hashes: Record<string, string>;
   stamps: SettledStamps;
 }> {
@@ -277,13 +285,218 @@ async function hashTree(directory: string): Promise<{
     const info = await lstat(file);
     if (!info.isFile() || info.isSymbolicLink())
       throw new Error("Unsafe native dependency cache entry.");
-    rawHashes[name] = await sha256File(file);
+    const precomputed = precomputedHashes?.get(name);
+    rawHashes[name] =
+      precomputed && precomputed.bytes === info.size
+        ? precomputed.sha256
+        : await sha256File(file);
     rawStamps[name] = [info.size, info.mtimeMs, info.ctimeMs];
   });
   return {
     hashes: Object.fromEntries(entries.map((name) => [name, rawHashes[name]!])),
     stamps: Object.fromEntries(entries.map((name) => [name, rawStamps[name]!])),
   };
+}
+
+function createTarFileHashTransform(
+  hashes: Map<string, StreamedFileHash>,
+): (entry: ReadEntry) => ReadEntry {
+  return (entry: ReadEntry) => {
+    const relative = entry.path.replace(/\\/g, "/").replace(/^\.\//, "");
+    const hash = createHash("sha256");
+    let bytes = 0;
+    const tx = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.length;
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+      flush(callback) {
+        hashes.set(relative, { sha256: hash.digest("hex"), bytes });
+        callback();
+      },
+    });
+    return tx as unknown as ReadEntry;
+  };
+}
+
+async function digestFile(
+  file: string,
+  algorithm: "sha256" | "sha512",
+  maxBytes: number,
+  label: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const hash = createHash(algorithm);
+  let total = 0;
+  for await (const chunk of createReadStream(file, { signal })) {
+    const buffer = chunk as Buffer;
+    total += buffer.length;
+    if (total > maxBytes)
+      throw new Error(`The bundled ${label} archive is larger than pinned.`);
+    hash.update(buffer);
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * Verifies a local bundled tar.gz archive's size and checksum while streaming
+ * it directly into `stage` and computing per-file SHA-256 hashes in memory,
+ * eliminating both the temporary archive copy and post-extract file re-reads.
+ */
+async function extractBundledTarVerified(options: {
+  file: string;
+  stage: string;
+  algorithm: "sha256" | "sha512";
+  digest: string;
+  maxBytes: number;
+  label?: string;
+  signal: AbortSignal;
+  onProgress?: (completed: number, total?: number) => void;
+  admit: (relative: string, type: string, size: number) => boolean;
+  getArchiveError: () => Error | undefined;
+}): Promise<Map<string, StreamedFileHash>> {
+  const label = options.label ?? "PostgreSQL";
+  const info = await stat(options.file).catch(() => undefined);
+  if (!info?.isFile())
+    throw new Error(
+      `The bundled ${label} archive is missing. Install Linger again.`,
+    );
+  if (info.size > options.maxBytes)
+    throw new Error(`The bundled ${label} archive is larger than pinned.`);
+
+  const archiveHash = createHash(options.algorithm);
+  const streamedHashes = new Map<string, StreamedFileHash>();
+  let completed = 0;
+  let meterFlushed = false;
+  let sizeExceeded = false;
+
+  const meter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      completed += chunk.length;
+      if (completed > options.maxBytes) {
+        sizeExceeded = true;
+        callback(
+          new Error(`The bundled ${label} archive is larger than pinned.`),
+        );
+        return;
+      }
+      archiveHash.update(chunk);
+      options.onProgress?.(completed, info.size);
+      callback(null, chunk);
+    },
+    flush(callback) {
+      meterFlushed = true;
+      callback();
+    },
+  });
+
+  const unpack = extract({
+    cwd: options.stage,
+    strict: true,
+    preservePaths: false,
+    filter: (name, entry) => {
+      const type =
+        "type" in entry
+          ? entry.type
+          : entry.isDirectory()
+            ? "Directory"
+            : entry.isFile()
+              ? "File"
+              : "Unsupported";
+      const relative = name.replace(/^\.\//, "").replace(/\/$/, "");
+      if (!relative && type === "Directory") return true;
+      return options.admit(relative, type, entry.size);
+    },
+    transform: createTarFileHashTransform(streamedHashes),
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const source = createReadStream(options.file);
+      let settled = false;
+      const cleanup = () => {
+        options.signal.removeEventListener("abort", onAbort);
+      };
+      const destroyStreams = (reason?: Error) => {
+        if (!source.destroyed) source.destroy();
+        if (!meter.destroyed) meter.destroy();
+        try {
+          if (reason) unpack.abort(reason);
+        } catch {
+          // Unpack already closed.
+        }
+      };
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        destroyStreams(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        reject(error);
+      };
+      const onAbort = () => {
+        fail(
+          options.signal.reason ?? new DOMException("Aborted", "AbortError"),
+        );
+      };
+      if (options.signal.aborted) {
+        onAbort();
+        return;
+      }
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      source.on("error", fail);
+      meter.on("error", fail);
+      unpack.on("error", fail);
+      unpack.once("close", () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        destroyStreams();
+        resolve();
+      });
+      source.pipe(meter).pipe(unpack);
+    });
+  } catch (error) {
+    if (options.signal.aborted || sizeExceeded) throw error;
+    const actualDigest = meterFlushed
+      ? archiveHash.digest("hex")
+      : await digestFile(
+          options.file,
+          options.algorithm,
+          options.maxBytes,
+          label,
+          options.signal,
+        );
+    if (actualDigest !== options.digest) {
+      throw new Error(
+        `The bundled ${label} archive does not match its checksum. Install Linger again.`,
+        { cause: error },
+      );
+    }
+    const admittedError = options.getArchiveError();
+    if (admittedError) throw admittedError;
+    throw error;
+  }
+
+  const actualDigest = meterFlushed
+    ? archiveHash.digest("hex")
+    : await digestFile(
+        options.file,
+        options.algorithm,
+        options.maxBytes,
+        label,
+        options.signal,
+      );
+  if (actualDigest !== options.digest) {
+    throw new Error(
+      `The bundled ${label} archive does not match its checksum. Install Linger again.`,
+    );
+  }
+  const admittedError = options.getArchiveError();
+  if (admittedError) throw admittedError;
+  return streamedHashes;
 }
 
 async function verifyCachedTree(
@@ -504,26 +717,8 @@ export async function acquireNativeArtifact(
             `${randomUUID()}.${artifact.format === "zip" ? "zip" : "tgz"}`,
           );
         await privateDirectory(stage);
+        let succeeded = false;
         try {
-          if (artifact.file !== undefined)
-            await copyVerified({
-              ...artifact,
-              file: artifact.file,
-              output: archive,
-              signal,
-              onProgress,
-            });
-          else if (home)
-            await downloadInRegion(
-              home,
-              { ...artifact, output: archive, signal, onProgress },
-              fetcher,
-            );
-          else
-            await downloadVerified(
-              { ...artifact, output: archive, signal, onProgress },
-              fetcher,
-            );
           let expanded = 0;
           let archiveError: Error | undefined;
           const admit = (relative: string, type: string, size: number) => {
@@ -544,41 +739,75 @@ export async function acquireNativeArtifact(
             }
             return !archiveError;
           };
-          if (artifact.format === "zip")
-            await extractZip(archive, stage, (entry) =>
-              admit(
-                entry.name,
-                entry.directory ? "Directory" : "File",
-                entry.size,
-              ),
-            );
-          else
-            await extract({
-              file: archive,
-              cwd: stage,
-              strict: true,
-              preservePaths: false,
-              filter: (name, entry) => {
-                const type =
-                  "type" in entry
-                    ? entry.type
-                    : entry.isDirectory()
-                      ? "Directory"
-                      : entry.isFile()
-                        ? "File"
-                        : "Unsupported";
-                const relative = name.replace(/^\.\//, "").replace(/\/$/, "");
-                if (!relative && type === "Directory") return true;
-                return admit(relative, type, entry.size);
-              },
+          let streamedHashes: Map<string, StreamedFileHash> | undefined;
+          if (artifact.file !== undefined && artifact.format !== "zip") {
+            streamedHashes = await extractBundledTarVerified({
+              file: artifact.file,
+              stage,
+              algorithm: artifact.algorithm,
+              digest: artifact.digest,
+              maxBytes: artifact.maxBytes,
+              label: artifact.label,
+              signal,
+              onProgress,
+              admit,
+              getArchiveError: () => archiveError,
             });
-          if (archiveError) throw archiveError;
+          } else {
+            if (artifact.file !== undefined)
+              await copyVerified({
+                ...artifact,
+                file: artifact.file,
+                output: archive,
+                signal,
+                onProgress,
+              });
+            else if (home)
+              await downloadInRegion(
+                home,
+                { ...artifact, output: archive, signal, onProgress },
+                fetcher,
+              );
+            else
+              await downloadVerified(
+                { ...artifact, output: archive, signal, onProgress },
+                fetcher,
+              );
+            if (artifact.format === "zip")
+              await extractZip(archive, stage, (entry) =>
+                admit(
+                  entry.name,
+                  entry.directory ? "Directory" : "File",
+                  entry.size,
+                ),
+              );
+            else {
+              await extract({
+                file: archive,
+                cwd: stage,
+                strict: true,
+                preservePaths: false,
+                filter: (name, entry) => {
+                  const type =
+                    "type" in entry
+                      ? entry.type
+                      : entry.isDirectory()
+                        ? "Directory"
+                        : entry.isFile()
+                          ? "File"
+                          : "Unsupported";
+                  const relative = name.replace(/^\.\//, "").replace(/\/$/, "");
+                  if (!relative && type === "Directory") return true;
+                  return admit(relative, type, entry.size);
+                },
+              });
+            }
+            if (archiveError) throw archiveError;
+          }
           if (artifact.windowsPostgres) {
             // initdb relaunches itself and starts postgres through narrow Win32 APIs.
-            for (const program of postgresPrograms)
-              await writeFile(
-                path.join(stage, "bin", `${program}.exe.manifest`),
-                `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            for (const program of postgresPrograms) {
+              const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity name="Linger.PostgreSQL.${program}" version="1.0.0.0" type="win32"/>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -587,11 +816,20 @@ export async function acquireNativeArtifact(
     </windowsSettings>
   </application>
 </assembly>
-`,
+`;
+              const xmlBytes = Buffer.from(xml, "utf8");
+              await writeFile(
+                path.join(stage, "bin", `${program}.exe.manifest`),
+                xmlBytes,
                 { flag: "wx" },
               );
+              streamedHashes?.set(`bin/${program}.exe.manifest`, {
+                sha256: createHash("sha256").update(xmlBytes).digest("hex"),
+                bytes: xmlBytes.length,
+              });
+            }
           }
-          const { hashes, stamps } = await hashTree(stage);
+          const { hashes, stamps } = await hashTree(stage, streamedHashes);
           const manifestBody = JSON.stringify(hashes);
           await writeFile(
             path.join(stage, ".simplex-files.json"),
@@ -608,10 +846,15 @@ export async function acquireNativeArtifact(
             manifestDigest,
             stamps,
           );
+          succeeded = true;
           return directory;
         } finally {
-          await rm(archive, { force: true });
-          await rm(stage, { recursive: true, force: true });
+          const cleanup = async () => {
+            await removeRetrying(archive);
+            await removeRetrying(stage);
+          };
+          if (succeeded) await cleanup();
+          else await cleanup().catch(() => undefined);
         }
       });
     } catch (error) {

@@ -11,6 +11,7 @@ import {
   startNativeLiveKit,
 } from "./native-livekit.js";
 import {
+  inspectNativeListeners,
   inspectNativeProcess,
   SERVICE_RESTART_POLICY,
   startNativeProcess,
@@ -21,13 +22,27 @@ vi.mock("./native-process.js", async (original) => {
   const actual = await original<typeof import("./native-process.js")>();
   return {
     ...actual,
+    inspectNativeListeners: vi.fn(actual.inspectNativeListeners),
+    inspectNativeProcess: vi.fn(actual.inspectNativeProcess),
     startNativeProcess: vi.fn(actual.startNativeProcess),
   };
 });
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.mocked(inspectNativeListeners).mockReset();
+  vi.mocked(inspectNativeProcess).mockClear();
   vi.mocked(startNativeProcess).mockClear();
+  const actual = await vi.importActual<typeof import("./native-process.js")>(
+    "./native-process.js",
+  );
+  vi.mocked(inspectNativeListeners).mockImplementation(
+    actual.inspectNativeListeners,
+  );
+  vi.mocked(inspectNativeProcess).mockImplementation(
+    actual.inspectNativeProcess,
+  );
+  vi.mocked(startNativeProcess).mockImplementation(actual.startNativeProcess);
   for (const root of roots.splice(0)) {
     await stopNativeProcess(root, "livekit").catch(() => {});
     await rm(root, { recursive: true, force: true });
@@ -210,6 +225,26 @@ test("startNativeLiveKit supervises exits with SERVICE_RESTART_POLICY", async ()
       restartOnConfigurationChange: true,
     }),
   );
+});
+
+test("startNativeLiveKit detects stopped LiveKit from one listener snapshot without extra process polls", async () => {
+  const root = await temp();
+  const settings = await prepareLiveKitSettings(root, new Set());
+  vi.mocked(startNativeProcess).mockResolvedValueOnce({
+    running: true,
+    pid: 123,
+  });
+  vi.mocked(inspectNativeListeners).mockResolvedValueOnce([{ running: false }]);
+  await expect(
+    startNativeLiveKit({
+      root,
+      executable: path.join(root, "livekit-server"),
+      settings,
+      signal: new AbortController().signal,
+    }),
+  ).rejects.toThrow("Native LiveKit stopped during startup");
+  expect(inspectNativeListeners).toHaveBeenCalledTimes(1);
+  expect(inspectNativeProcess).not.toHaveBeenCalled();
 });
 
 test.skipIf(process.platform === "win32")(

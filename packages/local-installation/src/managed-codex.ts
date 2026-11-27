@@ -1,10 +1,17 @@
 import path from "node:path";
+import { probeRuntimesWithDaemon } from "./daemon-runtime-probe.js";
 import { runLocalmodels } from "./localmodels-tool.js";
 import {
+  descriptorFromDaemonObservation,
+  discoverManagedRuntimeExecutable,
   inspectRuntimeDescriptors,
   inspectSelectedRuntimeDescriptors,
+  readModelSourceRuntimeHints,
   runtimeEnvironmentFromDescriptors,
+  runtimeProfileEnvFor,
+  type RuntimeDescriptor,
 } from "./managed-runtimes.js";
+import { readSetupChoice } from "./setup-selection.js";
 import { validateModelConfig } from "./instance.js";
 export interface RuntimeModel {
   baseUrl: string;
@@ -100,8 +107,53 @@ export async function readManagedModel(
 export async function managedRuntimeEnvironment(
   home: string,
   root = home,
-  dependencies: { localmodels?: typeof runLocalmodels } = {},
+  dependencies: {
+    localmodels?: typeof runLocalmodels;
+    probeRuntimes?: typeof probeRuntimesWithDaemon;
+    daemonExecutable?: string;
+    platform?: NodeJS.Platform;
+    env?: NodeJS.ProcessEnv;
+  } = {},
 ): Promise<NodeJS.ProcessEnv> {
+  const choice = await readSetupChoice({ root });
+  if (!choice || choice === "local-models") return {};
+  const platform = dependencies.platform ?? process.platform;
+  const hints = await readModelSourceRuntimeHints(home);
+  const profileEnv = runtimeProfileEnvFor(choice, hints.environment);
+  const configured = await discoverManagedRuntimeExecutable(
+    home,
+    choice,
+    platform,
+    hints.runtimePaths,
+  );
+  const probe = dependencies.probeRuntimes ?? probeRuntimesWithDaemon;
+  const observations = await probe({
+    runtimes: [choice],
+    ...(configured ? { configuredPaths: { [choice]: configured } } : {}),
+    includeBundled: true,
+    env: { ...(dependencies.env ?? process.env), ...profileEnv },
+    daemonExecutable: dependencies.daemonExecutable,
+    platform,
+  });
+  if (observations !== null) {
+    const obs = observations.find((item) => item.type === choice);
+    if (obs && obs.status !== "error") {
+      const seed: RuntimeDescriptor = {
+        runtime: choice,
+        executable: null,
+        argvPrefix: [],
+        installed: false,
+        authenticated: false,
+        authMode: null,
+        loginCommand: null,
+        ...(Object.keys(profileEnv).length > 0
+          ? { environment: profileEnv }
+          : {}),
+      };
+      const descriptor = descriptorFromDaemonObservation(choice, obs, seed);
+      return runtimeEnvironmentFromDescriptors([descriptor]);
+    }
+  }
   return runtimeEnvironmentFromDescriptors(
     await inspectSelectedRuntimeDescriptors(home, root, dependencies),
   );

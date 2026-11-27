@@ -24,7 +24,7 @@ import {
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { createInterface } from "node:readline";
-import type { Readable } from "node:stream";
+import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { createZstdDecompress } from "node:zlib";
@@ -609,6 +609,7 @@ export class LocalServerModule implements Module {
   #localModelsDegraded: LocalModelsDegradedStatus | undefined;
   #node: Promise<string> | undefined;
   #abort = new AbortController();
+  #reconcileAbort: AbortController | undefined;
   #inspectAbort: AbortController | undefined;
   #pruning: Promise<void> = Promise.resolve();
   #preStagedSources = new Map<string, PreStagedSourceState>();
@@ -728,6 +729,7 @@ export class LocalServerModule implements Module {
     });
     this.#offServerChanged = ctx.bus.on("server.changed", (serverUrl) => {
       if (this.#origin && sameOrigin(this.#origin, serverUrl)) return;
+      this.#cancelBackgroundReconcile();
       this.#origin = undefined;
       if (ctx.config.get().localServer !== false)
         ctx.config.update({ localServer: false });
@@ -756,6 +758,7 @@ export class LocalServerModule implements Module {
     // by itself once idle.
     this.#cancelPrestage("stopped");
     this.#cancelBifrostPrefetch("stopped");
+    this.#cancelBackgroundReconcile();
     this.#abort.abort();
     if (this.#busyCount > 0) {
       this.#busyCount = 0;
@@ -817,7 +820,7 @@ export class LocalServerModule implements Module {
           // A detached Windows process otherwise opens its own console window.
           windowsHide: true,
           stdio: ["ignore", output, output],
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+          env: { ...this.#daemonEnv(), ELECTRON_RUN_AS_NODE: "1" },
         },
       );
       child.once("error", (error) =>
@@ -1169,9 +1172,7 @@ export class LocalServerModule implements Module {
         (this.#options.platform ?? process.platform) === "win32"
       ) {
         try {
-          await (this.#options.checkPrivateLocation ?? windowsPrivateLocation)(
-            home,
-          );
+          await this.#checkPrivateLocation(home);
         } catch (error) {
           locationError =
             error instanceof Error ? error.message : String(error);
@@ -1382,6 +1383,14 @@ export class LocalServerModule implements Module {
             state: "failed",
             message: byokFailure(out, "Could not list the endpoint's models."),
           };
+  }
+
+  #checkPrivateLocation(directory: string): Promise<void> {
+    if (this.#options.checkPrivateLocation)
+      return this.#options.checkPrivateLocation(directory);
+    return windowsPrivateLocation(directory, undefined, {
+      daemonExecutable: this.#options.daemonExecutable,
+    });
   }
 
   #daemonEnv(): NodeJS.ProcessEnv {
@@ -1766,9 +1775,7 @@ export class LocalServerModule implements Module {
     const run = async (): Promise<string> => {
       await this.#awaitSettling(previous, signal);
       if ((this.#options.platform ?? process.platform) === "win32") {
-        const checkPrivate =
-          this.#options.checkPrivateLocation ?? windowsPrivateLocation;
-        await checkPrivate(home);
+        await this.#checkPrivateLocation(home);
         signal.throwIfAborted();
       }
       return this.#ensureSource(home, signal, { silent: true });
@@ -2105,6 +2112,7 @@ export class LocalServerModule implements Module {
     const status = this.status();
     if (!status.available)
       throw new Error("Running Linger on this computer is not supported here");
+    this.#cancelBackgroundReconcile();
     const signal = this.#abort.signal;
     const home = this.#location ?? this.#home;
     const resolvedHome = path.resolve(home);
@@ -2170,17 +2178,15 @@ export class LocalServerModule implements Module {
       // target ownership) fail immediately instead of after installation and
       // enrollment.
       if (platform === "win32") {
-        const checkPrivate =
-          this.#options.checkPrivateLocation ?? windowsPrivateLocation;
         await this.#timed("private_paths", async () => {
-          await checkPrivate(home);
+          await this.#checkPrivateLocation(home);
           const daemonDirectory = this.#options.daemonDirectory;
           if (
             daemonDirectory &&
             path.resolve(daemonDirectory) !== path.resolve(home)
           ) {
             try {
-              await checkPrivate(daemonDirectory);
+              await this.#checkPrivateLocation(daemonDirectory);
             } catch (error) {
               // Do not tag a daemon-directory refusal as an install-location
               // refusal; moving the install folder does not move <userData>.
@@ -2857,7 +2863,7 @@ export class LocalServerModule implements Module {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           env: {
-            ...process.env,
+            ...this.#daemonEnv(),
             ELECTRON_RUN_AS_NODE: "1",
             LINGER_HOME: home,
           },
@@ -3390,11 +3396,38 @@ export class LocalServerModule implements Module {
           bundle.archive!.file,
           installerDirectory,
         );
-        await this.#checkArchive(file, bundle.archive!.sha256, signal);
-        signal.throwIfAborted();
-        // Unpacked in place: renaming a folder of fresh files waited up to
-        // 30 s for Windows' scanners.
-        await this.#unpackInto(file, directory, signal);
+        if (file.endsWith(".zst")) {
+          const stage = `${directory}.staging-${randomUUID()}`;
+          try {
+            await this.#unpackInto(file, stage, signal, {
+              verifySha256: bundle.archive!.sha256,
+              ...(bundle.archive!.bytes !== undefined
+                ? { verifyBytes: bundle.archive!.bytes }
+                : {}),
+            });
+            signal.throwIfAborted();
+            await renameRetrying(stage, directory, {
+              ...(this.#options.platform
+                ? { platform: this.#options.platform }
+                : {}),
+              ...(this.#options.rename ? { rename: this.#options.rename } : {}),
+              signal,
+              onRetry: (error, attempt) =>
+                this.#ctx?.log.warn("local_server.rename_locked", {
+                  directory,
+                  attempt,
+                  code: error.code,
+                  error: error.message,
+                }),
+            });
+          } finally {
+            await removeRetrying(stage).catch(() => undefined);
+          }
+        } else {
+          await this.#checkArchive(file, bundle.archive!.sha256, signal);
+          signal.throwIfAborted();
+          await this.#unpackInto(file, directory, signal);
+        }
       }
       signal.throwIfAborted();
       // The record written last marks it complete, and the installer then
@@ -3653,19 +3686,23 @@ export class LocalServerModule implements Module {
   // update deleted. They move once into the instance's user.env, which the
   // installer reads and every update keeps; a developer's checkout is left
   // alone.
-  async #adoptSourceKeys(home: string): Promise<void> {
-    if (this.#options.checkout) return;
+  async #adoptSourceKeys(home: string): Promise<boolean> {
+    if (this.#options.checkout) return false;
     const parent = path.join(home, "desktop", "source");
     const root = path.join(home, "instances", LOCAL_INSTANCE);
+    let movedAny = false;
     for (const entry of await readdir(parent).catch(() => [] as string[])) {
       const moved = await adoptUserEnvironment(
         root,
         path.join(parent, entry, ".env"),
         (keys) => this.#ctx?.log.warn("local_server.keys_not_moved", { keys }),
       );
-      if (moved.length)
+      if (moved.length) {
+        movedAny = true;
         this.#ctx?.log.info("local_server.keys_moved", { keys: moved });
+      }
     }
+    return movedAny;
   }
 
   #schedulePruneSources(
@@ -3829,8 +3866,10 @@ export class LocalServerModule implements Module {
     file: string,
     unpacked: string,
     signal: AbortSignal,
+    verify?: { readonly verifySha256?: string; readonly verifyBytes?: number },
   ): Promise<void> {
     await unpackArchive(file, unpacked, signal, {
+      ...verify,
       onFallback: (command) =>
         this.#ctx?.log.warn("local_server.tar_fallback", {
           command,
@@ -3900,7 +3939,7 @@ export class LocalServerModule implements Module {
         {
           stdio: ["pipe", "pipe", "ignore"],
           windowsHide: true,
-          env: { ...process.env, LINGER_HOME: home },
+          env: { ...this.#daemonEnv(), LINGER_HOME: home },
           signal,
         },
       );
@@ -4226,12 +4265,72 @@ export class LocalServerModule implements Module {
     }
   }
 
+  #cancelBackgroundReconcile(): void {
+    this.#reconcileAbort?.abort();
+    this.#reconcileAbort = undefined;
+  }
+
+  async #reconcileAfterFastReady(
+    record: LocalRecord,
+    controller: AbortController,
+    signal: AbortSignal,
+    startedAt: number,
+  ): Promise<void> {
+    let stage = "ensure_node";
+    try {
+      const serving = await this.#runResume(
+        record,
+        record.repo,
+        signal,
+        (next) => {
+          stage = next;
+        },
+        { skipAdoptKeys: true },
+      );
+      if (signal.aborted) return;
+      const origin =
+        serving.origin ??
+        (await this.#readInstanceOrigin(record.home)) ??
+        record.origin;
+      if (signal.aborted) return;
+      if (!this.#origin || !sameOrigin(this.#origin, record.origin)) return;
+      if (origin !== record.origin) {
+        await this.#writeRecord({ ...record, origin });
+        if (signal.aborted) return;
+        if (!this.#origin || !sameOrigin(this.#origin, record.origin)) return;
+        this.#ctx?.log.info("local_server.origin_moved", {
+          from: record.origin,
+          to: origin,
+        });
+        this.#ready(origin, record.origin, "port_moved");
+        await this.#syncLocalGateway(record.home, origin, record.origin);
+        if (signal.aborted) return;
+      }
+      this.#ctx?.bus.emit("local-server.changed");
+      this.#ctx?.log.info("local_server.resume_succeeded", {
+        total_ms: Date.now() - startedAt,
+        background: true,
+      });
+    } catch (error) {
+      if (signal.aborted) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.#ctx?.log.warn("local_server.resume_background_failed", {
+        stage,
+        total_ms: Date.now() - startedAt,
+        error: this.#formatResumeError(message),
+      });
+    } finally {
+      if (this.#reconcileAbort === controller) this.#reconcileAbort = undefined;
+    }
+  }
+
   // Runs the installer headless against the saved instance; it starts only
   // the services that are not running and asks for nothing. When this app
   // brings a newer source package (it was installed over an older one), the
   // services move to it first: the window and the Computer already are this
   // version, and the older services would serve the older interface.
   async #resume(record: LocalRecord, signal: AbortSignal): Promise<void> {
+    this.#cancelBackgroundReconcile();
     let currentRecord = record;
     this.#origin = record.origin;
     this.#resuming = true;
@@ -4245,6 +4344,8 @@ export class LocalServerModule implements Module {
       const versionChanged =
         !currentRecord.version ||
         compareVersions(this.#options.version, currentRecord.version) > 0;
+      let repoValid: boolean | undefined;
+      let keysAlreadyAdopted = false;
       if (update) {
         // The services restart even if they still answer. A same-version
         // bundle refresh shows Starting instead of claiming a new version.
@@ -4263,6 +4364,7 @@ export class LocalServerModule implements Module {
         // The window would show the server as unreachable until it is back.
         const checkStartedAt = Date.now();
         let reachable = await this.#reachable(currentRecord.origin);
+        let serverVerified = false;
         if (!reachable) {
           // If an earlier restart moved the instance onto a new port before
           // desktop state caught up, follow the live origin right away instead
@@ -4284,13 +4386,66 @@ export class LocalServerModule implements Module {
             this.#ready(moved, previous, "port_moved");
             await this.#syncLocalGateway(currentRecord.home, moved, previous);
             reachable = true;
+            serverVerified = true;
           }
         }
         this.#ctx?.log.info("local_server.resume_stage", {
           stage: "fast_ready_check",
           ms: Date.now() - checkStartedAt,
         });
-        if (!reachable) windows?.showStarting();
+        if (!reachable) {
+          windows?.showStarting();
+        } else {
+          repoValid = await validateSourceRepository(currentRecord.repo).then(
+            () => true,
+            () => false,
+          );
+          const existingRuntimeEnv = this.#ctx?.config.get().runtimeEnvironment;
+          const hasRuntimeEnv = Boolean(
+            existingRuntimeEnv && Object.keys(existingRuntimeEnv).length > 0,
+          );
+          if (repoValid && hasRuntimeEnv) {
+            const verified =
+              serverVerified || (await this.#checkServer(currentRecord));
+            if (verified) {
+              const keysMoved = await this.#adoptSourceKeys(currentRecord.home);
+              keysAlreadyAdopted = true;
+              signal.throwIfAborted();
+              if (!keysMoved) {
+                if (!serverVerified) {
+                  this.#ready(
+                    currentRecord.origin,
+                    currentRecord.origin,
+                    "resume_ready",
+                  );
+                  await this.#syncLocalGateway(
+                    currentRecord.home,
+                    currentRecord.origin,
+                    currentRecord.origin,
+                  );
+                  signal.throwIfAborted();
+                }
+                this.#set("ready", "Linger is running on this computer.");
+                this.#ctx?.log.info("local_server.resume_fast_ready", {
+                  ms: Date.now() - startedAt,
+                });
+                const reconcileAbort = new AbortController();
+                this.#reconcileAbort = reconcileAbort;
+                const reconcileSignal = AbortSignal.any([
+                  signal,
+                  reconcileAbort.signal,
+                ]);
+                void this.#reconcileAfterFastReady(
+                  currentRecord,
+                  reconcileAbort,
+                  reconcileSignal,
+                  startedAt,
+                );
+                return;
+              }
+            }
+          }
+        }
       }
       // A source folder the installer no longer runs is unpacked again from
       // this app's package: one removed since (by hand, or a cleanup that an
@@ -4299,10 +4454,13 @@ export class LocalServerModule implements Module {
         this.#options.sourceArchive &&
         !this.#options.checkout &&
         (update ||
-          !(await validateSourceRepository(currentRecord.repo).then(
-            () => true,
-            () => false,
-          )))
+          !(
+            repoValid ??
+            (await validateSourceRepository(currentRecord.repo).then(
+              () => true,
+              () => false,
+            ))
+          ))
           ? await this.#ensureSource(currentRecord.home, signal)
           : currentRecord.repo;
       const serving = await this.#runResume(
@@ -4312,6 +4470,7 @@ export class LocalServerModule implements Module {
         (next) => {
           stage = next;
         },
+        { skipAdoptKeys: keysAlreadyAdopted },
       );
       // The installer moves the web port off one another program took. The
       // record and the window follow the origin together (a launch resumes
@@ -4405,6 +4564,7 @@ export class LocalServerModule implements Module {
   // Install sets this computer up again in the same location, keeping what
   // is left of that instance.
   async #reset(): Promise<void> {
+    this.#cancelBackgroundReconcile();
     const ctx = this.#ctx!;
     try {
       await rm(this.#recordFile(), { force: true });
@@ -4518,8 +4678,9 @@ export class LocalServerModule implements Module {
     repo: string,
     signal: AbortSignal,
     onStage?: (stage: string) => void,
+    options?: { readonly skipAdoptKeys?: boolean },
   ): Promise<{ source?: string; origin?: string; revived: boolean }> {
-    await this.#adoptSourceKeys(record.home);
+    if (!options?.skipAdoptKeys) await this.#adoptSourceKeys(record.home);
     // Resolved while the Node runtime is checked, so a slow PAC script does
     // not add to the start.
     const proxyEnv = this.#systemProxyEnv();
@@ -4612,6 +4773,7 @@ export class LocalServerModule implements Module {
         drainTimer.unref?.();
       });
     });
+    signal.throwIfAborted();
     this.#ctx?.log.info("local_server.resume_stage", {
       stage: "installer_resume",
       ms: Date.now() - resumeStartedAt,
@@ -4872,7 +5034,7 @@ interface BundledRuntime {
   target: string;
   sourceArchiveSha256: string;
   layout?: "archive" | "directory";
-  archive?: { file: string; sha256: string };
+  archive?: { file: string; sha256: string; bytes?: number };
   // runtime/files.json, when the services are a folder.
   directory?: { file: string; sha256: string };
   // The shared Computer tools binary, or a legacy release archive / folder copy.
@@ -6338,6 +6500,41 @@ export interface UnpackArchiveOptions {
   readonly runCommand?: typeof run;
   readonly fallback?: typeof extractArchiveFallback;
   readonly onFallback?: (command: string) => void;
+  readonly verifySha256?: string;
+  readonly verifyBytes?: number;
+}
+
+async function digestArchiveFile(
+  file: string,
+  signal: AbortSignal,
+): Promise<{ sha256: string; bytes: number }> {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  for await (const chunk of createReadStream(file, { signal })) {
+    const buffer = chunk as Buffer;
+    bytes += buffer.length;
+    hash.update(buffer);
+  }
+  return { sha256: hash.digest("hex"), bytes };
+}
+
+function assertArchiveIntegrity(
+  file: string,
+  actual: { sha256: string; bytes: number },
+  expected: { verifySha256?: string; verifyBytes?: number },
+  cause?: unknown,
+): void {
+  if (
+    (expected.verifyBytes !== undefined &&
+      actual.bytes !== expected.verifyBytes) ||
+    (expected.verifySha256 !== undefined &&
+      actual.sha256 !== expected.verifySha256)
+  ) {
+    throw new Error(
+      `The bundled ${path.basename(file)} is damaged`,
+      cause !== undefined ? { cause } : undefined,
+    );
+  }
 }
 
 // Unpacks `file` (stripping its single top-level directory) into an empty
@@ -6354,19 +6551,99 @@ export async function unpackArchive(
   const command = options.command ?? tarCommand(platform);
   const runCommand = options.runCommand ?? run;
   const fallback = options.fallback ?? extractArchiveFallback;
+  const shouldVerify =
+    options.verifySha256 !== undefined || options.verifyBytes !== undefined;
   await removeRetrying(unpacked);
   await mkdir(unpacked, { recursive: true, mode: 0o700 });
   try {
     // Windows' tar may not read zstd; Node's zlib does, and tar reads stdin.
     if (file.endsWith(".zst")) {
-      await runCommand(
-        command,
-        ["-xf", "-", "--strip-components=1"],
-        unpacked,
-        signal,
-        createReadStream(file, { signal }).pipe(createZstdDecompress()),
-      );
+      if (!shouldVerify) {
+        const source = createReadStream(file, { signal });
+        const decompressor = createZstdDecompress();
+        source.on("error", (err) => {
+          if (!decompressor.destroyed) decompressor.destroy(err);
+        });
+        decompressor.on("error", () => {
+          // Handled through runCommand's pipeline/termination path.
+        });
+        try {
+          await runCommand(
+            command,
+            ["-xf", "-", "--strip-components=1"],
+            unpacked,
+            signal,
+            source.pipe(decompressor),
+          );
+        } finally {
+          if (!source.destroyed) source.destroy();
+          if (!decompressor.destroyed) decompressor.destroy();
+        }
+        return;
+      }
+      const hash = createHash("sha256");
+      let bytes = 0;
+      let meterFlushed = false;
+      const source = createReadStream(file, { signal });
+      const meter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          bytes += chunk.length;
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+        flush(callback) {
+          meterFlushed = true;
+          callback();
+        },
+      });
+      const decompressor = createZstdDecompress();
+      source.on("error", (err) => {
+        if (!meter.destroyed) meter.destroy(err);
+        if (!decompressor.destroyed) decompressor.destroy(err);
+      });
+      meter.on("error", (err) => {
+        if (!decompressor.destroyed) decompressor.destroy(err);
+      });
+      decompressor.on("error", () => {
+        // Handled through runCommand's pipeline/termination path.
+      });
+      const input = source.pipe(meter).pipe(decompressor);
+      try {
+        await runCommand(
+          command,
+          ["-xf", "-", "--strip-components=1"],
+          unpacked,
+          signal,
+          input,
+        );
+      } catch (error) {
+        if (
+          signal.aborted ||
+          (error as NodeJS.ErrnoException)?.code === "ENOENT"
+        )
+          throw error;
+        const actual = meterFlushed
+          ? { sha256: hash.digest("hex"), bytes }
+          : await digestArchiveFile(file, signal);
+        assertArchiveIntegrity(file, actual, options, error);
+        throw error;
+      } finally {
+        if (!source.destroyed) source.destroy();
+        if (!meter.destroyed) meter.destroy();
+        if (!decompressor.destroyed) decompressor.destroy();
+      }
+      const actual = meterFlushed
+        ? { sha256: hash.digest("hex"), bytes }
+        : await digestArchiveFile(file, signal);
+      assertArchiveIntegrity(file, actual, options);
       return;
+    }
+    if (shouldVerify) {
+      assertArchiveIntegrity(
+        file,
+        await digestArchiveFile(file, signal),
+        options,
+      );
     }
     // Windows' tar.exe reads argv in the ANSI code page, so pass a relative path
     // from the resolved destination when both share a drive; POSIX tar is UTF-8
@@ -6388,6 +6665,14 @@ export async function unpackArchive(
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
     options.onFallback?.(command);
+    if (shouldVerify) {
+      assertArchiveIntegrity(
+        file,
+        await digestArchiveFile(file, signal),
+        options,
+        error,
+      );
+    }
     await removeRetrying(unpacked);
     await mkdir(unpacked, { recursive: true, mode: 0o700 });
     try {

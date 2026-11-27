@@ -174,6 +174,25 @@ vi.mock("./native-process.js", () => {
         ) => void;
       } = {},
     ) => {
+      if (process.platform === "win32") {
+        options.signal?.throwIfAborted();
+        const startedAt = Date.now();
+        const settled = await Promise.allSettled(
+          names.map((name) => stopNativeProcess(root, name)),
+        );
+        for (const [index, result] of settled.entries()) {
+          const name = names[index]!;
+          if (result.status === "rejected") {
+            const error: unknown = result.reason;
+            options.onServiceDone?.(name, Date.now() - startedAt, error);
+            throw error instanceof Error
+              ? error
+              : new Error("stopNativeProcess failed", { cause: error });
+          }
+          options.onServiceDone?.(name, Date.now() - startedAt);
+        }
+        return;
+      }
       for (const name of names) {
         options.signal?.throwIfAborted();
         const startedAt = Date.now();
@@ -629,14 +648,19 @@ test("a cold resume of a saved BYOK source reuses the installed runtime and forw
 });
 
 test("a restart of a saved BYOK source without resume prepares the runtime in full", async () => {
+  vi.mocked(managedRuntimeEnvironment).mockClear();
   const { result } = await restartAfter("codex", {
     mode: "byok",
     runtime: "pi",
   });
   expect(result.code).toBe(0);
   const options = vi.mocked(prepareRuntime).mock.calls[0]?.[1];
-  expect(options?.env).toBeDefined();
+  expect(options?.resolveEnv).toEqual(expect.any(Function));
   expect(options).not.toHaveProperty("reuseInstalled");
+  expect(options).not.toHaveProperty("reuseInstalledIfCompatible");
+  expect(vi.mocked(managedRuntimeEnvironment)).not.toHaveBeenCalled();
+  await options?.resolveEnv?.();
+  expect(vi.mocked(managedRuntimeEnvironment)).toHaveBeenCalledTimes(1);
 });
 
 test("choosing a subscription again replaces a saved BYOK source", async () => {
@@ -6390,4 +6414,53 @@ test("captures an early runtimeRecovery rejection without unhandledRejection and
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+test("cross-version update passes reuseInstalledIfCompatible and lazy resolveEnv without eager managedRuntimeEnvironment", async () => {
+  const f = await fixture();
+  const name = "native-flow-cross-version-reuse";
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ready",
+  });
+  const initial = await installNativeSource({
+    ...f,
+    name,
+    setupChoice: "codex",
+    externalComputer: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(initial.code).toBe(0);
+
+  const next = path.join(f.home, "next-cross-version-reuse");
+  await cp(f.repo, next, { recursive: true });
+  vi.mocked(managedRuntimeEnvironment).mockClear();
+  vi.mocked(prepareRuntime).mockClear();
+
+  const updated = await installNativeSource({
+    ...f,
+    repo: next,
+    name,
+    externalComputer: true,
+    reuseInstalledIfCompatible: true,
+    degradeLocalModels: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+
+  expect(updated.code).toBe(0);
+  expect(vi.mocked(managedRuntimeEnvironment)).not.toHaveBeenCalled();
+  expect(vi.mocked(prepareRuntime)).toHaveBeenCalledWith(
+    "codex",
+    expect.objectContaining({
+      reuseInstalledIfCompatible: true,
+      resolveEnv: expect.any(Function),
+    }),
+  );
+  expect(vi.mocked(prepareRuntime).mock.calls[0]![1]).not.toHaveProperty("env");
+  expect(vi.mocked(prepareRuntime).mock.calls[0]![1]).not.toHaveProperty(
+    "reuseInstalled",
+  );
 });

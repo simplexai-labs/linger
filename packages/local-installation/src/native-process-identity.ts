@@ -3,6 +3,10 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { excerptLine, redact } from "@linger/local-installation/redaction";
+import {
+  callWindowsProcessSnapshot,
+  type GoProcessSnapshot,
+} from "@linger/local-installation/windows-platform-worker";
 
 // The source supervisor imports this module directly, before any build, so
 // intra-package imports use the package self-reference in exports.
@@ -180,7 +184,42 @@ export async function parseWindowsListeners(
   return listeners;
 }
 
-export async function windowsProcesses(
+/**
+ * Converts a Win32 FILETIME integer string to the microsecond-truncated
+ * numeric FileTime produced by PowerShell CIM (`Win32_Process.CreationDate`),
+ * keeping recorded `win32:<pid>:<created>` identities identical across Go and
+ * PowerShell inspection backends and across upgrades.
+ */
+export function fileTimeStringToWindowsCreated(value: string): number {
+  if (!/^\d+$/.test(value)) return 0;
+  const ticks = BigInt(value);
+  if (ticks <= 0n) return 0;
+  return Number(ticks - (ticks % 10n));
+}
+
+function mapGoSnapshot(snapshot: GoProcessSnapshot): WindowsSnapshot {
+  const processes: WindowsProcess[] = snapshot.processes.map((entry) => ({
+    pid: entry.pid,
+    parent: entry.ppid,
+    created: fileTimeStringToWindowsCreated(entry.created),
+    command: entry.command,
+  }));
+  const listeners = new Map<number, number>();
+  const loopbackPorts = new Set<number>();
+  for (const row of snapshot.listeners ?? []) {
+    if (row.port < 1 || row.port > 65535 || row.pid < 1 || row.pid > 0xffffffff)
+      continue;
+    if (row.address === "127.0.0.1") {
+      listeners.set(row.port, row.pid);
+      loopbackPorts.add(row.port);
+    } else if (row.address === "0.0.0.0" && !loopbackPorts.has(row.port)) {
+      listeners.set(row.port, row.pid);
+    }
+  }
+  return { processes, listeners };
+}
+
+async function windowsProcessesPowerShell(
   systemRoot?: string,
 ): Promise<WindowsProcess[]> {
   const result = await runProcess(
@@ -197,6 +236,14 @@ export async function windowsProcesses(
     );
   }
   return parseWindowsProcesses(result.stdout);
+}
+
+export async function windowsProcesses(
+  systemRoot?: string,
+): Promise<WindowsProcess[]> {
+  const native = await callWindowsProcessSnapshot(false);
+  if (native.kind === "ok") return mapGoSnapshot(native.result).processes;
+  return windowsProcessesPowerShell(systemRoot);
 }
 
 async function windowsListeners(
@@ -236,22 +283,27 @@ async function windowsListeners(
 export async function windowsSnapshot(
   systemRoot: string,
 ): Promise<WindowsSnapshot> {
+  const native = await callWindowsProcessSnapshot(true);
+  if (native.kind === "ok") return mapGoSnapshot(native.result);
   const [processes, listeners] = await Promise.all([
-    windowsProcesses(systemRoot),
+    windowsProcessesPowerShell(systemRoot),
     windowsListeners(systemRoot),
   ]);
   return { processes, listeners };
 }
 /**
- * The PowerShell a supervisor starts to take this snapshot is its own child.
+ * The inspector a supervisor starts to take this snapshot is its own child.
  * Counted as a service process, it kept every Windows supervisor alive after
  * its service died, so the record still claimed a running service. Releases
- * before this one ran the same query, so it is recognized by its script.
+ * before this one ran the PowerShell CIM query, while newer releases run the
+ * Go daemon `platform` helper.
  */
 function processInspection(candidate: WindowsProcess): boolean {
   return (
-    /\bpowershell(?:\.exe)?\b/i.test(candidate.command) &&
-    candidate.command.includes("Get-CimInstance Win32_Process")
+    (/\bpowershell(?:\.exe)?\b/i.test(candidate.command) &&
+      candidate.command.includes("Get-CimInstance Win32_Process")) ||
+    (/\blinger-computer-daemon(?:\.exe)?\b/i.test(candidate.command) &&
+      /\bplatform\b/i.test(candidate.command))
   );
 }
 /** The supervisor holding the lease and everything it started, alive now. */

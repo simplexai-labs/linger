@@ -59,6 +59,9 @@ test("starts the saved instance again without new input", async () => {
     }),
   );
   expect(run.mock.calls[0]![0]).not.toHaveProperty("password");
+  expect(run.mock.calls[0]![0]).not.toHaveProperty(
+    "reuseInstalledIfCompatible",
+  );
 });
 
 test("an app update onto a new checkout starts in full but keeps local models optional", async () => {
@@ -77,6 +80,7 @@ test("an app update onto a new checkout starts in full but keeps local models op
   const started = run.mock.calls[0]![0];
   expect(started).toMatchObject({
     repo: "/source-next",
+    reuseInstalledIfCompatible: true,
     degradeLocalModels: true,
   });
   expect(started).not.toHaveProperty("resume");

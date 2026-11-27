@@ -53,9 +53,39 @@ it("stops an earlier release before an install replaces its files", () => {
     "Call StopEarlierLinger",
     "Call CloseLinger",
     'RMDir /r "$INSTDIR\\resources"',
-    'File /r "${STAGE}\\*"',
+    'File /r /x *.tar.gz /x *.tar.zst /x *.tgz /x *.zip "${STAGE}\\*"',
+    "SetCompress off",
+    'File /nonfatal /r "${STAGE}\\*.tar.gz"',
+    'File /nonfatal /r "${STAGE}\\*.tar.zst"',
+    'File /nonfatal /r "${STAGE}\\*.tgz"',
+    'File /nonfatal /r "${STAGE}\\*.zip"',
+    "SetCompress auto",
     'FileOpen $0 "${STOP_MARKER}" w',
   );
+});
+
+it("stores pre-compressed archives uncompressed while keeping regular files compressed", () => {
+  const section = block('Section "Linger"', "SectionEnd");
+  expect(section).not.toContain('\n  File /r "${STAGE}\\*"');
+  expect(section).toContain(
+    'File /r /x *.tar.gz /x *.tar.zst /x *.tgz /x *.zip "${STAGE}\\*"',
+  );
+  const offStart = section.indexOf("SetCompress off");
+  const autoStart = section.indexOf("SetCompress auto");
+  expect(offStart).toBeGreaterThan(-1);
+  expect(autoStart).toBeGreaterThan(offStart);
+  expect(section.slice(0, offStart).trimEnd()).toMatch(
+    /SetOutPath "\$INSTDIR"$/,
+  );
+  expect(
+    section.slice(autoStart + "SetCompress auto".length).trimStart(),
+  ).toMatch(/^SetOutPath "\$INSTDIR"/);
+  const uncompressedBlock = section.slice(offStart, autoStart);
+  for (const ext of ["*.tar.gz", "*.tar.zst", "*.tgz", "*.zip"]) {
+    expect(uncompressedBlock).toContain(
+      `File /nonfatal /r "\${STAGE}\\${ext}"`,
+    );
+  }
 });
 
 it("stops Linger before the uninstall removes it", () => {

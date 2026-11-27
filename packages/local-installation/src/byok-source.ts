@@ -628,7 +628,9 @@ export async function prepareByokNativeRuntime(
     signal: AbortSignal;
     onEvent: (event: InstallerEvent) => void;
     env?: NodeJS.ProcessEnv;
+    resolveEnv?: () => Promise<NodeJS.ProcessEnv>;
     reuseInstalled?: boolean;
+    reuseInstalledIfCompatible?: boolean;
     onDescriptor?: (descriptor: RuntimeDescriptor) => void;
   },
   dependencies: {
@@ -658,8 +660,12 @@ export async function prepareByokNativeRuntime(
       signal: options.signal,
       onEvent: options.onEvent,
       env: options.env,
+      ...(options.resolveEnv ? { resolveEnv: options.resolveEnv } : {}),
       skipHarnessWhenBundledPiMatches: runtime === "pi",
       ...(options.reuseInstalled ? { reuseInstalled: true } : {}),
+      ...(options.reuseInstalledIfCompatible
+        ? { reuseInstalledIfCompatible: true }
+        : {}),
       ...(options.onDescriptor ? { onDescriptor: options.onDescriptor } : {}),
     },
     runtimeDependencies,
@@ -678,6 +684,8 @@ export async function prepareByokRuntime(
     signal: AbortSignal;
     onEvent: (event: InstallerEvent) => void;
     env?: NodeJS.ProcessEnv;
+    resolveEnv?: () => Promise<NodeJS.ProcessEnv>;
+    reuseInstalledIfCompatible?: boolean;
     onDescriptor?: (descriptor: RuntimeDescriptor) => void;
   },
   dependencies: {

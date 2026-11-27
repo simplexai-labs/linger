@@ -239,7 +239,17 @@ Section "Linger"
   ; An update replaces the whole app folder.
   StrCpy $Replacing 1
   RMDir /r "$INSTDIR\resources"
-  File /r "${STAGE}\*"
+  ; Exclude pre-compressed archives from zlib compression so packaging and
+  ; install avoid wasting CPU re-compressing and re-inflating them.
+  File /r /x *.tar.gz /x *.tar.zst /x *.tgz /x *.zip "${STAGE}\*"
+  SetOutPath "$INSTDIR"
+  SetCompress off
+  File /nonfatal /r "${STAGE}\*.tar.gz"
+  File /nonfatal /r "${STAGE}\*.tar.zst"
+  File /nonfatal /r "${STAGE}\*.tgz"
+  File /nonfatal /r "${STAGE}\*.zip"
+  SetCompress auto
+  SetOutPath "$INSTDIR"
   FileOpen $0 "${STOP_MARKER}" w
   FileClose $0
   WriteUninstaller "$INSTDIR\Uninstall Linger.exe"

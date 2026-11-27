@@ -49,11 +49,14 @@ the running login. A failed login carries its `reason`; a timeout stays
 `--resume` (native source with `--instance`) starts an installed instance's
 stopped services headless, reusing its saved choices; the desktop client runs it
 after a reboot and reads the outcome from the single JSON line on stdout. Cold
-resumes on the same checkout pass `resume: true` (a resume onto another
-checkout omits it and prepares the runtime in full, sequentially) so an already-installed runtime
+resumes on the same checkout pass `resume: true` so an already-installed runtime
 is reused after one status check, runtime/foundation preparation overlaps
 service startup, and inspected runtime descriptors are passed directly to
-`instanceRuntime` without a second status probe. It also restarts running
+`instanceRuntime` without a second status probe; a resume onto another checkout
+passes `reuseInstalledIfCompatible: true` (omitting `resume: true`) so an
+already-installed runtime meeting the pinned `runtimeBaselines` is reused via
+daemon probe without `harness plan/apply` while still keeping checkout
+migrations sequential after runtime checks. It also restarts running
 services when the instance's `user.env` no longer
 matches the configuration they started with, or when `--source-repo` names
 another checkout than the instance's. An instance follows a new checkout only

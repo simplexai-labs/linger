@@ -1,17 +1,30 @@
-import { mkdtemp, readFile, rm, realpath } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  realpath,
+  stat,
+} from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { readSetupChoice } from "./setup-selection.js";
-import { privateDirectory } from "./instance.js";
-import { runLocalmodels } from "./localmodels-tool.js";
+import { privateDirectory, readPrivate } from "./instance.js";
+import {
+  localmodelsStateDirectory,
+  pinnedToolSource,
+  runLocalmodels,
+} from "./localmodels-tool.js";
 import { runProcess } from "./process.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
 import type { InstallOutcome, InstallerEvent } from "./events.js";
 import type { PreparationOptions } from "./dependencies.js";
 import {
+  compareSemver,
   ensureStableBundledPi,
   findHigherPrecedencePi,
   resolveBundledPi,
+  semverAtLeast,
 } from "./bundled-pi.js";
 import {
   probeRuntimesWithDaemon,
@@ -27,6 +40,7 @@ export interface RuntimeDependencies {
   probeRuntimes?: typeof probeRuntimesWithDaemon;
   daemonExecutable?: string;
   resolveBundledPi?: typeof resolveBundledPi;
+  runtimeBaselines?: Partial<Record<NativeRuntime, string>>;
 }
 export interface RuntimeDescriptor {
   configFingerprint?: string | null;
@@ -247,7 +261,146 @@ function isStableBundledPiExecutable(
   return isWithinRoot(bundledPiRoot(home), executable);
 }
 
-function descriptorFromDaemonObservation(
+const PROFILE_ENV_KEY: Record<NativeRuntime, string> = {
+  codex: "CODEX_HOME",
+  claude: "CLAUDE_CONFIG_DIR",
+  pi: "PI_CODING_AGENT_DIR",
+};
+
+export interface ModelSourceRuntimeHints {
+  readonly environment: Record<string, string>;
+  readonly runtimePaths: Partial<Record<NativeRuntime, string>>;
+}
+
+/**
+ * Returns only the saved profile environment variable belonging to `runtime`,
+ * preventing unselected runtimes' profile directories from leaking into probes.
+ */
+export function runtimeProfileEnvFor(
+  runtime: NativeRuntime,
+  environment: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const key = PROFILE_ENV_KEY[runtime];
+  const value = environment[key];
+  return value ? { [key]: value } : {};
+}
+
+/**
+ * Reads saved runtime profile environment variables and explicit runtime paths
+ * from `<home>/.../model-source.json` without spawning Python.
+ */
+export async function readModelSourceRuntimeHints(
+  home: string,
+): Promise<ModelSourceRuntimeHints> {
+  try {
+    const raw = await readPrivate(
+      path.join(localmodelsStateDirectory(home), "model-source.json"),
+    );
+    if (!raw) return { environment: {}, runtimePaths: {} };
+    const parsed = JSON.parse(raw) as {
+      schema?: unknown;
+      environment?: unknown;
+      runtime_paths?: unknown;
+    };
+    if (parsed.schema !== "localmodels.model-source/v1") {
+      return { environment: {}, runtimePaths: {} };
+    }
+    const environment: Record<string, string> = {};
+    if (parsed.environment && typeof parsed.environment === "object") {
+      for (const key of [
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "PI_CODING_AGENT_DIR",
+      ]) {
+        const val = (parsed.environment as Record<string, unknown>)[key];
+        if (typeof val === "string" && path.isAbsolute(val)) {
+          environment[key] = val;
+        }
+      }
+    }
+    const runtimePaths: Partial<Record<NativeRuntime, string>> = {};
+    if (parsed.runtime_paths && typeof parsed.runtime_paths === "object") {
+      for (const runtime of ["codex", "claude", "pi"] as const) {
+        const val = (parsed.runtime_paths as Record<string, unknown>)[runtime];
+        if (typeof val === "string" && path.isAbsolute(val)) {
+          runtimePaths[runtime] = val;
+        }
+      }
+    }
+    return { environment, runtimePaths };
+  } catch {
+    return { environment: {}, runtimePaths: {} };
+  }
+}
+
+async function isExistingFile(candidate: string): Promise<boolean> {
+  try {
+    return (await stat(candidate)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fast filesystem lookup for a managed runtime binary under `<home>/runtime`,
+ * mirroring the daemon's harness layout so `probe-runtimes` can verify managed
+ * installs without spawning Python `localmodels harness status`.
+ */
+export async function discoverManagedRuntimeExecutable(
+  home: string,
+  runtime: NativeRuntime,
+  platform: NodeJS.Platform = process.platform,
+  runtimePaths?: Partial<Record<NativeRuntime, string>>,
+): Promise<string | undefined> {
+  const configured = runtimePaths?.[runtime];
+  if (configured && (await isExistingFile(configured))) {
+    return configured;
+  }
+  const names =
+    platform === "win32"
+      ? [
+          `${runtime}.exe`,
+          `${runtime}.cmd`,
+          `${runtime}.bat`,
+          `${runtime}.ps1`,
+          runtime,
+        ]
+      : [runtime];
+  const harnessRoot = root(home);
+  for (const name of names) {
+    const candidate = path.join(harnessRoot, "bin", name);
+    if (await isExistingFile(candidate)) return candidate;
+  }
+  const toolDir = path.join(harnessRoot, "tools", runtime);
+  try {
+    const entries = await readdir(toolDir, { withFileTypes: true });
+    const versions = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => compareSemver(b, a));
+    for (const version of versions) {
+      for (const name of names) {
+        const direct = path.join(toolDir, version, name);
+        if (await isExistingFile(direct)) return direct;
+        const nested = path.join(toolDir, version, "bin", name);
+        if (await isExistingFile(nested)) return nested;
+      }
+    }
+  } catch {
+    // Managed tools directory absent or unreadable.
+  }
+  if (runtime === "pi") {
+    const bundledCandidate = path.join(
+      bundledPiRoot(home),
+      "bin",
+      platform === "win32" ? "pi.exe" : "pi",
+    );
+    if (await isExistingFile(bundledCandidate)) return bundledCandidate;
+  }
+  return undefined;
+}
+
+export function descriptorFromDaemonObservation(
   runtime: NativeRuntime,
   obs: DaemonRuntimeObservation,
   existing?: RuntimeDescriptor,
@@ -589,6 +742,11 @@ export async function installNativeRuntime(
     const fastBound = await tryFastBindBundledPi(options, dependencies);
     if (fastBound) return fastBound;
   }
+  const effectiveEnv =
+    options.env ??
+    (options.resolveEnv ? await options.resolveEnv() : undefined);
+  const effectiveOptions: RuntimePreparationOptions =
+    effectiveEnv !== undefined ? { ...options, env: effectiveEnv } : options;
   const tool = dependencies.localmodels ?? runLocalmodels;
   const plans = path.join(path.resolve(options.home), "setup", "harness-plans");
   await privateDirectory(plans);
@@ -614,7 +772,7 @@ export async function installNativeRuntime(
       ],
       {
         signal: options.signal,
-        env: options.env,
+        env: effectiveEnv,
         timeoutMs: 120000,
         onEvent: options.onEvent,
       },
@@ -643,7 +801,7 @@ export async function installNativeRuntime(
         ["harness", "apply", file, "--approve", plan.id, "--jsonl"],
         {
           signal: options.signal,
-          env: options.env,
+          env: effectiveEnv,
           timeoutMs: 20 * 60000,
           onEvent: options.onEvent,
         },
@@ -690,7 +848,7 @@ export async function installNativeRuntime(
           await reconcileDescriptorsWithDaemon(
             options.home,
             [appliedRow],
-            options,
+            effectiveOptions,
             dependencies,
           )
         )[0]
@@ -701,7 +859,7 @@ export async function installNativeRuntime(
           reconciledAppliedRow,
           options.platform,
         )
-      : await inspectRuntime(runtime, options, dependencies);
+      : await inspectRuntime(runtime, effectiveOptions, dependencies);
     if (!state.installed) throw unavailable();
     return {
       code: 0,
@@ -798,6 +956,7 @@ export async function prepareRuntime(
   runtime: NativeRuntime,
   options: RuntimePreparationOptions & {
     reuseInstalled?: boolean;
+    reuseInstalledIfCompatible?: boolean;
     onDescriptor?: (descriptor: RuntimeDescriptor) => void;
   },
   dependencies: RuntimeDependencies = {},
@@ -816,6 +975,72 @@ export async function prepareRuntime(
         state = existing;
       } else if (!fallbackEnv) {
         fallbackEnv = runtimeEnvironmentFromDescriptors([existing.descriptor]);
+      }
+    } catch (error) {
+      if (options.signal.aborted) throw error;
+    }
+  }
+  if (!state && options.reuseInstalledIfCompatible) {
+    try {
+      const platform = options.platform ?? process.platform;
+      const hints = await readModelSourceRuntimeHints(options.home);
+      const profileEnv = runtimeProfileEnvFor(runtime, hints.environment);
+      const configured = await discoverManagedRuntimeExecutable(
+        options.home,
+        runtime,
+        platform,
+        hints.runtimePaths,
+      );
+      const probe = dependencies.probeRuntimes ?? probeRuntimesWithDaemon;
+      const observations = await probe({
+        runtimes: [runtime],
+        ...(configured ? { configuredPaths: { [runtime]: configured } } : {}),
+        includeBundled: true,
+        env: { ...process.env, ...options.env, ...profileEnv },
+        daemonExecutable: dependencies.daemonExecutable,
+        platform,
+        signal: options.signal,
+      });
+      const obs = observations?.find((item) => item.type === runtime);
+      const baseline =
+        dependencies.runtimeBaselines?.[runtime] ??
+        pinnedToolSource()?.runtimeBaselines?.[runtime];
+      const compatibleVersion =
+        !baseline || semverAtLeast(obs?.version, baseline);
+      const compatibleStatus =
+        obs?.status === "ready" || obs?.status === "authentication_required";
+      if (
+        obs &&
+        obs.installed &&
+        compatibleStatus &&
+        Boolean(obs.executable) &&
+        compatibleVersion
+      ) {
+        const seedDescriptor: RuntimeDescriptor | undefined =
+          Object.keys(profileEnv).length > 0
+            ? {
+                runtime,
+                executable: null,
+                argvPrefix: [],
+                installed: false,
+                authenticated: false,
+                authMode: null,
+                loginCommand: null,
+                environment: profileEnv,
+              }
+            : undefined;
+        const descriptor = descriptorFromDaemonObservation(
+          runtime,
+          obs,
+          seedDescriptor,
+        );
+        const versionSuffix = obs.version ? ` (${obs.version})` : "";
+        options.onEvent({
+          kind: "log",
+          stage: "runtime",
+          message: `Reusing compatible installed ${runtime}${versionSuffix} across update (skipped harness plan/apply).\n`,
+        });
+        state = inspectionFromDescriptor(runtime, descriptor, platform);
       }
     } catch (error) {
       if (options.signal.aborted) throw error;

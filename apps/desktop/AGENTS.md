@@ -277,7 +277,19 @@ Gateway and runs Agents. The daemon exits with the app.
   file and renamed, so a power loss leaves the old record or none) and, while
   the window still uses that origin and the computer is enrolled, restarts the
   services on launch with `installer.js --resume`, which also restarts them
-  when the instance's `user.env` changed. Before it starts the installer
+  when the instance's `user.env` changed. On a non-update warm launch when the
+  saved origin already answers, `validateSourceRepository` passes, the HMAC
+  `#checkServer` identity proof succeeds, `runtimeEnvironment` is non-empty,
+  and no legacy source keys were moved, `LocalServer` enters `ready`
+  immediately (`local_server.resume_fast_ready`) and runs `--resume`
+  reconciliation asynchronously in the background (abortable on stop, reset, or
+  a new resume, preserving the ready window on transient background failures
+  while still adopting runtime updates and emitting `computer.runtime` on
+  `localModelsRestored`). Bundled `.tar.zst` offline runtimes hash the
+  compressed stream while decompressing into a staging directory and promote it
+  only after digest and byte-count verification; Windows NSIS packaging stores
+  pre-compressed archives (`.tar.gz`, `.tar.zst`, `.tgz`, `.zip`) with
+  `SetCompress off`. Before it starts the installer
   (`--resume`, or the installer that sets up) it asks
   `session.resolveProxy` for the Soniox websocket URL (`system-proxy.ts`,
   at most 1.5 s, alongside the Node runtime check) and passes an HTTP

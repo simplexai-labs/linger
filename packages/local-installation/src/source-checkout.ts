@@ -19,7 +19,7 @@ import { readUserEnvironment } from "./user-environment.js";
 import { localAccountProvisioned } from "./account.js";
 import { latestLegacyBackup } from "./legacy-database.js";
 import {
-  inspectNativeProcess,
+  inspectNativeProcesses,
   reclaimNativeOrphans,
   type NativeService,
 } from "./native-process.js";
@@ -69,6 +69,10 @@ export interface SourceInstallOptions {
   // Cold-resume restarts of an existing checkout reuse an installed runtime
   // after one inspection and overlap runtime preparation with service startup.
   resume?: boolean;
+  // Cross-version updates onto a new checkout skip `localmodels harness plan`
+  // and `apply` when the daemon probe confirms an already-installed runtime
+  // meets the pinned runtime baseline.
+  reuseInstalledIfCompatible?: boolean;
   // A start from the saved setup (a resume, including the first one after an
   // app update onto a new checkout) reports local models that do not come
   // back instead of failing, so the person still reaches the workspace and
@@ -321,14 +325,21 @@ export async function prepareSourceConfiguration(
     const movable = Object.entries(portOwners).filter(
       ([name]) => !keepsOrigin || name !== "web",
     ) as [keyof typeof portOwners, NativeService][];
+    const uniqueOwners = [...new Set(movable.map(([, owner]) => owner))];
+    const ownerStates = await inspectNativeProcesses(
+      instance.root,
+      uniqueOwners,
+    );
+    const runningByOwner = new Map<NativeService, boolean>(
+      uniqueOwners.map((owner, index) => [
+        owner,
+        Boolean(ownerStates[index]?.running),
+      ]),
+    );
     let reserved: Set<number> | undefined;
     for (const [name, owner] of movable) {
       const port = instance.source.ports[name];
-      if (
-        (await inspectNativeProcess(instance.root, owner)).running ||
-        (await portFree(port))
-      )
-        continue;
+      if (runningByOwner.get(owner) || (await portFree(port))) continue;
       // The program may be one an earlier run left behind.
       await reclaimNativeOrphans(instance.root, {
         ports: [port],

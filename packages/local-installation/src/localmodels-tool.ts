@@ -4,9 +4,10 @@ import { existsSync } from "node:fs";
 import { lstat, readdir, readFile, rm, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Transform } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { sleep } from "@linger/service-kit";
-import { x as extract } from "tar";
+import { x as extract, type ReadEntry } from "tar";
 import {
   downloadInRegion,
   formatRegionDownloadEvent,
@@ -38,6 +39,7 @@ import { runBounded, sha256File } from "./verified-stamps.js";
 export type LocalmodelsToolSource = PublishedServiceSource & {
   sourceCommit: string;
   manifestSha256: string;
+  runtimeBaselines?: Partial<Record<"codex" | "claude" | "pi", string>>;
 };
 interface ToolManifest {
   schemaVersion: number;
@@ -62,10 +64,29 @@ export function validateToolSource(value: unknown): LocalmodelsToolSource {
     throw new Error(
       "Upstream tool distribution metadata requires a pinned commit and manifest checksum.",
     );
+  const rawBaselines = extra.runtimeBaselines;
+  let runtimeBaselines:
+    | Partial<Record<"codex" | "claude" | "pi", string>>
+    | undefined;
+  if (
+    rawBaselines &&
+    typeof rawBaselines === "object" &&
+    !Array.isArray(rawBaselines)
+  ) {
+    const parsed: Partial<Record<"codex" | "claude" | "pi", string>> = {};
+    for (const key of ["codex", "claude", "pi"] as const) {
+      const candidate = (rawBaselines as Record<string, unknown>)[key];
+      if (typeof candidate === "string" && candidate.trim()) {
+        parsed[key] = candidate.trim();
+      }
+    }
+    if (Object.keys(parsed).length > 0) runtimeBaselines = parsed;
+  }
   return {
     ...source,
     sourceCommit: extra.sourceCommit,
     manifestSha256: extra.manifestSha256,
+    ...(runtimeBaselines ? { runtimeBaselines } : {}),
   };
 }
 function safeRelative(name: string): boolean {
@@ -166,10 +187,16 @@ export const LOCALMODELS_KIT_VERIFICATION_FAILED =
   "LOCALMODELS_KIT_VERIFICATION_FAILED";
 // Assets hashed at once.
 const CONCURRENCY = 32;
+interface StreamedToolFileHash {
+  readonly sha256: string;
+  readonly bytes: number;
+}
+
 async function verify(
   directory: string,
   source: LocalmodelsToolSource,
   known: Stamps = {},
+  precomputedHashes?: ReadonlyMap<string, StreamedToolFileHash>,
 ) {
   const checkedDirs = new Map<string, Promise<void>>();
   const { file: manifestFile, info: manifestInfo } = await regular(
@@ -209,9 +236,15 @@ async function verify(
     const stamp: [number, number] = [info.size, info.mtimeMs];
     const seen = known[name];
     if (!seen || seen[0] !== stamp[0] || seen[1] !== stamp[1]) {
-      hashed += 1;
-      if ((await sha256File(file)) !== expected)
-        throw new Error("Upstream tool payload checksum mismatch.");
+      const precomputed = precomputedHashes?.get(name);
+      if (precomputed && precomputed.bytes === info.size) {
+        if (precomputed.sha256 !== expected)
+          throw new Error("Upstream tool payload checksum mismatch.");
+      } else {
+        hashed += 1;
+        if ((await sha256File(file)) !== expected)
+          throw new Error("Upstream tool payload checksum mismatch.");
+      }
     }
     stamps[name] = stamp;
   });
@@ -231,7 +264,10 @@ const location = (tool: Awaited<ReturnType<typeof verify>>) => ({
   moduleDir: tool.moduleDir,
   sourceCommit: tool.sourceCommit,
 });
-async function unpack(archive: string, directory: string) {
+async function unpack(
+  archive: string,
+  directory: string,
+): Promise<Map<string, StreamedToolFileHash>> {
   let size = 0;
   // tar calls the filter from a stream event, so an error thrown there would
   // escape as an uncaught exception and leave extract() pending forever.
@@ -242,6 +278,7 @@ async function unpack(archive: string, directory: string) {
     refused ??= new Error(message);
     return false;
   };
+  const streamedHashes = new Map<string, StreamedToolFileHash>();
   await extract({
     file: archive,
     cwd: directory,
@@ -269,8 +306,26 @@ async function unpack(archive: string, directory: string) {
         );
       return true;
     },
+    transform: (entry: ReadEntry) => {
+      const relative = entry.path.replace(/\\/g, "/").replace(/^\.\//, "");
+      const hash = createHash("sha256");
+      let bytes = 0;
+      const tx = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          bytes += chunk.length;
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+        flush(callback) {
+          streamedHashes.set(relative, { sha256: hash.digest("hex"), bytes });
+          callback();
+        },
+      });
+      return tx as unknown as ReadEntry;
+    },
   });
   if (refused) throw refused;
+  return streamedHashes;
 }
 /**
  * Verified kits are sealed read-only: upstream children that run the kit's
@@ -522,11 +577,17 @@ async function prepareLocalmodelsTool(
           }
           signal.throwIfAborted();
           const unpackStartedAt = Date.now();
-          await unpack(archive, stage);
+          const unpackedHashes = await unpack(archive, stage);
           // The kit is an npm tarball: its files sit under package/.
           const kit = path.join(stage, "package");
+          const kitHashes = new Map<string, StreamedToolFileHash>();
+          for (const [relative, entry] of unpackedHashes) {
+            if (relative.startsWith("package/")) {
+              kitHashes.set(relative.slice("package/".length), entry);
+            }
+          }
           const verifyStartedAt = Date.now();
-          const tool = await verify(kit, source);
+          const tool = await verify(kit, source, undefined, kitHashes);
           const verifiedAt = Date.now();
           if (process.platform !== "win32") await chmod(tool.python, 0o700);
           // The kit manifest is private state; publisher bytes stay unchanged for digest checks.

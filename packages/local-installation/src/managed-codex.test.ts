@@ -99,7 +99,7 @@ it("delegates read-only model checks without saving a profile", async () => {
   expect(localmodels.mock.calls[0]![1]).toContain("--check");
 });
 
-it("managedRuntimeEnvironment and readManagedModel read descriptors without invoking local-daemon", async () => {
+it("readManagedModel reads descriptors without invoking local-daemon", async () => {
   const scratch = await mkdtemp(path.join(tmpdir(), "managed-codex-nodaemon-"));
   tempRoots.push(scratch);
   const instanceRoot = path.join(scratch, "instances", "default");
@@ -151,14 +151,6 @@ it("managedRuntimeEnvironment and readManagedModel read descriptors without invo
     stderr: "",
   }));
 
-  const env = await managedRuntimeEnvironment(scratch, instanceRoot, {
-    localmodels,
-  });
-  expect(env).toEqual({
-    CODEX_HOME: "/managed/codex-home",
-    LINGER_CODEX_PATH: "/managed/codex",
-  });
-
   const model = await readManagedModel(instanceRoot, { localmodels });
   expect(model).toEqual({
     baseUrl: "https://gateway.example/v1",
@@ -166,4 +158,175 @@ it("managedRuntimeEnvironment and readManagedModel read descriptors without invo
     keySaved: true,
   });
   await expect(access(marker)).rejects.toThrow();
+});
+
+it("managedRuntimeEnvironment prefers daemon runtime probe plus saved model-source env dirs without spawning localmodels", async () => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "managed-codex-daemon-"));
+  tempRoots.push(scratch);
+  const instanceRoot = path.join(scratch, "instances", "default");
+  const stateDir = path.join(scratch, "runtime", "localmodels", "state");
+  const codexHome = path.join(scratch, "profiles", "codex");
+  const claudeDir = path.join(scratch, "profiles", "claude");
+  const managedCodex = path.join(
+    scratch,
+    "runtime",
+    "harness",
+    "bin",
+    process.platform === "win32" ? "codex.exe" : "codex",
+  );
+  await mkdir(instanceRoot, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await mkdir(path.dirname(managedCodex), { recursive: true });
+  await writeFile(managedCodex, "stub");
+  await writeFile(
+    path.join(instanceRoot, "setup-choice.json"),
+    JSON.stringify({ choice: "codex" }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    path.join(stateDir, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "subscription",
+      runtime: "codex",
+      runtime_model: "",
+      model_label: null,
+      gateway_url: null,
+      environment: {
+        CODEX_HOME: codexHome,
+        CLAUDE_CONFIG_DIR: claudeDir,
+      },
+    }),
+    { mode: 0o600 },
+  );
+
+  const localmodels = vi.fn<typeof runLocalmodels>();
+  const probeRuntimes = vi.fn(async () => [
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "0.171.0",
+      executable: managedCodex,
+    },
+  ]);
+
+  const env = await managedRuntimeEnvironment(scratch, instanceRoot, {
+    localmodels,
+    probeRuntimes,
+  });
+
+  expect(env).toEqual({
+    CODEX_HOME: codexHome,
+    LINGER_CODEX_PATH: managedCodex,
+  });
+  expect(probeRuntimes).toHaveBeenCalledWith(
+    expect.objectContaining({
+      runtimes: ["codex"],
+      configuredPaths: { codex: managedCodex },
+      includeBundled: true,
+    }),
+  );
+  expect(localmodels).not.toHaveBeenCalled();
+});
+
+it("managedRuntimeEnvironment falls back to localmodels harness status when daemon probe is unavailable", async () => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "managed-codex-fallback-"));
+  tempRoots.push(scratch);
+  const instanceRoot = path.join(scratch, "instances", "default");
+  await mkdir(instanceRoot, { recursive: true });
+  await writeFile(
+    path.join(instanceRoot, "setup-choice.json"),
+    JSON.stringify({ choice: "codex" }),
+    { mode: 0o600 },
+  );
+
+  const localmodels = vi.fn<typeof runLocalmodels>(async () => ({
+    code: 0,
+    stdout: JSON.stringify({
+      schema: "localmodels.harness-status/v1",
+      runtimes: [
+        {
+          runtime: "codex",
+          executable: "/managed/codex",
+          argvPrefix: [],
+          installed: true,
+          authenticated: false,
+          authMode: null,
+          environment: { CODEX_HOME: "/managed/codex-home" },
+          loginCommand: null,
+        },
+      ],
+    }),
+    stderr: "",
+  }));
+
+  const env = await managedRuntimeEnvironment(scratch, instanceRoot, {
+    localmodels,
+    probeRuntimes: async () => null,
+  });
+  expect(env).toEqual({
+    CODEX_HOME: "/managed/codex-home",
+    LINGER_CODEX_PATH: "/managed/codex",
+  });
+  expect(localmodels).toHaveBeenCalledTimes(1);
+});
+
+it("managedRuntimeEnvironment falls back to localmodels when daemon probe returns status error or omits runtime", async () => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "managed-codex-err-"));
+  tempRoots.push(scratch);
+  const instanceRoot = path.join(scratch, "instances", "default");
+  await mkdir(instanceRoot, { recursive: true });
+  await writeFile(
+    path.join(instanceRoot, "setup-choice.json"),
+    JSON.stringify({ choice: "codex" }),
+    { mode: 0o600 },
+  );
+
+  const localmodels = vi.fn<typeof runLocalmodels>(async () => ({
+    code: 0,
+    stdout: JSON.stringify({
+      schema: "localmodels.harness-status/v1",
+      runtimes: [
+        {
+          runtime: "codex",
+          executable: "/fallback/codex",
+          argvPrefix: [],
+          installed: true,
+          authenticated: true,
+          authMode: "oauth",
+          environment: { CODEX_HOME: "/fallback/codex-home" },
+          loginCommand: null,
+        },
+      ],
+    }),
+    stderr: "",
+  }));
+
+  const envOnError = await managedRuntimeEnvironment(scratch, instanceRoot, {
+    localmodels,
+    probeRuntimes: async () => [
+      {
+        type: "codex" as const,
+        status: "error" as const,
+        installed: false,
+        authenticated: false,
+      },
+    ],
+  });
+  expect(envOnError).toEqual({
+    CODEX_HOME: "/fallback/codex-home",
+    LINGER_CODEX_PATH: "/fallback/codex",
+  });
+
+  const envOnMissing = await managedRuntimeEnvironment(scratch, instanceRoot, {
+    localmodels,
+    probeRuntimes: async () => [],
+  });
+  expect(envOnMissing).toEqual({
+    CODEX_HOME: "/fallback/codex-home",
+    LINGER_CODEX_PATH: "/fallback/codex",
+  });
+  expect(localmodels).toHaveBeenCalledTimes(2);
 });

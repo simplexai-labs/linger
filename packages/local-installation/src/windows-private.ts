@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { runProcess } from "./process.js";
+import {
+  callWindowsValidatePrivatePath,
+  closeWindowsPlatformWorker,
+} from "./windows-platform-worker.js";
 
 export const WINDOWS_PRIVATE_PREAMBLE = String.raw`$ErrorActionPreference = 'Stop'
 # This fixed Windows PowerShell script uses only its own built-in modules.
@@ -566,9 +570,10 @@ export function createWindowsPrivateClient(
 
 const defaultWorker = createWindowsPrivateClient();
 
-/** Closes the default persistent PowerShell worker if one is running. */
+/** Closes the default persistent Windows ACL workers if any are running. */
 export function closeWindowsPrivateWorker(): void {
   defaultWorker.close();
+  closeWindowsPlatformWorker();
 }
 
 function privatePathError(file: string, response: WorkerResponse): Error {
@@ -598,13 +603,37 @@ function privatePathError(file: string, response: WorkerResponse): Error {
   );
 }
 
-export async function windowsPrivatePath(
-  file: string,
-  kind: "file" | "directory",
-  repair = false,
+export interface WindowsPrivateCallOptions {
+  readonly daemonExecutable?: string;
+}
+
+async function runPrivateValidation(
+  target: string,
+  kind: "file" | "directory" | "location",
+  repair: boolean,
   run?: typeof runProcess,
+  options?: WindowsPrivateCallOptions,
 ): Promise<void> {
-  const payload = JSON.stringify({ path: path.resolve(file), kind, repair });
+  const resolved = path.resolve(target);
+  if (!run) {
+    const native = await callWindowsValidatePrivatePath(
+      {
+        path: resolved,
+        kind,
+        repair,
+      },
+      undefined,
+      options?.daemonExecutable,
+    );
+    if (native.kind === "ok") {
+      if (native.result.ok) return;
+      throw privatePathError(target, {
+        code: 1,
+        stdout: JSON.stringify(native.result.failure ?? { code: "UNCHECKED" }),
+      });
+    }
+  }
+  const payload = JSON.stringify({ path: resolved, kind, repair });
   const result: WorkerResponse = run
     ? await run(
         powershellPath(),
@@ -615,7 +644,17 @@ export async function windowsPrivatePath(
         },
       )
     : await defaultWorker.execute(payload);
-  if (result.code !== 0) throw privatePathError(file, result);
+  if (result.code !== 0) throw privatePathError(target, result);
+}
+
+export async function windowsPrivatePath(
+  file: string,
+  kind: "file" | "directory",
+  repair = false,
+  run?: typeof runProcess,
+  options?: WindowsPrivateCallOptions,
+): Promise<void> {
+  return runPrivateValidation(file, kind, repair, run, options);
 }
 
 /**
@@ -627,23 +666,9 @@ export async function windowsPrivatePath(
 export async function windowsPrivateLocation(
   directory: string,
   run?: typeof runProcess,
+  options?: WindowsPrivateCallOptions,
 ): Promise<void> {
-  const payload = JSON.stringify({
-    path: path.resolve(directory),
-    kind: "location",
-    repair: false,
-  });
-  const result: WorkerResponse = run
-    ? await run(
-        powershellPath(),
-        windowsPowerShellArguments(WINDOWS_PRIVATE_SCRIPT),
-        {
-          input: payload,
-          timeoutMs: REQUEST_TIMEOUT_MS,
-        },
-      )
-    : await defaultWorker.execute(payload);
-  if (result.code !== 0) throw privatePathError(directory, result);
+  return runPrivateValidation(directory, "location", false, run, options);
 }
 
 /** The code of an error from windowsPrivatePath; its reason says why. */

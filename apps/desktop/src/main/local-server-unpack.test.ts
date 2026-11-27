@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -166,5 +167,96 @@ describe("unpackArchive", () => {
     expect(await readFile(path.join(out, "hello.txt"), "utf8")).toBe(
       "symlink-ok\n",
     );
+  });
+
+  it("verifies sha256 and byte count in one streaming pass for .tar.zst archives", async () => {
+    const root = tempDirectory();
+    const src = path.join(root, "src", "top");
+    await mkdir(src, { recursive: true });
+    await writeFile(path.join(src, "payload.txt"), "verified-zst\n");
+
+    const tarFile = path.join(root, "runtime.tar");
+    execFileSync("tar", ["-cf", tarFile, "-C", path.join(root, "src"), "top"]);
+    const zstBytes = zstdCompressSync(await readFile(tarFile));
+    const zstFile = path.join(root, "runtime.tar.zst");
+    await writeFile(zstFile, zstBytes);
+    const sha256 = createHash("sha256").update(zstBytes).digest("hex");
+
+    const okOut = path.join(root, "out-ok");
+    await unpackArchive(zstFile, okOut, new AbortController().signal, {
+      verifySha256: sha256,
+      verifyBytes: zstBytes.length,
+    });
+    expect(await readFile(path.join(okOut, "payload.txt"), "utf8")).toBe(
+      "verified-zst\n",
+    );
+
+    const badShaOut = path.join(root, "out-bad-sha");
+    await expect(
+      unpackArchive(zstFile, badShaOut, new AbortController().signal, {
+        verifySha256: "0".repeat(64),
+        verifyBytes: zstBytes.length,
+      }),
+    ).rejects.toThrow("The bundled runtime.tar.zst is damaged");
+
+    const badSizeOut = path.join(root, "out-bad-size");
+    await expect(
+      unpackArchive(zstFile, badSizeOut, new AbortController().signal, {
+        verifySha256: sha256,
+        verifyBytes: zstBytes.length + 1,
+      }),
+    ).rejects.toThrow("The bundled runtime.tar.zst is damaged");
+
+    // Corrupt non-zstd bytes still surface the archive integrity error.
+    const corruptFile = path.join(root, "corrupt.tar.zst");
+    await writeFile(corruptFile, "not-a-zst-frame");
+    await expect(
+      unpackArchive(
+        corruptFile,
+        path.join(root, "out-corrupt"),
+        new AbortController().signal,
+        { verifySha256: sha256 },
+      ),
+    ).rejects.toThrow("The bundled corrupt.tar.zst is damaged");
+
+    // ENOENT pure-Node fallback also enforces verifySha256 before extracting.
+    const missingTar = "C:\\Windows\\System32\\tar.exe";
+    await expect(
+      unpackArchive(
+        zstFile,
+        path.join(root, "out-fallback-bad"),
+        new AbortController().signal,
+        {
+          command: missingTar,
+          runCommand: async () => {
+            throw enoent(missingTar);
+          },
+          verifySha256: "f".repeat(64),
+        },
+      ),
+    ).rejects.toThrow("The bundled runtime.tar.zst is damaged");
+
+    // Non-.zst archives also enforce verifySha256 and verifyBytes.
+    const tgzFile = path.join(root, "runtime.tar.gz");
+    execFileSync("tar", ["-czf", tgzFile, "-C", path.join(root, "src"), "top"]);
+    const tgzBytes = await readFile(tgzFile);
+    const tgzSha = createHash("sha256").update(tgzBytes).digest("hex");
+    await expect(
+      unpackArchive(
+        tgzFile,
+        path.join(root, "out-tgz-bad"),
+        new AbortController().signal,
+        { verifySha256: "1".repeat(64), verifyBytes: tgzBytes.length },
+      ),
+    ).rejects.toThrow("The bundled runtime.tar.gz is damaged");
+    await unpackArchive(
+      tgzFile,
+      path.join(root, "out-tgz-ok"),
+      new AbortController().signal,
+      { verifySha256: tgzSha, verifyBytes: tgzBytes.length },
+    );
+    expect(
+      await readFile(path.join(root, "out-tgz-ok", "payload.txt"), "utf8"),
+    ).toBe("verified-zst\n");
   });
 });

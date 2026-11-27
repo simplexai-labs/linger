@@ -17,8 +17,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   compareSemver,
   ensureStableBundledPi,
+  extractSemver,
   findHigherPrecedencePi,
   resolveBundledPi,
+  semverAtLeast,
   withBundledPiPath,
   type BundledPi,
 } from "./bundled-pi.js";
@@ -102,6 +104,23 @@ describe("compareSemver", () => {
     expect(compareSemver("not-a-version", "1.5.2")).toBe(0);
     expect(compareSemver("1.5.2", "not-a-version")).toBe(0);
     expect(compareSemver("1.5.2-", "1.5.2")).toBe(0);
+  });
+
+  it("extracts CLI version tokens and compares strictly against baselines", () => {
+    expect(extractSemver("codex-cli 0.168.0")).toBe("0.168.0");
+    expect(extractSemver("2.1.326 (Claude Code)")).toBe("2.1.326");
+    expect(extractSemver("127.0.0.1")).toBeUndefined();
+    expect(extractSemver("version 1.2.3.4")).toBeUndefined();
+    expect(extractSemver("not-a-version")).toBeUndefined();
+
+    expect(semverAtLeast("codex-cli 0.168.0", "0.166.0")).toBe(true);
+    expect(semverAtLeast("2.1.282 (Claude Code)", "2.1.282")).toBe(true);
+    expect(semverAtLeast("127.0.0.1", "0.166.0")).toBe(false);
+    expect(semverAtLeast("codex-cli 0.165.9", "0.166.0")).toBe(false);
+    expect(semverAtLeast("0.166.0-rc.1", "0.166.0")).toBe(false);
+    expect(semverAtLeast("not-a-version", "0.166.0")).toBe(false);
+    expect(semverAtLeast(undefined, "0.166.0")).toBe(false);
+    expect(semverAtLeast("1.5.2", "invalid")).toBe(false);
   });
 });
 

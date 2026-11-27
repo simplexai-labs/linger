@@ -58,9 +58,10 @@
   on the Desktop bundled Node (or `Linger.exe` with `ELECTRON_RUN_AS_NODE=1`,
   falling back to `LINGER_NODE` or `node` on `PATH` from source) inside a
   kill-on-close Job Object without routing arguments through `cmd.exe`. The
-  Daemon's Windows-only `platform` subcommand serves the Windows installer
-  helper (owner-only files, process identity, owned-process cleanup); nothing
-  else calls it.
+  Daemon's Windows-only `platform` subcommand (including persistent NDJSON
+  `platform --worker` mode) serves the Windows installer helper (owner-only
+  files, `validate-private-path`, `process-snapshot`, process identity, and
+  owned-process cleanup); nothing else calls it.
 - `scripts/` builds the development bundle, and `tests/` holds the Vitest
   checks of the bundle tools and the Runner Gateway wire against the Go
   Daemon. Do not add a second Runtime detector, Runtime executor, Gateway

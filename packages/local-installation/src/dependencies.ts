@@ -19,6 +19,12 @@ export interface PreparationOptions {
   interactive?: boolean;
   /** Desktop installers use the OS agent; passwords never pass through Linger. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Optional lazy environment resolver evaluated only when falling through to
+   * `localmodels harness plan` / `apply` so fast-bind and compatible-reuse paths
+   * avoid eager runtime environment probes.
+   */
+  resolveEnv?: () => Promise<NodeJS.ProcessEnv>;
   platform?: NodeJS.Platform;
   /**
    * When true for `pi`, binds the verified bundled Pi directly instead of

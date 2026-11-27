@@ -1261,4 +1261,39 @@ describe("runtime_paths persistence across model-source apply", () => {
     const persisted = await readModelSourceJson(home);
     expect(persisted.runtime_paths).toEqual({ codex: customCodex });
   });
+
+  it("forwards reuseInstalledIfCompatible and lazy resolveEnv through prepareByokNativeRuntime", async () => {
+    const home = await makeHome();
+    const prepareNative = vi.fn(async () => ({
+      code: 0,
+      state: "ready" as const,
+      message: "ok",
+    }));
+    const resolveEnv = vi.fn(async () => ({ PI_CODING_AGENT_DIR: "/pi" }));
+
+    const failure = await prepareByokNativeRuntime(
+      "pi",
+      {
+        home,
+        signal: new AbortController().signal,
+        onEvent: () => {},
+        reuseInstalledIfCompatible: true,
+        resolveEnv,
+      },
+      { prepareNative },
+    );
+
+    expect(failure).toBeUndefined();
+    expect(prepareNative).toHaveBeenCalledWith(
+      "pi",
+      expect.objectContaining({
+        home,
+        reuseInstalledIfCompatible: true,
+        resolveEnv,
+        skipHarnessWhenBundledPiMatches: true,
+      }),
+      expect.any(Object),
+    );
+    expect(resolveEnv).not.toHaveBeenCalled();
+  });
 });

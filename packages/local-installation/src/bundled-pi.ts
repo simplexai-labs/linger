@@ -44,6 +44,8 @@ interface ParsedSemver {
 
 const SEMVER_PATTERN =
   /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u;
+const EMBEDDED_SEMVER_PATTERN =
+  /(?<![0-9.])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?![0-9.])/u;
 const DIGITS_PATTERN = /^\d+$/u;
 
 function parseSemver(raw: string): ParsedSemver | undefined {
@@ -107,6 +109,31 @@ export function compareSemver(a: string, b: string): number {
     return left.prerelease.length < right.prerelease.length ? -1 : 1;
   }
   return 0;
+}
+
+/**
+ * Extracts the first semantic version token from CLI `--version` output
+ * (for example `"codex-cli 0.168.0"` -> `"0.168.0"`).
+ */
+export function extractSemver(raw: string): string | undefined {
+  const match = EMBEDDED_SEMVER_PATTERN.exec(raw);
+  if (!match?.[1]) return undefined;
+  return parseSemver(match[1]) ? match[1] : undefined;
+}
+
+/**
+ * Reports whether `observed` contains a valid semantic version greater than
+ * or equal to a valid `baseline` semantic version. Returns false when either
+ * input cannot be parsed.
+ */
+export function semverAtLeast(
+  observed: string | undefined,
+  baseline: string,
+): boolean {
+  if (!observed) return false;
+  const extracted = extractSemver(observed);
+  if (!extracted || !parseSemver(baseline)) return false;
+  return compareSemver(extracted, baseline) >= 0;
 }
 
 async function candidateToolsRoots(scriptPath?: string): Promise<string[]> {

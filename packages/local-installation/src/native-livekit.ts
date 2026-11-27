@@ -154,19 +154,19 @@ export function liveKitConfig(
     logging: { level: "info" },
   });
 }
-/** Whether LiveKit answers its health check (GET / is "OK"). */
-export async function liveKitReady(
+async function probeLiveKit(
   root: string,
   settings: LiveKitSettings,
   signal?: AbortSignal,
-): Promise<boolean> {
+): Promise<{ ready: boolean; running: boolean }> {
+  const [state] = await inspectNativeListeners(root, [
+    { name: "livekit", port: settings.httpPort },
+  ]);
+  // Another process on the port would answer for a LiveKit that cannot
+  // listen there.
+  if (!state?.running) return { ready: false, running: false };
+  if (state.foreign !== undefined) return { ready: false, running: true };
   try {
-    const [state] = await inspectNativeListeners(root, [
-      { name: "livekit", port: settings.httpPort },
-    ]);
-    // Another process on the port would answer for a LiveKit that cannot
-    // listen there.
-    if (!state?.running || state.foreign !== undefined) return false;
     const response = await fetch(`http://127.0.0.1:${settings.httpPort}/`, {
       redirect: "error",
       signal: AbortSignal.any([
@@ -175,7 +175,19 @@ export async function liveKitReady(
       ]),
     });
     await response.body?.cancel();
-    return response.ok;
+    return { ready: response.ok, running: true };
+  } catch {
+    return { ready: false, running: true };
+  }
+}
+/** Whether LiveKit answers its health check (GET / is "OK"). */
+export async function liveKitReady(
+  root: string,
+  settings: LiveKitSettings,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    return (await probeLiveKit(root, settings, signal)).ready;
   } catch {
     return false;
   }
@@ -210,8 +222,9 @@ export async function startNativeLiveKit(options: {
   });
   const deadline = Date.now() + (options.timeoutMs ?? 60_000);
   for (;;) {
-    if (await liveKitReady(options.root, settings, options.signal)) return;
-    if (!(await inspectNativeProcess(options.root, "livekit")).running)
+    const probe = await probeLiveKit(options.root, settings, options.signal);
+    if (probe.ready) return;
+    if (!probe.running)
       throw new Error(
         `Native LiveKit stopped during startup. Inspect ${path.join(options.root, "native/logs/livekit.log")}.`,
       );

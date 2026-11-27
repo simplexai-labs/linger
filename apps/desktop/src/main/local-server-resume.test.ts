@@ -1,4 +1,10 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import {
@@ -1713,5 +1719,728 @@ describe("orphaned local server recovery during LocalServerModule.start()", () =
         preferredRuntime: "codex",
       }),
     ).toBe(false);
+  });
+});
+
+function createValidRepo(root: string): string {
+  const repo = path.join(root, "valid-repo");
+  mkdirSync(path.join(repo, "scripts"), { recursive: true });
+  writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "linger" }),
+  );
+  writeFileSync(path.join(repo, "scripts", "source-native.mjs"), "// stub\n");
+  return repo;
+}
+
+describe("LocalServerModule warm restart fast path", () => {
+  it("reaches ready immediately while reconciling in the background and adopting runtime updates", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const gateFile = path.join(root, "release-resume.flag");
+    const home = path.join(root, "home");
+    const installerDirectory = path.join(root, "installer");
+    mkdirSync(installerDirectory, { recursive: true });
+    writeFileSync(
+      path.join(installerDirectory, "package.json"),
+      '{"type":"commonjs"}',
+    );
+    writeFileSync(
+      path.join(installerDirectory, "installer.js"),
+      `
+        const fs = require("node:fs");
+        const gate = ${JSON.stringify(gateFile)};
+        const timer = setInterval(() => {
+          if (!fs.existsSync(gate)) return;
+          clearInterval(timer);
+          process.stdout.write(JSON.stringify({
+            code: 0,
+            details: {
+              origin: "http://localhost:3000",
+              localModelsRestored: true,
+              restoredLocalModels: ["qwen-3"],
+            },
+            runtime: {
+              environment: {
+                LINGER_LOCALMODELS_BIN: "/tools/localmodels-new",
+                CODEX_HOME: "/home/codex",
+              },
+            },
+          }) + "\\n");
+        }, 20);
+      `,
+    );
+    const node = path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+    mkdirSync(path.join(node, "bin"), { recursive: true });
+    fixtureNode(path.join(node, "bin", "node"));
+    mkdirSync(path.join(home, "desktop"), { recursive: true });
+    writeFileSync(
+      path.join(home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+
+    const logs: Array<{
+      level: string;
+      event: string;
+      fields?: Record<string, unknown>;
+    }> = [];
+    const setServer = vi.fn(() => true);
+    const showStarting = vi.fn();
+    const showStartFailed = vi.fn();
+    const bus = new EventBus();
+    const runtimeEvents = vi.fn();
+    bus.on("computer.runtime", runtimeEvents);
+    const config = new ConfigStore(path.join(root, "config.json"), {
+      serverUrl: "http://localhost:3000",
+      computerId: "cmp_1",
+      runtimeEnvironment: {
+        LINGER_LOCALMODELS_BIN: "/tools/localmodels-old",
+      },
+    });
+    const module = new LocalServerModule({
+      home,
+      version: "0.16.20",
+      installerDirectory,
+      platform: "linux",
+      arch: "x64",
+      pollMs: 10,
+      signIn: async () => {},
+      serverIdentity: async () => ({
+        origin: "http://localhost:3000",
+        teamhub: "http://127.0.0.1:8080",
+        key: new Uint8Array(32),
+      }),
+      proveServer: async () => {},
+      fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+    });
+    const host = new ModuleHost(
+      [
+        {
+          ...stubModule("WindowManager"),
+          setServer,
+          hide: vi.fn(),
+          loadServer: vi.fn(),
+          showStarting,
+          showUpdating: vi.fn(),
+          showStartFailed,
+        } as never,
+        {
+          ...stubModule("Enrollment"),
+          unenroll: vi.fn(async () => {}),
+        } as never,
+        module,
+      ],
+      {
+        config,
+        bus,
+        log: {
+          info: (event, fields) => logs.push({ level: "info", event, fields }),
+          warn: (event, fields) => logs.push({ level: "warn", event, fields }),
+          error: (event, fields) =>
+            logs.push({ level: "error", event, fields }),
+        },
+      },
+    );
+
+    await host.start();
+
+    // Ready BEFORE the background installer is released.
+    await waitForInstaller(() => expect(module.status().phase).toBe("ready"));
+    expect(showStarting).not.toHaveBeenCalled();
+    expect(setServer).toHaveBeenCalledWith(
+      "http://localhost:3000",
+      "http://localhost:3000",
+      { reason: "resume_ready" },
+    );
+    const fastLog = logs.find(
+      (entry) => entry.event === "local_server.resume_fast_ready",
+    );
+    expect(typeof fastLog?.fields?.ms).toBe("number");
+    expect(
+      logs.find((entry) => entry.event === "local_server.resume_succeeded"),
+    ).toBeUndefined();
+
+    // Release background reconcile and verify runtime update + localModelsRestored.
+    writeFileSync(gateFile, "go");
+    await waitForInstaller(() =>
+      expect(
+        logs.find((entry) => entry.event === "local_server.resume_succeeded"),
+      ).toMatchObject({
+        fields: { background: true },
+      }),
+    );
+    expect(config.get().runtimeEnvironment).toEqual({
+      LINGER_LOCALMODELS_BIN: "/tools/localmodels-new",
+      CODEX_HOME: "/home/codex",
+    });
+    expect(runtimeEvents).toHaveBeenCalled();
+    expect(showStartFailed).not.toHaveBeenCalled();
+    await host.stop("quit");
+  });
+
+  it("keeps the ready window intact if background reconciliation fails transiently", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const f = setupResumeFixture(
+      `
+        setTimeout(() => {
+          process.stdout.write(JSON.stringify({ code: 1, message: "transient model probe failure" }) + "\\n");
+        }, 60);
+      `,
+      {
+        fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+        serverIdentity: async () => ({
+          origin: "http://localhost:3000",
+          teamhub: "http://127.0.0.1:8080",
+          key: new Uint8Array(32),
+        }),
+        proveServer: async () => {},
+        initialConfig: {
+          runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/localmodels" },
+        },
+      },
+    );
+    writeFileSync(
+      path.join(f.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: f.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() =>
+      expect(
+        f.logs.find(
+          (entry) => entry.event === "local_server.resume_background_failed",
+        ),
+      ).toBeDefined(),
+    );
+    expect(f.module.status().phase).toBe("ready");
+    expect(f.showStartFailed).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+
+  it("aborts in-flight background reconciliation cleanly on stop", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const f = setupResumeFixture(`setInterval(() => {}, 1000);`, {
+      fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+      serverIdentity: async () => ({
+        origin: "http://localhost:3000",
+        teamhub: "http://127.0.0.1:8080",
+        key: new Uint8Array(32),
+      }),
+      proveServer: async () => {},
+      initialConfig: {
+        runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/localmodels" },
+      },
+    });
+    writeFileSync(
+      path.join(f.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: f.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    await f.host.stop("quit");
+    expect(
+      f.logs.find(
+        (entry) => entry.event === "local_server.resume_background_failed",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("falls back to blocking resume when server identity check fails or runtimeEnvironment is empty", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+
+    // 1. Empty runtimeEnvironment -> blocking resume.
+    const emptyEnv = setupResumeFixture(
+      `
+        setTimeout(() => {
+          process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+        }, 40);
+      `,
+      {
+        fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+        serverIdentity: async () => ({
+          origin: "http://localhost:3000",
+          teamhub: "http://127.0.0.1:8080",
+          key: new Uint8Array(32),
+        }),
+        proveServer: async () => {},
+        initialConfig: { runtimeEnvironment: {} },
+      },
+    );
+    writeFileSync(
+      path.join(emptyEnv.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: emptyEnv.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+    await emptyEnv.host.start();
+    await waitForInstaller(() =>
+      expect(emptyEnv.module.status().phase).toBe("ready"),
+    );
+    expect(
+      emptyEnv.logs.find(
+        (entry) => entry.event === "local_server.resume_fast_ready",
+      ),
+    ).toBeUndefined();
+    await emptyEnv.host.stop("quit");
+
+    // 2. Identity proof fails -> blocking resume.
+    const unverified = setupResumeFixture(
+      `
+        setTimeout(() => {
+          process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+        }, 40);
+      `,
+      {
+        fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+        serverIdentity: async () => ({
+          origin: "http://localhost:3000",
+          teamhub: "http://127.0.0.1:8080",
+          key: new Uint8Array(32),
+        }),
+        proveServer: async () => {
+          throw new LocalServerUnverifiedError("mismatch");
+        },
+        initialConfig: {
+          runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/localmodels" },
+        },
+      },
+    );
+    writeFileSync(
+      path.join(unverified.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: unverified.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+    await unverified.host.start();
+    await waitForInstaller(() =>
+      expect(unverified.module.status().phase).toBe("ready"),
+    );
+    expect(
+      unverified.logs.find(
+        (entry) => entry.event === "local_server.resume_fast_ready",
+      ),
+    ).toBeUndefined();
+    await unverified.host.stop("quit");
+  });
+
+  it("suppresses fast-ready when update is true or legacy source keys are adopted", async () => {
+    // 1. Legacy source .env keys present -> adopts keys and stays on blocking resume.
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const keysFixture = setupResumeFixture(
+      `
+        setTimeout(() => {
+          process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");
+        }, 40);
+      `,
+      {
+        fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+        serverIdentity: async () => ({
+          origin: "http://localhost:3000",
+          teamhub: "http://127.0.0.1:8080",
+          key: new Uint8Array(32),
+        }),
+        proveServer: async () => {},
+        initialConfig: {
+          runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/localmodels" },
+        },
+      },
+    );
+    writeFileSync(
+      path.join(keysFixture.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: keysFixture.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+    const legacySourceDir = path.join(
+      keysFixture.home,
+      "desktop",
+      "source",
+      "legacy-prev",
+    );
+    mkdirSync(legacySourceDir, { recursive: true });
+    writeFileSync(
+      path.join(legacySourceDir, ".env"),
+      "COMPOSIO_API_KEY=cmp_adopted_secret\n",
+    );
+    await keysFixture.host.start();
+    await waitForInstaller(() =>
+      expect(keysFixture.module.status().phase).toBe("ready"),
+    );
+    expect(
+      keysFixture.logs.find(
+        (entry) => entry.event === "local_server.resume_fast_ready",
+      ),
+    ).toBeUndefined();
+    expect(
+      keysFixture.logs.find(
+        (entry) => entry.event === "local_server.keys_moved",
+      ),
+    ).toBeDefined();
+    await keysFixture.host.stop("quit");
+
+    // 2. Source update pending (`sourceArchive` sha differs from `repo` basename) -> blocking update resume.
+    const updateRoot = tempDirectory();
+    const updateHome = path.join(updateRoot, "home");
+    const updateRepo = createValidRepo(updateRoot);
+    const installerDirectory = path.join(updateRoot, "installer");
+    mkdirSync(installerDirectory, { recursive: true });
+    writeFileSync(
+      path.join(installerDirectory, "package.json"),
+      '{"type":"commonjs"}',
+    );
+    writeFileSync(
+      path.join(installerDirectory, "installer.js"),
+      `process.stdout.write(JSON.stringify({ code: 0, details: { origin: "http://localhost:3000" } }) + "\\n");`,
+    );
+    const node = path.join(
+      updateHome,
+      "desktop",
+      "node",
+      `v${NODE_RUNTIME_VERSION}`,
+    );
+    mkdirSync(path.join(node, "bin"), { recursive: true });
+    fixtureNode(path.join(node, "bin", "node"));
+    mkdirSync(path.join(updateHome, "desktop"), { recursive: true });
+    writeFileSync(
+      path.join(updateHome, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: updateHome,
+        repo: updateRepo,
+        origin: "http://localhost:3000",
+        version: "0.16.19",
+      }),
+    );
+    const updateLogs: Array<{ event: string }> = [];
+    const showUpdating = vi.fn();
+    const updateModule = new LocalServerModule({
+      home: updateHome,
+      version: "0.16.20",
+      installerDirectory,
+      platform: "linux",
+      arch: "x64",
+      pollMs: 10,
+      sourceArchive: {
+        url: "https://example.invalid/source.tar.gz",
+        sha256: "a".repeat(64),
+      },
+      signIn: async () => {},
+      serverIdentity: async () => ({
+        origin: "http://localhost:3000",
+        teamhub: "http://127.0.0.1:8080",
+        key: new Uint8Array(32),
+      }),
+      proveServer: async () => {},
+      fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+    });
+    const updateHost = new ModuleHost(
+      [
+        {
+          ...stubModule("WindowManager"),
+          setServer: vi.fn(() => true),
+          hide: vi.fn(),
+          loadServer: vi.fn(),
+          showStarting: vi.fn(),
+          showUpdating,
+          showStartFailed: vi.fn(),
+        } as never,
+        {
+          ...stubModule("Enrollment"),
+          unenroll: vi.fn(async () => {}),
+        } as never,
+        updateModule,
+      ],
+      {
+        config: new ConfigStore(path.join(updateRoot, "config.json"), {
+          serverUrl: "http://localhost:3000",
+          computerId: "cmp_1",
+          runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/localmodels" },
+        }),
+        bus: new EventBus(),
+        log: {
+          info: (event) => updateLogs.push({ event }),
+          warn: (event) => updateLogs.push({ event }),
+          error: (event) => updateLogs.push({ event }),
+        },
+      },
+    );
+    await updateHost.start();
+    await waitForInstaller(() => expect(showUpdating).toHaveBeenCalledOnce());
+    expect(
+      updateLogs.find(
+        (entry) => entry.event === "local_server.resume_fast_ready",
+      ),
+    ).toBeUndefined();
+    await updateHost.stop("quit");
+  });
+
+  it("emits computer.runtime on background localModelsRestored even when runtimeEnvironment is unchanged", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const unchangedEnv = { LINGER_LOCALMODELS_BIN: "/tools/localmodels" };
+    const f = setupResumeFixture(
+      `
+        setTimeout(() => {
+          process.stdout.write(JSON.stringify({
+            code: 0,
+            details: {
+              origin: "http://localhost:3000",
+              localModelsRestored: true,
+              restoredLocalModels: ["qwen-3"],
+            },
+            runtime: {
+              environment: ${JSON.stringify(unchangedEnv)},
+            },
+          }) + "\\n");
+        }, 40);
+      `,
+      {
+        fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+        serverIdentity: async () => ({
+          origin: "http://localhost:3000",
+          teamhub: "http://127.0.0.1:8080",
+          key: new Uint8Array(32),
+        }),
+        proveServer: async () => {},
+        initialConfig: { runtimeEnvironment: unchangedEnv },
+      },
+    );
+    writeFileSync(
+      path.join(f.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: f.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+    const runtimeEvents = vi.fn();
+    f.bus.on("computer.runtime", runtimeEvents);
+
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    await waitForInstaller(() =>
+      expect(
+        f.logs.find((entry) => entry.event === "local_server.resume_succeeded"),
+      ).toMatchObject({ fields: { background: true } }),
+    );
+    expect(runtimeEvents).toHaveBeenCalledTimes(1);
+    await f.host.stop("quit");
+  });
+
+  it("aborts in-flight background reconciliation on server.changed without applying late runtime updates", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const gateFile = path.join(root, "release-server-changed.flag");
+    const f = setupResumeFixture(
+      `
+        const fs = require("node:fs");
+        const gate = ${JSON.stringify(gateFile)};
+        const timer = setInterval(() => {
+          if (!fs.existsSync(gate)) return;
+          clearInterval(timer);
+          process.stdout.write(JSON.stringify({
+            code: 0,
+            details: { origin: "http://localhost:3001" },
+            runtime: { environment: { LINGER_LOCALMODELS_BIN: "/tools/late" } },
+          }) + "\\n");
+        }, 20);
+      `,
+      {
+        fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+        serverIdentity: async () => ({
+          origin: "http://localhost:3000",
+          teamhub: "http://127.0.0.1:8080",
+          key: new Uint8Array(32),
+        }),
+        proveServer: async () => {},
+        initialConfig: {
+          runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/initial" },
+        },
+      },
+    );
+    writeFileSync(
+      path.join(f.home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home: f.home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+
+    await f.host.start();
+    await waitForInstaller(() => expect(f.module.status().phase).toBe("ready"));
+    // User switches to a remote team server while background reconcile is in flight.
+    f.bus.emit("server.changed", "https://team.example.com");
+    writeFileSync(gateFile, "go");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(f.config.get().runtimeEnvironment).toEqual({
+      LINGER_LOCALMODELS_BIN: "/tools/initial",
+    });
+    expect(
+      f.logs.find((entry) => entry.event === "local_server.origin_moved"),
+    ).toBeUndefined();
+    expect(
+      f.logs.find(
+        (entry) => entry.event === "local_server.resume_background_failed",
+      ),
+    ).toBeUndefined();
+    await f.host.stop("quit");
+  });
+
+  it("aborts in-flight background reconciliation when a new installation begins", async () => {
+    const root = tempDirectory();
+    const repo = createValidRepo(root);
+    const gateFile = path.join(root, "release-install-abort.flag");
+    const startedFile = path.join(root, "resume-started.flag");
+    const home = path.join(root, "home");
+    const installerDirectory = path.join(root, "installer");
+    mkdirSync(installerDirectory, { recursive: true });
+    writeFileSync(
+      path.join(installerDirectory, "package.json"),
+      '{"type":"commonjs"}',
+    );
+    writeFileSync(
+      path.join(installerDirectory, "distribution.json"),
+      JSON.stringify({
+        platform: "linux",
+        arch: "x64",
+        nativeSources: [{ target: "linux-x64" }],
+      }),
+    );
+    writeFileSync(
+      path.join(installerDirectory, "installer.js"),
+      `
+        const fs = require("node:fs");
+        if (!process.argv.includes("--resume")) process.exit(1);
+        fs.writeFileSync(${JSON.stringify(startedFile)}, "started");
+        const gate = ${JSON.stringify(gateFile)};
+        const timer = setInterval(() => {
+          if (!fs.existsSync(gate)) return;
+          clearInterval(timer);
+          process.stdout.write(JSON.stringify({
+            code: 0,
+            details: { origin: "http://localhost:3001" },
+            runtime: { environment: { LINGER_LOCALMODELS_BIN: "/tools/stale" } },
+          }) + "\\n");
+        }, 20);
+      `,
+    );
+    const node = path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
+    mkdirSync(path.join(node, "bin"), { recursive: true });
+    fixtureNode(path.join(node, "bin", "node"));
+    mkdirSync(path.join(home, "desktop"), { recursive: true });
+    writeFileSync(
+      path.join(home, "desktop", "local-server.json"),
+      JSON.stringify({
+        home,
+        repo,
+        origin: "http://localhost:3000",
+        version: "0.16.20",
+      }),
+    );
+
+    const logs: Array<{ event: string }> = [];
+    const config = new ConfigStore(path.join(root, "config.json"), {
+      serverUrl: "http://localhost:3000",
+      computerId: "cmp_1",
+      runtimeEnvironment: { LINGER_LOCALMODELS_BIN: "/tools/initial" },
+    });
+    const module = new LocalServerModule({
+      home,
+      version: "0.16.20",
+      installerDirectory,
+      checkout: repo,
+      platform: "linux",
+      arch: "x64",
+      pollMs: 10,
+      freeBytes: Number.MAX_SAFE_INTEGER,
+      signIn: async () => {},
+      serverIdentity: async () => ({
+        origin: "http://localhost:3000",
+        teamhub: "http://127.0.0.1:8080",
+        key: new Uint8Array(32),
+      }),
+      proveServer: async () => {},
+      fetch: (async () => new Response("", { status: 200 })) as typeof fetch,
+    });
+    const host = new ModuleHost(
+      [
+        {
+          ...stubModule("WindowManager"),
+          setServer: vi.fn(() => true),
+          hide: vi.fn(),
+          loadServer: vi.fn(),
+          showStarting: vi.fn(),
+          showUpdating: vi.fn(),
+          showStartFailed: vi.fn(),
+        } as never,
+        {
+          ...stubModule("Enrollment"),
+          unenroll: vi.fn(async () => {}),
+        } as never,
+        module,
+      ],
+      {
+        config,
+        bus: new EventBus(),
+        log: {
+          info: (event) => logs.push({ event }),
+          warn: (event) => logs.push({ event }),
+          error: (event) => logs.push({ event }),
+        },
+      },
+    );
+
+    await host.start();
+    await waitForInstaller(() => expect(module.status().phase).toBe("ready"));
+    await waitForInstaller(() => expect(existsSync(startedFile)).toBe(true));
+    expect(module.status().available).toBe(true);
+    // Starting an install cancels the in-flight background reconcile immediately.
+    await module.begin().catch(() => undefined);
+    writeFileSync(gateFile, "go");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(config.get().runtimeEnvironment).toEqual({
+      LINGER_LOCALMODELS_BIN: "/tools/initial",
+    });
+    expect(
+      logs.find((entry) => entry.event === "local_server.resume_succeeded"),
+    ).toBeUndefined();
+    expect(
+      logs.find(
+        (entry) => entry.event === "local_server.resume_background_failed",
+      ),
+    ).toBeUndefined();
+    await host.stop("quit");
   });
 });

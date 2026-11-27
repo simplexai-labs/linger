@@ -195,8 +195,11 @@ export async function resumeSourceInstance(
         repo: options.sourceRepo,
         externalComputer: options.externalComputer,
         // A different checkout may pin newer runtimes, so only a resume on the
-        // same one may reuse the installed runtime as is.
-        ...(sameCheckout ? { resume: true } : {}),
+        // same checkout reuses the installed runtime unconditionally; a
+        // cross-version update reuses it when compatible with the pinned baseline.
+        ...(sameCheckout
+          ? { resume: true }
+          : { reuseInstalledIfCompatible: true }),
         // An app update onto a new checkout may find a local model stack it
         // cannot bring back as saved (for example, one an earlier release
         // stopped); the person still reaches the workspace and the Models page.

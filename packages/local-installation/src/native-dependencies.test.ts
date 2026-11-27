@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { c as pack } from "tar";
 import {
   acquireNativeArtifact,
+  hashTree,
   validateNativeSource,
   readPublishedNativeSources,
   readNativeToolVersions,
@@ -1145,5 +1146,196 @@ describe("native voice tools", () => {
       prepared: true,
       damaged: false,
     });
+  });
+
+  it("streams bundled tar.gz archives with windowsPostgres manifests without leaving a temp archive copy", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "linger-single-pass-pg-"));
+    roots.push(dir);
+    const payload = path.join(dir, "payload");
+    await mkdir(path.join(payload, "bin"), { recursive: true });
+    await writeFile(path.join(payload, "bin", "postgres.exe"), "pg-binary");
+    await writeFile(path.join(payload, "bin", "initdb.exe"), "initdb-binary");
+    const archivePath = path.join(dir, "postgres.tar.gz");
+    await pack({ cwd: payload, file: archivePath, gzip: true }, ["bin"]);
+    const archiveBytes = await readFile(archivePath);
+    const digest = createHash("sha256").update(archiveBytes).digest("hex");
+    const base = path.join(dir, "components");
+    const sha256Spy = vi.spyOn(verifiedStamps, "sha256File");
+
+    const installed = await acquireNativeArtifact(
+      base,
+      {
+        file: archivePath,
+        algorithm: "sha256",
+        digest,
+        maxBytes: archiveBytes.length,
+        windowsPostgres: true,
+        label: "PostgreSQL",
+      },
+      new AbortController().signal,
+    );
+    expect(sha256Spy).not.toHaveBeenCalled();
+
+    const manifest = JSON.parse(
+      await readFile(path.join(installed, ".simplex-files.json"), "utf8"),
+    ) as Record<string, string>;
+    expect(manifest["bin/postgres.exe"]).toBe(
+      createHash("sha256").update("pg-binary").digest("hex"),
+    );
+    expect(manifest["bin/initdb.exe"]).toBe(
+      createHash("sha256").update("initdb-binary").digest("hex"),
+    );
+    for (const program of [
+      "initdb",
+      "postgres",
+      "pg_isready",
+      "psql",
+      "createdb",
+      "pg_ctl",
+    ]) {
+      const xml = await readFile(
+        path.join(installed, "bin", `${program}.exe.manifest`),
+        "utf8",
+      );
+      expect(manifest[`bin/${program}.exe.manifest`]).toBe(
+        createHash("sha256").update(xml, "utf8").digest("hex"),
+      );
+    }
+    const baseEntries = await readdir(base);
+    expect(baseEntries.some((entry) => entry.endsWith(".tgz"))).toBe(false);
+    expect(baseEntries.some((entry) => entry.startsWith("pending-"))).toBe(
+      false,
+    );
+  });
+
+  it("rejects bundled tar.gz checksum mismatch, maxBytes overflow, corrupt bytes, unsafe paths, and abort without leaving stage artifacts", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "linger-bundled-errors-"));
+    roots.push(dir);
+    const payload = path.join(dir, "payload");
+    await mkdir(path.join(payload, "bin"), { recursive: true });
+    await writeFile(path.join(payload, "bin", "tool.exe"), "tool-payload");
+    const validArchive = path.join(dir, "valid.tar.gz");
+    await pack({ cwd: payload, file: validArchive, gzip: true }, ["bin"]);
+    const validBytes = await readFile(validArchive);
+    const validDigest = createHash("sha256").update(validBytes).digest("hex");
+    const base = path.join(dir, "components");
+
+    // 1. Mismatched checksum on a valid tar.gz archive.
+    await expect(
+      acquireNativeArtifact(
+        base,
+        {
+          file: validArchive,
+          algorithm: "sha256",
+          digest: "0".repeat(64),
+          maxBytes: validBytes.length,
+          label: "PostgreSQL",
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/does not match its checksum/);
+
+    // 2. maxBytes overflow.
+    await expect(
+      acquireNativeArtifact(
+        base,
+        {
+          file: validArchive,
+          algorithm: "sha256",
+          digest: validDigest,
+          maxBytes: validBytes.length - 1,
+          label: "PostgreSQL",
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/larger than pinned/);
+
+    // 3. Corrupt / truncated gzip bytes report checksum mismatch before archive errors.
+    const corruptArchive = path.join(dir, "corrupt.tar.gz");
+    await writeFile(corruptArchive, validBytes.subarray(0, 12));
+    await expect(
+      acquireNativeArtifact(
+        base,
+        {
+          file: corruptArchive,
+          algorithm: "sha256",
+          digest: validDigest,
+          maxBytes: validBytes.length,
+          label: "PostgreSQL",
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/does not match its checksum/);
+
+    // 4. Unsafe path entry (`.simplex-files.json`) inside a checksum-verified bundled archive.
+    const unsafePayload = path.join(dir, "unsafe-payload");
+    await mkdir(unsafePayload, { recursive: true });
+    await writeFile(path.join(unsafePayload, ".simplex-files.json"), "{}");
+    const unsafeArchive = path.join(dir, "unsafe.tar.gz");
+    await pack({ cwd: unsafePayload, file: unsafeArchive, gzip: true }, [
+      ".simplex-files.json",
+    ]);
+    const unsafeBytes = await readFile(unsafeArchive);
+    const unsafeDigest = createHash("sha256").update(unsafeBytes).digest("hex");
+    await expect(
+      acquireNativeArtifact(
+        base,
+        {
+          file: unsafeArchive,
+          algorithm: "sha256",
+          digest: unsafeDigest,
+          maxBytes: unsafeBytes.length,
+          label: "PostgreSQL",
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/Unsafe native dependency archive/);
+
+    // 5. Pre-aborted signal rejects cleanly without promoting.
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    await expect(
+      acquireNativeArtifact(
+        base,
+        {
+          file: validArchive,
+          algorithm: "sha256",
+          digest: validDigest,
+          maxBytes: validBytes.length,
+          label: "PostgreSQL",
+        },
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled");
+
+    const baseEntries = await readdir(base);
+    expect(baseEntries.filter((entry) => entry !== ".locks")).toEqual([]);
+  });
+
+  it("falls back to disk sha256File when a precomputed entry byte count mismatches the file on disk", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "linger-size-mismatch-"));
+    roots.push(dir);
+    await mkdir(path.join(dir, "bin"), { recursive: true });
+    await writeFile(path.join(dir, "bin", "matched.bin"), "abc");
+    await writeFile(path.join(dir, "bin", "changed.bin"), "longer-payload");
+
+    const matchedDigest = createHash("sha256").update("abc").digest("hex");
+    const actualChangedDigest = createHash("sha256")
+      .update("longer-payload")
+      .digest("hex");
+    const sha256Spy = vi.spyOn(verifiedStamps, "sha256File");
+
+    const precomputed = new Map([
+      ["bin/matched.bin", { sha256: matchedDigest, bytes: 3 }],
+      ["bin/changed.bin", { sha256: "f".repeat(64), bytes: 2 }],
+    ]);
+
+    const { hashes } = await hashTree(dir, precomputed);
+    expect(hashes["bin/matched.bin"]).toBe(matchedDigest);
+    expect(hashes["bin/changed.bin"]).toBe(actualChangedDigest);
+    expect(sha256Spy).toHaveBeenCalledTimes(1);
+    expect(sha256Spy).toHaveBeenCalledWith(
+      path.join(dir, "bin", "changed.bin"),
+    );
   });
 });

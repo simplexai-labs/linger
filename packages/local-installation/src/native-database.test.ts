@@ -148,7 +148,27 @@ describe("prepareNativeDatabase on Windows", () => {
       executable: path.join(options.postgresBin, "postgres.exe"),
       withoutAdministrators: false,
     });
-    expect(vi.mocked(inspectNativeProcess)).toHaveBeenCalled();
+    expect(vi.mocked(inspectNativeProcess)).not.toHaveBeenCalled();
+  });
+
+  it("checks process liveness only after pg_isready reports not ready", async () => {
+    asWindows();
+    let isReadyCalls = 0;
+    run.mockImplementation(async (command) => {
+      if (command.endsWith("whoami.exe")) {
+        return ok(
+          '"Mandatory Label\\Medium Mandatory Level","Label","S-1-16-8192",""',
+        );
+      }
+      if (command.endsWith("pg_isready.exe")) {
+        isReadyCalls += 1;
+        return isReadyCalls === 1 ? { code: 2, stdout: "", stderr: "" } : ok();
+      }
+      return ok();
+    });
+    await prepareNativeDatabase(options);
+    expect(isReadyCalls).toBe(2);
+    expect(vi.mocked(inspectNativeProcess)).toHaveBeenCalledTimes(1);
   });
 
   it("starts postgres with Administrators disabled when Linger runs as administrator", async () => {

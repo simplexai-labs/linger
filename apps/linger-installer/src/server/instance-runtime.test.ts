@@ -94,6 +94,22 @@ test("falls back to managedRuntimeEnvironment when no descriptors are supplied",
   );
 });
 
+test("propagates daemon-probed executable and saved profile dir from managedRuntimeEnvironment", async () => {
+  vi.mocked(readSetupChoice).mockResolvedValueOnce("codex");
+  vi.mocked(managedRuntimeEnvironment).mockResolvedValueOnce({
+    LINGER_CODEX_PATH: "/managed/codex",
+    CODEX_HOME: "/managed/codex-home",
+  });
+  const result = await instanceRuntime("/home", "local");
+  expect(result).toEqual({
+    setupChoice: "codex",
+    environment: {
+      LINGER_CODEX_PATH: "/managed/codex",
+      CODEX_HOME: "/managed/codex-home",
+    },
+  });
+});
+
 test("reports separate stage timings for a runtime lookup", async () => {
   const timings: RuntimeLookupTimings[] = [];
   let clock = 0;

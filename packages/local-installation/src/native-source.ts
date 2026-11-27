@@ -1172,6 +1172,16 @@ async function runNativeSource(
           logLocalModelsDegraded(localModelsDegraded);
         }
       };
+      const lazyManagedRuntimeEnv = () =>
+        managedRuntimeEnvironment(home, current.root);
+      const reuseOptions = options.resume
+        ? { reuseInstalled: true }
+        : {
+            ...(options.reuseInstalledIfCompatible
+              ? { reuseInstalledIfCompatible: true }
+              : {}),
+            resolveEnv: lazyManagedRuntimeEnv,
+          };
       const runtime = (async () => {
         try {
           if (restoredByok) {
@@ -1181,11 +1191,7 @@ async function runNativeSource(
                 home,
                 signal,
                 onEvent: emit,
-                ...(options.resume
-                  ? { reuseInstalled: true }
-                  : {
-                      env: await managedRuntimeEnvironment(home, current.root),
-                    }),
+                ...reuseOptions,
                 onDescriptor: (descriptor) =>
                   options.onRuntimeDescriptors?.([descriptor]),
               },
@@ -1219,7 +1225,7 @@ async function runNativeSource(
                 home,
                 signal,
                 onEvent: emit,
-                env: await managedRuntimeEnvironment(home, current.root),
+                resolveEnv: lazyManagedRuntimeEnv,
               },
             );
           } else if (restoredSubscription) {
@@ -1234,11 +1240,7 @@ async function runNativeSource(
                 home,
                 signal,
                 onEvent: emit,
-                ...(options.resume
-                  ? { reuseInstalled: true }
-                  : {
-                      env: await managedRuntimeEnvironment(home, current.root),
-                    }),
+                ...reuseOptions,
                 onDescriptor: (descriptor) =>
                   options.onRuntimeDescriptors?.([descriptor]),
               },
@@ -1336,11 +1338,7 @@ async function runNativeSource(
                 home,
                 signal,
                 onEvent: emit,
-                ...(options.resume
-                  ? { reuseInstalled: true }
-                  : {
-                      env: await managedRuntimeEnvironment(home, current.root),
-                    }),
+                ...reuseOptions,
                 onDescriptor: (descriptor) =>
                   options.onRuntimeDescriptors?.([descriptor]),
               },
@@ -1355,9 +1353,7 @@ async function runNativeSource(
               home,
               signal,
               onEvent: emit,
-              ...(options.resume
-                ? { reuseInstalled: true }
-                : { env: await managedRuntimeEnvironment(home, current.root) }),
+              ...reuseOptions,
               onDescriptor: (descriptor) =>
                 options.onRuntimeDescriptors?.([descriptor]),
             });
@@ -1954,24 +1950,37 @@ async function runNativeSource(
           // untracked in `started` so rollback does not stop previously running
           // services. When TeamHub is not running or not changing,
           // node-services is left alone so it can reconnect.
-          const preStopped =
-            (await nativeConfigurationChanged(serviceOptions("teamhub"))) &&
-            (await inspectNativeProcess(current.root, "node-services")).running;
-          const webPreStop =
-            preStopped &&
-            (await nativeConfigurationChanged(serviceOptions("web"))) &&
-            (await inspectNativeProcess(current.root, "web")).running;
+          let preStopped = false;
+          let webPreStop = false;
+          if (await nativeConfigurationChanged(serviceOptions("teamhub"))) {
+            const [nodeServicesState, webState] = await inspectNativeProcesses(
+              current.root,
+              ["node-services", "web"],
+            );
+            preStopped = Boolean(nodeServicesState?.running);
+            webPreStop =
+              preStopped &&
+              Boolean(webState?.running) &&
+              (await nativeConfigurationChanged(serviceOptions("web")));
+          }
           signal.throwIfAborted();
           if (preStopped) {
             if (webPreStop) {
-              const stopped = await Promise.allSettled([
-                stopNativeProcess(current.root, "node-services"),
-                stopNativeProcess(current.root, "web"),
-              ]);
-              const stopFailed = stopped.find(
-                (result) => result.status === "rejected",
-              );
-              if (stopFailed) throw stopFailed.reason;
+              if (process.platform === "win32") {
+                await stopNativeProcesses(current.root, [
+                  "node-services",
+                  "web",
+                ]);
+              } else {
+                const stopped = await Promise.allSettled([
+                  stopNativeProcess(current.root, "node-services"),
+                  stopNativeProcess(current.root, "web"),
+                ]);
+                const stopFailed = stopped.find(
+                  (result) => result.status === "rejected",
+                );
+                if (stopFailed) throw stopFailed.reason;
+              }
             } else {
               await stopNativeProcess(current.root, "node-services");
             }

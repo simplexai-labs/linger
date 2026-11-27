@@ -246,29 +246,31 @@ it.each([
   "keeps allowlisted upstream Runtime cause %s without native errors",
   async (code) => {
     const options = await fixture();
-    const localmodels = vi.fn(async (_home: string, args: string[]) => {
-      if (args[1] === "plan")
-        await writeFile(
-          args[args.indexOf("--out") + 1]!,
-          JSON.stringify({
-            schema: "localmodels.harness-plan/v1",
-            id: "a".repeat(64),
-            runtime: "pi",
-          }),
-        );
-      return {
-        code: args[1] === "apply" ? 1 : 0,
-        stdout:
-          args[1] === "apply"
-            ? JSON.stringify({
-                schema: "localmodels.harness-error/v1",
-                code,
-                message: "private-token raw native details",
-              })
-            : "",
-        stderr: "private-token",
-      };
-    });
+    const localmodels = vi.fn(
+      async (_home: string, args: string[], _opts?: unknown) => {
+        if (args[1] === "plan")
+          await writeFile(
+            args[args.indexOf("--out") + 1]!,
+            JSON.stringify({
+              schema: "localmodels.harness-plan/v1",
+              id: "a".repeat(64),
+              runtime: "pi",
+            }),
+          );
+        return {
+          code: args[1] === "apply" ? 1 : 0,
+          stdout:
+            args[1] === "apply"
+              ? JSON.stringify({
+                  schema: "localmodels.harness-error/v1",
+                  code,
+                  message: "private-token raw native details",
+                })
+              : "",
+          stderr: "private-token",
+        };
+      },
+    );
     const failure = await installNativeRuntime("pi", options, {
       localmodels,
       probeRuntimes: noDaemon,
@@ -557,25 +559,27 @@ it.each([
   async (authenticated, expectedState, expectedCode) => {
     const options = await fixture();
     const id = "d".repeat(64);
-    const localmodels = vi.fn(async (_home: string, args: string[]) => {
-      if (args[1] === "plan")
-        await writeFile(
-          args[args.indexOf("--out") + 1]!,
-          JSON.stringify({
-            schema: "localmodels.harness-plan/v1",
-            id,
-            runtime: "pi",
-          }),
-        );
-      return {
-        code: 0,
-        stdout:
-          args[1] === "apply"
-            ? `${JSON.stringify({ kind: "stage", stage: "install", state: "succeeded" })}\n${JSON.stringify(status("pi", authenticated))}\n`
-            : "",
-        stderr: "",
-      };
-    });
+    const localmodels = vi.fn(
+      async (_home: string, args: string[], _opts?: unknown) => {
+        if (args[1] === "plan")
+          await writeFile(
+            args[args.indexOf("--out") + 1]!,
+            JSON.stringify({
+              schema: "localmodels.harness-plan/v1",
+              id,
+              runtime: "pi",
+            }),
+          );
+        return {
+          code: 0,
+          stdout:
+            args[1] === "apply"
+              ? `${JSON.stringify({ kind: "stage", stage: "install", state: "succeeded" })}\n${JSON.stringify(status("pi", authenticated))}\n`
+              : "",
+          stderr: "",
+        };
+      },
+    );
     const descriptors: unknown[] = [];
     const outcome = await prepareRuntime(
       "pi",
@@ -1120,23 +1124,26 @@ it.each([
     }
 
     const id = "e".repeat(64);
-    const localmodels = vi.fn(async (_home: string, args: string[]) => {
-      if (args[1] === "plan") {
-        await writeFile(
-          args[args.indexOf("--out") + 1]!,
-          JSON.stringify({
-            schema: "localmodels.harness-plan/v1",
-            id,
-            runtime: "pi",
-          }),
-        );
-      }
-      return {
-        code: 0,
-        stdout: args[1] === "apply" ? JSON.stringify(status("pi", false)) : "",
-        stderr: "",
-      };
-    });
+    const localmodels = vi.fn(
+      async (_home: string, args: string[], _opts?: unknown) => {
+        if (args[1] === "plan") {
+          await writeFile(
+            args[args.indexOf("--out") + 1]!,
+            JSON.stringify({
+              schema: "localmodels.harness-plan/v1",
+              id,
+              runtime: "pi",
+            }),
+          );
+        }
+        return {
+          code: 0,
+          stdout:
+            args[1] === "apply" ? JSON.stringify(status("pi", false)) : "",
+          stderr: "",
+        };
+      },
+    );
     const run = vi.fn(async () =>
       scenario === "version_mismatch"
         ? { code: 0, stdout: "1.5.20\n", stderr: "" }
@@ -1167,5 +1174,177 @@ it.each([
       "plan",
       "apply",
     ]);
+  },
+);
+
+it("prepareRuntime with reuseInstalledIfCompatible reuses compatible installed runtime via daemon without harness plan/apply or resolveEnv", async () => {
+  const options = await fixture();
+  const stateDir = path.join(options.home, "runtime", "localmodels", "state");
+  const codexHome = path.join(options.home, "profiles", "codex");
+  const claudeDir = path.join(options.home, "profiles", "claude");
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(
+    path.join(stateDir, "model-source.json"),
+    JSON.stringify({
+      schema: "localmodels.model-source/v1",
+      mode: "subscription",
+      runtime: "codex",
+      runtime_model: "",
+      model_label: null,
+      gateway_url: null,
+      environment: {
+        CODEX_HOME: codexHome,
+        CLAUDE_CONFIG_DIR: claudeDir,
+      },
+    }),
+  );
+
+  const localmodels = vi.fn();
+  const resolveEnv = vi.fn(async () => ({ CODEX_HOME: "/should-not-run" }));
+  const descriptors: unknown[] = [];
+  const events: string[] = [];
+  const outcome = await prepareRuntime(
+    "codex",
+    {
+      ...options,
+      reuseInstalledIfCompatible: true,
+      resolveEnv,
+      onDescriptor: (descriptor) => descriptors.push(descriptor),
+      onEvent: (event) => {
+        if (event.message) events.push(event.message);
+      },
+    },
+    {
+      localmodels,
+      runtimeBaselines: { codex: "0.166.0" },
+      probeRuntimes: vi.fn(async () => [
+        {
+          type: "codex" as const,
+          status: "ready" as const,
+          installed: true,
+          authenticated: true,
+          version: "codex-cli 0.171.0",
+          executable: "/managed/codex",
+        },
+      ]),
+    },
+  );
+
+  expect(outcome.code).toBe(0);
+  expect(localmodels).not.toHaveBeenCalled();
+  expect(resolveEnv).not.toHaveBeenCalled();
+  expect(
+    events.some((line) => line.includes("Reusing compatible installed codex")),
+  ).toBe(true);
+  expect(descriptors).toEqual([
+    expect.objectContaining({
+      runtime: "codex",
+      executable: "/managed/codex",
+      installed: true,
+      authenticated: true,
+      environment: { CODEX_HOME: codexHome },
+    }),
+  ]);
+});
+
+it.each([
+  [
+    "below_baseline",
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "0.165.0",
+      executable: "/managed/codex",
+    },
+  ],
+  [
+    "unparseable_version",
+    {
+      type: "codex" as const,
+      status: "ready" as const,
+      installed: true,
+      authenticated: true,
+      version: "dev-build",
+      executable: "/managed/codex",
+    },
+  ],
+  [
+    "incompatible_status",
+    {
+      type: "codex" as const,
+      status: "incompatible" as const,
+      installed: true,
+      authenticated: false,
+      version: "0.171.0",
+      executable: "/managed/codex",
+    },
+  ],
+  ["daemon_unavailable", null],
+])(
+  "prepareRuntime with reuseInstalledIfCompatible falls back to harness plan/apply and resolves lazy env when %s",
+  async (_label, observation) => {
+    const options = await fixture();
+    const id = "f".repeat(64);
+    const localmodels = vi.fn(
+      async (_home: string, args: string[], _opts?: unknown) => {
+        if (args[1] === "plan") {
+          await writeFile(
+            args[args.indexOf("--out") + 1]!,
+            JSON.stringify({
+              schema: "localmodels.harness-plan/v1",
+              id,
+              runtime: "codex",
+            }),
+          );
+        }
+        return {
+          code: 0,
+          stdout:
+            args[1] === "apply" ? JSON.stringify(status("codex", true)) : "",
+          stderr: "",
+        };
+      },
+    );
+    const resolveEnv = vi.fn(async () => ({
+      CODEX_HOME: "/lazy/codex-home",
+    }));
+
+    const outcome = await prepareRuntime(
+      "codex",
+      {
+        ...options,
+        reuseInstalledIfCompatible: true,
+        resolveEnv,
+      },
+      {
+        localmodels,
+        runtimeBaselines: { codex: "0.166.0" },
+        probeRuntimes: vi
+          .fn()
+          .mockResolvedValueOnce(observation ? [observation] : null)
+          .mockResolvedValue([
+            {
+              type: "codex" as const,
+              status: "ready" as const,
+              installed: true,
+              authenticated: true,
+              version: "0.171.0",
+              executable: "/managed/codex",
+            },
+          ]),
+      },
+    );
+
+    expect(outcome.code).toBe(0);
+    expect(resolveEnv).toHaveBeenCalledTimes(1);
+    expect(localmodels.mock.calls.map(([, args]) => args[1])).toEqual([
+      "plan",
+      "apply",
+    ]);
+    expect(localmodels.mock.calls[0]![2]).toMatchObject({
+      env: { CODEX_HOME: "/lazy/codex-home" },
+    });
   },
 );

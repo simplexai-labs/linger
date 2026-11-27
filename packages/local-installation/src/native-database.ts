@@ -257,14 +257,14 @@ export async function prepareNativeDatabase(options: {
     let nextProgressAt = startedAt + POSTGRES_READY_PROGRESS_MS;
     for (;;) {
       signal.throwIfAborted();
-      if (!(await inspectNativeProcess(instance.root, "postgres")).running)
-        throw new Error("Native PostgreSQL stopped; inspect its instance log.");
       const ready = await runProcess(
         postgresProgram(postgresBin, "pg_isready"),
         connection,
         { env, signal, timeoutMs: 5_000 },
       );
       if (ready.code === 0) break;
+      if (!(await inspectNativeProcess(instance.root, "postgres")).running)
+        throw new Error("Native PostgreSQL stopped; inspect its instance log.");
       const now = Date.now();
       if (now >= deadline)
         throw new Error(

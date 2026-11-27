@@ -23,7 +23,13 @@ such as `D:\program\Linger` are accepted. The Daemon's `privatefs` follows the
 same policy while holding ancestor directory handles open without
 `FILE_SHARE_DELETE` during target open to prevent concurrent rename races.
 `windowsPrivateLocation` runs the same check non-destructively without creating
-folders or changing ACLs. The PowerShell script checks
+folders or changing ACLs. When `linger-computer-daemon.exe` is available,
+Windows private-path validation (`validate-private-path`) and process/listener
+snapshots (`process-snapshot`) run through a persistent NDJSON
+`linger-computer-daemon.exe platform --worker` process (stripping
+`LINGER_NATIVE_PROCESS_LEASE` and automatically falling back to the persistent
+PowerShell worker / `netstat.exe` when the daemon binary is absent or older).
+The PowerShell fallback script checks
 `$ExecutionContext.SessionState.LanguageMode` first, emits Win32 P/Invoke stubs
 in memory via `Reflection.Emit` instead of compiling C# through `Add-Type`, and
 reports the offending ancestor path or SID or sanitized exception/worker
@@ -154,9 +160,19 @@ the Go `local-daemon` via `linger-computer-daemon probe-runtimes --json`
 owns hardware/memory evaluation, local-model stack admission/lifecycle, and
 managed harness installation and profile descriptors. When no daemon binary is
 available, those entrypoints fall back cleanly to `localmodels` `harness`
-status. `inspectRuntimeDescriptors` (used by `managedRuntimeEnvironment`,
-`readManagedModel`, and Computer enrollment bindings) reads `localmodels`
-descriptors only and never probes `local-daemon`.
+status. `managedRuntimeEnvironment` prefers `probeRuntimesWithDaemon` plus saved
+`model-source.json` profile directories and falls back to
+`inspectSelectedRuntimeDescriptors` (`localmodels harness status`) when the
+daemon probe is unavailable; `inspectRuntimeDescriptors` and `readManagedModel`
+still read `localmodels` descriptors only and never probe `local-daemon`.
+Cross-version updates pass `reuseInstalledIfCompatible: true`, reusing an
+already-installed runtime via daemon probe when its version meets the pinned
+`runtimeBaselines` (preserving saved profile directories and skipping
+`harness plan/apply`) while resolving `managedRuntimeEnvironment` lazily only
+when falling through to `harness plan/apply`. Local bundled `.tar.gz` native
+dependencies and cold `localmodels` kit unpacks compute per-file SHA-256 hashes
+in memory during streaming extraction, verifying archive checksums before stage
+promotion and retaining warm on-disk integrity verification.
 
 The home is `LINGER_HOME`, else `~/.simplexai` (`home.ts`). Installs from
 before the product was renamed Linger convert once in

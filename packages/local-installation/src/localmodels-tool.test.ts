@@ -3225,3 +3225,54 @@ test("falls through to the normal download path when the bundled kit archive is 
     path.join(f.home, "tools", "localmodels", source.sha256, "modules"),
   );
 });
+
+test("validateToolSource preserves optional runtimeBaselines and omits them when absent", () => {
+  const base = {
+    url: "https://example.com/kit.tgz",
+    sha256: "a".repeat(64),
+    bytes: 1234,
+    sourceCommit: "b".repeat(40),
+    manifestSha256: "c".repeat(64),
+  };
+  expect(validateToolSource(base)).not.toHaveProperty("runtimeBaselines");
+  expect(
+    validateToolSource({
+      ...base,
+      runtimeBaselines: {
+        codex: "0.166.0",
+        claude: "2.1.282",
+        pi: "1.2.0",
+      },
+    }),
+  ).toMatchObject({
+    runtimeBaselines: {
+      codex: "0.166.0",
+      claude: "2.1.282",
+      pi: "1.2.0",
+    },
+  });
+});
+
+test("cold single-pass unpack verification rejects mismatched asset checksums without promoting the kit", async () => {
+  const f = await fixture();
+  // Tamper with one file inside the kit archive while keeping tool.json's original manifest hash.
+  await writeFile(
+    path.join(f.directory, "modules", "localmodels", "__init__.py"),
+    "corrupted-payload",
+  );
+  const bytes = await packed(f);
+  const source = { ...f.source, sha256: hash(bytes), bytes: bytes.length };
+  const targetDir = path.join(f.home, "tools", "localmodels", source.sha256);
+
+  await expect(
+    ensureLocalmodelsTool(
+      f.home,
+      {},
+      {
+        source,
+        fetcher: async () => new Response(bytes),
+      },
+    ),
+  ).rejects.toThrow("Upstream tool payload checksum mismatch.");
+  expect(existsSync(targetDir)).toBe(false);
+});
