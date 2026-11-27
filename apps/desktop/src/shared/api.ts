@@ -50,6 +50,21 @@ export type LocalAccountSignIn =
   | { readonly ok: true }
   | { readonly ok: false; readonly message: string };
 
+export type LocalModelsStorageErrorCode =
+  | "NOT_AVAILABLE"
+  | "NOT_FOUND"
+  | "OUTSIDE_ROOT"
+  | "INVALID_PATH"
+  | "OPEN_FAILED";
+
+export type LocalModelsStorageActionResult =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: LocalModelsStorageErrorCode;
+      readonly message?: string;
+    };
+
 export type DesktopPermissionId = "screen_recording" | "accessibility";
 
 // A permission step this app takes on its own Mac. Linger is this app, so
@@ -211,6 +226,13 @@ export interface LingerDesktopApi {
     ): Promise<DesktopDriverActionResult>;
     clearInstallState?(): Promise<void>;
   };
+  // Local model storage folder opener and file revealer scoped strictly to the
+  // main-process-resolved models directory. Older desktop apps lack it, so the
+  // page falls back to copy-only path display.
+  readonly localModelsStorage?: {
+    openFolder(): Promise<LocalModelsStorageActionResult>;
+    revealPath(targetPath: string): Promise<LocalModelsStorageActionResult>;
+  };
 }
 
 export const IPC = {
@@ -233,6 +255,8 @@ export const IPC = {
   driverUpdateInstallStateEvent: "driver-update.install-state.event",
   driverUpdateStartInstall: "driver-update.start-install",
   driverUpdateClearState: "driver-update.clear-state",
+  localModelsStorageOpenFolder: "local-models-storage.open-folder",
+  localModelsStorageRevealPath: "local-models-storage.reveal-path",
   localAccountAvailable: "local-account.available",
   localAccountSignIn: "local-account.sign-in",
   localServerOwned: "local-server.owned",

@@ -112,6 +112,12 @@ build:assets` to check the initial JS budget.
   total. When the pool reports `external_holders`, only those apps count as
   Other apps and the rest of the `used_bytes` no holder accounts for shows as
   System & engine; without the field, all of that rest counts as Other apps.
+  For the Computer's owner (`viewer_is_owner`), `model-storage-location.tsx`
+  shows the global `host.models_dir` in `MemorySummaryCard` and
+  `AdvancedDialog -> Hardware` plus per-model `model.storage` paths and file
+  lists in `ModelFacts` (preferring `storage.disk_bytes` for `On disk`), with
+  Copy path everywhere and OS-labelled local Open/Reveal controls only when
+  `isLocalDesktop` and `window.lingerDesktop.localModelsStorage` are present.
   Opening the page or
   reconnecting an offline Computer auto-refreshes `model-source` and triggers a
   fresh `POST .../local-models` memory snapshot for the owner, while

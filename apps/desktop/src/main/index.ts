@@ -38,6 +38,7 @@ import {
 import { EmbeddedComputerUse } from "./embedded-computer-use.js";
 import { EnrollmentModule } from "./enrollment.js";
 import { LanguageModule } from "./language.js";
+import { LocalModelsStorage } from "./local-models-storage.js";
 import {
   LocalServerModule,
   signInWithPassword,
@@ -352,6 +353,28 @@ async function main(): Promise<void> {
           },
         }
       : undefined;
+  const computerDaemon = new ComputerDaemonModule({
+    createEmbeddedDriver:
+      process.platform === "darwin" && app.isPackaged
+        ? (selected) => new EmbeddedComputerUse(process.resourcesPath, selected)
+        : undefined,
+    spawn: spawnDaemon(
+      daemonPath,
+      path.join(userData, "logs", "computer-daemon.log"),
+    ),
+    credentials,
+    directory: daemonDirectory,
+    // The bundled teamhub CLI, run by the app's own Node, so runtimes reply
+    // with a matching version and the computer needs no Node.
+    teamhubCliDirectory: path.join(here, "../teamhub-cli"),
+    defaultDisplayName,
+    env: daemonEnv(loginShell),
+    ...(devLocalmodels ? { devLocalmodels } : {}),
+    ...(process.platform === "win32"
+      ? { protect: protectWithDaemon(daemonPath) }
+      : {}),
+    ...desktopPermissions,
+  });
   const modules: Module[] = [
     {
       name: "Config",
@@ -379,29 +402,7 @@ async function main(): Promise<void> {
       },
       defaultDirectory: path.join(app.getPath("home"), "Linger"),
     }),
-    new ComputerDaemonModule({
-      createEmbeddedDriver:
-        process.platform === "darwin" && app.isPackaged
-          ? (selected) =>
-              new EmbeddedComputerUse(process.resourcesPath, selected)
-          : undefined,
-      spawn: spawnDaemon(
-        daemonPath,
-        path.join(userData, "logs", "computer-daemon.log"),
-      ),
-      credentials,
-      directory: daemonDirectory,
-      // The bundled teamhub CLI, run by the app's own Node, so runtimes reply
-      // with a matching version and the computer needs no Node.
-      teamhubCliDirectory: path.join(here, "../teamhub-cli"),
-      defaultDisplayName,
-      env: daemonEnv(loginShell),
-      ...(devLocalmodels ? { devLocalmodels } : {}),
-      ...(process.platform === "win32"
-        ? { protect: protectWithDaemon(daemonPath) }
-        : {}),
-      ...desktopPermissions,
-    }),
+    computerDaemon,
     status,
     new PowerGuardModule(electronPower()),
     windows,
@@ -423,6 +424,12 @@ async function main(): Promise<void> {
       defaultDisplayName,
       ...(desktopPermissions ? { permissions: desktopPermissions } : {}),
       driverUpdater,
+      localModelsStorage: new LocalModelsStorage({
+        resolveBaseDir: () => computerDaemon.localmodelsBaseDirectory(),
+        openPath: (directoryPath) => shell.openPath(directoryPath),
+        openWithXdg,
+        showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
+      }),
     }),
   ];
   const host = new ModuleHost(modules, { config, log, bus });

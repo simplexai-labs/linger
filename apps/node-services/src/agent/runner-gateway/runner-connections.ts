@@ -531,6 +531,7 @@ export class RunnerConnections {
               "local_model_unavailable",
               "model_gateway_unavailable",
               "local_models_external_holders",
+              "local_models_storage",
               "runtime_failure_detail",
               "operation_background_wait",
               "dynamic_reasoning_efforts",

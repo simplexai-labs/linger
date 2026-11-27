@@ -348,6 +348,7 @@ export function ModelRow({
   entry,
   expanded,
   inSpotlight = false,
+  isLocalDesktop = false,
   onAssignAgent,
   onRecheck,
   onSelectVariant,
@@ -371,6 +372,7 @@ export function ModelRow({
   expanded: boolean;
   /** Rendered inside `FeaturedModelSpotlight`, which already carries the partner header. */
   inSpotlight?: boolean;
+  isLocalDesktop?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
   onRecheck?: () => void;
   onSelectVariant?: (modelId: string) => void;
@@ -813,6 +815,7 @@ export function ModelRow({
               disabled={disabled}
               entry={entry}
               hasPrimaryAssignAction={showsPrimaryAssignButton}
+              isLocalDesktop={isLocalDesktop}
               onAssignAgent={onAssignAgent}
               onRecheck={onRecheck}
               onUpdateDriver={onUpdateDriver}

@@ -1,6 +1,7 @@
 package localmodels
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,10 +48,11 @@ var (
 		"MEMORY_INSUFFICIENT", "DISK_INSUFFICIENT", "PLATFORM_UNSUPPORTED",
 		"GPU_UNSUPPORTED", "DRIVER_UPDATE_REQUIRED", "RUNTIME_DEPENDENCY_MISSING", "UNAVAILABLE",
 	}
-	memoryKinds  = []string{"vram", "ram", "unified"}
-	gpuVendors   = []string{"amd", "intel", "none", "unknown"}
-	debugModes   = []string{"tiny", "simulate"}
-	debugSources = []string{"env", "state_config", "user_config"}
+	memoryKinds      = []string{"vram", "ram", "unified"}
+	gpuVendors       = []string{"amd", "intel", "none", "unknown"}
+	debugModes       = []string{"tiny", "simulate"}
+	debugSources     = []string{"env", "state_config", "user_config"}
+	storageFileRoles = []string{"weights", "mmproj", "other"}
 )
 
 var (
@@ -72,6 +74,14 @@ func unavailable(code, detail string, now time.Time) wire.LocalModelsSnapshot {
 	}
 }
 
+// libraryModel decodes one localmodels.library-status/v1 model row while
+// keeping storage raw so negative or malformed storage payloads sanitize
+// leniently instead of failing the whole snapshot decode.
+type libraryModel struct {
+	wire.LocalModel
+	Storage json.RawMessage `json:"storage"`
+}
+
 // libraryStatus is localmodels.library-status/v1. Its host and model entries
 // already use the wire field names; pools gain kind and gpu_index here.
 type libraryStatus struct {
@@ -86,7 +96,7 @@ type libraryStatus struct {
 		Holders         []wire.LocalModelPoolHolder `json:"holders"`
 		ExternalHolders []json.RawMessage           `json:"external_holders"`
 	} `json:"pools"`
-	Models []wire.LocalModel          `json:"models"`
+	Models []libraryModel             `json:"models"`
 	Debug  *wire.LocalModelsDebugInfo `json:"debug,omitempty"`
 }
 
@@ -117,6 +127,7 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		return wire.LocalModelsSnapshot{}, fmt.Errorf("library status host %s/%s is outside the contract", status.Host.Platform, status.Host.Arch)
 	}
 	host.OsLabel, host.EngineLabel = clip(host.OsLabel, 200), clip(host.EngineLabel, 200)
+	host.ModelsDir = clip(strings.TrimSpace(host.ModelsDir), 4096)
 	if host.Gpus == nil {
 		host.Gpus = []wire.LocalModelGpu{}
 	}
@@ -164,7 +175,9 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 			Holders: holders, ExternalHolders: externalHolders,
 		})
 	}
-	for _, model := range status.Models {
+	for _, rawModel := range status.Models {
+		model := rawModel.LocalModel
+		model.Storage = sanitizeStorage(rawModel.Storage, model.State)
 		sanitizeModel(&model)
 		if err := checkModel(model); err != nil {
 			return wire.LocalModelsSnapshot{}, err
@@ -184,6 +197,70 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		snapshot.Models = append(snapshot.Models, model)
 	}
 	return snapshot, nil
+}
+
+func sanitizeStorage(raw json.RawMessage, state string) *wire.LocalModelStorage {
+	if state == "absent" || len(raw) == 0 {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var parsed struct {
+		Dir          string  `json:"dir"`
+		PrimaryPath  string  `json:"primary_path"`
+		DedicatedDir bool    `json:"dedicated_dir"`
+		DiskBytes    float64 `json:"disk_bytes"`
+		FilesPresent bool    `json:"files_present"`
+		Files        []struct {
+			Path      string  `json:"path"`
+			Role      string  `json:"role"`
+			SizeBytes float64 `json:"size_bytes"`
+			Present   bool    `json:"present"`
+			Shared    bool    `json:"shared"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil
+	}
+	dir := clip(strings.TrimSpace(parsed.Dir), 4096)
+	primaryPath := clip(strings.TrimSpace(parsed.PrimaryPath), 4096)
+	if dir == "" || primaryPath == "" || len(parsed.Files) == 0 {
+		return nil
+	}
+	files := make([]wire.LocalModelStorageFile, 0, min(len(parsed.Files), 256))
+	for _, entry := range parsed.Files {
+		if len(files) >= 256 {
+			break
+		}
+		filePath := clip(strings.TrimSpace(entry.Path), 4096)
+		if filePath == "" {
+			continue
+		}
+		role := strings.TrimSpace(entry.Role)
+		if !slices.Contains(storageFileRoles, role) {
+			role = "other"
+		}
+		files = append(files, wire.LocalModelStorageFile{
+			Path:      filePath,
+			Role:      role,
+			SizeBytes: bytesValue(entry.SizeBytes),
+			Present:   entry.Present,
+			Shared:    entry.Shared,
+		})
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	return &wire.LocalModelStorage{
+		Dir:          dir,
+		PrimaryPath:  primaryPath,
+		DedicatedDir: parsed.DedicatedDir,
+		DiskBytes:    bytesValue(parsed.DiskBytes),
+		FilesPresent: parsed.FilesPresent,
+		Files:        files,
+	}
 }
 
 func sanitizeDebugInfo(raw *wire.LocalModelsDebugInfo) *wire.LocalModelsDebugInfo {

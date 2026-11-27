@@ -468,3 +468,77 @@ func TestPublishLocalModelsGatesExternalHolders(t *testing.T) {
 		t.Fatalf("empty holders did not pass through as []: %+v", pools[1])
 	}
 }
+
+func TestPublishLocalModelsGatesStorageFields(t *testing.T) {
+	exists := true
+	storage := &wire.LocalModelStorage{
+		Dir:          "/home/alice/.simplexai/runtime/localmodels/models/models",
+		PrimaryPath:  "/home/alice/.simplexai/runtime/localmodels/models/models/qwen.gguf",
+		DedicatedDir: false,
+		DiskBytes:    4096,
+		FilesPresent: true,
+		Files: []wire.LocalModelStorageFile{
+			{Path: "/home/alice/.simplexai/runtime/localmodels/models/models/qwen.gguf", Role: "weights", SizeBytes: 4096, Present: true, Shared: false},
+		},
+	}
+	snapshot := wire.LocalModelsSnapshot{
+		Available:  true,
+		ObservedAt: "2026-11-27T00:00:00Z",
+		Host: &wire.LocalModelHost{
+			Platform:        "linux",
+			Arch:            "x86_64",
+			OsLabel:         "Ubuntu",
+			EngineLabel:     "llama.cpp",
+			ModelsDir:       "/home/alice/.simplexai/runtime/localmodels/models/models",
+			ModelsDirExists: &exists,
+			Gpus:            []wire.LocalModelGpu{},
+		},
+		Pools: []wire.LocalModelPool{},
+		Models: []wire.LocalModel{
+			{ID: "qwen:Q4", Name: "Qwen", Quant: "Q4", Fit: "gpu", Pool: "gpu:0", State: "idle", Storage: storage},
+		},
+	}
+
+	publish := func(feature bool) map[string]any {
+		t.Helper()
+		stream := &browserEventStream{}
+		d := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: stream}
+		d.localModelsStorage.Store(feature)
+		d.PublishLocalModels(snapshot)
+		var frame struct {
+			LocalModels map[string]any `json:"local_models"`
+		}
+		if err := json.Unmarshal(stream.events[0].Payload, &frame); err != nil {
+			t.Fatal(err)
+		}
+		return frame.LocalModels
+	}
+
+	legacy := publish(false)
+	legacyHost := legacy["host"].(map[string]any)
+	if _, ok := legacyHost["models_dir"]; ok {
+		t.Fatalf("legacy service received host.models_dir: %+v", legacyHost)
+	}
+	if _, ok := legacyHost["models_dir_exists"]; ok {
+		t.Fatalf("legacy service received host.models_dir_exists: %+v", legacyHost)
+	}
+	legacyModel := legacy["models"].([]any)[0].(map[string]any)
+	if _, ok := legacyModel["storage"]; ok {
+		t.Fatalf("legacy service received model.storage: %+v", legacyModel)
+	}
+	// Caller-owned Host pointer and Models slice must remain unmutated.
+	if snapshot.Host.ModelsDir == "" || snapshot.Host.ModelsDirExists == nil || snapshot.Models[0].Storage == nil {
+		t.Fatalf("stripping mutated caller-owned snapshot: host=%+v model=%+v", snapshot.Host, snapshot.Models[0])
+	}
+
+	modern := publish(true)
+	modernHost := modern["host"].(map[string]any)
+	if modernHost["models_dir"] != snapshot.Host.ModelsDir || modernHost["models_dir_exists"] != true {
+		t.Fatalf("modern host lost storage fields: %+v", modernHost)
+	}
+	modernModel := modern["models"].([]any)[0].(map[string]any)
+	modernStorage, ok := modernModel["storage"].(map[string]any)
+	if !ok || modernStorage["primary_path"] != storage.PrimaryPath {
+		t.Fatalf("modern model lost storage: %+v", modernModel)
+	}
+}

@@ -232,6 +232,10 @@ take precedence.
 - `local_models_external_holders` is advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
   strips `external_holders` from `LocalModelPool` rows.
+- `local_models_storage` is advertised to every Computer (a Daemon ignores an
+  unknown feature); a Daemon talking to an older Agent Service strips
+  `host.models_dir`, `host.models_dir_exists`, and per-model `storage` from
+  `LocalModelsSnapshot` frames.
 - `operation_background_wait` in `runner.welcome`'s `service_features` is
   advertised to every Computer (a Daemon ignores an unknown feature); only a
   Daemon that sees it emits `run.background_waiting` and

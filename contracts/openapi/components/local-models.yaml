@@ -151,6 +151,21 @@ components:
           type: integer
           format: int64
           minimum: 0
+        models_dir:
+          description: >-
+            Absolute directory on the Computer where local model weight files
+            are stored (<base_dir>/models). Sent only when service_features
+            declares local_models_storage; omitted for non-owners in the public
+            view.
+          type: string
+          minLength: 1
+          maxLength: 4096
+        models_dir_exists:
+          description: >-
+            Whether models_dir currently exists on disk on the Computer. Sent
+            only when service_features declares local_models_storage; omitted
+            for non-owners in the public view.
+          type: boolean
         gpus:
           type: array
           maxItems: 64
@@ -527,6 +542,77 @@ components:
           LocalModelEnginePolystrata,
           LocalModelEngineStrata,
         ]
+    LocalModelStorageFile:
+      description: >-
+        One local weight or companion file belonging to a model on disk.
+        Omitted for non-owners in the public view.
+      type: object
+      additionalProperties: false
+      required: [path, role, size_bytes, present, shared]
+      properties:
+        path:
+          description: Absolute native OS path to the file on the Computer.
+          type: string
+          minLength: 1
+          maxLength: 4096
+        role:
+          type: string
+          enum: [weights, mmproj, other]
+          x-enum-varnames:
+            [
+              LocalModelStorageFileRoleWeights,
+              LocalModelStorageFileRoleMmproj,
+              LocalModelStorageFileRoleOther,
+            ]
+        size_bytes:
+          description: Actual bytes currently on disk (or partial download bytes); 0 when missing.
+          type: integer
+          format: int64
+          minimum: 0
+        present:
+          description: Whether the final file currently exists on disk.
+          type: boolean
+        shared:
+          description: Whether another downloaded model or deployment shares this file.
+          type: boolean
+    LocalModelStorage:
+      description: >-
+        On-disk storage location and files for a model on the Computer. Present
+        only for non-absent models when reported by localmodels and
+        service_features declares local_models_storage; omitted for non-owners
+        in the public view.
+      type: object
+      additionalProperties: false
+      required:
+        [dir, primary_path, dedicated_dir, disk_bytes, files_present, files]
+      properties:
+        dir:
+          description: Absolute native OS directory containing primary_path.
+          type: string
+          minLength: 1
+          maxLength: 4096
+        primary_path:
+          description: Absolute native OS path to the primary weight file for this model.
+          type: string
+          minLength: 1
+          maxLength: 4096
+        dedicated_dir:
+          description: True when dir holds only this model's files rather than a shared flat folder.
+          type: boolean
+        disk_bytes:
+          description: Total actual bytes currently on disk across files.
+          type: integer
+          format: int64
+          minimum: 0
+        files_present:
+          description: True when every required file in files currently exists on disk.
+          type: boolean
+        files:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/LocalModelStorageFile"
     LocalModel:
       description: >-
         One validated chat model of the catalog on this platform and its state
@@ -673,6 +759,9 @@ components:
           type: integer
           format: int64
           minimum: 0
+        storage:
+          $ref: "#/components/schemas/LocalModelStorage"
+          description: On-disk storage location and files for this model; owner-only in the public view.
     LocalModelsUnavailableReason:
       type: object
       additionalProperties: false

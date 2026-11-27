@@ -335,7 +335,11 @@ downloaded model that Run's Agent names.
   `runner.welcome`'s `service_features` names
   `local_models_external_holders` and stripped otherwise; the Models page calls only those "Other
   apps" and shows the rest of `used_bytes` beyond `holders` neutrally, since
-  an engine can hold more than its catalog estimate). Structural and
+  an engine can hold more than its catalog estimate). `host.models_dir`,
+  `host.models_dir_exists`, and per-model `storage` are decoded and sanitized
+  from `localmodels`, with `host.models_dir` falling back to
+  `<base_dir>/models` on older kits, and sent only when `runner.welcome`'s
+  `service_features` names `local_models_storage`. Structural and
   security invariants (`id`, unique model IDs, `fit`, `state`, `pool`,
   `pi_model` length, non-negative speeds, HTTPS `source_url`) still fail
   closed as `TOOL_FAILED`, while extensible display and diagnostic enums

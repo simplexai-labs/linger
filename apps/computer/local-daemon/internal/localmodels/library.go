@@ -439,6 +439,17 @@ func (l *Library) read(ctx context.Context) wire.LocalModelsSnapshot {
 		slog.Warn("local_models.status_invalid", "error", err)
 		return unavailable(CodeToolFailed, "localmodels reported a library status outside its contract", l.now())
 	}
+	// Older localmodels kits omit host.models_dir; derive <base_dir>/models so
+	// Linger's double-nested weights folder is still surfaced accurately.
+	if snapshot.Host != nil && snapshot.Host.ModelsDir == "" && l.tool.BaseDirectory != "" {
+		modelsDir := clip(filepath.Join(filepath.Clean(l.tool.BaseDirectory), "models"), 4096)
+		snapshot.Host.ModelsDir = modelsDir
+		if snapshot.Host.ModelsDirExists == nil {
+			info, statErr := os.Stat(modelsDir)
+			exists := statErr == nil && info.IsDir()
+			snapshot.Host.ModelsDirExists = &exists
+		}
+	}
 	l.restoreCauses(&snapshot)
 	return snapshot
 }

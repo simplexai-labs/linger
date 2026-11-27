@@ -336,3 +336,116 @@ func TestLocalModelsViewPassesThroughConcurrencyProbingWhileLoading(t *testing.T
 		t.Fatalf("probing model = %+v, want state=loading concurrency_probing=true", probingModel)
 	}
 }
+
+func TestLocalModelsViewRedactsStoragePathsForNonOwnersAndKeepsOfflineHost(t *testing.T) {
+	storageJSON := `,"storage":{"dir":"/home/alice/.simplexai/runtime/localmodels/models/models","primary_path":"/home/alice/.simplexai/runtime/localmodels/models/models/idle.gguf","dedicated_dir":false,"disk_bytes":1024,"files_present":true,"files":[{"path":"/home/alice/.simplexai/runtime/localmodels/models/models/idle.gguf","role":"weights","size_bytes":1024,"present":true,"shared":false}]}`
+	snapshot := strings.Replace(storedLocalModelsSnapshotJSON, `"state":"idle"`, `"state":"idle"`+storageJSON, 1)
+	hostJSON := `{"platform":"linux","arch":"x86_64","os_label":"Ubuntu","engine_label":"llama.cpp","ram_total_bytes":1,"disk_free_bytes":1,"models_dir":"/home/alice/.simplexai/runtime/localmodels/models/models","models_dir_exists":true,"gpus":[]}`
+
+	record := agentruntimestate.LocalModelsRecord{
+		ComputerID: "computer_1", DisplayName: "Studio", Status: "offline",
+		Owner:    agentruntimestate.LocalComputerOwner{TenantID: "tenant_1", OwnerActorID: "actor_owner"},
+		Snapshot: json.RawMessage(snapshot),
+		Host:     json.RawMessage(hostJSON),
+	}
+
+	ownerView, err := localModelsView(record, "actor_owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerView.Computer.Status != httpapi.LocalModelsComputerOffline ||
+		ownerView.Computer.Host == nil ||
+		ownerView.Computer.Host.ModelsDir == nil ||
+		*ownerView.Computer.Host.ModelsDir != "/home/alice/.simplexai/runtime/localmodels/models/models" ||
+		ownerView.Computer.Host.ModelsDirExists == nil ||
+		!*ownerView.Computer.Host.ModelsDirExists {
+		t.Fatalf("owner offline host lost storage fields: %+v", ownerView.Computer.Host)
+	}
+	if ownerView.Models[2].Model.Storage == nil ||
+		ownerView.Models[2].Model.Storage.PrimaryPath != "/home/alice/.simplexai/runtime/localmodels/models/models/idle.gguf" {
+		t.Fatalf("owner model lost storage: %+v", ownerView.Models[2].Model.Storage)
+	}
+
+	memberView, err := localModelsView(record, "actor_member", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if memberView.Computer.Host == nil || memberView.Computer.Host.ModelsDir != nil || memberView.Computer.Host.ModelsDirExists != nil {
+		t.Fatalf("non-owner saw host storage fields: %+v", memberView.Computer.Host)
+	}
+	for _, entry := range memberView.Models {
+		if entry.Model.Storage != nil {
+			t.Fatalf("non-owner saw model storage on %s: %+v", entry.Model.Id, entry.Model.Storage)
+		}
+	}
+
+	// Offline Computer with no snapshot still preserves host.models_dir for owner only.
+	noSnap := record
+	noSnap.Snapshot = nil
+	ownerNoSnap, err := localModelsView(noSnap, "actor_owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerNoSnap.Computer.Host == nil || ownerNoSnap.Computer.Host.ModelsDir == nil {
+		t.Fatalf("owner without snapshot lost host.models_dir: %+v", ownerNoSnap.Computer.Host)
+	}
+	memberNoSnap, err := localModelsView(noSnap, "actor_member", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if memberNoSnap.Computer.Host == nil || memberNoSnap.Computer.Host.ModelsDir != nil || memberNoSnap.Computer.Host.ModelsDirExists != nil {
+		t.Fatalf("non-owner without snapshot saw host storage fields: %+v", memberNoSnap.Computer.Host)
+	}
+}
+
+func TestSanitizeLocalModelsSnapshotStorage(t *testing.T) {
+	var snapshot teamhubinternal.LocalModelsSnapshot
+	if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	rawDir := "  /tmp/models  "
+	exists := true
+	snapshot.Host = &teamhubinternal.LocalModelHost{
+		Platform:        teamhubinternal.LocalModelHostPlatformLinux,
+		Arch:            teamhubinternal.LocalModelHostArchX8664,
+		OsLabel:         "Ubuntu",
+		EngineLabel:     "llama.cpp",
+		RamTotalBytes:   1,
+		DiskFreeBytes:   1,
+		ModelsDir:       &rawDir,
+		ModelsDirExists: &exists,
+		Gpus:            []teamhubinternal.LocalModelGpu{},
+	}
+	// Idle model with dirty storage fields gets sanitized.
+	snapshot.Models[2].Storage = &teamhubinternal.LocalModelStorage{
+		Dir:          "  /tmp/models  ",
+		PrimaryPath:  "  /tmp/models/m.gguf  ",
+		DedicatedDir: false,
+		DiskBytes:    -10,
+		FilesPresent: true,
+		Files: []teamhubinternal.LocalModelStorageFile{
+			{Path: "  /tmp/models/m.gguf ", Role: "future_role", SizeBytes: -5, Present: true, Shared: false},
+			{Path: "   ", Role: teamhubinternal.LocalModelStorageFileRoleMmproj, SizeBytes: 100, Present: true, Shared: true},
+		},
+	}
+	// Absent model must have storage cleared.
+	snapshot.Models[4].Storage = &teamhubinternal.LocalModelStorage{
+		Dir: "/tmp/models", PrimaryPath: "/tmp/models/a.gguf",
+		Files: []teamhubinternal.LocalModelStorageFile{{Path: "/tmp/models/a.gguf", Role: teamhubinternal.LocalModelStorageFileRoleWeights}},
+	}
+
+	sanitizeLocalModelsSnapshot(&snapshot)
+	if !validLocalModelsSnapshot(snapshot) {
+		t.Fatal("sanitized snapshot with storage was rejected")
+	}
+	if snapshot.Host.ModelsDir == nil || *snapshot.Host.ModelsDir != "/tmp/models" {
+		t.Fatalf("sanitized host models_dir = %+v", snapshot.Host.ModelsDir)
+	}
+	if got := snapshot.Models[2].Storage; got == nil || got.Dir != "/tmp/models" || got.PrimaryPath != "/tmp/models/m.gguf" ||
+		got.DiskBytes != 0 || len(got.Files) != 1 || got.Files[0].Role != teamhubinternal.LocalModelStorageFileRoleOther || got.Files[0].SizeBytes != 0 {
+		t.Fatalf("sanitized model storage = %+v", got)
+	}
+	if snapshot.Models[4].Storage != nil {
+		t.Fatalf("absent model retained storage: %+v", snapshot.Models[4].Storage)
+	}
+}

@@ -44,6 +44,12 @@ const serviceFeatureLocalModelsConcurrencyProbe = "local_models_concurrency_prob
 // services close the connection on unknown LocalModelPool properties.
 const serviceFeatureLocalModelsExternalHolders = "local_models_external_holders"
 
+// serviceFeatureLocalModelsStorage in runner.welcome's service_features says
+// the Agent Service accepts host.models_dir, host.models_dir_exists, and
+// per-model storage on LocalModelsSnapshot frames. Older services close the
+// connection on unknown host or model properties.
+const serviceFeatureLocalModelsStorage = "local_models_storage"
+
 // serviceFeatureLocalModelUnavailable in runner.welcome's service_features
 // says the Agent Service accepts the local_model_unavailable Run failure
 // code. An older service rejects the frame, so the Daemon reports
@@ -142,6 +148,9 @@ func (d *Daemon) PublishLocalModels(snapshot wire.LocalModelsSnapshot) {
 	}
 	if !d.localModelsExternalHolders.Load() {
 		snapshot = stripLocalModelsExternalHolders(snapshot)
+	}
+	if !d.localModelsStorage.Load() {
+		snapshot = stripLocalModelsStorage(snapshot)
 	}
 	d.localModelsRevision++
 	sentAt := time.Now().UTC()
@@ -344,6 +353,28 @@ func stripLocalModelsExternalHolders(snapshot wire.LocalModelsSnapshot) wire.Loc
 		pools[i] = pool
 	}
 	snapshot.Pools = pools
+	return snapshot
+}
+
+// stripLocalModelsStorage omits host.models_dir, host.models_dir_exists, and
+// per-model storage without mutating caller-owned pointers or slices when
+// talking to an Agent Service that did not announce
+// serviceFeatureLocalModelsStorage.
+func stripLocalModelsStorage(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnapshot {
+	if snapshot.Host != nil {
+		host := *snapshot.Host
+		host.ModelsDir = ""
+		host.ModelsDirExists = nil
+		snapshot.Host = &host
+	}
+	if len(snapshot.Models) > 0 {
+		models := make([]wire.LocalModel, len(snapshot.Models))
+		for i, model := range snapshot.Models {
+			model.Storage = nil
+			models[i] = model
+		}
+		snapshot.Models = models
+	}
 	return snapshot
 }
 

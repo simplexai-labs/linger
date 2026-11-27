@@ -49,7 +49,8 @@ export type ServiceFeature =
   | "dynamic_reasoning_efforts"
   | "antigravity_history"
   | "antigravity_usage_provider"
-  | "local_voice_asr";
+  | "local_voice_asr"
+  | "local_models_storage";
 export type JsonValue =
   | null
   | boolean
@@ -1533,6 +1534,14 @@ export interface LocalModelHost {
   ram_total_bytes: NonNegativeInteger;
   disk_free_bytes: NonNegativeInteger;
   /**
+   * Absolute directory on the Computer where model weight files are stored (<base_dir>/models). Sent only when service_features declares local_models_storage.
+   */
+  models_dir?: string;
+  /**
+   * Whether models_dir currently exists on disk on the Computer. Sent only when service_features declares local_models_storage.
+   */
+  models_dir_exists?: boolean;
+  /**
    * @maxItems 64
    */
   gpus: LocalModelGpu[];
@@ -1675,6 +1684,7 @@ export interface LocalModel {
    * Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.
    */
   host_ram_bytes?: number;
+  storage?: LocalModelStorage;
 }
 export interface LocalModelAvailability {
   downloadable: boolean;
@@ -1882,6 +1892,40 @@ export interface LocalModelError {
  */
 export interface LocalModelNote {
   code: "NO_ROOM_TO_LOAD";
+}
+/**
+ * On-disk storage location and files for this model. Sent only when runner.welcome service_features names local_models_storage.
+ */
+export interface LocalModelStorage {
+  /**
+   * Absolute native OS directory containing primary_path.
+   */
+  dir: string;
+  /**
+   * Absolute native OS path to the primary weight file for this model.
+   */
+  primary_path: string;
+  dedicated_dir: boolean;
+  disk_bytes: NonNegativeInteger;
+  files_present: boolean;
+  /**
+   * @minItems 1
+   * @maxItems 256
+   */
+  files: [LocalModelStorageFile, ...LocalModelStorageFile[]];
+}
+/**
+ * One local weight or companion file belonging to a model on disk.
+ */
+export interface LocalModelStorageFile {
+  /**
+   * Absolute native OS path to the file on the Computer.
+   */
+  path: string;
+  role: "weights" | "mmproj" | "other";
+  size_bytes: NonNegativeInteger;
+  present: boolean;
+  shared: boolean;
 }
 /**
  * Present only when localmodels debug mode is active and the Agent Service declared local_models_diagnostics.

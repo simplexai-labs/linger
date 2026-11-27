@@ -126,6 +126,40 @@ func TestRefreshMapsLibraryStatusToTheWireSnapshot(t *testing.T) {
 	}
 }
 
+func TestRefreshDerivesModelsDirFallbackWhenToolOmitsIt(t *testing.T) {
+	fake := newFakeTool(t)
+	fake.write("status.json", status(model(testModel, "absent")))
+	wantDir := filepath.Join(filepath.Clean(fake.tool.BaseDirectory), "models")
+
+	// Before <base_dir>/models exists on disk, fallback reports models_dir_exists=false.
+	snapshot := newLibrary(t, fake, &recorder{}, time.Second).Refresh(context.Background())
+	if snapshot.Host == nil || snapshot.Host.ModelsDir != wantDir ||
+		snapshot.Host.ModelsDirExists == nil || *snapshot.Host.ModelsDirExists {
+		t.Fatalf("missing dir fallback host = %+v, want models_dir=%q exists=false", snapshot.Host, wantDir)
+	}
+
+	// Once <base_dir>/models is created, fallback reports models_dir_exists=true.
+	if err := os.MkdirAll(wantDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = newLibrary(t, fake, &recorder{}, time.Second).Refresh(context.Background())
+	if snapshot.Host == nil || snapshot.Host.ModelsDir != wantDir ||
+		snapshot.Host.ModelsDirExists == nil || !*snapshot.Host.ModelsDirExists {
+		t.Fatalf("existing dir fallback host = %+v, want models_dir=%q exists=true", snapshot.Host, wantDir)
+	}
+
+	// When the tool explicitly emits host.models_dir, Library preserves it untouched.
+	explicit := status(model(testModel, "absent"))
+	explicit["host"].(map[string]any)["models_dir"] = "/custom/models/root"
+	explicit["host"].(map[string]any)["models_dir_exists"] = false
+	fake.write("status.json", explicit)
+	snapshot = newLibrary(t, fake, &recorder{}, time.Second).Refresh(context.Background())
+	if snapshot.Host == nil || snapshot.Host.ModelsDir != "/custom/models/root" ||
+		snapshot.Host.ModelsDirExists == nil || *snapshot.Host.ModelsDirExists {
+		t.Fatalf("explicit host = %+v, want /custom/models/root exists=false", snapshot.Host)
+	}
+}
+
 func TestRefreshRejectsStatusOutsideTheContract(t *testing.T) {
 	fake := newFakeTool(t)
 	broken := model(testModel, "warming")

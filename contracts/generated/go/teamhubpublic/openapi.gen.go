@@ -2459,6 +2459,27 @@ func (e LocalModelState) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelStorageFileRole.
+const (
+	LocalModelStorageFileRoleMmproj  LocalModelStorageFileRole = "mmproj"
+	LocalModelStorageFileRoleOther   LocalModelStorageFileRole = "other"
+	LocalModelStorageFileRoleWeights LocalModelStorageFileRole = "weights"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelStorageFileRole enum.
+func (e LocalModelStorageFileRole) Valid() bool {
+	switch e {
+	case LocalModelStorageFileRoleMmproj:
+		return true
+	case LocalModelStorageFileRoleOther:
+		return true
+	case LocalModelStorageFileRoleWeights:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelsComputerStatus.
 const (
 	LocalModelsComputerOffline LocalModelsComputerStatus = "offline"
@@ -7493,6 +7514,9 @@ type LocalModel struct {
 	// State absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
 	State LocalModelState `json:"state"`
 
+	// Storage On-disk storage location and files for a model on the Computer. Present only for non-absent models when reported by localmodels and service_features declares local_models_storage; omitted for non-owners in the public view.
+	Storage *LocalModelStorage `json:"storage,omitempty"`
+
 	// TokensPerSecond Warm speed measured at the last load; absent when unknown.
 	TokensPerSecond *float32 `json:"tokens_per_second,omitempty"`
 	Vision          bool     `json:"vision"`
@@ -7639,6 +7663,12 @@ type LocalModelHost struct {
 	EngineLabel string          `json:"engine_label"`
 	Gpus        []LocalModelGpu `json:"gpus"`
 
+	// ModelsDir Absolute directory on the Computer where local model weight files are stored (<base_dir>/models). Sent only when service_features declares local_models_storage; omitted for non-owners in the public view.
+	ModelsDir *string `json:"models_dir,omitempty"`
+
+	// ModelsDirExists Whether models_dir currently exists on disk on the Computer. Sent only when service_features declares local_models_storage; omitted for non-owners in the public view.
+	ModelsDirExists *bool `json:"models_dir_exists,omitempty"`
+
 	// OsLabel Display only, such as Ubuntu 24.04.
 	OsLabel       string                 `json:"os_label"`
 	Platform      LocalModelHostPlatform `json:"platform"`
@@ -7703,6 +7733,44 @@ type LocalModelPoolId = string
 
 // LocalModelState absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
 type LocalModelState string
+
+// LocalModelStorage On-disk storage location and files for a model on the Computer. Present only for non-absent models when reported by localmodels and service_features declares local_models_storage; omitted for non-owners in the public view.
+type LocalModelStorage struct {
+	// DedicatedDir True when dir holds only this model's files rather than a shared flat folder.
+	DedicatedDir bool `json:"dedicated_dir"`
+
+	// Dir Absolute native OS directory containing primary_path.
+	Dir string `json:"dir"`
+
+	// DiskBytes Total actual bytes currently on disk across files.
+	DiskBytes int64                   `json:"disk_bytes"`
+	Files     []LocalModelStorageFile `json:"files"`
+
+	// FilesPresent True when every required file in files currently exists on disk.
+	FilesPresent bool `json:"files_present"`
+
+	// PrimaryPath Absolute native OS path to the primary weight file for this model.
+	PrimaryPath string `json:"primary_path"`
+}
+
+// LocalModelStorageFile One local weight or companion file belonging to a model on disk. Omitted for non-owners in the public view.
+type LocalModelStorageFile struct {
+	// Path Absolute native OS path to the file on the Computer.
+	Path string `json:"path"`
+
+	// Present Whether the final file currently exists on disk.
+	Present bool                      `json:"present"`
+	Role    LocalModelStorageFileRole `json:"role"`
+
+	// Shared Whether another downloaded model or deployment shares this file.
+	Shared bool `json:"shared"`
+
+	// SizeBytes Actual bytes currently on disk (or partial download bytes); 0 when missing.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// LocalModelStorageFileRole defines model for LocalModelStorageFile.Role.
+type LocalModelStorageFileRole string
 
 // LocalModelUser An Agent whose runtime model is this model on this Computer.
 type LocalModelUser struct {

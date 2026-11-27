@@ -6011,4 +6011,139 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(details).toHaveTextContent("10.4 GB");
     expect(details).toHaveTextContent("Unified memory");
   });
+
+  it("shows model storage paths for owners with local Desktop Open/Reveal, hides them for non-owners, and preserves offline host storage", async () => {
+    const modelsDir =
+      "C:\\Users\\Alice\\.simplexai\\runtime\\localmodels\\models\\models";
+    const primaryPath = `${modelsDir}\\Qwen3-Coder-30B-Q4_K_M.gguf`;
+    const mmprojPath = `${modelsDir}\\assets\\mmproj-Qwen3-Coder.gguf`;
+    const openFolder = vi.fn(async () => ({ ok: true as const }));
+    const revealPath = vi.fn(async () => ({ ok: true as const }));
+    (window as { lingerDesktop?: unknown }).lingerDesktop = {
+      computer: {
+        getStatus: vi.fn(async () => ({
+          activeOperations: 0,
+          bridge: "online",
+          computerId: "computer-lab",
+          preventSleep: false,
+          runtime: "ready",
+        })),
+        onStatus: vi.fn(() => () => {}),
+      },
+      localModelsStorage: { openFolder, revealPath },
+      platform: "win32",
+    };
+
+    const base = labView();
+    const withStorage = labView({
+      computer: {
+        ...base.computer,
+        host: {
+          ...base.computer.host!,
+          models_dir: modelsDir,
+          models_dir_exists: true,
+        },
+      },
+      models: base.models.map((item) =>
+        item.model.id === "qwen3-coder-30b:Q4_K_M"
+          ? {
+              ...item,
+              model: {
+                ...item.model,
+                storage: {
+                  dedicated_dir: false,
+                  dir: modelsDir,
+                  disk_bytes: gb(19.2),
+                  files: [
+                    {
+                      path: primaryPath,
+                      present: true,
+                      role: "weights",
+                      shared: false,
+                      size_bytes: gb(18.6),
+                    },
+                    {
+                      path: mmprojPath,
+                      present: true,
+                      role: "mmproj",
+                      shared: true,
+                      size_bytes: gb(0.6),
+                    },
+                  ],
+                  files_present: true,
+                  primary_path: primaryPath,
+                },
+              },
+            }
+          : item,
+      ),
+    });
+
+    await renderPage(setup([withStorage]));
+    await findModels();
+
+    // Global storage row in MemorySummaryCard shows path + Windows Open button.
+    expect(screen.getByText(modelsDir)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open in File Explorer" }),
+    );
+    await waitFor(() => expect(openFolder).toHaveBeenCalledOnce());
+
+    // AdvancedDialog -> Hardware also shows Model storage beside Free disk.
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 details" });
+    expect(within(dialog).getByText("Model storage")).toBeVisible();
+    expect(within(dialog).getByText(modelsDir)).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    // Expanded model facts show actual disk_bytes (19.2 GB), primary_path, Reveal button, and 2 files toggle.
+    fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
+    const details = screen.getByRole("region", {
+      name: "Qwen3 Coder 30B details",
+    });
+    expect(details).toHaveTextContent("19.2 GB");
+    expect(within(details).getByText(primaryPath)).toBeInTheDocument();
+    fireEvent.click(
+      within(details).getByRole("button", { name: "Show in File Explorer" }),
+    );
+    await waitFor(() =>
+      expect(revealPath).toHaveBeenCalledExactlyOnceWith(primaryPath),
+    );
+    fireEvent.click(within(details).getByRole("button", { name: "2 files" }));
+    expect(details).toHaveTextContent("assets\\mmproj-Qwen3-Coder.gguf");
+
+    // Remote computer viewed inside Desktop shows Copy only (no Open in File Explorer button).
+    cleanup();
+    const remoteDir = "/Users/bob/.simplexai/runtime/localmodels/models/models";
+    const remoteView = macView({
+      computer: {
+        ...macView().computer,
+        host: {
+          ...macView().computer.host!,
+          models_dir: remoteDir,
+          models_dir_exists: true,
+        },
+        status: "offline",
+      },
+    });
+    await renderPage(
+      setup([withStorage, remoteView]),
+      "?computer=computer-mac",
+    );
+    await findModels();
+    expect(screen.getByText(remoteDir)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Open in File Explorer" }),
+    ).not.toBeInTheDocument();
+
+    // Non-owner sees neither global storage nor per-model storage.
+    cleanup();
+    const nonOwnerView = {
+      ...withStorage,
+      viewer_is_owner: false,
+    };
+    await renderPage(setup([nonOwnerView]), "?computer=computer-lab", {});
+    await findModels();
+    expect(screen.queryByText(modelsDir)).not.toBeInTheDocument();
+  });
 });

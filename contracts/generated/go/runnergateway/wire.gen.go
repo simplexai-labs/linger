@@ -1227,13 +1227,15 @@ func (LocalModelGpu) RequiredFields() []string {
 
 // LocalModelHost mirrors the LocalModelHost schema shape.
 type LocalModelHost struct {
-	Platform      string          `json:"platform"`
-	Arch          string          `json:"arch"`
-	OsLabel       string          `json:"os_label"`
-	EngineLabel   string          `json:"engine_label"`
-	RamTotalBytes uint64          `json:"ram_total_bytes"`
-	DiskFreeBytes uint64          `json:"disk_free_bytes"`
-	Gpus          []LocalModelGpu `json:"gpus"`
+	Platform        string          `json:"platform"`
+	Arch            string          `json:"arch"`
+	OsLabel         string          `json:"os_label"`
+	EngineLabel     string          `json:"engine_label"`
+	RamTotalBytes   uint64          `json:"ram_total_bytes"`
+	DiskFreeBytes   uint64          `json:"disk_free_bytes"`
+	ModelsDir       string          `json:"models_dir,omitempty"`
+	ModelsDirExists *bool           `json:"models_dir_exists,omitempty"`
+	Gpus            []LocalModelGpu `json:"gpus"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelHost.
@@ -1387,6 +1389,41 @@ func (LocalModelNote) FixedFields() map[string]string { return nil }
 // RequiredFields lists the keys a LocalModelNote must carry.
 func (LocalModelNote) RequiredFields() []string { return []string{"code"} }
 
+// LocalModelStorageFile mirrors the LocalModelStorageFile schema shape.
+type LocalModelStorageFile struct {
+	Path      string `json:"path"`
+	Role      string `json:"role"`
+	SizeBytes uint64 `json:"size_bytes"`
+	Present   bool   `json:"present"`
+	Shared    bool   `json:"shared"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelStorageFile.
+func (LocalModelStorageFile) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelStorageFile must carry.
+func (LocalModelStorageFile) RequiredFields() []string {
+	return []string{"path", "role", "size_bytes", "present", "shared"}
+}
+
+// LocalModelStorage mirrors the LocalModelStorage schema shape.
+type LocalModelStorage struct {
+	Dir          string                  `json:"dir"`
+	PrimaryPath  string                  `json:"primary_path"`
+	DedicatedDir bool                    `json:"dedicated_dir"`
+	DiskBytes    uint64                  `json:"disk_bytes"`
+	FilesPresent bool                    `json:"files_present"`
+	Files        []LocalModelStorageFile `json:"files"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelStorage.
+func (LocalModelStorage) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelStorage must carry.
+func (LocalModelStorage) RequiredFields() []string {
+	return []string{"dir", "primary_path", "dedicated_dir", "disk_bytes", "files_present", "files"}
+}
+
 // LocalModel mirrors the LocalModel schema shape.
 type LocalModel struct {
 	ID                    string                      `json:"id"`
@@ -1422,6 +1459,7 @@ type LocalModel struct {
 	Concurrency           *uint64                     `json:"concurrency,omitempty"`
 	ConcurrencyProbing    *bool                       `json:"concurrency_probing,omitempty"`
 	HostRamBytes          *uint64                     `json:"host_ram_bytes,omitempty"`
+	Storage               *LocalModelStorage          `json:"storage,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.

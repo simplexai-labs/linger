@@ -17,6 +17,7 @@ import type { DiagnosticsModule } from "./diagnostics.js";
 import type { DriverUpdaterHost } from "./driver-updater.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
+import type { LocalModelsStorageHost } from "./local-models-storage.js";
 import type { LocalServerModule } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { sameOrigin } from "./navigation.js";
@@ -77,6 +78,12 @@ const driverInstallRequestInput = z
   })
   .strict();
 
+const storageTargetPathInput = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => !value.includes("\0"), "Path must not contain NUL bytes");
+
 const view = (grant: WorkspaceGrant): WorkspaceGrantView => ({ ...grant });
 
 // The page learns what the tray shows; Install opens a release page itself,
@@ -105,16 +112,19 @@ export class DesktopIpcModule implements Module {
   // Set on macOS only.
   readonly #permissions: DesktopPermissionHost | undefined;
   readonly #driverUpdater: DriverUpdaterHost | undefined;
+  readonly #localModelsStorage: LocalModelsStorageHost | undefined;
   readonly #unsubscribe: (() => void)[] = [];
 
   constructor(options: {
     defaultDisplayName: string;
     permissions?: DesktopPermissionHost;
     driverUpdater?: DriverUpdaterHost;
+    localModelsStorage?: LocalModelsStorageHost;
   }) {
     this.#defaultDisplayName = options.defaultDisplayName;
     this.#permissions = options.permissions;
     this.#driverUpdater = options.driverUpdater;
+    this.#localModelsStorage = options.localModelsStorage;
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -272,6 +282,45 @@ export class DesktopIpcModule implements Module {
       );
       handle(IPC.driverUpdateClearState, () => {
         driverUpdater.clearInstallState();
+      });
+    }
+
+    const handleMainFrame = (
+      channel: string,
+      handler: (...args: unknown[]) => unknown,
+    ): void => {
+      ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args) => {
+        const serverUrl = ctx.config.get().serverUrl;
+        const origin = event.senderFrame?.origin;
+        const contents = windows.webContents();
+        if (
+          !serverUrl ||
+          !origin ||
+          !sameOrigin(origin, serverUrl) ||
+          !contents ||
+          !contents.mainFrame ||
+          event.sender !== contents ||
+          event.senderFrame !== contents.mainFrame
+        ) {
+          ctx.log.warn("ipc.rejected_origin", { channel });
+          throw new Error("Not allowed");
+        }
+        return handler(...args);
+      });
+      this.#unsubscribe.push(() => ipcMain.removeHandler(channel));
+    };
+
+    const localModelsStorage = this.#localModelsStorage;
+    if (localModelsStorage) {
+      handleMainFrame(IPC.localModelsStorageOpenFolder, () =>
+        localModelsStorage.openFolder(),
+      );
+      handleMainFrame(IPC.localModelsStorageRevealPath, (targetPath) => {
+        const parsed = storageTargetPathInput.safeParse(targetPath);
+        if (!parsed.success) {
+          return { ok: false, code: "INVALID_PATH" } as const;
+        }
+        return localModelsStorage.revealPath(parsed.data);
       });
     }
 

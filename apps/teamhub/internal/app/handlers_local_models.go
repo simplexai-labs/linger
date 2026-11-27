@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentregistry"
@@ -130,6 +132,10 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 		if err := json.Unmarshal(record.Host, &host); err != nil {
 			return httpapi.LocalModelsView{}, err
 		}
+		if !view.ViewerIsOwner {
+			host.ModelsDir = nil
+			host.ModelsDirExists = nil
+		}
 		view.Computer.Host = &host
 	}
 	if len(record.Snapshot) == 0 {
@@ -162,9 +168,12 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 				}
 			}
 		}
-		// A cause's path is a folder on the owner's machine; only they can act on it.
-		if model.Error != nil && !view.ViewerIsOwner {
-			model.Error.Path = nil
+		// Host filesystem paths belong to the owner's machine; only they see them.
+		if !view.ViewerIsOwner {
+			if model.Error != nil {
+				model.Error.Path = nil
+			}
+			model.Storage = nil
 		}
 		view.Models = append(view.Models, httpapi.LocalModelView{Model: model, UsedBy: users})
 	}
@@ -328,11 +337,24 @@ func (a *App) recordAgentRuntimeLocalModels(c *gin.Context) {
 // enums so a newer Computer Daemon or localmodels catalog never fails snapshot
 // ingestion with HTTP 400 while preserving structural and security checks.
 func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) {
+	if snapshot.Host != nil && snapshot.Host.ModelsDir != nil {
+		trimmed := clipLocalModelString(strings.TrimSpace(*snapshot.Host.ModelsDir), 4096)
+		if trimmed == "" {
+			snapshot.Host.ModelsDir = nil
+		} else {
+			snapshot.Host.ModelsDir = &trimmed
+		}
+	}
 	if snapshot.Debug != nil && (!snapshot.Debug.Mode.Valid() || !snapshot.Debug.Source.Valid()) {
 		snapshot.Debug = nil
 	}
 	for i := range snapshot.Models {
 		model := &snapshot.Models[i]
+		if model.State == teamhubinternal.LocalModelStateAbsent {
+			model.Storage = nil
+		} else if model.Storage != nil {
+			model.Storage = sanitizeLocalModelStorage(model.Storage)
+		}
 		if model.Family != nil && !model.Family.Valid() {
 			other := teamhubinternal.LocalModelFamilyOther
 			model.Family = &other
@@ -396,12 +418,63 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 	}
 }
 
+func sanitizeLocalModelStorage(raw *teamhubinternal.LocalModelStorage) *teamhubinternal.LocalModelStorage {
+	dir := clipLocalModelString(strings.TrimSpace(raw.Dir), 4096)
+	primaryPath := clipLocalModelString(strings.TrimSpace(raw.PrimaryPath), 4096)
+	if dir == "" || primaryPath == "" || len(raw.Files) == 0 {
+		return nil
+	}
+	files := make([]teamhubinternal.LocalModelStorageFile, 0, min(len(raw.Files), 256))
+	for _, entry := range raw.Files {
+		if len(files) >= 256 {
+			break
+		}
+		filePath := clipLocalModelString(strings.TrimSpace(entry.Path), 4096)
+		if filePath == "" {
+			continue
+		}
+		role := entry.Role
+		if !role.Valid() {
+			role = teamhubinternal.LocalModelStorageFileRoleOther
+		}
+		files = append(files, teamhubinternal.LocalModelStorageFile{
+			Path:      filePath,
+			Role:      role,
+			SizeBytes: max(entry.SizeBytes, int64(0)),
+			Present:   entry.Present,
+			Shared:    entry.Shared,
+		})
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	return &teamhubinternal.LocalModelStorage{
+		Dir:          dir,
+		PrimaryPath:  primaryPath,
+		DedicatedDir: raw.DedicatedDir,
+		DiskBytes:    max(raw.DiskBytes, int64(0)),
+		FilesPresent: raw.FilesPresent,
+		Files:        files,
+	}
+}
+
+func clipLocalModelString(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	return string([]rune(text)[:limit])
+}
+
 // validLocalModelsSnapshot checks what the public view relies on: the
 // unavailable reason travels only with an unavailable library, and every
 // enum the Web branches on is known.
 func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool {
 	if snapshot.ObservedAt.IsZero() || len(snapshot.Pools) > 65 || len(snapshot.Models) > 256 ||
 		snapshot.Available != (snapshot.Reason == nil) || (snapshot.Reason != nil && !snapshot.Reason.Code.Valid()) {
+		return false
+	}
+	if snapshot.Host != nil && snapshot.Host.ModelsDir != nil &&
+		(*snapshot.Host.ModelsDir == "" || utf8.RuneCountInString(*snapshot.Host.ModelsDir) > 4096) {
 		return false
 	}
 	for _, pool := range snapshot.Pools {
@@ -431,6 +504,19 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 		}
 		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
 			return false
+		}
+		if model.Storage != nil {
+			if model.State == teamhubinternal.LocalModelStateAbsent ||
+				model.Storage.Dir == "" || utf8.RuneCountInString(model.Storage.Dir) > 4096 ||
+				model.Storage.PrimaryPath == "" || utf8.RuneCountInString(model.Storage.PrimaryPath) > 4096 ||
+				model.Storage.DiskBytes < 0 || len(model.Storage.Files) == 0 || len(model.Storage.Files) > 256 {
+				return false
+			}
+			for _, file := range model.Storage.Files {
+				if file.Path == "" || utf8.RuneCountInString(file.Path) > 4096 || !file.Role.Valid() || file.SizeBytes < 0 {
+					return false
+				}
+			}
 		}
 		if model.Capabilities != nil {
 			for index, capability := range *model.Capabilities {

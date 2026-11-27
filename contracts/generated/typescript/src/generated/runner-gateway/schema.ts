@@ -241,6 +241,7 @@ export const runnerGatewayEnvelopeSchema = {
         "antigravity_history",
         "antigravity_usage_provider",
         "local_voice_asr",
+        "local_models_storage",
       ],
     },
     ReasoningEffort: {
@@ -2347,6 +2348,18 @@ export const runnerGatewayEnvelopeSchema = {
         disk_free_bytes: {
           $ref: "#/$defs/NonNegativeInteger",
         },
+        models_dir: {
+          description:
+            "Absolute directory on the Computer where model weight files are stored (<base_dir>/models). Sent only when service_features declares local_models_storage.",
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+        },
+        models_dir_exists: {
+          description:
+            "Whether models_dir currently exists on disk on the Computer. Sent only when service_features declares local_models_storage.",
+          type: "boolean",
+        },
         gpus: {
           type: "array",
           maxItems: 64,
@@ -2662,6 +2675,79 @@ export const runnerGatewayEnvelopeSchema = {
       type: "string",
       enum: ["llama.cpp", "polystrata", "strata"],
     },
+    LocalModelStorageFile: {
+      description:
+        "One local weight or companion file belonging to a model on disk.",
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "role", "size_bytes", "present", "shared"],
+      properties: {
+        path: {
+          description: "Absolute native OS path to the file on the Computer.",
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+        },
+        role: {
+          enum: ["weights", "mmproj", "other"],
+        },
+        size_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        present: {
+          type: "boolean",
+        },
+        shared: {
+          type: "boolean",
+        },
+      },
+    },
+    LocalModelStorage: {
+      description:
+        "On-disk storage location and files for a model on the Computer. Sent only when service_features declares local_models_storage.",
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "dir",
+        "primary_path",
+        "dedicated_dir",
+        "disk_bytes",
+        "files_present",
+        "files",
+      ],
+      properties: {
+        dir: {
+          description: "Absolute native OS directory containing primary_path.",
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+        },
+        primary_path: {
+          description:
+            "Absolute native OS path to the primary weight file for this model.",
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+        },
+        dedicated_dir: {
+          type: "boolean",
+        },
+        disk_bytes: {
+          $ref: "#/$defs/NonNegativeInteger",
+        },
+        files_present: {
+          type: "boolean",
+        },
+        files: {
+          type: "array",
+          minItems: 1,
+          maxItems: 256,
+          items: {
+            $ref: "#/$defs/LocalModelStorageFile",
+          },
+        },
+      },
+    },
     LocalModel: {
       description:
         "One validated chat model of the catalog on this platform, with its state on this Computer. Bytes everywhere; the reader formats them.",
@@ -2851,6 +2937,11 @@ export const runnerGatewayEnvelopeSchema = {
           description:
             "Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.",
           $ref: "#/$defs/NonNegativeInteger",
+        },
+        storage: {
+          description:
+            "On-disk storage location and files for this model. Sent only when runner.welcome service_features names local_models_storage.",
+          $ref: "#/$defs/LocalModelStorage",
         },
       },
     },

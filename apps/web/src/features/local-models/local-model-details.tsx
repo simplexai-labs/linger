@@ -56,6 +56,11 @@ import {
   speedLabel,
   type ModelEntry,
 } from "./local-models-rules";
+import {
+  AdvancedStorageFact,
+  ModelStorageFact,
+  selectCodeText,
+} from "./model-storage-location";
 
 /** Category colors from the Nature palette, one per model holding memory. */
 const segmentColors = ["bg-rain-500", "bg-lichen-500", "bg-sun-500"] as const;
@@ -142,16 +147,6 @@ function CopyEndpoint({ endpoint, name }: { endpoint: string; name: string }) {
       </Button>
     </span>
   );
-}
-
-function selectCodeText(element: HTMLElement | null) {
-  if (!element) return;
-  const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  selection.removeAllRanges();
-  selection.addRange(range);
 }
 
 function gatewayFactValue(
@@ -285,6 +280,7 @@ export function ModelFacts({
   disabled = false,
   entry,
   hasPrimaryAssignAction = false,
+  isLocalDesktop = false,
   onAssignAgent,
   onRecheck,
   onUpdateDriver,
@@ -297,6 +293,7 @@ export function ModelFacts({
   disabled?: boolean;
   entry: ModelEntry;
   hasPrimaryAssignAction?: boolean;
+  isLocalDesktop?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
   onRecheck?: () => void;
   onUpdateDriver?: () => void;
@@ -518,7 +515,12 @@ export function ModelFacts({
         <SpecTile
           label={t(onComputer ? m.factOnDisk : m.factDownload)}
           subline={t(m.diskSpace)}
-          value={formatGigabytes(model.download_bytes, t)}
+          value={formatGigabytes(
+            onComputer && model.storage && model.storage.disk_bytes > 0
+              ? model.storage.disk_bytes
+              : model.download_bytes,
+            t,
+          )}
         />
         <SpecTile
           label={t(m.factContext)}
@@ -550,6 +552,12 @@ export function ModelFacts({
           ) : null}
         </div>
       ) : null}
+
+      <ModelStorageFact
+        isLocalDesktop={isLocalDesktop}
+        model={model}
+        viewerIsOwner={view.viewer_is_owner}
+      />
 
       {hasRuntimeLinks ? (
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-border/40 pt-3 text-xs">
@@ -734,9 +742,11 @@ function PoolBar({
 
 /** Memory and hardware of one Computer, for people who want the numbers. */
 export function AdvancedDialog({
+  isLocalDesktop = false,
   onClose,
   view,
 }: {
+  isLocalDesktop?: boolean;
   onClose: () => void;
   view: LocalModelsView;
 }) {
@@ -855,6 +865,11 @@ export function AdvancedDialog({
               <Fact label={t(m.factFreeDisk)}>
                 {formatGigabytes(host.disk_free_bytes, t)}
               </Fact>
+              <AdvancedStorageFact
+                host={host}
+                isLocalDesktop={isLocalDesktop}
+                viewerIsOwner={view.viewer_is_owner}
+              />
             </div>
           </section>
         ) : null}

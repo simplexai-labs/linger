@@ -266,3 +266,86 @@ func TestMapStatusDropsMalformedExternalHolders(t *testing.T) {
 		t.Fatalf("malformed holders changed the rest of the snapshot")
 	}
 }
+
+func TestMapStatusSanitizesHostAndModelStorage(t *testing.T) {
+	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	host := document["host"].(map[string]any)
+	host["models_dir"] = "  /home/alice/.simplexai/runtime/localmodels/models/models  "
+	host["models_dir_exists"] = true
+
+	rows := document["models"].([]any)
+	// Row 0 is absent: storage must always be cleared even if present in JSON.
+	absentRow := rows[0].(map[string]any)
+	absentRow["state"] = "absent"
+	absentRow["storage"] = map[string]any{
+		"dir": "/home/alice/models", "primary_path": "/home/alice/models/a.gguf",
+		"dedicated_dir": false, "disk_bytes": 100, "files_present": true,
+		"files": []any{map[string]any{"path": "/home/alice/models/a.gguf", "role": "weights", "size_bytes": 100, "present": true, "shared": false}},
+	}
+
+	// Row 1 is idle: trims/clips paths, clamps negatives, drops empty file paths, coerces unknown role.
+	idleRow := rows[1].(map[string]any)
+	idleRow["state"] = "idle"
+	idleRow["storage"] = map[string]any{
+		"dir":           "  /home/alice/models  ",
+		"primary_path":  "  /home/alice/models/qwen.gguf  ",
+		"dedicated_dir": false,
+		"disk_bytes":    -42,
+		"files_present": true,
+		"files": []any{
+			map[string]any{"path": "  /home/alice/models/qwen.gguf ", "role": "weights", "size_bytes": 1234, "present": true, "shared": false},
+			map[string]any{"path": "   ", "role": "mmproj", "size_bytes": 10, "present": true, "shared": false},
+			map[string]any{"path": "/home/alice/models/assets/extra.bin", "role": "future_role", "size_bytes": -9, "present": false, "shared": true},
+		},
+	}
+
+	// Row 2 is idle with empty files after dropping blank paths: storage becomes nil.
+	emptyRow := rows[2].(map[string]any)
+	emptyRow["state"] = "idle"
+	emptyRow["storage"] = map[string]any{
+		"dir": "/home/alice/models", "primary_path": "/home/alice/models/empty.gguf",
+		"dedicated_dir": false, "disk_bytes": 0, "files_present": false,
+		"files": []any{map[string]any{"path": "   ", "role": "weights", "size_bytes": 0, "present": false, "shared": false}},
+	}
+
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Host == nil || snapshot.Host.ModelsDir != "/home/alice/.simplexai/runtime/localmodels/models/models" ||
+		snapshot.Host.ModelsDirExists == nil || !*snapshot.Host.ModelsDirExists {
+		t.Fatalf("host storage = %+v", snapshot.Host)
+	}
+	if snapshot.Models[0].Storage != nil {
+		t.Fatalf("absent model kept storage: %+v", snapshot.Models[0].Storage)
+	}
+	got := snapshot.Models[1].Storage
+	want := &wire.LocalModelStorage{
+		Dir:          "/home/alice/models",
+		PrimaryPath:  "/home/alice/models/qwen.gguf",
+		DedicatedDir: false,
+		DiskBytes:    0,
+		FilesPresent: true,
+		Files: []wire.LocalModelStorageFile{
+			{Path: "/home/alice/models/qwen.gguf", Role: "weights", SizeBytes: 1234, Present: true, Shared: false},
+			{Path: "/home/alice/models/assets/extra.bin", Role: "other", SizeBytes: 0, Present: false, Shared: true},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sanitized storage = %+v, want %+v", got, want)
+	}
+	if snapshot.Models[2].Storage != nil {
+		t.Fatalf("model with no valid storage files kept storage: %+v", snapshot.Models[2].Storage)
+	}
+}

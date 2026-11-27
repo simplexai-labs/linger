@@ -4708,6 +4708,10 @@ export interface components {
       ram_total_bytes: number;
       /** Format: int64 */
       disk_free_bytes: number;
+      /** @description Absolute directory on the Computer where local model weight files are stored (<base_dir>/models). Sent only when service_features declares local_models_storage; omitted for non-owners in the public view. */
+      models_dir?: string;
+      /** @description Whether models_dir currently exists on disk on the Computer. Sent only when service_features declares local_models_storage; omitted for non-owners in the public view. */
+      models_dir_exists?: boolean;
       gpus: components["schemas"]["LocalModelGpu"][];
     };
     LocalModelsComputer: {
@@ -4911,6 +4915,39 @@ export interface components {
      * @enum {string}
      */
     LocalModelEngine: "llama.cpp" | "polystrata" | "strata";
+    /** @description One local weight or companion file belonging to a model on disk. Omitted for non-owners in the public view. */
+    LocalModelStorageFile: {
+      /** @description Absolute native OS path to the file on the Computer. */
+      path: string;
+      /** @enum {string} */
+      role: "weights" | "mmproj" | "other";
+      /**
+       * Format: int64
+       * @description Actual bytes currently on disk (or partial download bytes); 0 when missing.
+       */
+      size_bytes: number;
+      /** @description Whether the final file currently exists on disk. */
+      present: boolean;
+      /** @description Whether another downloaded model or deployment shares this file. */
+      shared: boolean;
+    };
+    /** @description On-disk storage location and files for a model on the Computer. Present only for non-absent models when reported by localmodels and service_features declares local_models_storage; omitted for non-owners in the public view. */
+    LocalModelStorage: {
+      /** @description Absolute native OS directory containing primary_path. */
+      dir: string;
+      /** @description Absolute native OS path to the primary weight file for this model. */
+      primary_path: string;
+      /** @description True when dir holds only this model's files rather than a shared flat folder. */
+      dedicated_dir: boolean;
+      /**
+       * Format: int64
+       * @description Total actual bytes currently on disk across files.
+       */
+      disk_bytes: number;
+      /** @description True when every required file in files currently exists on disk. */
+      files_present: boolean;
+      files: components["schemas"]["LocalModelStorageFile"][];
+    };
     /** @description One validated chat model of the catalog on this platform and its state on this Computer. Sizes are bytes; readers format them. */
     LocalModel: {
       id: components["schemas"]["LocalModelId"];
@@ -4974,6 +5011,8 @@ export interface components {
        * @description Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
        */
       host_ram_bytes?: number;
+      /** @description On-disk storage location and files for this model; owner-only in the public view. */
+      storage?: components["schemas"]["LocalModelStorage"];
     };
     /** @description An Agent whose runtime model is this model on this Computer. */
     LocalModelUser: {

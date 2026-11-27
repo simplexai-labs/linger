@@ -59,6 +59,7 @@ import {
 import { FeaturedModelSpotlight } from "./featured-model-spotlight";
 import { AdvancedDialog } from "./local-model-details";
 import { ModelRow } from "./local-model-row";
+import { ModelStorageSummaryRow } from "./model-storage-location";
 import {
   MakeRoomDialog,
   RemoveModelDialog,
@@ -359,6 +360,7 @@ const memorySegmentColors = [
 function MemorySummaryCard({
   canRecheck,
   guidanceCopy,
+  isLocalDesktop = false,
   onDetails,
   onRecheck,
   rechecking,
@@ -367,6 +369,7 @@ function MemorySummaryCard({
 }: {
   canRecheck: boolean;
   guidanceCopy?: { body: string; title: string };
+  isLocalDesktop?: boolean;
   onDetails: () => void;
   onRecheck: () => void;
   rechecking: boolean;
@@ -492,6 +495,7 @@ function MemorySummaryCard({
           </div>
         </aside>
       ) : null}
+      <ModelStorageSummaryRow isLocalDesktop={isLocalDesktop} view={view} />
     </div>
   );
 }
@@ -918,12 +922,21 @@ function ComputerModels({
             <MemorySummaryCard
               canRecheck={canRecheck}
               guidanceCopy={summaryGuidanceCopy}
+              isLocalDesktop={isLocalDesktop}
               onDetails={() => setDialog({ kind: "advanced" })}
               onRecheck={recheckMemory}
               rechecking={refresh.isPending}
               summary={summary}
               view={view}
             />
+          ) : view.viewer_is_owner && view.computer.host?.models_dir ? (
+            <div className="mt-5 overflow-hidden rounded-2xl bg-card shadow-sm">
+              <ModelStorageSummaryRow
+                bordered={false}
+                isLocalDesktop={isLocalDesktop}
+                view={view}
+              />
+            </div>
           ) : null}
           <Library
             blocker={blocker}
@@ -1586,6 +1599,7 @@ function Library({
         entry={entry}
         expanded={expandedKey === group.key}
         inSpotlight={inSpotlight}
+        isLocalDesktop={isLocalDesktop}
         key={group.key}
         onAssignAgent={
           entry.model.pi_model && canSwitchAgents
@@ -1969,7 +1983,11 @@ function Library({
       )}
 
       {dialog?.kind === "advanced" ? (
-        <AdvancedDialog onClose={() => setDialog(null)} view={view} />
+        <AdvancedDialog
+          isLocalDesktop={isLocalDesktop}
+          onClose={() => setDialog(null)}
+          view={view}
+        />
       ) : null}
       {dialog?.kind === "updateDriver" ? (
         <UpdateDriverDialog
