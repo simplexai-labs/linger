@@ -1,9 +1,13 @@
-import { AiSparklesIcon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
+import {
+  AiSparklesIcon,
+  Cancel01Icon,
+  LinkSquare02Icon,
+} from "@hugeicons/core-free-icons";
 import {
   INKLING_2_MINI_ANNOUNCEMENT_URL,
   INKLING_2_MINI_HF_URL,
 } from "@linger/service-kit/featured-models";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import { useT } from "@/i18n/use-translation";
@@ -12,21 +16,68 @@ import { localModelsMessages as m } from "./local-models.messages";
 
 const INKLING_TITLE = "Inkling 2 Mini";
 
+/** Default identifier persisted in localStorage when the spotlight is dismissed. */
+export const FEATURED_SPOTLIGHT_MODEL_ID = "inkling-2-mini";
+const DISMISSED_STORAGE_PREFIX = "linger.models.dismissedSpotlight:";
+
+function dismissedStorageKey(modelId: string) {
+  return `${DISMISSED_STORAGE_PREFIX}${modelId}`;
+}
+
+export function isFeaturedSpotlightDismissed(
+  modelId = FEATURED_SPOTLIGHT_MODEL_ID,
+): boolean {
+  try {
+    return window.localStorage.getItem(dismissedStorageKey(modelId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function dismissFeaturedSpotlight(
+  modelId = FEATURED_SPOTLIGHT_MODEL_ID,
+): void {
+  try {
+    window.localStorage.setItem(dismissedStorageKey(modelId), "1");
+  } catch {
+    // Ignore storage quota or private-mode errors.
+  }
+}
+
 /**
  * Editorial partner frame for Thinking Machines' Inkling 2 Mini at the top of
  * the local model library. Wraps the matching `ModelRow` when present so
  * status, progress, details and actions stay in one place, and falls back to a
  * partner highlight when the Computer's catalog does not include it.
  */
-export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
+export function FeaturedModelSpotlight({
+  children,
+  modelId = FEATURED_SPOTLIGHT_MODEL_ID,
+  onDismiss,
+}: {
+  children?: ReactNode;
+  modelId?: string;
+  onDismiss?: () => void;
+}) {
   const t = useT();
+  const [dismissed, setDismissed] = useState(() =>
+    isFeaturedSpotlightDismissed(modelId),
+  );
+  if (dismissed) return null;
+
   const hasEntry = Boolean(children);
+
+  function handleDismiss() {
+    dismissFeaturedSpotlight(modelId);
+    setDismissed(true);
+    onDismiss?.();
+  }
 
   return (
     <section
       aria-label={t(m.featuredSpotlightRegion)}
       className="overflow-hidden rounded-xl border border-border bg-card shadow-outline"
-      data-featured-spotlight="inkling-2-mini"
+      data-featured-spotlight={modelId}
       data-in-catalog={hasEntry ? "true" : "false"}
     >
       <div className="flex flex-col gap-2.5 bg-[var(--app-card-info-surface)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -76,6 +127,16 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
             <span>{t(m.featuredHuggingFace)}</span>
             <Icon className="shrink-0" icon={LinkSquare02Icon} size={14} />
           </a>
+          <button
+            aria-label={t(m.featuredDismiss)}
+            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+            data-voice-close
+            onClick={handleDismiss}
+            title={t(m.featuredDismiss)}
+            type="button"
+          >
+            <Icon icon={Cancel01Icon} size={14} />
+          </button>
         </div>
       </div>
       {children ? <div>{children}</div> : null}

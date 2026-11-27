@@ -336,4 +336,43 @@ describe("UpdateDriverDialog", () => {
       screen.getByRole("button", { name: "Open NVIDIA App" }),
     ).toBeEnabled();
   });
+
+  it("navigates Linux distribution tabs with roving tabindex and arrow keys", () => {
+    const view = makeView({ osLabel: "Ubuntu 24.04", platform: "linux" });
+    render(
+      <UpdateDriverDialog
+        isLocalDesktop={false}
+        onClose={vi.fn()}
+        reason={{ detected_cuda: "12.4", required_cuda: "13.0" }}
+        view={view}
+      />,
+    );
+
+    const ubuntu = screen.getByRole("tab", { name: /Ubuntu/i });
+    const fedora = screen.getByRole("tab", { name: /Fedora/i });
+
+    expect(ubuntu).toHaveAttribute("tabindex", "0");
+    expect(fedora).toHaveAttribute("tabindex", "-1");
+
+    ubuntu.focus();
+    fireEvent.keyDown(ubuntu, { key: "ArrowRight" });
+    expect(fedora).toHaveAttribute("aria-selected", "true");
+    expect(fedora).toHaveAttribute("tabindex", "0");
+    expect(ubuntu).toHaveAttribute("tabindex", "-1");
+    expect(fedora).toHaveFocus();
+
+    fireEvent.keyDown(fedora, { key: "ArrowLeft" });
+    expect(ubuntu).toHaveAttribute("aria-selected", "true");
+    expect(ubuntu).toHaveAttribute("tabindex", "0");
+    expect(fedora).toHaveAttribute("tabindex", "-1");
+    expect(ubuntu).toHaveFocus();
+
+    fireEvent.keyDown(ubuntu, { key: "End" });
+    expect(fedora).toHaveAttribute("aria-selected", "true");
+    expect(fedora).toHaveFocus();
+
+    fireEvent.keyDown(fedora, { key: "Home" });
+    expect(ubuntu).toHaveAttribute("aria-selected", "true");
+    expect(ubuntu).toHaveFocus();
+  });
 });

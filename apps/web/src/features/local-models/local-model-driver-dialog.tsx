@@ -13,7 +13,7 @@ import {
   type DesktopDriverInstallState,
   type LinuxNvidiaDistro,
 } from "@linger/service-kit/nvidia-driver";
-import { useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { Button, buttonClassName } from "@/components/ui/button";
 import { FormFeedback } from "@/components/ui/form-feedback";
@@ -36,6 +36,7 @@ export interface DriverUpdateReason {
 
 const AUTO_RECHECK_COOLDOWN_MS = 3000;
 const IDLE_DRIVER_INSTALL_STATE: DesktopDriverInstallState = { phase: "idle" };
+const LINUX_DISTROS: readonly LinuxNvidiaDistro[] = ["ubuntu", "fedora"];
 
 function installFailureMessage(code: string) {
   switch (code) {
@@ -106,6 +107,7 @@ export function UpdateDriverDialog({
     classifyWindowsNvidiaGpu(gpuName) !== "unsupported";
 
   const [distro, setDistro] = useState<LinuxNvidiaDistro>("ubuntu");
+  const distroTabRefs = useRef(new Map<LinuxNvidiaDistro, HTMLButtonElement>());
   const [copiedTarget, setCopiedTarget] = useState<"command" | "gpu" | null>(
     null,
   );
@@ -238,6 +240,31 @@ export function UpdateDriverDialog({
       if (result.ok) return;
     }
     window.open(NVIDIA_DRIVER_GUIDE_URL, "_blank", "noopener,noreferrer");
+  }
+
+  function handleDistroKeyDown(
+    id: LinuxNvidiaDistro,
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) {
+    const currentIndex = LINUX_DISTROS.indexOf(id);
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % LINUX_DISTROS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex =
+        (currentIndex - 1 + LINUX_DISTROS.length) % LINUX_DISTROS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = LINUX_DISTROS.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const nextDistro = LINUX_DISTROS[nextIndex];
+    if (!nextDistro) return;
+    if (nextDistro !== distro) setDistro(nextDistro);
+    distroTabRefs.current.get(nextDistro)?.focus();
   }
 
   const linuxCommand = linuxNvidiaDriverCommand(distro, requiredDriver);
@@ -418,7 +445,13 @@ export function UpdateDriverDialog({
                   )}
                   key={id}
                   onClick={() => setDistro(id)}
+                  onKeyDown={(event) => handleDistroKeyDown(id, event)}
+                  ref={(node) => {
+                    if (node) distroTabRefs.current.set(id, node);
+                    else distroTabRefs.current.delete(id);
+                  }}
                   role="tab"
+                  tabIndex={distro === id ? 0 : -1}
                   type="button"
                 >
                   {t(label)}
