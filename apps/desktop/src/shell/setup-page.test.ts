@@ -2175,9 +2175,12 @@ describe("setup page model picker", () => {
     expect($("local-model-name").textContent).toBe("Inkling 2 Mini · Standard");
     // Who makes it, and nothing more: no parameter counts.
     expect($("local-model-sub").textContent).toBe("Thinking Machines");
-    // The family's mark before the name: the featured Inkling's sparkle.
-    expect($("local-model-icon").dataset.family).toBe("featured");
-    expect($("local-model-icon").querySelector("svg")).not.toBeNull();
+    // Its maker's logo before the name, as on the Local models page.
+    expect($("local-model-icon").dataset.brand).toBe("thinkingmachines");
+    expect($("local-model-icon").dataset.fullBleed).toBe("true");
+    expect(
+      $("local-model-icon").querySelector("img")!.getAttribute("src"),
+    ).toBe("model-logo/thinkingmachines.png");
     // No pitch line while the model fits.
     expect($("local-model-why-row").hidden).toBe(true);
     // Two estimates; the download size is not on the card.
@@ -2224,16 +2227,23 @@ describe("setup page model picker", () => {
       "Inkling 2 Mini · Standard",
     );
     expect(best.querySelector(".tg")!.textContent).toBe("Thinking Machines");
-    // Each row leads with its family's mark: the featured sparkle, Qwen's
-    // mark, and the generic chip for a family the app has no mark for.
+    // Each row leads with its maker's logo: Inkling's, XHToken's for its
+    // Spark id, and Qwen's for its family.
     expect(
       [...rows].map(
-        (row) => row.querySelector<HTMLElement>(".m-ico")!.dataset.family,
+        (row) => row.querySelector<HTMLElement>(".m-ico")!.dataset.brand,
       ),
-    ).toEqual(["featured", "featured", "other", "qwen"]);
-    expect([...rows].every((row) => row.querySelector(".m-ico svg path"))).toBe(
-      true,
-    );
+    ).toEqual(["thinkingmachines", "thinkingmachines", "xhtoken", "qwen"]);
+    expect(
+      [...rows].map((row) =>
+        row.querySelector(".m-ico img")!.getAttribute("src"),
+      ),
+    ).toEqual([
+      "model-logo/thinkingmachines.png",
+      "model-logo/thinkingmachines.png",
+      "model-logo/xhtoken.png",
+      "model-logo/qwen.svg",
+    ]);
     expect(
       [...rows].some((row) => /\d+(\.\d+)?B\b/.test(row.textContent ?? "")),
     ).toBe(false);
@@ -2266,6 +2276,55 @@ describe("setup page model picker", () => {
     expect(stage()).toBe("settings");
   });
 
+  it("finds each model's logo as the Local models page does", async () => {
+    const other = (library: string, fields: Partial<SetupModelOption> = {}) =>
+      option({ library, name: library, featured: undefined, ...fields });
+    await openPage(
+      {
+        ...welcome({
+          ...listed,
+          models: [
+            listed.models![0]!,
+            other("llama-4-scout:Q4_K_M", { family: "llama" }),
+            other("kimi-k3:Q4_K_M", { family: "kimi" }),
+            other("starcoder-9b:Q4_K_M", { family: "starcoder" }),
+            other("ornith-coder:Q4_K_M", { sourceOrg: "ornith-ai" }),
+            other("ling-lite:Q4_K_M"),
+            other("tiny-1b:Q4_K_M", { sourceOrg: "someone" }),
+          ],
+        }),
+        platform: "darwin" as const,
+      },
+      "welcome",
+    );
+    open("local");
+    $("model-change").click();
+    const icons = [
+      ...document.querySelectorAll<HTMLElement>("#model-list .mrow .m-ico"),
+    ];
+    expect(icons.map((icon) => icon.dataset.brand)).toEqual([
+      "thinkingmachines",
+      "meta",
+      "kimi",
+      // A family with no logo keeps the plain mark, as on that page.
+      "default",
+      "ornith",
+      "inclusionai",
+      "default",
+    ]);
+    expect(icons.map((icon) => icon.dataset.fullBleed)).toEqual([
+      "true",
+      "false",
+      "true",
+      "false",
+      "true",
+      "true",
+      "false",
+    ]);
+    expect(icons[3]!.querySelector("img")).toBeNull();
+    expect(icons[3]!.querySelector("svg path")).not.toBeNull();
+  });
+
   it("changes the card to a picked model, checks it fits, and installs it", async () => {
     const { run, push } = await openPage(onMac(), "welcome");
     open("local");
@@ -2274,7 +2333,8 @@ describe("setup page model picker", () => {
     await vi.waitFor(() => expect($("model-sheet").hidden).toBe(true));
     expect($("local-model-name").textContent).toBe("Spark X2.6 4B");
     expect($("local-model-sub").textContent).toBe("XHToken");
-    expect($("local-model-icon").dataset.family).toBe("other");
+    expect($("local-model-icon").dataset.brand).toBe("xhtoken");
+    expect($("local-model-icon").dataset.fullBleed).toBe("false");
     expect($("local-model-quality").textContent).toBe("≈ Gemini 2.5 Pro");
     expect(run).toHaveBeenCalledWith({
       op: "local.model.check",

@@ -32,6 +32,7 @@ const library = {
       minimum_memory_bytes: 19847946932,
       publisher: "Thinking Machines",
       family: "other",
+      source_url: "https://huggingface.co/ThinkingMachines/Inkling-2-Mini-GGUF",
       architecture: "moe",
       parameters: "26.4B",
       active_parameters: "3.4B",
@@ -46,6 +47,7 @@ const library = {
       availability: { downloadable: true },
       fits_now: true,
       publisher: "Thinking Machines",
+      source_url: "https://example.com/inkling-2-mini",
     },
     {
       id: "qwen3.6-35b-a3b:UD-Q4_K_M",
@@ -59,6 +61,7 @@ const library = {
       minimum_memory_bytes: 25216865265,
       publisher: "Qwen",
       family: "qwen",
+      source_url: "not a url",
     },
     {
       id: "qwen3.8-flash-next-iq2xs:GSQ-RCO-IQ2_XS",
@@ -166,6 +169,7 @@ it("lists every catalog model with the kit's estimates and whether it fits", asy
     quant: "UD-Q4_K_M",
     family: "other",
     featured: true,
+    sourceOrg: "thinkingmachines",
     quality: 54,
     decodeTokS: 63.2,
     downloadBytes: 17252349088,
@@ -184,6 +188,10 @@ it("lists every catalog model with the kit's estimates and whether it fits", asy
   // The family names its icon; only Inkling 2 Mini is the featured one.
   expect(listing.models[2]).toMatchObject({ family: "qwen" });
   expect(listing.models[2]?.featured).toBeUndefined();
+  // The Hugging Face organization names a publisher's logo; another host or
+  // a malformed address gives none.
+  expect(listing.models[1]?.sourceOrg).toBeUndefined();
+  expect(listing.models[2]?.sourceOrg).toBeUndefined();
   // Parameter counts stay out: the page doesn't show them.
   expect(listing.models[0]).not.toHaveProperty("parameters");
   // An unscored model keeps its speed but has no quality.

@@ -60,6 +60,7 @@ import {
   parseSetCookie,
   pollDelayMs,
   LocalServerUnverifiedError,
+  setupModelOptions,
   PasswordChangeError,
   proveLocalServer,
   runChild,
@@ -10214,6 +10215,7 @@ describe("LocalServerModule setup sources", () => {
       quant: "UD-Q4_K_M",
       family: "other",
       featured: true,
+      sourceOrg: "thinkingmachines",
       quality: 54,
       decodeTokS: 63.2,
       downloadBytes: 17252349088,
@@ -10261,6 +10263,25 @@ describe("LocalServerModule setup sources", () => {
       JSON.stringify(PICKER_MODELS),
     );
   };
+
+  it("keeps a model's publisher organization only when it is a plain slug", () => {
+    const row = {
+      library: "ling-lite:Q4_K_M",
+      name: "Ling Lite",
+      quant: "Q4_K_M",
+      downloadBytes: 1,
+      memoryBytes: 1,
+      fits: true,
+    };
+    expect(
+      setupModelOptions([
+        { ...row, sourceOrg: "inclusionai" },
+        { ...row, sourceOrg: "../model-logo" },
+        { ...row, sourceOrg: "Inclusion AI" },
+        { ...row, sourceOrg: 7 },
+      ]).map((option) => option.sourceOrg),
+    ).toEqual(["inclusionai", undefined, undefined, undefined]);
+  });
 
   it("lists the kit's models, prices a pick and installs exactly that model", async () => {
     const commands = setupCommands({

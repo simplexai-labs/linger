@@ -48,6 +48,7 @@ import type { DriverUpdaterHost } from "./driver-updater.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
 import type { LocalServerModule } from "./local-server.js";
+import { MODEL_LOGOS } from "./model-logos.js";
 import {
   SETTINGS_URL,
   type MacPermissions,
@@ -665,6 +666,13 @@ export class SetupWindowModule implements Module {
     if (harnessSvg)
       return new Response(Buffer.from(harnessSvg), {
         headers: { "content-type": "image/svg+xml" },
+      });
+    const modelLogo = Object.hasOwn(MODEL_LOGOS, url.pathname)
+      ? MODEL_LOGOS[url.pathname]
+      : undefined;
+    if (modelLogo)
+      return new Response(Buffer.from(modelLogo.bytes), {
+        headers: { "content-type": modelLogo.type },
       });
     // In the language of the moment it opens; the Web client, where the
     // language is chosen, is not on screen while setup is.

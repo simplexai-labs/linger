@@ -278,6 +278,36 @@ describe("SetupWindowModule", () => {
     await background.host.stop("quit");
   });
 
+  it("serves the Local models page's logos to the setup page", async () => {
+    const shown = setupHost({ show: true });
+    await shown.host.start();
+    try {
+      const serve = state.partitionSession.protocol.handle.mock.calls.at(
+        -1,
+      )![1] as (request: Request) => Response;
+      const svg = serve(new Request("app://setup/model-logo/qwen.svg"));
+      expect(svg.status).toBe(200);
+      expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+      const png = serve(
+        new Request("app://setup/model-logo/thinkingmachines.png"),
+      );
+      expect(png.headers.get("content-type")).toBe("image/png");
+      // Nothing else under the folder, and no prototype keys.
+      expect(
+        serve(new Request("app://setup/model-logo/other.svg")).headers.get(
+          "content-type",
+        ),
+      ).not.toMatch(/^image\//);
+      expect(
+        serve(new Request("app://setup/constructor")).headers.get(
+          "content-type",
+        ),
+      ).not.toMatch(/^image\//);
+    } finally {
+      await shown.host.stop("quit");
+    }
+  });
+
   it("still accepts a boolean show option", async () => {
     const shown = setupHost({ show: true });
     await shown.host.start();

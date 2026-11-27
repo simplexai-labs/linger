@@ -262,6 +262,8 @@ export interface SetupModelOption {
   // The kit's model family, for its icon; the featured release has its own.
   readonly family?: string;
   readonly featured?: true;
+  // The Hugging Face organization it comes from, for a publisher's logo.
+  readonly sourceOrg?: string;
   readonly quality?: number;
   readonly decodeTokS?: number;
   readonly downloadBytes: number;

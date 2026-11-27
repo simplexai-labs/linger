@@ -46,6 +46,11 @@ export interface SetupModelOption {
   family?: string;
   /** Whether it is the featured release (Inkling 2 Mini), drawn apart. */
   featured?: boolean;
+  /**
+   * The Hugging Face organization of its `source_url`, lowercased: the
+   * publisher's logo when the family has none, as on the Local models page.
+   */
+  sourceOrg?: string;
   /** The kit's quality score for this model, when it has one (0 = unscored). */
   quality?: number;
   /** Estimated single-stream decode speed on this computer, tokens/s. */
@@ -88,6 +93,25 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+// `https://huggingface.co/<org>/<repo>` -> `<org>`, lowercased.
+const HUGGING_FACE_HOSTS = new Set([
+  "huggingface.co",
+  "www.huggingface.co",
+  "hf.co",
+]);
+const huggingFaceOrg = (value: unknown): string | undefined => {
+  const url = text(value, 500);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (!HUGGING_FACE_HOSTS.has(parsed.hostname.toLowerCase()))
+      return undefined;
+    const org = parsed.pathname.split("/").find(Boolean)?.toLowerCase();
+    return org && /^[a-z0-9][a-z0-9._-]{0,95}$/.test(org) ? org : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 async function json(
   tool: typeof runLocalmodels,
@@ -210,6 +234,7 @@ export async function listSetupModels(
     const role = roles.get(library);
     const publisher = text(model.publisher, 80);
     const family = text(model.family, 20);
+    const sourceOrg = huggingFaceOrg(model.source_url);
     models.push({
       library,
       name,
@@ -219,6 +244,7 @@ export async function listSetupModels(
       ...(isInkling2MiniModelId(splitLibraryModel(library).id)
         ? { featured: true }
         : {}),
+      ...(sourceOrg ? { sourceOrg } : {}),
       ...(estimate?.quality !== undefined ? { quality: estimate.quality } : {}),
       ...(estimate?.tokS !== undefined ? { decodeTokS: estimate.tokS } : {}),
       downloadBytes: model.download_bytes,

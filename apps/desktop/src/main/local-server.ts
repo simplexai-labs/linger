@@ -6419,6 +6419,10 @@ export function setupModelOptions(value: unknown): SetupModelOption[] {
           ? { family: row.family }
           : {}),
         ...(row.featured === true ? { featured: true as const } : {}),
+        ...(label(row.sourceOrg, 96) &&
+        /^[a-z0-9][a-z0-9._-]*$/.test(row.sourceOrg)
+          ? { sourceOrg: row.sourceOrg }
+          : {}),
         ...(count(row.quality) ? { quality: row.quality } : {}),
         ...(count(row.decodeTokS) ? { decodeTokS: row.decodeTokS } : {}),
         downloadBytes: row.downloadBytes,
