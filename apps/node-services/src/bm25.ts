@@ -5,11 +5,20 @@ export function searchBm25<T>(
 ): Array<{ value: T; score: number; coverage: number }> {
   const terms = [...new Set(tokenizeSearchText(query))];
   if (terms.length === 0 || documents.length === 0) return [];
+  const queryTerms = new Set(terms);
+  const documentFrequencies = new Map<string, number>();
   const prepared = documents.map((document) => {
     const tokens = tokenizeSearchText(document.text);
     const frequencies = new Map<string, number>();
     for (const token of tokens) {
-      frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+      if (!queryTerms.has(token)) continue;
+      const previous = frequencies.get(token) ?? 0;
+      frequencies.set(token, previous + 1);
+      if (previous === 0)
+        documentFrequencies.set(
+          token,
+          (documentFrequencies.get(token) ?? 0) + 1,
+        );
     }
     return { ...document, frequencies, length: tokens.length };
   });
@@ -19,9 +28,7 @@ export function searchBm25<T>(
   if (averageLength === 0) return [];
   const idfs = new Map(
     terms.map((term) => {
-      const frequency = prepared.filter(({ frequencies }) =>
-        frequencies.has(term),
-      ).length;
+      const frequency = documentFrequencies.get(term) ?? 0;
       return [
         term,
         Math.log(1 + (prepared.length - frequency + 0.5) / (frequency + 0.5)),

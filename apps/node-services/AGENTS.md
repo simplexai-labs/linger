@@ -100,6 +100,12 @@ not make an empty message indexable.
 - `scripts/generate-feature-catalog.ts` generates
   `src/agent/agent-features/catalog.generated.ts`; `typecheck` verifies it.
 
+## Search scoring
+
+The shared BM25 scorer retains per-document counts only for the current query
+terms while still using every analyzed token for document-length normalization.
+Document frequency is counted once per document during that pass.
+
 ## JSON document conversion
 
 JSON imports validate and pretty-print the source while retaining each numeric
