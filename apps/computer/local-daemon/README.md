@@ -358,6 +358,19 @@ downloaded model that Run's Agent names.
   cached, omit `concurrency` for that load so scheduling falls back to
   adaptive limits, and retry on the next load. Models with omitted or `<= 1`
   configured concurrency skip probing.
+  After a PolyStrata model (`engine` `"polystrata"` or `"strata"`) reaches
+  `loaded` and any concurrency probe completes, the Daemon runs an asynchronous
+  prefix warm-up: it fetches `GET <contentURL>/static-prefixes/v1`, opens a
+  temporary schema-only `computer` MCP server when computer UI tools are
+  enabled, and runs one-shot `--no-session` Pi turns with `LINGER_PI_STRATA_PIN`
+  to prefill and pin RAM-resident KV prefixes (`linger-meta` and
+  `linger-alter-ego`, selecting compact or full instructions from the model's
+  context window; roughly 0.5 GiB of host RAM per pinned prefix on typical
+  4B-9B models). Warm-up leaves the model's snapshot `state` as `loaded`, skips
+  non-PolyStrata engines, defers cleanly when runtime prerequisites
+  (`contentURL` or Pi installation) are not ready yet, and marks completed, HTTP
+  404 (unsupported), or failed warm-ups as settled so a failed attempt does not
+  retry until the model unloads and reloads.
   The snapshot is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters the `download` phase, the Daemon publishes

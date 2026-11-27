@@ -88,7 +88,16 @@ func TestPrefixWarmupSelectionStateAndDedup(t *testing.T) {
 
 	// Repeated refresh deduplicates identical loaded models; llama.cpp stays ignored.
 	library.Refresh(context.Background())
-	time.Sleep(30 * time.Millisecond)
+	library.mu.Lock()
+	inFlight := len(library.prefixWarmups)
+	_, polyWarmed := library.prefixWarmed["poly-one"]
+	_, strataWarmed := library.prefixWarmed["strata-nil"]
+	_, llamaWarmed := library.prefixWarmed["llama-ignored"]
+	library.mu.Unlock()
+	if inFlight != 0 || !polyWarmed || !strataWarmed || llamaWarmed {
+		t.Fatalf("dedup state = (inFlight=%d, poly=%t, strata=%t, llama=%t), want (0, true, true, false)",
+			inFlight, polyWarmed, strataWarmed, llamaWarmed)
+	}
 	mu.Lock()
 	if calls["poly-one"] != 1 || calls["strata-nil"] != 1 || calls["llama-ignored"] != 0 {
 		mu.Unlock()
@@ -359,9 +368,20 @@ func TestPrefixWarmupDoesNotSpinAfterErrorUntilReload(t *testing.T) {
 	t.Cleanup(library.Close)
 
 	library.Refresh(context.Background())
-	waitFor(t, "initial failing warmup", func() bool { return calls.Load() == 1 })
+	waitFor(t, "initial failing warmup", func() bool {
+		library.mu.Lock()
+		defer library.mu.Unlock()
+		_, warmed := library.prefixWarmed["poly-err"]
+		return calls.Load() == 1 && len(library.prefixWarmups) == 0 && warmed
+	})
 	library.Refresh(context.Background())
-	time.Sleep(30 * time.Millisecond)
+	library.mu.Lock()
+	inFlight := len(library.prefixWarmups)
+	_, warmed := library.prefixWarmed["poly-err"]
+	library.mu.Unlock()
+	if inFlight != 0 || !warmed {
+		t.Fatalf("error dedup state = (inFlight=%d, warmed=%t), want (0, true)", inFlight, warmed)
+	}
 	if calls.Load() != 1 {
 		t.Fatalf("calls = %d, want 1 after error dedup", calls.Load())
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/native"
 )
 
-func TestPrefixWarmupRunnerPrerequisitesAndCaching(t *testing.T) {
+func TestPrefixWarmupRunnerPrerequisitesAndUnsupported(t *testing.T) {
 	var fetches atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token-a/static-prefixes/v1" {
@@ -72,13 +72,84 @@ func TestPrefixWarmupRunnerPrerequisitesAndCaching(t *testing.T) {
 	}
 	done, err = runner.Warmup(t.Context(), target)
 	if err != nil || !done {
-		t.Fatalf("cached 404 bundle: Warmup = (%t, %v), want (true, nil)", done, err)
+		t.Fatalf("second 404 bundle: Warmup = (%t, %v), want (true, nil)", done, err)
 	}
-	if fetches.Load() != 1 {
-		t.Fatalf("404 fetch count = %d, want 1 (cached)", fetches.Load())
+	if fetches.Load() != 2 {
+		t.Fatalf("404 fetch count = %d, want 2 (uncached)", fetches.Load())
 	}
 	if invoked.Load() != 0 {
 		t.Fatalf("invoked = %d, want 0 when unsupported", invoked.Load())
+	}
+}
+
+func TestPrefixWarmupRunnerRejectsInvalidV1Bundle(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "non_positive_compact_threshold",
+			payload: map[string]any{
+				"version":                    1,
+				"marker":                     lingercontext.StaticPrefixEndMarker,
+				"compact_max_context_tokens": 0,
+				"prefixes": map[string]any{
+					"meta":      map[string]any{"full": "META", "compact": "META"},
+					"alter_ego": map[string]any{"full": "ALTER", "compact": "ALTER"},
+				},
+			},
+		},
+		{
+			name: "empty_marker",
+			payload: map[string]any{
+				"version":                    1,
+				"marker":                     "   ",
+				"compact_max_context_tokens": 128 * 1024,
+				"prefixes": map[string]any{
+					"meta":      map[string]any{"full": "META", "compact": "META"},
+					"alter_ego": map[string]any{"full": "ALTER", "compact": "ALTER"},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/conn/static-prefixes/v1" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(tc.payload)
+			}))
+			defer server.Close()
+
+			var invoked atomic.Int32
+			runner := &PrefixWarmupRunner{
+				ContentURL: func() string { return server.URL + "/conn" },
+				PiInstallation: func() (lingercontext.ProviderInstallation, bool) {
+					return lingercontext.ProviderInstallation{ExecutablePath: "/usr/local/bin/pi"}, true
+				},
+				ManagedMCPExtension: "/opt/tools/pi-mcp.mjs",
+				HTTPClient:          server.Client(),
+				RunWarmup: func(context.Context, native.Profile, string, string, string, native.StrataPinSpec, json.RawMessage) error {
+					invoked.Add(1)
+					return nil
+				},
+			}
+
+			done, err := runner.Warmup(t.Context(), localmodels.PrefixWarmupTarget{
+				ModelID:       "qwen3-4b",
+				PiModel:       "localmodels/qwen3-4b",
+				Engine:        "polystrata",
+				ContextTokens: 65536,
+			})
+			if err == nil || done {
+				t.Fatalf("Warmup = (%t, %v), want (false, non-nil error)", done, err)
+			}
+			if invoked.Load() != 0 {
+				t.Fatalf("invoked = %d, want 0 for invalid bundle", invoked.Load())
+			}
+		})
 	}
 }
 
@@ -198,7 +269,7 @@ func TestPrefixWarmupRunnerSelectsVariantAndCleansTempDir(t *testing.T) {
 		t.Fatalf("expected temp dir %s removed, stat err = %v", calls[0].dir, err)
 	}
 
-	// Second call on same ContentURL reuses cache; > 128K uses full variants.
+	// Second call fetches fresh bundle; > 128K uses full variants.
 	calls = nil
 	done, err = runner.Warmup(t.Context(), localmodels.PrefixWarmupTarget{
 		ModelID:       "model-full",
@@ -209,8 +280,8 @@ func TestPrefixWarmupRunnerSelectsVariantAndCleansTempDir(t *testing.T) {
 	if err != nil || !done {
 		t.Fatalf("full Warmup = (%t, %v)", done, err)
 	}
-	if fetchesA.Load() != 1 {
-		t.Fatalf("fetchesA = %d, want 1 (cached)", fetchesA.Load())
+	if fetchesA.Load() != 2 {
+		t.Fatalf("fetchesA = %d, want 2 (uncached)", fetchesA.Load())
 	}
 	if calls[0].instructions != lingercontext.AssembleWarmupSystemPrompt("META-FULL-A", guides) ||
 		calls[1].instructions != lingercontext.AssembleWarmupSystemPrompt("ALTER-FULL-A", guides) {

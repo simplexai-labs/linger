@@ -1,13 +1,12 @@
-import { assembleExecutionContextDeveloperInstructions } from "../agent-features/context-instructions/context-instructions.js";
 import {
-  EMOJI_REACTION_INSTRUCTIONS,
-  EMOJI_REACTION_INSTRUCTIONS_COMPACT,
-} from "../agent-features/emoji-reaction/prompt.js";
+  createBuiltinAgentFeatures,
+  type BuiltinAgentFeatures,
+} from "../agent-features/builtin.js";
+import type { FeatureContext } from "../agent-features/contracts.js";
+import type { BuiltinFeatureHost } from "../agent-features/host-ports.js";
+import type { ExecutionContextRef } from "../executor/context-ref.js";
+import type { AgentLogger } from "../observability/agent-log.js";
 import { STATIC_PREFIX_END_MARKER } from "./prefix-boundary.js";
-import {
-  TOOL_APPROVAL_PROTOCOL,
-  TOOL_APPROVAL_PROTOCOL_COMPACT,
-} from "./tool-approval-protocol.js";
 
 // Models with at most a 128K-token context window, such as local models, get
 // the compact instructions.
@@ -38,54 +37,80 @@ const STATIC_WARMUP_SPONSOR = {
   displayName: "Warmup Sponsor",
 } as const;
 
+const SILENT_LOGGER: AgentLogger = {
+  log() {},
+  child() {
+    return SILENT_LOGGER;
+  },
+};
+
+const STATIC_FEATURE_HOST: BuiltinFeatureHost = {
+  trackBackground() {},
+  timers: {
+    set() {},
+    clear() {},
+  },
+};
+
+let cachedBuiltinFeatures: BuiltinAgentFeatures | undefined;
+
+function getStaticBuiltinFeatures(): BuiltinAgentFeatures {
+  cachedBuiltinFeatures ??= createBuiltinAgentFeatures({
+    services: { logger: SILENT_LOGGER },
+  });
+  return cachedBuiltinFeatures;
+}
+
 function renderStaticPrefixVariant(
   contextKind: "meta" | "alter_ego",
   compact: boolean,
   options: RenderStaticPrefixBundleOptions,
 ): string {
-  const base =
+  const ref: ExecutionContextRef =
     contextKind === "meta"
-      ? assembleExecutionContextDeveloperInstructions({
-          agentName: "Warmup Agent",
-          agentActorId: "actor:warmup-agent",
-          agentType: "anotherme",
-          representedHuman: STATIC_WARMUP_SPONSOR,
-          sponsor: STATIC_WARMUP_SPONSOR,
-          connectedApps: options.connectedApps,
-          connectedAppKeys: [],
-          connectableAppKeys: [],
-          compactInstructions: compact,
-          contextKind: "meta",
-          roomId: "room-warmup",
-          roomKind: "direct",
-        })
-      : assembleExecutionContextDeveloperInstructions({
-          agentName: "Warmup Agent",
-          agentActorId: "actor:warmup-agent",
-          agentType: "anotherme",
-          representedHuman: STATIC_WARMUP_SPONSOR,
-          sponsor: STATIC_WARMUP_SPONSOR,
-          connectedApps: options.connectedApps,
-          connectedAppKeys: [],
-          connectableAppKeys: [],
-          compactInstructions: compact,
-          contextKind: "alter_ego",
-          taskId: "task-warmup",
-        });
+      ? { kind: "meta", agentId: "agent-warmup", roomId: "room-warmup" }
+      : { kind: "alter_ego", agentId: "agent-warmup", taskId: "task-warmup" };
+  const context: FeatureContext = {
+    ref,
+    ...(contextKind === "meta" ? { roomKind: "direct" as const } : {}),
+    configurationRevision: "warmup",
+    runtime: undefined,
+    identity: {
+      actorId: "actor:warmup-agent",
+      agentType: "anotherme",
+      representedHuman: STATIC_WARMUP_SPONSOR,
+      sponsor: STATIC_WARMUP_SPONSOR,
+    },
+    tenantId: "tenant-warmup",
+    actorId: "actor:warmup-agent",
+    agentName: "Warmup Agent",
+    agent: { name: "Warmup Agent", instructions: "" },
+    capabilities: options.permissionReview ? ["permissionReview"] : [],
+    signal: new AbortController().signal,
+    activeRunId: () => undefined,
+    steer: async () => ({ status: "skipped", reason: "static prefix warmup" }),
+    followUp: async () => ({
+      status: "skipped",
+      reason: "static prefix warmup",
+    }),
+  };
 
-  const parts: string[] = [];
-  if (base.static && base.static.length > 0) {
-    parts.push(base.static);
-  }
-  if (options.permissionReview) {
-    parts.push(
-      compact ? TOOL_APPROVAL_PROTOCOL_COMPACT : TOOL_APPROVAL_PROTOCOL,
+  const composed = getStaticBuiltinFeatures()
+    .composeContext({ context, host: STATIC_FEATURE_HOST })
+    .contextInstructions({
+      connectedApps: options.connectedApps,
+      connectedAppKeys: [],
+      connectableAppKeys: [],
+      compactInstructions: compact,
+    });
+  const delimiter = `\n\n${STATIC_PREFIX_END_MARKER}`;
+  const markerIndex = composed?.indexOf(delimiter) ?? -1;
+  if (!composed || markerIndex === -1) {
+    throw new Error(
+      `Expected ${STATIC_PREFIX_END_MARKER} in composed static prefix`,
     );
   }
-  parts.push(
-    compact ? EMOJI_REACTION_INSTRUCTIONS_COMPACT : EMOJI_REACTION_INSTRUCTIONS,
-  );
-  return parts.join("\n\n");
+  return composed.slice(0, markerIndex);
 }
 
 /**
