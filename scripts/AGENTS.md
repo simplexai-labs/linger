@@ -23,6 +23,9 @@ Scripts support existing build, generation, and verification entrypoints.
 ## Important Conventions
 
 - Scripts must be idempotent and safe to rerun.
+- When a managed-tools smoke command times out on Linux and neither process
+  group signaling nor the procfs children index works, take one bounded
+  `ps` PID/PPID snapshot before signaling the owned processes individually.
 - Build Local Computer Linux and macOS archives on a Unix host so the tar
   entries retain executable modes. On Windows, pass `--targets win32-x64`
   or `--targets win32-arm64` to `prepare-local-computer-release.mjs`.
