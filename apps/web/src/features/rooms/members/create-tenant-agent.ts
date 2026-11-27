@@ -21,7 +21,6 @@ export interface TenantAgentCreation {
     workspaceGrantId: string;
   };
   tenantId: string;
-  skillBindings: NonNullable<TeamHubTenantAgentCreateInput["skill_bindings"]>;
   visibilityScope: TeamHubAgentVisibilityScope;
 }
 
@@ -54,7 +53,6 @@ export async function createTenantAgent(
               }
             : {}),
         },
-        skill_bindings: input.skillBindings,
       },
     }),
   );

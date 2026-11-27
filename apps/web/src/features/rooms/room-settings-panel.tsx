@@ -276,7 +276,7 @@ function RoomHeader({
       {onShare ? (
         <div className="absolute right-3 top-3">
           <button
-            className="agent-publish-button"
+            className="panel-header-action-button"
             onClick={onShare}
             title={t(m.shareConversation)}
             type="button"

@@ -183,8 +183,9 @@ Settings exposes four tabs: `Profile` (`/settings/account`), `Security` (`/setti
 **Setup:** Use an owned General Agent, a ready Computer and a harmless `SKILL.md` with a unique observable instruction.
 Keep Another Me onboarding and Profile generation separate from General Agent initialization.
 **Journey:** Save instructions while idle; send a subsequent request and observe the new instruction taking effect.
-Upload the Skill through Agent Info → Details → Skills, confirm its exact binding, and ask the Agent to apply it.
-Remove that binding, start the next eligible Run and verify the manifest no longer includes it.
+The Web has no Skill management surface while it moves out of Agent Info, so upload the Skill with
+`POST /v0/tenants/{tenantId}/agents/{agentId}/skill-packages`, confirm its exact binding, and ask the Agent to apply it.
+Remove that binding with `DELETE /v0/tenants/{tenantId}/agents/{agentId}/skill-bindings/{skillId}`, start the next eligible Run and verify the manifest no longer includes it.
 Reject an invalid package without leaving a binding. Exercise the documented busy-update refusal with owned running work.
 Delete the General Agent after its work stops and reopen its former Direct Room and ordinary shared Room.
 

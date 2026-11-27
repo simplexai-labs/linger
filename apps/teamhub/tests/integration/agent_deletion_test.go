@@ -575,3 +575,55 @@ func (barrier *agentDeletionWriterBarrier) TraceQueryEnd(ctx context.Context, _ 
 		}
 	}
 }
+
+// Deleting an Agent pauses the Routines installed under its template origin,
+// including ones a Human authored, and bumps their revision so an enable
+// request that read the old state loses its revision check.
+func TestAgentDeletionPausesTemplateOriginRoutines(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	env, alice := newAgentRegistrationEnv(t, &recordingAgentManagement{})
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
+	status, _, body := env.request(alice, http.MethodPost, "/v0/tenants/"+acmeTenant+"/agents", map[string]any{
+		"name": "Routine Owner", "instructions": "Run Routines.",
+		"runtime": fixtureRuntime("gpt-5"),
+	}, "routine-owner-"+suffix)
+	if status != http.StatusCreated {
+		t.Fatalf("create Agent status=%d body=%s", status, body)
+	}
+	var agent struct {
+		Actor struct {
+			ID string `json:"id"`
+		} `json:"actor"`
+	}
+	decode(t, body, &agent)
+	roomID := createPrivateRoom(t, env, alice, "Routine origin "+suffix, "routine-origin-room-"+suffix)
+	if memberStatus, memberBody := putRoomMember(t, env, alice, roomID, agent.Actor.ID, "member"); memberStatus != http.StatusOK {
+		t.Fatalf("add Agent status=%d body=%s", memberStatus, memberBody)
+	}
+	if _, err := env.pool.Exec(t.Context(), `
+		INSERT INTO room_reminders(id,tenant_id,room_id,created_by_actor_id,template_agent_actor_id,template_routine_key,
+			name,instruction,timezone,cadence_kind,hour,minute,enabled,next_run_at)
+		VALUES ('routine_origin_'||$4,$1,$2,'actor_acme_alice',$3,'daily-check','Daily check','Check the Room.','UTC','daily',9,0,true,now()+interval '1 day'),
+		       ('routine_plain_'||$4,$1,$2,'actor_acme_alice',NULL,NULL,'Plain check','Check the Room.','UTC','daily',9,0,true,now()+interval '1 day')
+	`, acmeTenant, roomID, agent.Actor.ID, suffix); err != nil {
+		t.Fatal(err)
+	}
+
+	status, _, body = env.request(alice, http.MethodDelete, "/v0/tenants/"+acmeTenant+"/agents/"+agent.Actor.ID, nil, "")
+	if status != http.StatusNoContent {
+		t.Fatalf("delete Agent status=%d body=%s", status, body)
+	}
+	var enabled bool
+	var nextRunAt *time.Time
+	var revision int64
+	if err := env.pool.QueryRow(t.Context(), `SELECT enabled,next_run_at,revision FROM room_reminders WHERE id='routine_origin_'||$1`, suffix).
+		Scan(&enabled, &nextRunAt, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if enabled || nextRunAt != nil || revision != 2 {
+		t.Fatalf("template-origin Routine enabled=%v next_run_at=%v revision=%d", enabled, nextRunAt, revision)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM room_reminders WHERE id='routine_plain_'||$1 AND enabled AND revision=1`, suffix); got != 1 {
+		t.Fatalf("a Routine without that origin changed: %d", got)
+	}
+}

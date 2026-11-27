@@ -714,40 +714,6 @@ function installSeedRoutes(server: TeamHubTestServer, seed: TeamHubTestSeed) {
         })),
       ),
     )
-    .on(
-      "GET",
-      "/v0/tenants/{tenantId}/agents/{agentId}/skill-bindings",
-      ({ params }) => {
-        const agent = seed.tenantAgents.find(
-          (item) => item.actor.id === params.agentId,
-        );
-        if (!agent) return notFound("AGENT_NOT_FOUND");
-        return {
-          agent_actor_id: agent.actor.id,
-          binding_version: 1,
-          items: agent.skill_bindings.flatMap((item) =>
-            item.is_default
-              ? []
-              : [
-                  {
-                    agent_actor_id: agent.actor.id,
-                    binding_version: 1,
-                    config: {},
-                    enabled: true,
-                    id: `binding-${agent.actor.id}-${item.skill_id}`,
-                    skill: {
-                      manifest_version: item.manifest_version,
-                      skill_id: item.skill_id,
-                    },
-                    tenant_id: params.tenantId,
-                    updated_at: agent.updated_at,
-                    updated_by_actor_id: agent.created_by.id,
-                  },
-                ],
-          ),
-        };
-      },
-    )
     .on("GET", "/v0/tenants/{tenantId}/skill-manifests", () =>
       page(seed.skillManifests),
     )

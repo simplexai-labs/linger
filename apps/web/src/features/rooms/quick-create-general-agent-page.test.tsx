@@ -98,7 +98,6 @@ describe("quick General Agent creation", () => {
             workspace_grant_id: "grant-linger-workspace",
           },
         },
-        skill_bindings: [],
         visibility_scope: "sponsor",
       }),
     });
@@ -474,7 +473,6 @@ describe("quick Local Agent creation", () => {
             workspace_grant_id: ready.workspace_grants[0]!.grant_id,
           },
         }),
-        skill_bindings: [],
         visibility_scope: "sponsor",
       }),
     });

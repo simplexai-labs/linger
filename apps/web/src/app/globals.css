@@ -4527,6 +4527,38 @@ button.question-choice:focus-visible {
   }
 }
 
+/* A quiet pill for the one secondary action a panel header offers, such as
+   sharing a Room: hairline border and ink text at rest, a soft fill under the
+   pointer. */
+.panel-header-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid hsl(var(--town-border));
+  border-radius: 999px;
+  background: transparent;
+  color: hsl(var(--town-foreground));
+  font-size: 12px;
+  font-weight: 470;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+  transition:
+    background-color var(--app-micro-duration) ease,
+    border-color var(--app-micro-duration) ease;
+}
+
+.panel-header-action-button:hover {
+  border-color: hsl(var(--town-foreground) / 0.15);
+  background: hsl(var(--town-accent));
+}
+
+.panel-header-action-button:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
 .panel-tab-scroll {
   overscroll-behavior-x: contain;
   padding-block: 4px;

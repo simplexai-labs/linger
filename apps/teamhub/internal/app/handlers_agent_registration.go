@@ -65,7 +65,7 @@ func (a *App) writeTenantAgentDirectoryError(c *gin.Context, err error) bool {
 	return a.notFoundOrError(c, "list Tenant Agents", err)
 }
 
-// validAgentName reports whether an Agent or template name fits the contract
+// validAgentName reports whether an Agent name fits the contract
 // character bound.
 func validAgentName(name string) bool {
 	name = strings.TrimSpace(name)
@@ -74,7 +74,7 @@ func validAgentName(name string) bool {
 		utf8.RuneCountInString(name) <= agentregistry.MaxNameRunes
 }
 
-// validAgentText reports whether an Agent or template name and instructions fit
+// validAgentText reports whether an Agent name and instructions fit
 // the contract character bounds.
 func validAgentText(name, instructions string) bool {
 	instructions = strings.TrimSpace(instructions)
