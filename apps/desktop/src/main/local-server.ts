@@ -116,6 +116,7 @@ import type {
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
+  SetupDetectedRuntime,
   SetupReason,
 } from "../shared/setup.js";
 
@@ -177,6 +178,8 @@ export type LocalModelsCheck =
       // The localmodels tool's pick for this computer, which Quick Install
       // installs; the page adds no rule of its own.
       readonly recommendation?: SetupChoice;
+      // Harnesses discovered on this computer during inspect.
+      readonly runtimes?: readonly SetupDetectedRuntime[];
     };
 
 // A download under way: its bytes so far and in all, and the rate when the
@@ -1518,6 +1521,7 @@ export class LocalServerModule implements Module {
     // A failed check prints null; its cause is in the logged stderr.
     const report = JSON.parse(output) as {
       recommendation?: unknown;
+      runtimes?: unknown;
       localModels?: {
         eligible?: unknown;
         state?: unknown;
@@ -1613,6 +1617,38 @@ export class LocalServerModule implements Module {
       (pick !== "local-models" || eligible)
         ? (pick as SetupChoice)
         : undefined;
+    const validRuntimes = new Set<SetupDetectedRuntime["runtime"]>([
+      "codex",
+      "claude",
+      "pi",
+    ]);
+    const runtimes: SetupDetectedRuntime[] = Array.isArray(report.runtimes)
+      ? report.runtimes.flatMap((entry): SetupDetectedRuntime[] => {
+          if (!entry || typeof entry !== "object") return [];
+          const row = entry as {
+            choice?: unknown;
+            installed?: unknown;
+            auth?: unknown;
+            status?: unknown;
+          };
+          if (
+            typeof row.choice !== "string" ||
+            !validRuntimes.has(row.choice as SetupDetectedRuntime["runtime"])
+          )
+            return [];
+          const installed = row.installed === true;
+          const authenticated = row.auth === "authenticated";
+          const ready = row.status === "ready" || (installed && authenticated);
+          return [
+            {
+              runtime: row.choice as SetupDetectedRuntime["runtime"],
+              installed,
+              authenticated,
+              ready,
+            },
+          ];
+        })
+      : [];
     const check: LocalModelsCheck = {
       state: "checked",
       eligible,
@@ -1639,6 +1675,7 @@ export class LocalServerModule implements Module {
         : {}),
       ...(reasons.length ? { reasons } : {}),
       ...(recommendation ? { recommendation } : {}),
+      ...(runtimes.length ? { runtimes } : {}),
     };
     return { check, reasonLog };
   }
@@ -6287,10 +6324,21 @@ export async function unpackArchive(
       );
       return;
     }
+    // Windows' tar.exe reads argv in the ANSI code page, so pass a relative path
+    // from the resolved destination when both share a drive; POSIX tar is UTF-8
+    // native and takes the archive path directly without symlink depth drift.
+    let archiveArg = file;
+    let cwd = unpacked;
+    if (platform === "win32") {
+      const realUnpacked = await realpath(unpacked).catch(() => unpacked);
+      const realFile = await realpath(file).catch(() => file);
+      archiveArg = path.relative(realUnpacked, realFile);
+      cwd = realUnpacked;
+    }
     await runCommand(
       command,
-      ["-xf", path.relative(unpacked, file), "--strip-components=1"],
-      unpacked,
+      ["-xf", archiveArg, "--strip-components=1"],
+      cwd,
       signal,
     );
   } catch (error) {

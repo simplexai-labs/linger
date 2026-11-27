@@ -16,6 +16,9 @@ import path from "node:path";
 import iconPng from "../../resources/icon.png";
 // The Linger logo with its wordmark, for the page header.
 import logoPng from "../../resources/logo-horizontal.png";
+import claudeSvg from "../../resources/harnesses/claude.svg";
+import codexSvg from "../../resources/harnesses/codex.svg";
+import piSvg from "../../resources/harnesses/pi.svg";
 // The installer's welcome scene, so setup looks like the installer.
 import scenePng from "../../../linger-installer/public/onboarding/welcome-scene.png";
 // The SPA's typeface, so the setup page reads like the app it opens.
@@ -69,6 +72,11 @@ export interface SetupWindowOptions {
 }
 
 const SETUP_URL = "app://setup/";
+const HARNESS_ICONS: Readonly<Record<string, Uint8Array>> = {
+  "/harness-claude.svg": claudeSvg,
+  "/harness-codex.svg": codexSvg,
+  "/harness-pi.svg": piSvg,
+};
 // Its own session: the setup page never sees the server's cookies.
 const PARTITION = "linger-setup";
 
@@ -577,6 +585,11 @@ export class SetupWindowModule implements Module {
     if (url.pathname === "/geist.woff2")
       return new Response(Buffer.from(geistWoff2), {
         headers: { "content-type": "font/woff2" },
+      });
+    const harnessSvg = HARNESS_ICONS[url.pathname];
+    if (harnessSvg)
+      return new Response(Buffer.from(harnessSvg), {
+        headers: { "content-type": "image/svg+xml" },
       });
     // In the language of the moment it opens; the Web client, where the
     // language is chosen, is not on screen while setup is.

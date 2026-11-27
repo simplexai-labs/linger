@@ -117,7 +117,12 @@ await Promise.all([
     outfile: "dist/main/index.mjs",
     format: "esm",
     banner: requireShim,
-    loader: { ".html": "text", ".png": "binary", ".woff2": "binary" },
+    loader: {
+      ".html": "text",
+      ".png": "binary",
+      ".svg": "binary",
+      ".woff2": "binary",
+    },
   }),
   build({
     ...common,
