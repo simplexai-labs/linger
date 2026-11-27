@@ -1313,6 +1313,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/internal/v1/voice/sessions/{voiceSessionId}/dictation-polish": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rewrite one dictated segment on the VoiceSession owner's connected CLI.
+     * @description Fixes recognition errors, drops filler words and tidies punctuation without changing the meaning or the language. The runtime keeps the recognized text when this answers with an error, so a slow or unavailable polish never fails dictation.
+     */
+    post: operations["polishVoiceDictation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/internal/v1/voice/sessions/{voiceSessionId}/live-context": {
     parameters: {
       query?: never;
@@ -1452,6 +1472,12 @@ export interface components {
       event_id: components["schemas"]["VoiceId"];
       /** @enum {string} */
       status: "accepted" | "ignored";
+    };
+    VoiceDictationPolishRequest: {
+      text: string;
+    };
+    VoiceDictationPolishResult: {
+      text: string;
     };
     VoiceMediaEpochClaim: {
       media_epoch: number;
@@ -3491,6 +3517,15 @@ export interface components {
     };
     /** @description VoiceSession is not visible to the runtime. */
     VoiceNotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["VoiceError"];
+      };
+    };
+    /** @description The owner's connected CLI could not polish the text in time, or is not available. */
+    VoicePolishUnavailable: {
       headers: {
         [name: string]: unknown;
       };
@@ -5827,6 +5862,36 @@ export interface operations {
       };
       401: components["responses"]["VoiceUnauthenticated"];
       404: components["responses"]["VoiceNotFound"];
+    };
+  };
+  polishVoiceDictation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        voiceSessionId: components["schemas"]["VoiceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["VoiceDictationPolishRequest"];
+      };
+    };
+    responses: {
+      /** @description The polished text. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceDictationPolishResult"];
+        };
+      };
+      400: components["responses"]["VoiceBadRequest"];
+      401: components["responses"]["VoiceUnauthenticated"];
+      404: components["responses"]["VoiceNotFound"];
+      503: components["responses"]["VoicePolishUnavailable"];
     };
   };
   getVoiceLiveContext: {

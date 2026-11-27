@@ -57,6 +57,64 @@ snapshots local interfaces at startup.
 Browsers allow the microphone only on `localhost` or HTTPS, so voice from
 another computer needs an HTTPS proxy in front of port 3000.
 
+## Dictation without a key
+
+With no Soniox key, dictation in the Message box and in Pocket notes runs on
+SenseVoiceSmall int8, a speech model of about 230 MB that Node Services
+downloads once into `AGENT_HOME/models` (from Hugging Face, or `hf-mirror.com`
+first when `SIMPLEX_REGION` is `cn`) the first time it starts without a Soniox
+key. The download resumes after an interruption, and its checksums are pinned.
+Recognition runs on the CPU of the computer that runs Node Services; the audio
+goes to no speech service.
+
+While you speak, the text appears as it is recognized. In Voice Mode a pause of
+about one second after you spoke ends the turn and sends it, as with Soniox. The
+local model hears the pause by loudness alone, so it works in any language, but
+a very noisy room can keep a turn from ending on its own. A long dictation is cut
+into segments of at most 30 seconds, at the quietest moment near the end of
+each, and each closed segment is rewritten, on the CLI your Another Me runs on
+(the same Runtime that answers your chat) or on an API of your own, as chosen
+below: it removes filler words, fixes mistakes in the recognized words, and adds
+punctuation, without translating or changing what you said. The text lands in
+the box when you stop, so stopping waits for the last segment's rewrite, up to
+about ten seconds; if the CLI is offline or the rewrite is too slow or fails,
+the recognized text is used as it is.
+
+Dictation without a key stays off until someone chooses what rewrites the text.
+With no Soniox key, the voice button opens the same dialog that takes the keys,
+and its Local model page offers two ways to rewrite:
+
+- **Claude CLI.** The page offers the aliases every Claude CLI takes (Haiku, the
+  fastest, preselected, Sonnet and Opus), because the choice applies to whoever
+  dictates on the server. The alias reaches that person's Claude CLI as
+  `--model`; a Computer release before 0.62.0, or an Another Me that runs on
+  Codex, keeps the Runtime's default model. A CLI starts a process for every
+  rewrite, so expect several seconds.
+- **My API key.** An OpenAI-compatible API of your own, such as DeepSeek:
+  enter its https address and the key, then select the round button beside Model
+  to list the models the API offers and pick one, or type a name (an API with no
+  listing needs the typed name). A key already saved is used for that listing
+  only while the address is the one it was saved for. TeamHub checks the key
+  against the API's `/models` listing, stores it encrypted with
+  `TEAMHUB_SECRET_ENCRYPTION_KEY` (without it the key cannot be saved), and
+  never shows it again. Each segment of what you said is then sent to that API
+  from the server running TeamHub, which connects only to public addresses, so
+  an address inside your network is refused. A saved key stays when you switch
+  back to the CLI, and goes only to the address it was saved for: another
+  address needs a key of its own.
+
+Use local model saves the choice and starts dictating. Like the keys, the choice
+is shared by everyone on the server, and Settings › API keys has a Local model
+row to change it later. The choice decides where everyone's dictated text goes,
+so anyone who can sign in to the deployment can send it to an API they name. On
+a server several people share, only let in people you trust with that, or leave
+`TEAMHUB_SECRET_ENCRYPTION_KEY` unset, which keeps the API route off because no
+key can be saved.
+
+The local model labels no speakers, so recording still needs Soniox. A Soniox
+key, once saved, takes over dictation again. `VOICE_LOCAL_ASR=0` keeps the
+model from being downloaded; `VOICE_LOCAL_ASR_THREADS` caps its CPU threads.
+
 ## When a recording ends
 
 As soon as a recording stops, Another Me posts the recording and its

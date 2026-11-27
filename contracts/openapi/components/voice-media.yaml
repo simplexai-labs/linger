@@ -28,6 +28,12 @@ components:
         voice_available:
           type: boolean
           description: The deployment can run voice (TEAMHUB_VOICE_MEDIA=on); clients show voice entries only when true.
+        local_dictation_supported:
+          type: boolean
+          description: >-
+            A speech model downloaded to this deployment is ready and a person chose what rewrites the dictated
+            text, so Pocket notes dictation and Voice Mode dictation work without a Soniox key. Recording still
+            needs Soniox.
         soniox_key:
           $ref: "#/components/schemas/VoiceProviderKeyStatus"
         xai_key:
@@ -35,6 +41,107 @@ components:
     VoiceProvider:
       type: string
       enum: [soniox, xai]
+    VoiceDictationSettings:
+      type: object
+      additionalProperties: false
+      required: [local_model, default_polish_model, can_save_api_key]
+      properties:
+        local_model:
+          type: string
+          enum: [ready, downloading, unavailable]
+          description: >-
+            State of the speech model that dictates without a Soniox key: ready to use, still downloading, or
+            not available on this deployment.
+        polish_source:
+          type: string
+          enum: [cli, api]
+          description: >-
+            What rewrites dictated text: the connected CLI, or an OpenAI-compatible API of the deployment's own.
+            Absent until a person chooses, and dictation without a Soniox key stays off until then.
+        polish_model:
+          type: string
+          description: The Claude model the connected CLI rewrites dictated text with.
+        default_polish_model:
+          type: string
+          description: The model a client preselects for the CLI.
+        polish_api:
+          $ref: "#/components/schemas/VoiceDictationPolishApi"
+        can_save_api_key:
+          type: boolean
+          description: False when this deployment has no secret encryption key, so an API key cannot be stored.
+    VoiceDictationPolishApi:
+      type: object
+      additionalProperties: false
+      required: [base_url, model, key_saved]
+      description: The deployment's own API for rewriting dictated text. The key is never returned.
+      properties:
+        base_url:
+          type: string
+        model:
+          type: string
+        key_saved:
+          type: boolean
+    SaveVoiceDictationSettingsRequest:
+      type: object
+      additionalProperties: false
+      required: [polish_source]
+      properties:
+        polish_source:
+          type: string
+          enum: [cli, api]
+        polish_model:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:/\\[\\]-]*$"
+          description: Required for cli.
+        polish_api:
+          $ref: "#/components/schemas/SaveVoiceDictationPolishApiRequest"
+    SaveVoiceDictationPolishApiRequest:
+      type: object
+      additionalProperties: false
+      required: [base_url, model]
+      description: Required for api.
+      properties:
+        base_url:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: An https base URL whose /chat/completions answers, such as https://api.deepseek.com/v1.
+        model:
+          type: string
+          minLength: 1
+          maxLength: 100
+        api_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Omitted, the key already saved is kept.
+    ListVoiceDictationModelsRequest:
+      type: object
+      additionalProperties: false
+      required: [base_url]
+      properties:
+        base_url:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: An https base URL whose /models lists the API's models, such as https://api.deepseek.com/v1.
+        api_key:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Omitted, the key already saved for this address is used.
+    VoiceDictationModels:
+      type: object
+      additionalProperties: false
+      required: [models]
+      properties:
+        models:
+          type: array
+          maxItems: 300
+          items:
+            type: string
     SaveVoiceProviderKeyRequest:
       type: object
       additionalProperties: false

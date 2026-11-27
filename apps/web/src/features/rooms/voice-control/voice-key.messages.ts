@@ -5,6 +5,52 @@ export const voiceKeyMessages = defineMessages("voiceKey", {
   title: "{provider} key",
   turnOnVoice: "Turn on voice",
   voiceProvider: "Voice provider",
+  localModel: "Local model",
+  localTitle: "Local speech model",
+  localPurpose:
+    "Dictation runs on the speech model downloaded to this server. Choose what then rewrites what you said.",
+  rewriteWith: "Rewrite with",
+  rewriteWithCli: "Claude CLI",
+  rewriteWithApi: "My API key",
+  apiPurpose:
+    "Rewrites with an OpenAI-compatible API of your own, such as DeepSeek. Your words are sent to it.",
+  apiBaseUrl: "API address",
+  apiModel: "Model",
+  listApiModels: "Get models from the API",
+  apiModelHint:
+    "Enter the address and key, then select the round button to pick a model from the API, or type a name.",
+  apiModelsListing: "Getting models…",
+  apiModelsListed: {
+    one: "{count} model available. Pick it or type another name.",
+    other: "{count} models available. Pick one or type another name.",
+  },
+  apiModelsNone:
+    "This API does not list its models. Type the name of the model to use.",
+  apiListInvalid: "Enter an https API address and its key.",
+  apiKeyLabel: "API key",
+  keyHint: "Stored encrypted and never shown again.",
+  apiKeySavedHint: "A key is saved. Leave this empty to keep it.",
+  apiKeyNewAddressHint:
+    "Enter this address's own key. The saved key is used only at the address it was saved for.",
+  apiRejected: "The API rejected this key. Check it and try again.",
+  apiUnreachable: "Could not reach the API to check the key. Try again.",
+  invalidApi: "Enter an https API address, a model and a key.",
+  checkingApi: "Checking the API…",
+  localReady: "The speech model is ready.",
+  localDownloading:
+    "The speech model is still downloading. Dictation starts once it is ready.",
+  localUnavailable: "This server has no speech model.",
+  rewriteModel: "Rewrite model",
+  rewriteModelLabel: "Model that rewrites dictated text",
+  rewriteModelHint:
+    "Runs on the Claude CLI connected to each person's Another Me. Haiku is the fastest.",
+  defaultRewriteModel: "Haiku (fastest, recommended)",
+  rewriteModelSonnet: "Sonnet",
+  rewriteModelOpus: "Opus",
+  useLocalModel: "Use local model",
+  localSavedButOff:
+    "The choice is saved, but dictation could not be turned on yet. Try again.",
+  localSaveFailed: "Could not save the choice. Try again.",
   sonioxPurpose:
     "Transcribes meetings, Pocket Notes dictation and Voice Mode dictation.",
   xaiPurpose: "Turns Voice Mode into a live conversation with Grok.",

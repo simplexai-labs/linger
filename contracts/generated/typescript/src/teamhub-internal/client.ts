@@ -760,6 +760,10 @@ export type VoiceObservationReceipt =
   components["schemas"]["VoiceObservationReceipt"];
 export type VoiceMediaEpochClaim =
   components["schemas"]["VoiceMediaEpochClaim"];
+export type VoiceDictationPolishRequest =
+  components["schemas"]["VoiceDictationPolishRequest"];
+export type VoiceDictationPolishResult =
+  components["schemas"]["VoiceDictationPolishResult"];
 export type VoiceMediaObjectKey = components["schemas"]["VoiceMediaObjectKey"];
 export type VoiceRecordingReport =
   components["schemas"]["VoiceRecordingReport"];
@@ -801,6 +805,22 @@ export class TeamHubVoiceRuntimeClient {
       signal,
     );
     return claim.media_epoch;
+  }
+
+  /** Rewrites one dictated passage on the session owner's connected CLI. */
+  async polishDictation(
+    voiceSessionId: string,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const request: VoiceDictationPolishRequest = { text };
+    const result = await this.request<VoiceDictationPolishResult>(
+      "POST",
+      `/internal/v1/voice/sessions/${encodeURIComponent(voiceSessionId)}/dictation-polish`,
+      request,
+      signal,
+    );
+    return result.text;
   }
 
   async putMediaObject(

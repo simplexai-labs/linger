@@ -384,6 +384,83 @@ tenantVoiceMediaPolicy:
       "404":
         $ref: "../components/common.yaml#/components/responses/NotFound"
 
+voiceDictationSettings:
+  get:
+    tags: [Capture]
+    operationId: getVoiceDictationSettings
+    summary: Read how this deployment dictates without a Soniox key.
+    responses:
+      "200":
+        description: The speech model's state and the chosen rewrite model.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/voice-media.yaml#/components/schemas/VoiceDictationSettings"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+  put:
+    tags: [Capture]
+    operationId: saveVoiceDictationSettings
+    summary: Choose what rewrites dictated text.
+    description: >-
+      The deployment's choice, shared by everyone on the server like the voice keys. With cli, the
+      model is passed to the Claude CLI of the dictating person's Another Me as --model, an alias
+      such as haiku or an id from the Computer's catalog; a Runtime that is not Claude ignores it.
+      With api, TeamHub calls an OpenAI-compatible API with the saved key, which it checks first and
+      stores encrypted with TEAMHUB_SECRET_ENCRYPTION_KEY. error.code is one of
+      VoiceProviderKeyErrorCode: INVALID_REQUEST, VOICE_KEY_REJECTED, VOICE_PROVIDER_UNAVAILABLE or
+      VOICE_KEY_STORAGE_UNAVAILABLE.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/voice-media.yaml#/components/schemas/SaveVoiceDictationSettingsRequest"
+    responses:
+      "200":
+        description: The settings after saving.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/voice-media.yaml#/components/schemas/VoiceDictationSettings"
+      "400":
+        $ref: "../components/voice-media.yaml#/components/responses/VoiceProviderKeyRefused"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "503":
+        $ref: "../components/voice-media.yaml#/components/responses/VoiceProviderKeyRefused"
+
+voiceDictationModels:
+  post:
+    tags: [Capture]
+    operationId: listVoiceDictationModels
+    summary: List the models of an OpenAI-compatible API before saving it.
+    description: >-
+      Asks the API's /models for the names it offers, so a client can offer them instead of a typed
+      name. The key is the one in the request, or, left out, the saved key when base_url is the
+      address it was saved for; the saved key is never sent anywhere else. The list is empty for an
+      API with no such route. error.code is one of VoiceProviderKeyErrorCode: INVALID_REQUEST,
+      VOICE_KEY_REJECTED or VOICE_PROVIDER_UNAVAILABLE.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/voice-media.yaml#/components/schemas/ListVoiceDictationModelsRequest"
+    responses:
+      "200":
+        description: The model names the API offers, sorted.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/voice-media.yaml#/components/schemas/VoiceDictationModels"
+      "400":
+        $ref: "../components/voice-media.yaml#/components/responses/VoiceProviderKeyRefused"
+      "401":
+        $ref: "../components/common.yaml#/components/responses/Unauthenticated"
+      "503":
+        $ref: "../components/voice-media.yaml#/components/responses/VoiceProviderKeyRefused"
+
 voiceProviderKey:
   put:
     tags: [Capture]

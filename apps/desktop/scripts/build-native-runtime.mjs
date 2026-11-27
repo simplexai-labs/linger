@@ -81,7 +81,10 @@ const PLATFORMS = {
 
 // Packages the services load at runtime by a name esbuild cannot see:
 // createRequire, require.resolve of data files, or a native binding.
-export const RUNTIME_PACKAGES = ["@livekit/local-inference"];
+export const RUNTIME_PACKAGES = [
+  "@livekit/local-inference",
+  "sherpa-onnx-node",
+];
 // Packages that are model data rather than code: the installer leaves them
 // out and Node Services downloads them when a feature first needs them
 // (apps/node-services/src/model-packages.ts). Local models install

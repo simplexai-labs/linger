@@ -19,10 +19,13 @@ import { RichMessage, useT } from "@/i18n/use-translation";
 
 import { publishVoiceMediaPolicy } from "./use-voice-media-policy";
 import { voiceKeyMessages as m } from "./voice-key.messages";
+import {
+  VOICE_KEY_STORAGE_VARIABLE as STORAGE_VARIABLE,
+  VoiceLocalModelPage,
+} from "./voice-local-model-page";
 
-// Where TeamHub keeps saved keys; a server without it can only read keys
-// from its environment.
-const STORAGE_VARIABLE = "TEAMHUB_SECRET_ENCRYPTION_KEY";
+/** A page of the dialog: a provider's key, or the local speech model. */
+export type VoiceDialogPage = TeamHubVoiceProvider | "local";
 
 const providerDetails: Record<
   TeamHubVoiceProvider,
@@ -108,32 +111,41 @@ export function VoiceKeyDialog({
   tenantId,
 }: {
   onClose: () => void;
-  onReady: (
-    provider: TeamHubVoiceProvider,
-    policy: TeamHubVoiceMediaPolicy,
-  ) => void;
+  onReady: (page: VoiceDialogPage, policy: TeamHubVoiceMediaPolicy) => void;
   /** The policy the caller holds, read only for each key's status. */
   policy: TeamHubVoiceMediaPolicy | undefined;
-  providers: readonly TeamHubVoiceProvider[];
+  providers: readonly VoiceDialogPage[];
   tenantId: string;
 }) {
   const t = useT();
   const { client } = useTeamHubRuntime();
-  const [provider, setProvider] = useState(providers[0] ?? "soniox");
+  const keyProviders = providers.filter(
+    (option): option is TeamHubVoiceProvider => option !== "local",
+  );
+  const [provider, setProvider] = useState<TeamHubVoiceProvider>(
+    keyProviders[0] ?? "soniox",
+  );
+  const [local, setLocal] = useState(providers[0] === "local");
   // Set when the key is saved but the fresh policy did not turn voice on.
   const [turnOnFailed, setTurnOnFailed] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
   async function turnOn() {
+    const page: VoiceDialogPage = local ? "local" : provider;
     const next = await teamHubData(
       client.api.GET("/v0/tenants/{tenantId}/voice-media-policy", {
         params: { path: { tenantId } },
       }),
     ).catch(() => undefined);
-    if (next && voiceReady(next, provider)) {
+    if (
+      next &&
+      (page === "local"
+        ? next.local_dictation_supported === true
+        : voiceReady(next, page))
+    ) {
       setTurnOnFailed(false);
       publishVoiceMediaPolicy(tenantId, next);
-      onReady(provider, next);
+      onReady(page, next);
       return;
     }
     setTurnOnFailed(true);
@@ -149,13 +161,15 @@ export function VoiceKeyDialog({
       title={
         providers.length > 1
           ? t(m.turnOnVoice)
-          : t(m.title, { provider: details.name })
+          : local
+            ? t(m.localTitle)
+            : t(m.title, { provider: details.name })
       }
     >
       <div className="space-y-4 px-5 py-5 text-sm text-app-body">
         {turnOnFailed ? (
           <>
-            <p role="alert">{t(m.savedButOff)}</p>
+            <p role="alert">{t(local ? m.localSavedButOff : m.savedButOff)}</p>
             <Button
               loading={retrying}
               onClick={() => {
@@ -175,22 +189,32 @@ export function VoiceKeyDialog({
                 className="flex gap-2"
                 role="group"
               >
-                {providers.map((option) => (
-                  <Button
-                    aria-pressed={option === provider}
-                    key={option}
-                    onClick={() => setProvider(option)}
-                    tone={option === provider ? "primary" : "secondary"}
-                  >
-                    {providerDetails[option].name}
-                  </Button>
-                ))}
+                {providers.map((option) => {
+                  const pressed =
+                    option === "local" ? local : !local && option === provider;
+                  return (
+                    <Button
+                      aria-pressed={pressed}
+                      key={option}
+                      onClick={() => {
+                        setLocal(option === "local");
+                        if (option !== "local") setProvider(option);
+                      }}
+                      tone={pressed ? "primary" : "secondary"}
+                    >
+                      {option === "local"
+                        ? t(m.localModel)
+                        : providerDetails[option].name}
+                    </Button>
+                  );
+                })}
               </div>
             ) : null}
-            {providers.length > 1 ? (
+            {local ? <VoiceLocalModelPage onSaved={turnOn} /> : null}
+            {!local && providers.length > 1 ? (
               <p className="text-muted-foreground">{t(details.purpose)}</p>
             ) : null}
-            {status?.can_save === false ? (
+            {local ? null : status?.can_save === false ? (
               <p>
                 <RichMessage
                   message={m.cannotSaveHere}

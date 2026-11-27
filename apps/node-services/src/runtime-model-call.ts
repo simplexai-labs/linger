@@ -81,6 +81,10 @@ export interface ModelPrompt {
   readonly effort?: ModelCallEffort;
   readonly instructions?: string;
   readonly input: string;
+  /** The model a Claude Runtime runs the call on: an alias such as haiku or a
+   * catalog id. Omitted, the Runtime's default. Another Runtime, or a Computer
+   * release that cannot take it, ignores it. */
+  readonly model?: string;
   /** One Runtime attempt, each retry and correction getting its own;
    * omitted, the kind's default. */
   readonly timeoutMs?: number;
@@ -485,6 +489,7 @@ interface CallRequest {
   readonly effort?: ModelCallEffort;
   readonly instructions?: string;
   readonly input: string;
+  readonly model?: string;
   readonly timeoutMs?: number;
   readonly maxOutputChars?: number;
   readonly schemaName?: string;
@@ -604,6 +609,7 @@ function callId(call: CallRequest): string {
       call.effort ?? "low",
       call.instructions ?? "",
       call.input,
+      call.model ?? null,
       call.schemaName ?? null,
       call.outputSchema ?? null,
       call.sessionKey ?? null,
@@ -925,10 +931,16 @@ async function invokeAttempt(
     placement.computerId,
     runtimeType,
   );
+  // A call that names its model (dictation's rewrite) runs on it when the
+  // Runtime is Claude, whose CLI takes an alias such as haiku; the Gateway
+  // leaves the model off for a Computer that cannot decode it. Any other
+  // Runtime keeps the placed Agent's model.
   const wireModel =
-    runtimeType === resolved.runtimeType
-      ? resolved.wireModel
-      : defaultRuntimeModel(runtimeModels)?.runtimeModel;
+    call.model && runtimeType === "claude"
+      ? call.model
+      : runtimeType === resolved.runtimeType
+        ? resolved.wireModel
+        : defaultRuntimeModel(runtimeModels)?.runtimeModel;
   const policy = modelCallPolicies[call.kind];
   const breakerKey = backgroundBreakerKey(placement.computerId, runtimeType);
   const modelsFingerprint = `${wireModel ?? ""}\n${runtimeModelsFingerprint(runtimeModels)}`;
@@ -1334,6 +1346,7 @@ function callRequest(
     ...(request.effort ? { effort: request.effort } : {}),
     ...(request.instructions ? { instructions: request.instructions } : {}),
     input: request.input,
+    ...(request.model ? { model: request.model } : {}),
     ...(request.timeoutMs === undefined
       ? {}
       : { timeoutMs: request.timeoutMs }),

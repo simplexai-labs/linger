@@ -927,6 +927,43 @@ paths:
           $ref: "#/components/responses/VoiceNotFound"
       security:
         - voiceRuntimeBearer: []
+  /internal/v1/voice/sessions/{voiceSessionId}/dictation-polish:
+    post:
+      operationId: polishVoiceDictation
+      summary: Rewrite one dictated segment on the VoiceSession owner's connected CLI.
+      description: >-
+        Fixes recognition errors, drops filler words and tidies punctuation without changing the meaning or the
+        language. The runtime keeps the recognized text when this answers with an error, so a slow or unavailable
+        polish never fails dictation.
+      parameters:
+        - name: voiceSessionId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/VoiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceDictationPolishRequest"
+      responses:
+        "200":
+          description: The polished text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceDictationPolishResult"
+        "400":
+          $ref: "#/components/responses/VoiceBadRequest"
+        "401":
+          $ref: "#/components/responses/VoiceUnauthenticated"
+        "404":
+          $ref: "#/components/responses/VoiceNotFound"
+        "503":
+          $ref: "#/components/responses/VoicePolishUnavailable"
+      security:
+        - voiceRuntimeBearer: []
   /internal/v1/voice/sessions/{voiceSessionId}/live-context:
     get:
       operationId: getVoiceLiveContext
@@ -1256,6 +1293,26 @@ components:
           x-enum-varnames:
             - VoiceObservationReceiptStatusAccepted
             - VoiceObservationReceiptStatusIgnored
+    VoiceDictationPolishRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 50000
+    VoiceDictationPolishResult:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 100000
     VoiceMediaEpochClaim:
       type: object
       additionalProperties: false
@@ -1601,6 +1658,12 @@ components:
             $ref: "#/components/schemas/VoiceError"
     VoiceNotFound:
       description: VoiceSession is not visible to the runtime.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/VoiceError"
+    VoicePolishUnavailable:
+      description: The owner's connected CLI could not polish the text in time, or is not available.
       content:
         application/json:
           schema:

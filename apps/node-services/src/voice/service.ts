@@ -15,6 +15,11 @@ import {
 } from "../model-packages.js";
 import { hasBearerToken } from "../service-bearer-auth.js";
 import { readVoiceConfig, type VoiceConfig } from "./config.js";
+import {
+  installLocalAsrModel,
+  localAsrModelDirectory,
+  localAsrModelInstalled,
+} from "./local-asr-model.js";
 
 export type VoiceWorker = "asr" | "recorder" | "live";
 const VOICE_WORKERS = ["asr", "recorder", "live"] as const;
@@ -34,9 +39,15 @@ export interface VoiceWorkerSpawn {
   readonly env: NodeJS.ProcessEnv;
 }
 
-/** Soniox runs transcription and recording; xAI runs Live on its own. */
+/**
+ * Soniox runs transcription and recording; xAI runs Live on its own. Without a
+ * Soniox key, a downloaded local model runs dictation: it needs no key, so its
+ * directory takes the key's place, and the recorder stays stopped because the
+ * local model labels no speakers.
+ */
 export function workerKeys(
   keys: ProviderKeys,
+  localModelDirectory?: string,
 ): Map<VoiceWorker, { variable: string; key: string }> {
   const soniox = keys.soniox_api_key?.trim();
   const xai = keys.xai_api_key?.trim();
@@ -44,10 +55,18 @@ export function workerKeys(
   if (soniox) {
     workers.set("asr", { variable: "SONIOX_API_KEY", key: soniox });
     workers.set("recorder", { variable: "SONIOX_API_KEY", key: soniox });
+  } else if (localModelDirectory) {
+    workers.set("asr", {
+      variable: "VOICE_LOCAL_ASR_MODEL_DIR",
+      key: localModelDirectory,
+    });
   }
   if (xai) workers.set("live", { variable: "XAI_API_KEY", key: xai });
   return workers;
 }
+
+/** The local model's state, as the health route reports it to TeamHub. */
+export type LocalAsrState = "disabled" | "idle" | "downloading" | "ready";
 
 type FetchResult =
   | { readonly ok: true; readonly keys: ProviderKeys }
@@ -135,6 +154,12 @@ export async function startVoiceService(options: {
   environment?: NodeJS.ProcessEnv;
   spawnWorker?: (worker: VoiceWorker, spec: VoiceWorkerSpawn) => ChildProcess;
   installModels?: () => Promise<void>;
+  /** The local ASR model; the defaults download it beside the other models. */
+  localAsr?: {
+    installed: () => boolean;
+    install: () => Promise<void>;
+    directory: string;
+  };
   fetch?: typeof fetch;
   probeWorker?: (port: number) => Promise<boolean>;
   allocatePort?: () => Promise<number>;
@@ -165,6 +190,49 @@ export async function startVoiceService(options: {
     : {};
   let stopping = false;
   const stopped = new AbortController();
+  const localAsr = options.localAsr ?? {
+    directory: localAsrModelDirectory(env),
+    installed: () => localAsrModelInstalled(env),
+    install: async () => {
+      await installLocalAsrModel(env, {
+        region: config.region,
+        signal: stopped.signal,
+      });
+    },
+  };
+  let localInstalling = false;
+  const localState = (): LocalAsrState =>
+    !config.localAsr
+      ? "disabled"
+      : localAsr.installed()
+        ? "ready"
+        : localInstalling
+          ? "downloading"
+          : "idle";
+  // Only a deployment without a Soniox key needs the model, so a keyed one
+  // never downloads it. A failed download resumes at the next reconcile.
+  const installLocalAsr = () => {
+    if (!config.localAsr || localInstalling || localAsr.installed()) return;
+    localInstalling = true;
+    options.logger.log("info", "voice.local_asr_downloading", {});
+    localAsr
+      .install()
+      .then(
+        () => {
+          options.logger.log("info", "voice.local_asr_ready", {});
+          void reconcile();
+        },
+        (error: unknown) => {
+          if (!stopping)
+            options.logger.log("warn", "voice.local_asr_install_failed", {
+              error,
+            });
+        },
+      )
+      .finally(() => {
+        localInstalling = false;
+      });
+  };
   const entries = new Map<
     VoiceWorker,
     {
@@ -262,6 +330,7 @@ export async function startVoiceService(options: {
             ...modelPath,
             SONIOX_API_KEY: "",
             XAI_API_KEY: "",
+            VOICE_LOCAL_ASR_MODEL_DIR: "",
             [key.variable]: key.key,
             TEAMHUB_BASE_URL: config.teamHubBaseUrl,
             VOICE_WORKER_PORT: String(port),
@@ -290,7 +359,12 @@ export async function startVoiceService(options: {
     }
   };
   const apply = (keys: ProviderKeys) => {
-    const wanted = workerKeys(keys);
+    let localModel: string | undefined;
+    if (config.localAsr && !keys.soniox_api_key?.trim()) {
+      installLocalAsr();
+      if (localAsr.installed()) localModel = localAsr.directory;
+    }
+    const wanted = workerKeys(keys, localModel);
     for (const worker of VOICE_WORKERS) {
       const entry = entries.get(worker)!;
       const key = wanted.get(worker);
@@ -406,7 +480,10 @@ export async function startVoiceService(options: {
     prefixes: ["/voice/health", RECONCILE_PATH],
     fetch: (request) => {
       if (new URL(request.url).pathname !== RECONCILE_PATH)
-        return Response.json({ workers: wantedWorkers() });
+        return Response.json({
+          workers: wantedWorkers(),
+          local_asr: localState(),
+        });
       if (
         !config.managementCredential ||
         !hasBearerToken(

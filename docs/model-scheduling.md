@@ -61,15 +61,16 @@ Runs from different Contexts can wait for their model independently. Priority
 applies when work enters the endpoint queue. A Run being claimed in TeamHub
 does not hold back work already waiting there.
 
-| Work in priority order        | Unit                                                                                                       |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Tool approval                 | The review borrows the reviewed Run's place on the same endpoint. A standalone review queues first.        |
-| Recording questions and notes | A question in a recording's Ask tab, and the quick notes written when a recording ends.                    |
-| Chat                          | A Human's message, a Human's answer to a card, and a request sent to the Agent from a recording's Ask tab. |
-| Conversation work             | Task callbacks, agent messages, automatic follow-ups, routines and proactive Runs share one priority.      |
-| Tasks and documents           | Task and document Runs share one priority.                                                                 |
-| Compaction                    | An idle conversation's session compaction. New work for that conversation cancels it.                      |
-| Background                    | Agent memory, user memory, profile, insights and wiki refresh, in descending priority.                     |
+| Work in priority order        | Unit                                                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Tool approval                 | The review borrows the reviewed Run's place on the same endpoint. A standalone review queues first.                   |
+| Recording questions and notes | A question in a recording's Ask tab, and the quick notes written when a recording ends.                               |
+| Chat                          | A Human's message, a Human's answer to a card, and a request sent to the Agent from a recording's Ask tab.            |
+| Dictation polish              | A dictated passage rewritten before it reaches the Message box, at the priority of chat and never swapping a Run out. |
+| Conversation work             | Task callbacks, agent messages, automatic follow-ups, routines and proactive Runs share one priority.                 |
+| Tasks and documents           | Task and document Runs share one priority.                                                                            |
+| Compaction                    | An idle conversation's session compaction. New work for that conversation cancels it.                                 |
+| Background                    | Agent memory, user memory, profile, insights and wiki refresh, in descending priority.                                |
 
 When conversation work or anything before it is first in line and cannot
 start, it swaps out the lowest-priority work below it on that endpoint, one

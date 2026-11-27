@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { answerModelCall } from "../../../../src/agent/executor/http/model-call-http.js";
+import {
+  answerModelCall,
+  readModelCallRequest,
+} from "../../../../src/agent/executor/http/model-call-http.js";
 import type { ModelCall } from "../../../../src/runtime-model-call.js";
 import { stubModelCall } from "../../../model-call-stub.js";
 
@@ -44,5 +47,31 @@ describe("answerModelCall", () => {
     );
     leave.abort(new Error("client closed"));
     await expect(answer).rejects.toThrow("client closed");
+  });
+});
+
+describe("readModelCallRequest model", () => {
+  const body = { kind: "dictation_polish", key: "k", input: "x" };
+
+  it("reads a model alias or catalog id", () => {
+    for (const model of ["haiku", "claude-opus-4-1[1m]", "vendor/model:beta"])
+      expect(readModelCallRequest({ ...body, model })).toMatchObject({ model });
+  });
+
+  it("leaves the model out when the request names none", () => {
+    expect(readModelCallRequest(body)).not.toHaveProperty("model");
+  });
+
+  it("refuses a name the CLI could read as a flag or that is not text", () => {
+    for (const model of [
+      "",
+      "--model",
+      "-p",
+      " haiku",
+      "a b",
+      7,
+      "a".repeat(101),
+    ])
+      expect(readModelCallRequest({ ...body, model })).toBeUndefined();
   });
 });

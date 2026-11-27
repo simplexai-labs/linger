@@ -45,7 +45,10 @@ const noVoiceModes: VoiceModeModes = { dictation: false, live: false };
 function voiceModes(policy: TeamHubVoiceMediaPolicy | undefined) {
   return policy
     ? {
-        dictation: policy.voice_media_supported === true,
+        // The downloaded speech model dictates without a Soniox key.
+        dictation:
+          policy.voice_media_supported === true ||
+          policy.local_dictation_supported === true,
         live: policy.live_supported === true,
       }
     : noVoiceModes;
@@ -165,7 +168,7 @@ export function VoiceModeControls(props: {
               enter(voiceModes(next));
             }}
             policy={policy}
-            providers={["xai", "soniox"]}
+            providers={["xai", "soniox", "local"]}
             tenantId={tenantId}
           />
         ) : null}

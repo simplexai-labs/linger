@@ -13,11 +13,9 @@ import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
 import { voiceKeyMessages } from "@/features/rooms/voice-control/voice-key.messages";
 import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
+import type { VoiceDialogPage } from "@/features/rooms/voice-control/voice-key-dialog";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
-import type {
-  TeamHubVoiceProvider,
-  TeamHubVoiceProviderKeyStatus,
-} from "@/features/teamhub/teamhub-types";
+import type { TeamHubVoiceProviderKeyStatus } from "@/features/teamhub/teamhub-types";
 import { useT } from "@/i18n/use-translation";
 import { useParams } from "react-router";
 
@@ -32,7 +30,7 @@ export function ApiKeysSettings() {
   const [dialogOpen, setDialogOpen] = useState(false);
   // The provider whose key was just saved, named in the notice below.
   const [savedProvider, setSavedProvider] = useState<string>();
-  const [voiceDialog, setVoiceDialog] = useState<TeamHubVoiceProvider>();
+  const [voiceDialog, setVoiceDialog] = useState<VoiceDialogPage>();
   // Voice keys matter only where this deployment can run voice; the policy
   // is read per Space, so Security outside a Space shows no voice rows.
   const tenantId = useParams().tenantId ?? "";
@@ -41,7 +39,7 @@ export function ApiKeysSettings() {
     setSavedProvider(undefined);
     setDialogOpen(true);
   }
-  function openVoice(provider: TeamHubVoiceProvider) {
+  function openVoice(provider: VoiceDialogPage) {
     setSavedProvider(undefined);
     setVoiceDialog(provider);
   }
@@ -73,6 +71,29 @@ export function ApiKeysSettings() {
               onOpen={() => openVoice("xai")}
               status={voicePolicy.xai_key}
               title="xAI"
+            />
+            <KeyRow
+              actions={
+                <Button onClick={() => openVoice("local")}>
+                  {t(accountSettingsMessages.chooseModel)}
+                </Button>
+              }
+              detail={t(accountSettingsMessages.localModelDetail)}
+              logo={
+                <AppLogoTile name={t(accountSettingsMessages.localModel)} />
+              }
+              pill={
+                voicePolicy.local_dictation_supported ? (
+                  <StatusPill tone="success">
+                    {t(accountSettingsMessages.keyActive)}
+                  </StatusPill>
+                ) : (
+                  <StatusPill>
+                    {t(accountSettingsMessages.keyNotSet)}
+                  </StatusPill>
+                )
+              }
+              title={t(accountSettingsMessages.localModel)}
             />
           </>
         ) : null}
@@ -119,7 +140,8 @@ export function ApiKeysSettings() {
         <LazyVoiceKeyDialog
           onClose={() => setVoiceDialog(undefined)}
           onReady={(provider) => {
-            setSavedProvider(provider === "soniox" ? "Soniox" : "xAI");
+            if (provider !== "local")
+              setSavedProvider(provider === "soniox" ? "Soniox" : "xAI");
             setVoiceDialog(undefined);
           }}
           policy={voicePolicy}

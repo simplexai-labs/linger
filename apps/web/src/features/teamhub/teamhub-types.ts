@@ -80,6 +80,8 @@ export type TeamHubDocumentTreeSummary =
 export type TeamHubVoiceSession = components["schemas"]["VoiceSession"];
 export type TeamHubVoiceMediaPolicy = components["schemas"]["VoiceMediaPolicy"];
 export type TeamHubVoiceProvider = components["schemas"]["VoiceProvider"];
+export type TeamHubVoiceDictationSettings =
+  components["schemas"]["VoiceDictationSettings"];
 export type TeamHubVoiceProviderKeyStatus =
   components["schemas"]["VoiceProviderKeyStatus"];
 export type TeamHubVoiceConnectionCredential =

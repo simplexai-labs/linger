@@ -108,6 +108,23 @@ third_party/licenses/.
    TeamHub and Voice Runtime images include this file at /app/NOTICE and
    the license texts at /app/third_party/licenses/.
 
+8. SpeakMore (cnYui/SpeakMore)
+   Copyright (c) 2026 Yui. MIT License.
+   Source: https://github.com/cnYui/SpeakMore
+   The long-recording segmentation and the dictation rewrite rules in
+   apps/voice-runtime/src/sensevoice-segments.ts and
+   apps/teamhub/internal/voicedictation/voicedictation.go are adapted from it.
+   License text: third_party/licenses/speakmore-MIT.txt
+
+9. SenseVoiceSmall speech model and sherpa-onnx
+   Not shipped in this repository: Node Services downloads the int8 ONNX export
+   (csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 on Hugging
+   Face) of FunAudioLLM/SenseVoiceSmall when dictation has no Soniox key. The
+   model is under the FunASR Model Open Source License:
+   https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+   It runs through sherpa-onnx (Apache License 2.0), a package dependency:
+   https://github.com/k2-fsa/sherpa-onnx
+
 README demo materials
    Files: assets/linger-story.webp, assets/linger-story.mp4
    Metal 011 by ambientCG, released under CC0 1.0 Universal.

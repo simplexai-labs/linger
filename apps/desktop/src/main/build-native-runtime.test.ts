@@ -388,8 +388,11 @@ it("prunes unused browser viewer and non-legacy subtrees from pdfjs-dist", async
   }
 });
 
-it("bundles word-extractor and ignores optional tesseract.js and canvas imports", () => {
-  expect(RUNTIME_PACKAGES).toEqual(["@livekit/local-inference"]);
+it("copies native voice packages and ignores optional OCR and canvas imports", () => {
+  expect(RUNTIME_PACKAGES).toEqual([
+    "@livekit/local-inference",
+    "sherpa-onnx-node",
+  ]);
   expect(OPTIONAL_IMPORTS.has("tesseract.js")).toBe(true);
   expect(OPTIONAL_IMPORTS.has("canvas")).toBe(true);
 });

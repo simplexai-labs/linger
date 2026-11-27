@@ -1036,14 +1036,15 @@ func (e ModelCallEffort) Valid() bool {
 
 // Defines values for ModelCallKind.
 const (
-	ModelCallKindAgentMemory  ModelCallKind = "agent_memory"
-	ModelCallKindApproval     ModelCallKind = "approval"
-	ModelCallKindInsight      ModelCallKind = "insight"
-	ModelCallKindMeetingNotes ModelCallKind = "meeting_notes"
-	ModelCallKindMemory       ModelCallKind = "memory"
-	ModelCallKindProfile      ModelCallKind = "profile"
-	ModelCallKindVoiceAsk     ModelCallKind = "voice_ask"
-	ModelCallKindWiki         ModelCallKind = "wiki"
+	ModelCallKindAgentMemory     ModelCallKind = "agent_memory"
+	ModelCallKindApproval        ModelCallKind = "approval"
+	ModelCallKindDictationPolish ModelCallKind = "dictation_polish"
+	ModelCallKindInsight         ModelCallKind = "insight"
+	ModelCallKindMeetingNotes    ModelCallKind = "meeting_notes"
+	ModelCallKindMemory          ModelCallKind = "memory"
+	ModelCallKindProfile         ModelCallKind = "profile"
+	ModelCallKindVoiceAsk        ModelCallKind = "voice_ask"
+	ModelCallKindWiki            ModelCallKind = "wiki"
 )
 
 // Valid indicates whether the value is a known member of the ModelCallKind enum.
@@ -1052,6 +1053,8 @@ func (e ModelCallKind) Valid() bool {
 	case ModelCallKindAgentMemory:
 		return true
 	case ModelCallKindApproval:
+		return true
+	case ModelCallKindDictationPolish:
 		return true
 	case ModelCallKindInsight:
 		return true
@@ -2242,6 +2245,9 @@ type ModelCallRequest struct {
 
 	// Kind An approval borrows its Run's place on the same endpoint or queues first. Recording questions and notes go before chat, can use the reserved place and swap out a running Run of lower priority. All three calls stop waiting when their caller leaves and never answer pending.
 	Kind ModelCallKind `json:"kind"`
+
+	// Model The model a Claude Runtime runs the call on: an alias such as haiku or a model id from the Computer's catalog. Omitted, the Runtime's default. A call that runs on another Runtime, or on a Computer release that cannot take it, ignores it.
+	Model *string `json:"model,omitempty"`
 
 	// Output Asks for one JSON object; omitted, the answer is text.
 	Output *struct {

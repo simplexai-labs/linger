@@ -1561,6 +1561,47 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/voice-dictation-settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read how this deployment dictates without a Soniox key. */
+    get: operations["getVoiceDictationSettings"];
+    /**
+     * Choose what rewrites dictated text.
+     * @description The deployment's choice, shared by everyone on the server like the voice keys. With cli, the model is passed to the Claude CLI of the dictating person's Another Me as --model, an alias such as haiku or an id from the Computer's catalog; a Runtime that is not Claude ignores it. With api, TeamHub calls an OpenAI-compatible API with the saved key, which it checks first and stores encrypted with TEAMHUB_SECRET_ENCRYPTION_KEY. error.code is one of VoiceProviderKeyErrorCode: INVALID_REQUEST, VOICE_KEY_REJECTED, VOICE_PROVIDER_UNAVAILABLE or VOICE_KEY_STORAGE_UNAVAILABLE.
+     */
+    put: operations["saveVoiceDictationSettings"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/voice-dictation-settings/models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * List the models of an OpenAI-compatible API before saving it.
+     * @description Asks the API's /models for the names it offers, so a client can offer them instead of a typed name. The key is the one in the request, or, left out, the saved key when base_url is the address it was saved for; the saved key is never sent anywhere else. The list is empty for an API with no such route. error.code is one of VoiceProviderKeyErrorCode: INVALID_REQUEST, VOICE_KEY_REJECTED or VOICE_PROVIDER_UNAVAILABLE.
+     */
+    post: operations["listVoiceDictationModels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/voice-provider-keys/{provider}": {
     parameters: {
       query?: never;
@@ -6853,13 +6894,50 @@ export interface components {
       live_enabled?: boolean;
       /** @description The deployment can run voice (TEAMHUB_VOICE_MEDIA=on); clients show voice entries only when true. */
       voice_available?: boolean;
+      /** @description A speech model downloaded to this deployment is ready and a person chose what rewrites the dictated text, so Pocket notes dictation and Voice Mode dictation work without a Soniox key. Recording still needs Soniox. */
+      local_dictation_supported?: boolean;
       soniox_key?: components["schemas"]["VoiceProviderKeyStatus"];
       xai_key?: components["schemas"]["VoiceProviderKeyStatus"];
     };
-    /** @enum {string} */
-    VoiceProvider: "soniox" | "xai";
-    SaveVoiceProviderKeyRequest: {
-      api_key: string;
+    /** @description The deployment's own API for rewriting dictated text. The key is never returned. */
+    VoiceDictationPolishApi: {
+      base_url: string;
+      model: string;
+      key_saved: boolean;
+    };
+    VoiceDictationSettings: {
+      /**
+       * @description State of the speech model that dictates without a Soniox key: ready to use, still downloading, or not available on this deployment.
+       * @enum {string}
+       */
+      local_model: "ready" | "downloading" | "unavailable";
+      /**
+       * @description What rewrites dictated text: the connected CLI, or an OpenAI-compatible API of the deployment's own. Absent until a person chooses, and dictation without a Soniox key stays off until then.
+       * @enum {string}
+       */
+      polish_source?: "cli" | "api";
+      /** @description The Claude model the connected CLI rewrites dictated text with. */
+      polish_model?: string;
+      /** @description The model a client preselects for the CLI. */
+      default_polish_model: string;
+      polish_api?: components["schemas"]["VoiceDictationPolishApi"];
+      /** @description False when this deployment has no secret encryption key, so an API key cannot be stored. */
+      can_save_api_key: boolean;
+    };
+    /** @description Required for api. */
+    SaveVoiceDictationPolishApiRequest: {
+      /** @description An https base URL whose /chat/completions answers, such as https://api.deepseek.com/v1. */
+      base_url: string;
+      model: string;
+      /** @description Omitted, the key already saved is kept. */
+      api_key?: string;
+    };
+    SaveVoiceDictationSettingsRequest: {
+      /** @enum {string} */
+      polish_source: "cli" | "api";
+      /** @description Required for cli. */
+      polish_model?: string;
+      polish_api?: components["schemas"]["SaveVoiceDictationPolishApiRequest"];
     };
     /**
      * @description error.code of a refused voice provider key save. 400: INVALID_REQUEST (malformed request or key); VOICE_KEY_REJECTED (the provider refused the key); VOICE_KEY_NO_BALANCE (the provider account's balance or monthly budget is used up); VOICE_KEY_NO_REALTIME_PERMISSION (the Soniox key may not use realtime transcription). 409: VOICE_KEY_FROM_ENVIRONMENT. 503: VOICE_KEY_STORAGE_UNAVAILABLE, VOICE_MEDIA_OFF, or VOICE_PROVIDER_UNAVAILABLE (the provider could not be reached or did not answer in time).
@@ -6886,6 +6964,20 @@ export interface components {
     };
     VoiceProviderKeyErrorResponse: {
       error: components["schemas"]["VoiceProviderKeyError"];
+    };
+    ListVoiceDictationModelsRequest: {
+      /** @description An https base URL whose /models lists the API's models, such as https://api.deepseek.com/v1. */
+      base_url: string;
+      /** @description Omitted, the key already saved for this address is used. */
+      api_key?: string;
+    };
+    VoiceDictationModels: {
+      models: string[];
+    };
+    /** @enum {string} */
+    VoiceProvider: "soniox" | "xai";
+    SaveVoiceProviderKeyRequest: {
+      api_key: string;
     };
     VoiceConnectionCredential: {
       /** Format: uri */
@@ -11439,6 +11531,81 @@ export interface operations {
       };
       401: components["responses"]["Unauthenticated"];
       404: components["responses"]["NotFound"];
+    };
+  };
+  getVoiceDictationSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The speech model's state and the chosen rewrite model. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceDictationSettings"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+    };
+  };
+  saveVoiceDictationSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SaveVoiceDictationSettingsRequest"];
+      };
+    };
+    responses: {
+      /** @description The settings after saving. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceDictationSettings"];
+        };
+      };
+      400: components["responses"]["VoiceProviderKeyRefused"];
+      401: components["responses"]["Unauthenticated"];
+      503: components["responses"]["VoiceProviderKeyRefused"];
+    };
+  };
+  listVoiceDictationModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ListVoiceDictationModelsRequest"];
+      };
+    };
+    responses: {
+      /** @description The model names the API offers, sorted. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VoiceDictationModels"];
+        };
+      };
+      400: components["responses"]["VoiceProviderKeyRefused"];
+      401: components["responses"]["Unauthenticated"];
+      503: components["responses"]["VoiceProviderKeyRefused"];
     };
   };
   saveVoiceProviderKey: {

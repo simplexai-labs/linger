@@ -31,11 +31,20 @@ func (a *App) getVoiceMediaPolicy(c *gin.Context) {
 	transcription := available && soniox.Source != voicekey.SourceNone
 	live := available && xai.Source != voicekey.SourceNone
 	sonioxStatus, xaiStatus := voiceProviderKeyModel(soniox), voiceProviderKeyModel(xai)
+	// The downloaded speech model serves dictation only when no Soniox key
+	// exists; it labels no speakers, so recording stays on Soniox.
+	// It also waits for a person to choose the model that rewrites the text.
+	localReady, err := a.localDictationEnabled(c.Request.Context())
+	if a.writeVoiceMediaError(c, "resolve dictation settings", err) {
+		return
+	}
+	local := available && soniox.Source == voicekey.SourceNone && localReady
 	response := httpapi.VoiceMediaPolicy{
 		LiveSupported: &live, LiveEnabled: &live,
-		VoiceMediaSupported: transcription,
-		VoiceAvailable:      &available,
-		SonioxKey:           &sonioxStatus, XaiKey: &xaiStatus,
+		VoiceMediaSupported:     transcription,
+		VoiceAvailable:          &available,
+		LocalDictationSupported: &local,
+		SonioxKey:               &sonioxStatus, XaiKey: &xaiStatus,
 	}
 	if policy.LivekitRoomID != "" {
 		response.ActiveRoomId = &policy.LivekitRoomID

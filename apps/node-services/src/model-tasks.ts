@@ -13,6 +13,7 @@ const modelCallKinds = [
   "wiki",
   "profile",
   "insight",
+  "dictation_polish",
 ] as const;
 export type ModelCallKind = (typeof modelCallKinds)[number];
 
@@ -140,6 +141,14 @@ export const modelCallPolicies: Readonly<
     interactive: true,
     attempts: 1,
     timeoutMs: 60_000,
+  },
+  // The text goes into the Message box its author is about to send, so it
+  // waits its turn beside their chat and never swaps a Run out.
+  dictation_polish: {
+    priority: runPriorities.chat,
+    interactive: true,
+    attempts: 1,
+    timeoutMs: 9_000,
   },
   agent_memory: {
     priority: 30,

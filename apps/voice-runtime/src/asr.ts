@@ -84,4 +84,9 @@ export interface ASRStream {
 
 export interface ASRProvider {
   open(signal: AbortSignal): Promise<ASRStream>;
+  /**
+   * Joins the final texts of one dictation turn. Without it each final is its
+   * own line, which suits a provider whose finals are whole utterances.
+   */
+  joinFinals?(parts: readonly string[]): string;
 }

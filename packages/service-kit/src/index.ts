@@ -77,7 +77,12 @@ export const requestBodyText = (body: unknown): string => {
 export type Region = "cn" | "global";
 
 // Hosts that mirror public downloads inside mainland China.
-const chinaMirrorDomains = ["npmmirror.com", "aliyun.com", "goproxy.cn"];
+const chinaMirrorDomains = [
+  "npmmirror.com",
+  "aliyun.com",
+  "goproxy.cn",
+  "hf-mirror.com",
+];
 
 /** The region of a download source's host; an unparsable URL counts as global. */
 export function sourceRegion(source: string | URL): Region {

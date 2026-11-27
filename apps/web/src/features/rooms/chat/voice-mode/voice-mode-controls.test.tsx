@@ -440,6 +440,43 @@ describe("Voice Mode controls", () => {
 });
 
 describe("Voice Mode without a voice key", () => {
+  it("dictates on the downloaded speech model without asking for a key", async () => {
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/voice-media-policy",
+      () => ({
+        voice_available: true,
+        voice_media_supported: false,
+        local_dictation_supported: true,
+        live_supported: false,
+        soniox_key: { source: "none", can_save: true },
+        xai_key: { source: "none", can_save: true },
+      }),
+    );
+    render(
+      <TeamHubRuntimeProvider runtime={runtime}>
+        <VoiceModeSessionProvider>
+          <BoundControls
+            target={{ tenantId: "tenant-northstar", roomId: "room-another-me" }}
+            disabled={false}
+            empty
+            onChange={vi.fn()}
+            onSend={vi.fn()}
+          />
+        </VoiceModeSessionProvider>
+      </TeamHubRuntimeProvider>,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Start Voice Mode" }),
+      ).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start Voice Mode" }));
+    await waitFor(() => expect(transport.open).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("asks for a key when neither exists and enters Live once xAI is saved", async () => {
     const runtime = createTestTeamHubRuntime();
     const missing = { source: "none" as const, can_save: true };

@@ -68,6 +68,30 @@ func (a *App) claimVoiceMediaEpoch(c *gin.Context) {
 	c.JSON(http.StatusOK, teamhubinternal.VoiceMediaEpochClaim{MediaEpoch: epoch})
 }
 
+// polishVoiceDictation rewrites one dictated passage on the session owner's
+// connected CLI. The runtime keeps its recognized text on any error, so a
+// failure here never fails dictation.
+func (a *App) polishVoiceDictation(c *gin.Context) {
+	var request teamhubinternal.VoiceDictationPolishRequest
+	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Text) == "" {
+		c.JSON(http.StatusBadRequest, teamhubinternal.VoiceError{Code: "INVALID_REQUEST", Message: "Dictation text is invalid"})
+		return
+	}
+	text, err := a.voice.PolishDictation(c.Request.Context(), c.Param("voiceSessionId"), request.Text)
+	switch {
+	case errors.Is(err, voice.ErrVoiceSessionNotFound):
+		c.JSON(http.StatusNotFound, teamhubinternal.VoiceError{Code: "NOT_FOUND", Message: "VoiceSession was not found"})
+	case errors.Is(err, voice.ErrVoicePurposeConflict):
+		c.JSON(http.StatusBadRequest, teamhubinternal.VoiceError{Code: "INVALID_REQUEST", Message: "Only a chat dictation session polishes text"})
+	case errors.Is(err, voice.ErrDictationPolishUnavailable):
+		c.JSON(http.StatusServiceUnavailable, teamhubinternal.VoiceError{Code: "VOICE_POLISH_UNAVAILABLE", Message: "The text could not be polished"})
+	case err != nil:
+		a.internalVoiceRuntimeError(c, "polish dictation", err)
+	default:
+		c.JSON(http.StatusOK, teamhubinternal.VoiceDictationPolishResult{Text: text})
+	}
+}
+
 // reportVoiceObservation applies one Voice Runtime observation. Every write is
 // keyed by the event ID, the transcript window or a monotonic offset, so a
 // retried observation applies again without a receipt table.

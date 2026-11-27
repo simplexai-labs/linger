@@ -61,6 +61,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/reminder"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomdocument"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/secretbox"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/skill"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskdelegation"
@@ -68,6 +69,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/urlpreview"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicecaptureqa"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicedictation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicekey"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicequicknotes"
@@ -143,6 +145,9 @@ type App struct {
 	proactive                      *proactive.Service
 	voiceCaptureAnswerer           voicecaptureqa.Answerer
 	voiceQuickNotes                voicequicknotes.Writer
+	voiceDictationPolisher         voicedictation.Polisher
+	voiceDictationBox              *secretbox.Box
+	localASR                       localASRCache
 	agentRuntimeState              *agentruntimestate.Service
 	presentationSequences          *agentsendmessage.PresentationSequenceService
 	typedCards                     *typedcard.Service
@@ -626,6 +631,7 @@ func (a *App) registerVoiceCaptureAnswerer(models *roomagent.ModelCallClient) {
 	if models != nil {
 		a.voiceCaptureAnswerer = voicecaptureqa.NewAnswerer(models, voice.VoiceCaptureQuestionTimeout)
 		a.voiceQuickNotes = voicequicknotes.NewWriter(models)
+		a.voiceDictationPolisher = voicedictation.NewPolisher(models)
 	}
 }
 
@@ -682,7 +688,7 @@ func (a *App) registerVoiceService() {
 	a.voice = voice.New(voice.Deps{
 		Pool: a.pool, Artifacts: a.artifacts, Documents: a.documents, DocumentComments: a.documentComments, Collaboration: a.collaboration,
 		Canvas: a.canvas, AgentConnectedApps: a.agentConnectedApps, Agents: a.agents, Reminders: a.reminders, WorkItems: a.workItems, TypedCards: a.typedCards,
-		Memory: a.memory, LocalComputers: a.localComputers, Answerer: a.voiceCaptureAnswerer, QuickNotes: a.voiceQuickNotes, VoiceMedia: a.voiceMedia, Logger: a.logger,
+		Memory: a.memory, LocalComputers: a.localComputers, Answerer: a.voiceCaptureAnswerer, QuickNotes: a.voiceQuickNotes, DictationPolisher: a.voiceDictationPolisher, DictationBox: a.voiceDictationBox, VoiceMedia: a.voiceMedia, Logger: a.logger,
 	})
 }
 

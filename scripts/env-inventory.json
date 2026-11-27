@@ -135,8 +135,13 @@
     },
     "voice-workers": {
       "owner": "runtime",
-      "description": "Private port assigned by the node-services voice supervisor to its ASR, recorder and Live child processes, and the NODE_PATH it prepends with the downloaded model packages; never a user configuration setting.",
-      "names": ["NODE_PATH", "VOICE_WORKER_PORT"]
+      "description": "Private port assigned by the node-services voice supervisor to its ASR, recorder and Live child processes, the NODE_PATH it prepends with the downloaded model packages, and the directory of the local speech model it hands the ASR worker; never a user configuration setting. VOICE_LOCAL_ASR_THREADS optionally caps that model's CPU threads.",
+      "names": [
+        "NODE_PATH",
+        "VOICE_LOCAL_ASR_MODEL_DIR",
+        "VOICE_LOCAL_ASR_THREADS",
+        "VOICE_WORKER_PORT"
+      ]
     },
     "voice-compose": {
       "owner": "code-default",

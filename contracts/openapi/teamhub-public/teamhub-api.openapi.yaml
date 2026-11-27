@@ -2254,6 +2254,10 @@ paths:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     $ref: '../paths/teamhub-public-voice-media.yaml#/tenantVoiceMediaPolicy'
+  /v0/voice-dictation-settings:
+    $ref: '../paths/teamhub-public-voice-media.yaml#/voiceDictationSettings'
+  /v0/voice-dictation-settings/models:
+    $ref: '../paths/teamhub-public-voice-media.yaml#/voiceDictationModels'
   /v0/voice-provider-keys/{provider}:
     parameters:
       - name: provider

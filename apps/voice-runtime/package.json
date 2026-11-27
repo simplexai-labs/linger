@@ -27,7 +27,8 @@
     "@linger/wire-contracts": "workspace:*",
     "ws": "8.18.3",
     "zod": "4.4.3",
-    "@livekit/local-inference": "0.2.7"
+    "@livekit/local-inference": "0.2.7",
+    "sherpa-onnx-node": "2.0.3"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

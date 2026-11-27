@@ -13,6 +13,11 @@ export interface VoiceConfig {
    * packages come from its registry first. Global when unset.
    */
   readonly region: Region;
+  /**
+   * Whether a deployment without a Soniox key downloads and runs the local
+   * speech model for dictation (VOICE_LOCAL_ASR, on unless "0").
+   */
+  readonly localAsr: boolean;
 }
 
 export function readVoiceConfig(environment: NodeJS.ProcessEnv): VoiceConfig {
@@ -24,5 +29,6 @@ export function readVoiceConfig(environment: NodeJS.ProcessEnv): VoiceConfig {
       environment,
     ),
     region: environment.SIMPLEX_REGION === "cn" ? "cn" : "global",
+    localAsr: environment.VOICE_LOCAL_ASR?.trim() !== "0",
   });
 }

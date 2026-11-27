@@ -123,6 +123,66 @@ const ask = {
   timeoutMs: 60_000,
 };
 
+describe("Runtime model call model selection", () => {
+  const owner = { tenantId: "tenant_1", ownerActorId: "bob" } as const;
+  const named = {
+    kind: "dictation_polish",
+    key: "test",
+    input: "Text.",
+    model: "haiku",
+  } as const;
+
+  it("runs a Claude call on the model it names", async () => {
+    const { modelCall, invokeModel } = setup();
+    await modelCall.text({ ...named, owner });
+    expect(invokeModel).toHaveBeenCalledWith(
+      "computer_bob",
+      expect.objectContaining({ runtimeType: "claude", model: "haiku" }),
+    );
+  });
+
+  it("leaves a call without a model on the Runtime default", async () => {
+    const { modelCall, invokeModel } = setup();
+    await modelCall.text({
+      kind: "dictation_polish",
+      key: "test",
+      input: "Text.",
+      owner,
+    });
+    expect(invokeModel.mock.calls[0]![1]).not.toHaveProperty("model");
+  });
+
+  it("drops the model on a Runtime that is not Claude", async () => {
+    const { modelCall, invokeModel } = setup();
+    await modelCall.text({
+      ...named,
+      owner: { tenantId: "tenant_1", ownerActorId: "alice" },
+    });
+    expect(invokeModel).toHaveBeenCalledWith(
+      "computer_alice",
+      expect.objectContaining({ runtimeType: "codex" }),
+    );
+    expect(invokeModel.mock.calls[0]![1]).not.toHaveProperty("model");
+  });
+
+  it("lets the model a call names win over the placed Agent's", async () => {
+    const { modelCall, invokeModel } = setup({
+      runtimeModels: () => [
+        {
+          id: "claude-default",
+          runtimeModel: "claude-sonnet-default",
+          isDefault: true,
+        },
+      ],
+    });
+    await modelCall.text({ ...named, owner });
+    expect(invokeModel).toHaveBeenCalledWith(
+      "computer_bob",
+      expect.objectContaining({ model: "haiku" }),
+    );
+  });
+});
+
 describe("Runtime model call", () => {
   it("runs on the owner's Another Me Computer with its Runtime and low effort", async () => {
     const { modelCall, invokeModel } = setup();

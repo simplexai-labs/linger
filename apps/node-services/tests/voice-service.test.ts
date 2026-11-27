@@ -17,6 +17,7 @@ class Worker extends EventEmitter {
 const environment = {
   LINGER_SECRET_SEED: "voice-service-test-seed-0123456789abcdef",
   TEAMHUB_BASE_URL: "http://teamhub.test",
+  VOICE_LOCAL_ASR: "0",
 };
 const SONIOX = "soniox-key-1";
 const XAI = "xai-key-1";
@@ -29,6 +30,7 @@ async function harness(
     env?: NodeJS.ProcessEnv;
     failure?: "network" | number | "json";
     healthy?: boolean;
+    localAsr?: Parameters<typeof startVoiceService>[0]["localAsr"];
   } = {},
 ) {
   vi.useFakeTimers();
@@ -77,6 +79,7 @@ async function harness(
     environment: { ...environment, ...options.env },
     fetch: fetchImpl as unknown as typeof fetch,
     installModels: async () => undefined,
+    localAsr: options.localAsr,
     probeWorker: async (port) => {
       probed.push(port);
       return health.healthy;
@@ -124,7 +127,10 @@ describe("voice worker reconcile", () => {
     const { spawned, route, shutdown } = await harness();
     expect(spawned).toHaveLength(0);
     const health = await route.fetch(new Request("http://x/voice/health"));
-    expect(await health.json()).toEqual({ workers: [] });
+    expect(await health.json()).toEqual({
+      workers: [],
+      local_asr: "disabled",
+    });
     expect(await route.readiness!()).toEqual({ ready: true });
     await shutdown();
   });
@@ -211,7 +217,10 @@ describe("voice worker reconcile", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(of("live")).toHaveLength(1);
     const health = await route.fetch(new Request("http://x/voice/health"));
-    expect(await health.json()).toEqual({ workers: ["asr", "recorder"] });
+    expect(await health.json()).toEqual({
+      workers: ["asr", "recorder"],
+      local_asr: "disabled",
+    });
     await shutdown();
   });
 
@@ -448,5 +457,139 @@ describe("voice worker reconcile", () => {
     expect(of("live")).toHaveLength(2);
     expect(teamHub.calls).toBe(calls);
     expect(unmount).toHaveBeenCalledOnce();
+  });
+});
+
+function localModel(options: { installed?: boolean; failures?: number } = {}) {
+  const model = {
+    installed: options.installed ?? false,
+    failures: options.failures ?? 0,
+    finish: () => undefined as void,
+  };
+  const install = vi.fn(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        if (model.failures > 0) {
+          model.failures -= 1;
+          reject(new Error("download failed"));
+          return;
+        }
+        model.finish = () => {
+          model.installed = true;
+          resolve();
+        };
+      }),
+  );
+  return {
+    model,
+    install,
+    localAsr: {
+      directory: "/models/sensevoice",
+      installed: () => model.installed,
+      install,
+    },
+  };
+}
+
+async function healthOf(route: HttpRoute) {
+  return (await route.fetch(new Request("http://x/voice/health"))).json();
+}
+
+describe("local ASR model", () => {
+  const env = { VOICE_LOCAL_ASR: "1" };
+
+  it("runs dictation on the downloaded model when no Soniox key exists", async () => {
+    const { localAsr, install } = localModel({ installed: true });
+    const { of, route, shutdown } = await harness({
+      env,
+      localAsr,
+      keys: { xai_api_key: XAI },
+    });
+    expect(install).not.toHaveBeenCalled();
+    expect(of("asr")).toHaveLength(1);
+    expect(of("asr")[0]!.spec.env).toMatchObject({
+      VOICE_LOCAL_ASR_MODEL_DIR: "/models/sensevoice",
+      SONIOX_API_KEY: "",
+    });
+    // The local model labels no speakers, so recording stays off.
+    expect(of("recorder")).toHaveLength(0);
+    expect(await healthOf(route)).toEqual({
+      workers: ["asr", "live"],
+      local_asr: "ready",
+    });
+    await shutdown();
+  });
+
+  it("downloads the model once, then starts the worker", async () => {
+    const { model, install, localAsr } = localModel();
+    const { spawned, service, route, shutdown } = await harness({
+      env,
+      localAsr,
+    });
+    expect(install).toHaveBeenCalledOnce();
+    expect(await healthOf(route)).toMatchObject({ local_asr: "downloading" });
+    await service.reconcile();
+    expect(install).toHaveBeenCalledOnce();
+    expect(spawned).toHaveLength(0);
+    model.finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spawned.map(({ worker }) => worker)).toEqual(["asr"]);
+    expect(await healthOf(route)).toMatchObject({ local_asr: "ready" });
+    await shutdown();
+  });
+
+  it("resumes a failed download at the next reconcile", async () => {
+    const { model, install, localAsr } = localModel({ failures: 1 });
+    const { spawned, route, shutdown } = await harness({ env, localAsr });
+    expect(install).toHaveBeenCalledOnce();
+    expect(await healthOf(route)).toMatchObject({ local_asr: "idle" });
+    await vi.advanceTimersByTimeAsync(VOICE_RECONCILE_POLL_MS);
+    expect(install).toHaveBeenCalledTimes(2);
+    model.finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spawned.map(({ worker }) => worker)).toEqual(["asr"]);
+    await shutdown();
+  });
+
+  it("never downloads the model while a Soniox key exists", async () => {
+    const { install, localAsr } = localModel();
+    const { of, shutdown } = await harness({
+      env,
+      localAsr,
+      keys: { soniox_api_key: SONIOX },
+    });
+    expect(install).not.toHaveBeenCalled();
+    expect(of("asr")[0]!.spec.env).toMatchObject({
+      SONIOX_API_KEY: SONIOX,
+      VOICE_LOCAL_ASR_MODEL_DIR: "",
+    });
+    await shutdown();
+  });
+
+  it("replaces the local worker when a Soniox key is saved", async () => {
+    const { localAsr } = localModel({ installed: true });
+    const { of, teamHub, service, shutdown } = await harness({ env, localAsr });
+    await service.reconcile();
+    expect(of("asr")).toHaveLength(1);
+    teamHub.keys = { soniox_api_key: SONIOX };
+    await service.reconcile();
+    const local = of("asr")[0]!.child;
+    expect(local.kill).toHaveBeenCalledWith("SIGTERM");
+    local.emit("exit", 0, null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(of("asr")[1]!.spec.env.SONIOX_API_KEY).toBe(SONIOX);
+    expect(of("recorder")).toHaveLength(1);
+    await shutdown();
+  });
+
+  it("keeps the model off when VOICE_LOCAL_ASR is 0", async () => {
+    const { install, localAsr } = localModel();
+    const { spawned, shutdown } = await harness({
+      env: { VOICE_LOCAL_ASR: "0" },
+      localAsr,
+    });
+    expect(install).not.toHaveBeenCalled();
+    expect(spawned).toHaveLength(0);
+    await shutdown();
   });
 });

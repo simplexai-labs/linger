@@ -293,13 +293,15 @@ export class DictationASRStream implements ASRStream {
         "dictation_unconfirmed",
         "Dictation final exceeds endpoint",
       );
-    const text = [...turn.finals.values()]
+    const parts = [...turn.finals.values()]
       .sort(
         (a, b) =>
           a.startOffsetMs - b.startOffsetMs || a.endOffsetMs - b.endOffsetMs,
       )
-      .map((event) => event.text?.trim() ?? "")
-      .join("\n");
+      .map((event) => event.text?.trim() ?? "");
+    const text = this.provider.joinFinals
+      ? this.provider.joinFinals(parts)
+      : parts.join("\n");
     if (meaningful(text)) {
       // Ordered behind this turn's finals and before the next turn's partials.
       // TeamHub callbacks keep that order; no provider drain is needed here.

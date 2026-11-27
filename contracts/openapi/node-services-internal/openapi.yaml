@@ -1544,6 +1544,7 @@ components:
         - wiki
         - profile
         - insight
+        - dictation_polish
       x-enum-varnames:
         - ModelCallKindApproval
         - ModelCallKindVoiceAsk
@@ -1553,6 +1554,7 @@ components:
         - ModelCallKindWiki
         - ModelCallKindProfile
         - ModelCallKindInsight
+        - ModelCallKindDictationPolish
       description: >-
         An approval borrows its Run's place on the same endpoint or queues first.
         Recording questions and notes go before chat, can use the reserved
@@ -1605,6 +1607,16 @@ components:
               $ref: ../components/common.yaml#/components/schemas/Id
         effort:
           $ref: "#/components/schemas/ModelCallEffort"
+        model:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:/\\[\\]-]*$"
+          description: >-
+            The model a Claude Runtime runs the call on: an alias such as haiku
+            or a model id from the Computer's catalog. Omitted, the Runtime's
+            default. A call that runs on another Runtime, or on a Computer
+            release that cannot take it, ignores it.
         instructions:
           type: string
           maxLength: 1000000

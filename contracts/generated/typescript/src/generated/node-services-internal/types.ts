@@ -747,7 +747,8 @@ export interface components {
       | "agent_memory"
       | "wiki"
       | "profile"
-      | "insight";
+      | "insight"
+      | "dictation_polish";
     /**
      * @description Stable error codes of POST /v1/model-calls.
      * @enum {string}
@@ -771,6 +772,8 @@ export interface components {
         ownerActorId: components["schemas"]["Id"];
       };
       effort?: components["schemas"]["ModelCallEffort"];
+      /** @description The model a Claude Runtime runs the call on: an alias such as haiku or a model id from the Computer's catalog. Omitted, the Runtime's default. A call that runs on another Runtime, or on a Computer release that cannot take it, ignores it. */
+      model?: string;
       /** @description Shares the 1,000,000-character prompt budget with input. */
       instructions?: string;
       /** @description Together with instructions at most 1,000,000 characters, which keeps the prompt under the Runtime's 3 MiB limit. */

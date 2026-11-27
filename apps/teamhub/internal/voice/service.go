@@ -18,9 +18,11 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/memoryclient"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/reminder"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/secretbox"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicecaptureqa"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicedictation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicequicknotes"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/workitem"
@@ -48,6 +50,14 @@ type Deps struct {
 	// QuickNotes writes a finished recording's quick notes; nil when no model
 	// is configured.
 	QuickNotes voicequicknotes.Writer
+	// DictationPolisher rewrites dictated passages; nil when no model is
+	// configured.
+	DictationPolisher voicedictation.Polisher
+	// DictationAPI rewrites on the deployment's own API and defaults to the
+	// real client. DictationBox seals that API's key; nil means no key can be
+	// saved.
+	DictationAPI DictationAPI
+	DictationBox *secretbox.Box
 	// VoiceMedia is nil when no voice media provider is configured.
 	VoiceMedia voicemedia.Plane
 	Logger     *slog.Logger
@@ -71,8 +81,13 @@ type Service struct {
 	localComputers     roomagent.LocalComputerManagement
 	answerer           voicecaptureqa.Answerer
 	quickNotes         voicequicknotes.Writer
-	voiceMedia         voicemedia.Plane
-	logger             *slog.Logger
+	dictationPolisher  voicedictation.Polisher
+	dictationAPI       DictationAPI
+	dictationBox       *secretbox.Box
+	// dictationStore is the store the dictation settings read and write.
+	dictationStore dictationStore
+	voiceMedia     voicemedia.Plane
+	logger         *slog.Logger
 	// slackSelfDMs keeps each Slack connection's DM with its own user;
 	// Slack never changes a DM's channel.
 	slackSelfDMs sync.Map
@@ -112,11 +127,16 @@ type savedCanvasDraft struct {
 
 // New builds the Service.
 func New(deps Deps) *Service {
+	dictationAPI := deps.DictationAPI
+	if dictationAPI == nil {
+		dictationAPI = voicedictation.NewAPIPolisher()
+	}
+	queries := store.New(deps.Pool)
 	return &Service{
-		pool: deps.Pool, queries: store.New(deps.Pool), artifacts: deps.Artifacts,
+		pool: deps.Pool, queries: queries, dictationStore: queries, artifacts: deps.Artifacts,
 		documents: deps.Documents, documentComments: deps.DocumentComments, collaboration: deps.Collaboration, canvas: deps.Canvas,
 		agentConnectedApps: deps.AgentConnectedApps, agents: deps.Agents, reminders: deps.Reminders, workItems: deps.WorkItems, typedCards: deps.TypedCards,
-		memory: deps.Memory, localComputers: deps.LocalComputers, answerer: deps.Answerer, quickNotes: deps.QuickNotes, voiceMedia: deps.VoiceMedia, logger: deps.Logger,
+		memory: deps.Memory, localComputers: deps.LocalComputers, answerer: deps.Answerer, quickNotes: deps.QuickNotes, dictationPolisher: deps.DictationPolisher, dictationAPI: dictationAPI, dictationBox: deps.DictationBox, voiceMedia: deps.VoiceMedia, logger: deps.Logger,
 	}
 }
 

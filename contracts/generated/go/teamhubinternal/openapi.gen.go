@@ -4518,6 +4518,16 @@ type UserMemoryRevision struct {
 	Version  int    `json:"version"`
 }
 
+// VoiceDictationPolishRequest defines model for VoiceDictationPolishRequest.
+type VoiceDictationPolishRequest struct {
+	Text string `json:"text"`
+}
+
+// VoiceDictationPolishResult defines model for VoiceDictationPolishResult.
+type VoiceDictationPolishResult struct {
+	Text string `json:"text"`
+}
+
 // VoiceError defines model for VoiceError.
 type VoiceError struct {
 	Code    string `json:"code"`
@@ -4866,6 +4876,9 @@ type VoiceConflict = VoiceError
 // VoiceNotFound defines model for VoiceNotFound.
 type VoiceNotFound = VoiceError
 
+// VoicePolishUnavailable defines model for VoicePolishUnavailable.
+type VoicePolishUnavailable = VoiceError
+
 // VoiceUnauthenticated defines model for VoiceUnauthenticated.
 type VoiceUnauthenticated = VoiceError
 
@@ -5038,6 +5051,9 @@ type ReportVoiceObservationJSONRequestBody = VoiceObservation
 
 // ReportVoiceRecordingJSONRequestBody defines body for ReportVoiceRecording for application/json ContentType.
 type ReportVoiceRecordingJSONRequestBody = VoiceRecordingReport
+
+// PolishVoiceDictationJSONRequestBody defines body for PolishVoiceDictation for application/json ContentType.
+type PolishVoiceDictationJSONRequestBody = VoiceDictationPolishRequest
 
 // CommitAgentMemoryJSONRequestBody defines body for CommitAgentMemory for application/json ContentType.
 type CommitAgentMemoryJSONRequestBody = AgentMemoryDocument

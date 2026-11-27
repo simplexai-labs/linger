@@ -3701,6 +3701,24 @@ func (e RuntimePermissionDecisionViewKind) Valid() bool {
 	}
 }
 
+// Defines values for SaveVoiceDictationSettingsRequestPolishSource.
+const (
+	SaveVoiceDictationSettingsRequestPolishSourceApi SaveVoiceDictationSettingsRequestPolishSource = "api"
+	SaveVoiceDictationSettingsRequestPolishSourceCli SaveVoiceDictationSettingsRequestPolishSource = "cli"
+)
+
+// Valid indicates whether the value is a known member of the SaveVoiceDictationSettingsRequestPolishSource enum.
+func (e SaveVoiceDictationSettingsRequestPolishSource) Valid() bool {
+	switch e {
+	case SaveVoiceDictationSettingsRequestPolishSourceApi:
+		return true
+	case SaveVoiceDictationSettingsRequestPolishSourceCli:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SearchKeyDecisionViewOrigin.
 const (
 	SearchKeyDecisionViewOriginRequested SearchKeyDecisionViewOrigin = "requested"
@@ -4148,6 +4166,45 @@ const (
 func (e VoiceDictationCommitReceiptStatus) Valid() bool {
 	switch e {
 	case Accepted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VoiceDictationSettingsLocalModel.
+const (
+	Downloading VoiceDictationSettingsLocalModel = "downloading"
+	Ready       VoiceDictationSettingsLocalModel = "ready"
+	Unavailable VoiceDictationSettingsLocalModel = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the VoiceDictationSettingsLocalModel enum.
+func (e VoiceDictationSettingsLocalModel) Valid() bool {
+	switch e {
+	case Downloading:
+		return true
+	case Ready:
+		return true
+	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VoiceDictationSettingsPolishSource.
+const (
+	VoiceDictationSettingsPolishSourceApi VoiceDictationSettingsPolishSource = "api"
+	VoiceDictationSettingsPolishSourceCli VoiceDictationSettingsPolishSource = "cli"
+)
+
+// Valid indicates whether the value is a known member of the VoiceDictationSettingsPolishSource enum.
+func (e VoiceDictationSettingsPolishSource) Valid() bool {
+	switch e {
+	case VoiceDictationSettingsPolishSourceApi:
+		return true
+	case VoiceDictationSettingsPolishSourceCli:
 		return true
 	default:
 		return false
@@ -6985,6 +7042,15 @@ type LatestMessageSummary struct {
 	RoomSeq RoomSeq `json:"room_seq"`
 }
 
+// ListVoiceDictationModelsRequest defines model for ListVoiceDictationModelsRequest.
+type ListVoiceDictationModelsRequest struct {
+	// ApiKey Omitted, the key already saved for this address is used.
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// BaseUrl An https base URL whose /models lists the API's models, such as https://api.deepseek.com/v1.
+	BaseUrl string `json:"base_url"`
+}
+
 // LocalAgentRuntimeStatus defines model for LocalAgentRuntimeStatus.
 type LocalAgentRuntimeStatus struct {
 	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
@@ -9099,6 +9165,29 @@ type SaveExternalProviderKeyRequest struct {
 	ApiKey string `json:"api_key"`
 }
 
+// SaveVoiceDictationPolishApiRequest Required for api.
+type SaveVoiceDictationPolishApiRequest struct {
+	// ApiKey Omitted, the key already saved is kept.
+	ApiKey *string `json:"api_key,omitempty"`
+
+	// BaseUrl An https base URL whose /chat/completions answers, such as https://api.deepseek.com/v1.
+	BaseUrl string `json:"base_url"`
+	Model   string `json:"model"`
+}
+
+// SaveVoiceDictationSettingsRequest defines model for SaveVoiceDictationSettingsRequest.
+type SaveVoiceDictationSettingsRequest struct {
+	// PolishApi Required for api.
+	PolishApi *SaveVoiceDictationPolishApiRequest `json:"polish_api,omitempty"`
+
+	// PolishModel Required for cli.
+	PolishModel  *string                                       `json:"polish_model,omitempty"`
+	PolishSource SaveVoiceDictationSettingsRequestPolishSource `json:"polish_source"`
+}
+
+// SaveVoiceDictationSettingsRequestPolishSource defines model for SaveVoiceDictationSettingsRequest.PolishSource.
+type SaveVoiceDictationSettingsRequestPolishSource string
+
 // SaveVoiceProviderKeyRequest defines model for SaveVoiceProviderKeyRequest.
 type SaveVoiceProviderKeyRequest struct {
 	ApiKey string `json:"api_key"`
@@ -9842,6 +9931,45 @@ type VoiceDictationCommitRequest struct {
 	RequestId Id `json:"request_id"`
 }
 
+// VoiceDictationModels defines model for VoiceDictationModels.
+type VoiceDictationModels struct {
+	Models []string `json:"models"`
+}
+
+// VoiceDictationPolishApi The deployment's own API for rewriting dictated text. The key is never returned.
+type VoiceDictationPolishApi struct {
+	BaseUrl  string `json:"base_url"`
+	KeySaved bool   `json:"key_saved"`
+	Model    string `json:"model"`
+}
+
+// VoiceDictationSettings defines model for VoiceDictationSettings.
+type VoiceDictationSettings struct {
+	// CanSaveApiKey False when this deployment has no secret encryption key, so an API key cannot be stored.
+	CanSaveApiKey bool `json:"can_save_api_key"`
+
+	// DefaultPolishModel The model a client preselects for the CLI.
+	DefaultPolishModel string `json:"default_polish_model"`
+
+	// LocalModel State of the speech model that dictates without a Soniox key: ready to use, still downloading, or not available on this deployment.
+	LocalModel VoiceDictationSettingsLocalModel `json:"local_model"`
+
+	// PolishApi The deployment's own API for rewriting dictated text. The key is never returned.
+	PolishApi *VoiceDictationPolishApi `json:"polish_api,omitempty"`
+
+	// PolishModel The Claude model the connected CLI rewrites dictated text with.
+	PolishModel *string `json:"polish_model,omitempty"`
+
+	// PolishSource What rewrites dictated text: the connected CLI, or an OpenAI-compatible API of the deployment's own. Absent until a person chooses, and dictation without a Soniox key stays off until then.
+	PolishSource *VoiceDictationSettingsPolishSource `json:"polish_source,omitempty"`
+}
+
+// VoiceDictationSettingsLocalModel State of the speech model that dictates without a Soniox key: ready to use, still downloading, or not available on this deployment.
+type VoiceDictationSettingsLocalModel string
+
+// VoiceDictationSettingsPolishSource What rewrites dictated text: the connected CLI, or an OpenAI-compatible API of the deployment's own. Absent until a person chooses, and dictation without a Soniox key stays off until then.
+type VoiceDictationSettingsPolishSource string
+
 // VoiceEvent defines model for VoiceEvent.
 type VoiceEvent struct {
 	Capture    *VoiceCapture         `json:"capture,omitempty"`
@@ -9878,8 +10006,11 @@ type VoiceMediaPolicy struct {
 	LiveEnabled *bool `json:"live_enabled,omitempty"`
 
 	// LiveSupported Whether the xAI live voice provider is configured; Live does not need Soniox.
-	LiveSupported *bool                   `json:"live_supported,omitempty"`
-	SonioxKey     *VoiceProviderKeyStatus `json:"soniox_key,omitempty"`
+	LiveSupported *bool `json:"live_supported,omitempty"`
+
+	// LocalDictationSupported A speech model downloaded to this deployment is ready and a person chose what rewrites the dictated text, so Pocket notes dictation and Voice Mode dictation work without a Soniox key. Recording still needs Soniox.
+	LocalDictationSupported *bool                   `json:"local_dictation_supported,omitempty"`
+	SonioxKey               *VoiceProviderKeyStatus `json:"soniox_key,omitempty"`
 
 	// VoiceAvailable The deployment can run voice (TEAMHUB_VOICE_MEDIA=on); clients show voice entries only when true.
 	VoiceAvailable *bool `json:"voice_available,omitempty"`
@@ -11212,6 +11343,12 @@ type CreateWorkItemJSONRequestBody = WorkItemCreateRequest
 
 // AskVoiceCaptureQuestionJSONRequestBody defines body for AskVoiceCaptureQuestion for application/json ContentType.
 type AskVoiceCaptureQuestionJSONRequestBody = VoiceCaptureQuestionRequest
+
+// SaveVoiceDictationSettingsJSONRequestBody defines body for SaveVoiceDictationSettings for application/json ContentType.
+type SaveVoiceDictationSettingsJSONRequestBody = SaveVoiceDictationSettingsRequest
+
+// ListVoiceDictationModelsJSONRequestBody defines body for ListVoiceDictationModels for application/json ContentType.
+type ListVoiceDictationModelsJSONRequestBody = ListVoiceDictationModelsRequest
 
 // SaveVoiceProviderKeyJSONRequestBody defines body for SaveVoiceProviderKey for application/json ContentType.
 type SaveVoiceProviderKeyJSONRequestBody = SaveVoiceProviderKeyRequest

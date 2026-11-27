@@ -9,6 +9,7 @@ export interface VoiceRuntimeConfig {
   teamhubBaseUrl: string;
   teamhubToken: string;
   sonioxApiKey: string;
+  localAsr: LocalAsrConfig | undefined;
   xaiApiKey: string;
   xaiLiveWebSocketUrl: string;
   xaiLiveAudioTransport?: "binary" | "json";
@@ -65,6 +66,7 @@ export const loadConfig = (
     // Each provider key turns on only its own workers: Soniox transcribes,
     // xAI runs Live.
     sonioxApiKey: env.SONIOX_API_KEY?.trim() ?? "",
+    localAsr: localAsrConfig(env),
     xaiApiKey: env.XAI_API_KEY?.trim() ?? "",
     xaiLiveWebSocketUrl:
       env.VOICE_RUNTIME_XAI_LIVE_WEBSOCKET_URL?.trim() ||
@@ -94,6 +96,30 @@ export const loadConfig = (
 
 export const calculateWorkerLoad = (activeJobs: number, maxSessions: number) =>
   activeJobs / maxSessions;
+
+export interface LocalAsrConfig {
+  /** Holds the SenseVoice model files. */
+  modelDir: string;
+  threads: number | undefined;
+}
+
+/**
+ * The local SenseVoice model, which dictation uses when there is no Soniox
+ * key. Recording needs Soniox's speaker labels, so it never uses this. Read
+ * apart from `loadConfig` so an idle process can preload the model without
+ * the settings only a job needs.
+ */
+export function localAsrConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): LocalAsrConfig | undefined {
+  const modelDir = env.VOICE_LOCAL_ASR_MODEL_DIR?.trim();
+  if (!modelDir || env.SONIOX_API_KEY?.trim()) return undefined;
+  const threads = Number(env.VOICE_LOCAL_ASR_THREADS?.trim());
+  return {
+    modelDir,
+    threads: Number.isInteger(threads) && threads > 0 ? threads : undefined,
+  };
+}
 
 const validateUrl = (raw: string, protocols: string[], name: string) => {
   const url = new URL(raw);

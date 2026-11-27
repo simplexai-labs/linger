@@ -21,6 +21,9 @@ export interface ModelCallHttpRequest extends TextModelCallRequest {
 }
 
 const OUTPUT_NAME = /^[A-Za-z0-9_-]{1,64}$/u;
+/** What the claude CLI takes after --model: it starts with a letter or digit,
+ * so it can never read as another flag. */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]*$/u;
 /** Instructions and input share one character budget that keeps the prompt
  * under the 3 MiB invocation limit even at three UTF-8 bytes per UTF-16 unit;
  * Skill-based instructions such as the Profile prompt run past 200,000. */
@@ -44,6 +47,7 @@ export function readModelCallRequest(
       "key",
       "owner",
       "effort",
+      "model",
       "instructions",
       "input",
       "output",
@@ -63,6 +67,8 @@ export function readModelCallRequest(
         (body.timeoutMs as number) < 1_000 ||
         (body.timeoutMs as number) > 600_000)) ||
     (body.sessionKey !== undefined && !isText(body.sessionKey, 1, 200)) ||
+    (body.model !== undefined &&
+      !(isText(body.model, 1, 100) && MODEL_NAME.test(body.model))) ||
     (body.runOperationId !== undefined &&
       (body.kind !== "approval" || !isText(body.runOperationId, 1, 200)))
   )
@@ -100,6 +106,7 @@ export function readModelCallRequest(
     ...(body.effort === undefined
       ? {}
       : { effort: body.effort as ModelCallEffort }),
+    ...(body.model === undefined ? {} : { model: body.model }),
     ...(body.instructions === undefined
       ? {}
       : { instructions: body.instructions }),

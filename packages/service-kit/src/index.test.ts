@@ -106,6 +106,7 @@ describe("download regions", () => {
   it("knows the mainland-China mirrors", () => {
     expect(sources.map(sourceRegion)).toEqual(["global", "cn", "global", "cn"]);
     expect(sourceRegion("https://goproxy.cn")).toBe("cn");
+    expect(sourceRegion("https://hf-mirror.com/a/b")).toBe("cn");
     expect(sourceRegion("https://npmmirror.com.example/x")).toBe("global");
     expect(sourceRegion("not a url")).toBe("global");
   });

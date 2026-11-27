@@ -69,6 +69,8 @@ const (
 	KindMeetingNotes = agentapi.ModelCallKindMeetingNotes
 	KindProfile      = agentapi.ModelCallKindProfile
 	KindInsight      = agentapi.ModelCallKindInsight
+	// KindDictationPolish rewrites a dictated passage while its author waits.
+	KindDictationPolish = agentapi.ModelCallKindDictationPolish
 )
 
 // ModelCallOwner names the Human whose Another Me's Computer runs the call.
@@ -82,7 +84,10 @@ type ModelCallRequest struct {
 	Key string
 	// Owner is sent only when both ids are set; without it the Agent Service
 	// uses the deployment's only Another Me.
-	Owner        ModelCallOwner
+	Owner ModelCallOwner
+	// Model names the model a Claude Runtime runs the call on, an alias such
+	// as haiku or a catalog id; empty runs the Runtime's default.
+	Model        string
 	Effort       Effort
 	Instructions string
 	Input        string
@@ -203,6 +208,9 @@ func (c *ModelCallClient) call(ctx context.Context, request ModelCallRequest, wa
 	}
 	if request.RunOperationID != "" {
 		payload.RunOperationId = &request.RunOperationID
+	}
+	if request.Model != "" {
+		payload.Model = &request.Model
 	}
 	if request.Effort != "" {
 		effort := agentapi.ModelCallEffort(request.Effort)

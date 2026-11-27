@@ -62,6 +62,7 @@ func (a *App) registerVoice(cfg config.Config, deps Deps, objects artifactstore.
 	// This is the one place voice is decided on or off for the process: the
 	// key service's Enabled drives the policy, saves and the key read.
 	a.voiceMedia = media
+	a.voiceDictationBox = box
 	a.voiceKeys = voicekey.New(a.queries, checker, voicekey.Config{
 		Enabled: media != nil,
 		Environment: map[voicekey.Provider]string{

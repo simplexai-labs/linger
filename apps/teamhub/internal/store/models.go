@@ -1851,6 +1851,16 @@ type VoiceCaptureQuestion struct {
 	SentMessageID    pgtype.Text        `json:"sent_message_id"`
 }
 
+type VoiceDictationSetting struct {
+	Singleton              bool               `json:"singleton"`
+	PolishModel            string             `json:"polish_model"`
+	PolishSource           string             `json:"polish_source"`
+	PolishApiBaseUrl       pgtype.Text        `json:"polish_api_base_url"`
+	PolishApiModel         pgtype.Text        `json:"polish_api_model"`
+	PolishApiKeyCiphertext []byte             `json:"polish_api_key_ciphertext"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type VoiceLiveConfirmation struct {
 	ID             string             `json:"id"`
 	VoiceSessionID string             `json:"voice_session_id"`

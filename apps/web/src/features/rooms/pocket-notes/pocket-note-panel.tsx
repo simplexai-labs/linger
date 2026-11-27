@@ -433,7 +433,7 @@ function TodayPocketNote({
               startDictation();
             }}
             policy={dictation.policy}
-            providers={["soniox"]}
+            providers={["soniox", "local"]}
             tenantId={tenantId}
           />
         ) : null}

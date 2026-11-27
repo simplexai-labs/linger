@@ -154,6 +154,9 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   apiKeys: "API keys",
   apiKeysDescription:
     "Shared by everyone on this server. Stored encrypted and never shown again.",
+  localModel: "Local model",
+  localModelDetail: "Runs the SenseVoiceSmall model locally.",
+  chooseModel: "Choose model",
   providerKey: "{provider} key",
   providerKeySaved: "{provider} key saved",
   keySetByServer: "Set by your server",

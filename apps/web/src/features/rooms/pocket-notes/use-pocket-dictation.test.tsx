@@ -133,6 +133,16 @@ describe("Pocket Note dictation availability", () => {
     // Older servers do not send voice_available.
     [{ voice_media_supported: false }, false, true],
     [{ voice_media_supported: true }, true, false],
+    // The downloaded speech model dictates without a Soniox key.
+    [
+      {
+        voice_available: true,
+        voice_media_supported: false,
+        local_dictation_supported: true,
+      },
+      true,
+      false,
+    ],
   ])(
     "for policy %j offers dictation %s and asks for a key %s",
     async (policy, available, needsKey) => {

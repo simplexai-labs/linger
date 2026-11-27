@@ -49,7 +49,8 @@ func (a *App) createVoiceSession(c *gin.Context) {
 		a.writeError(c, http.StatusBadRequest, "INVALID_VOICE_PURPOSE", "Voice session purpose is invalid")
 		return
 	}
-	// Live runs on xAI alone; every other purpose transcribes with Soniox.
+	// Live runs on xAI alone; every other purpose transcribes with Soniox, or
+	// dictation with the downloaded speech model.
 	// The key is read now, so one saved a moment ago already counts.
 	provider := voicekey.Soniox
 	if purpose == voicemedia.PurposeChatLive {
@@ -57,7 +58,14 @@ func (a *App) createVoiceSession(c *gin.Context) {
 	}
 	key, err := a.voiceKeys.Effective(c.Request.Context(), provider)
 	if err == nil && key == "" {
-		err = voicemedia.ErrProviderUnavailable
+		// Without a Soniox key, dictation runs on the downloaded speech model.
+		local := false
+		if purpose == voicemedia.PurposeChatDictation {
+			local, err = a.localDictationEnabled(c.Request.Context())
+		}
+		if err == nil && !local {
+			err = voicemedia.ErrProviderUnavailable
+		}
 	}
 	if a.writeVoiceMediaError(c, "resolve voice provider key", err) {
 		return
