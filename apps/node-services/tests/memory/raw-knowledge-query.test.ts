@@ -23,6 +23,7 @@ import {
   wikiPageRawSource,
   type DocumentRawSourceInput,
   type RawSource,
+  type SourceIdentity,
 } from "../../src/memory/search/source-store.js";
 import type { SessionlyCollection } from "../../src/memory/types.js";
 import { chunkSource } from "../../src/memory/search/chunks.js";
@@ -566,6 +567,8 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
     });
     expect(read).toHaveBeenCalledTimes(20);
     expect(result.items).toHaveLength(20);
+    expect(result.gaps).toEqual([]);
+    expect(result.status).toBe("grounded");
     expect(
       result.items[0]!.sections.map((section) => section.sectionId),
     ).toContain(indexed[0]!.chunks[2]!.id);
@@ -654,6 +657,68 @@ describe("Raw Chunk search with PG Raw BM25 fallback", () => {
       result.items.some((item) => item.evidenceId.startsWith("raw_")),
     ).toBe(true);
   });
+
+  it.each([
+    { scope: "summaries", count: 15, matchedIndex: 11 },
+    { scope: "originals", count: 25, matchedIndex: 24 },
+  ] as const)(
+    "finds $scope fallback evidence beyond the output entry limit",
+    async ({ scope, count, matchedIndex }) => {
+      const f = await fixture();
+      const documents = Array.from({ length: count }, (_, index) => {
+        const markdown =
+          index === matchedIndex
+            ? "# Receipt\n\nThe quasarlimit is 27."
+            : `# Note ${index}\n\nUnrelated evidence.`;
+        const title = `Evidence ${index}`;
+        const source =
+          scope === "summaries"
+            ? wikiPageRawSource({
+                identity,
+                pageKey: `projects/window-${index}`,
+                title,
+                documentId: `wiki-window-${index}`,
+                documentVersionId: `version-window-${index}`,
+                publishedAt: "2026-09-16T00:00:00Z",
+                revision: "revision_1",
+                markdown,
+              })
+            : documentRawSource({
+                ...meetingDocument,
+                documentId: `document-window-${index}`,
+                textSourceId: `version-window-${index}`,
+                title,
+                markdown,
+              });
+        return { source, markdown };
+      });
+      const read = vi.fn(
+        async (_input: SourceIdentity, source: RawSource) =>
+          documents.find((item) => item.source.id === source.id)?.markdown,
+      );
+      const result = await queryWithDatabase(
+        f.root,
+        { ...request("quasarlimit"), scope },
+        {
+          chunkSearch: {
+            search: async () => [],
+            resolveRawSources: async () =>
+              documents.map(({ source }) => source),
+            readRawSource: read,
+          },
+        },
+      );
+
+      const entries = scope === "summaries" ? result.summaries : result.items;
+      expect(entries.map(({ title }) => title)).toEqual([
+        documents[matchedIndex]!.source.title,
+      ]);
+      expect(shown(entries[0]!)).toContain("quasarlimit is 27");
+      expect(read).toHaveBeenCalledTimes(count);
+      expect(result.gaps).toEqual([]);
+      expect(result.status).toBe("grounded");
+    },
+  );
 
   it("reports a limited BM25 fallback with candidates as partial", async () => {
     const fixtureData = await fixture();

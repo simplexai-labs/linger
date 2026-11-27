@@ -417,6 +417,11 @@ reads no local files, never scans all Raw, and never revives a retired My Pages 
 projection. Fallback candidates can be verified by the same boundary's second-step Evidence read; a database query
 error returns `partial` with `raw_chunk_search_unavailable` rather than posing as an empty result.
 
+The fallback candidate window is independent of the output's 20-item and
+10-summary entry limits. Indexed searches load only the top-ranked sources
+needed for those entries; choosing them does not add `source_search_limited`.
+That gap reports a fallback scan cut short by its source or byte budget.
+
 The index lives in the separate `memory_index.sources` / `memory_index.chunks` tables of TeamHub's PostgreSQL. The
 source table also records JSON metadata such as `source_kind` (Room messages, recording transcript, Document, Pocket
 Note `pocket_note`), `origin_kind` (Room, Recording, My Pages, Wiki source, Pocket Note `pocket_note`), version and
