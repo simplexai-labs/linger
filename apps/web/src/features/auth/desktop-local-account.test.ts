@@ -54,12 +54,19 @@ describe("desktop local account silent recovery", () => {
     setDesktopLocalAccount(account);
 
     markDesktopLocalAccountSignedOut();
+    window.sessionStorage.clear();
+    expect(window.localStorage.getItem("linger:desktop-local-signed-out")).toBe(
+      "1",
+    );
     expect(isDesktopLocalAccountSignedOut()).toBe(true);
     expect(await trySilentDesktopLocalSignIn()).toBe(false);
     expect(account.available).not.toHaveBeenCalled();
     expect(account.signIn).not.toHaveBeenCalled();
 
     clearDesktopLocalAccountSignedOut();
+    expect(
+      window.localStorage.getItem("linger:desktop-local-signed-out"),
+    ).toBeNull();
     expect(isDesktopLocalAccountSignedOut()).toBe(false);
     expect(await trySilentDesktopLocalSignIn()).toBe(true);
     expect(account.signIn).toHaveBeenCalledOnce();

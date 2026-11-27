@@ -191,17 +191,18 @@ Gateway and runs Agents. The daemon exits with the app.
   another service's environment, so no other local service can answer. A
   new key restarts TeamHub. It asks TeamHub's port rather than the web
   port, which a program could take and relay through. "Sign in with this
-  computer's account": `localAccount.signIn()` first tries passwordless
-  `signInWithLocalIdentity`, which proves the server and then posts a fresh
-  nonce, Unix timestamp and domain-separated HMAC-SHA256 proof to
-  `POST /v0/local/session` on TeamHub's port to mint a long-lived local
-  owner session without reading `local-account.json` (surviving password
-  changes); if an older TeamHub answers 404, it falls back to reading
-  `local-account.json` in the main process and signing in with
-  `signInWithPassword` (as install-time sign-in does). On a 401 from TeamHub,
-  the SPA silently calls `localAccount.signIn()` (with a 30 s failure cooldown
-  and concurrent deduplication) unless the person explicitly logged out in the
-  current tab (`sessionStorage`), in which case it stays on `/login`. A failed
+  computer's account": `localAccount.signIn()` (and install-time owner
+  sign-in) first tries passwordless `signInWithLocalIdentity`, which proves
+  the server and then posts a fresh nonce, Unix timestamp and domain-separated
+  HMAC-SHA256 proof to `POST /v0/local/session` on TeamHub's port to mint a
+  long-lived local owner session without reading `local-account.json`
+  (surviving password changes); if an older TeamHub answers 404, it falls back
+  to reading `local-account.json` in the main process and signing in with
+  `signInWithPassword`. On a 401 from TeamHub, the SPA silently calls
+  `localAccount.signIn()` (with a 30 s failure cooldown and concurrent
+  deduplication) unless the person explicitly logged out (persisted in
+  `localStorage` across app restarts and new windows until the user signs back
+  in), in which case it stays on `/login`. A failed
   proof logs `local_server.identity_unverified`
   with a reason (never the key, nonce or proof) and says "Linger on this
   computer is not responding."; the page gets only `{ ok }` or the reason it

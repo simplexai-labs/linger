@@ -34,7 +34,7 @@ let silentSignInCooldownUntil = 0;
 
 export function markDesktopLocalAccountSignedOut(): void {
   try {
-    window.sessionStorage.setItem(DESKTOP_LOCAL_SIGNED_OUT_KEY, "1");
+    window.localStorage.setItem(DESKTOP_LOCAL_SIGNED_OUT_KEY, "1");
   } catch {
     // Restricted storage cannot persist the marker; explicit logout still navigates to /login.
   }
@@ -42,7 +42,7 @@ export function markDesktopLocalAccountSignedOut(): void {
 
 export function clearDesktopLocalAccountSignedOut(): void {
   try {
-    window.sessionStorage.removeItem(DESKTOP_LOCAL_SIGNED_OUT_KEY);
+    window.localStorage.removeItem(DESKTOP_LOCAL_SIGNED_OUT_KEY);
   } catch {
     // Ignore restricted storage.
   }
@@ -50,7 +50,7 @@ export function clearDesktopLocalAccountSignedOut(): void {
 
 export function isDesktopLocalAccountSignedOut(): boolean {
   try {
-    return window.sessionStorage.getItem(DESKTOP_LOCAL_SIGNED_OUT_KEY) === "1";
+    return window.localStorage.getItem(DESKTOP_LOCAL_SIGNED_OUT_KEY) === "1";
   } catch {
     return false;
   }
