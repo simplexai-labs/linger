@@ -59,6 +59,14 @@
         -webkit-user-select: none;
       }
 
+      body:not([data-ready]) {
+        background: #fbfbf9;
+      }
+      body:not([data-ready]) .scene,
+      body:not([data-ready]) .topbar {
+        display: none;
+      }
+
       /* Scene and top bar. Both are the window drag region. */
       .scene {
         flex: none;
@@ -1530,6 +1538,9 @@
         position: absolute;
         inset: 0;
         z-index: 15;
+      }
+      .intro[data-intro="waiting"] {
+        opacity: 0;
       }
       .intro-mark {
         position: absolute;
@@ -4690,6 +4701,7 @@
             ),
           );
         }
+        $("welcome-checking").dataset.intro = "playing";
         if (!introDone)
           setTimeout(() => {
             introDone = true;
@@ -6588,7 +6600,11 @@
               : t("welcomeTitle"),
         );
         // The welcome: the mark and the title.
-        $("welcome-checking").hidden = !checkingStage && !handing;
+        const checking = $("welcome-checking");
+        checking.hidden = !checkingStage && !handing;
+        if (checkingStage)
+          checking.dataset.intro = introStarted ? "playing" : "waiting";
+        else delete checking.dataset.intro;
         if (!introStarted) introWords();
 
         $("local-setup").hidden = !choosing && !settings;
@@ -7180,6 +7196,7 @@
           step === "welcome" && local.available && stage === "intro";
         if (intro) body.chrome = "off";
         else delete body.chrome;
+        body.ready = "true";
         const at = ORDER.indexOf(step);
         // Setting up this computer takes two steps: a source, then its
         // settings. The wizard shows no step marks; the step is only read

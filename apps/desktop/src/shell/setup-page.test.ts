@@ -141,6 +141,8 @@ const $ = (id: string) => document.getElementById(id)!;
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  for (const key of Object.keys(document.body.dataset))
+    delete document.body.dataset[key];
 });
 
 describe("setup page finish screen", () => {
@@ -348,7 +350,85 @@ describe("setup page two-step welcome", () => {
     );
   });
 
+  it("keeps body unready until the first render so scene and topbar never flash first", async () => {
+    stopPage();
+    expect(rawPage).toMatch(
+      /body:not\(\[data-ready\]\)\s*\{\s*background:\s*#fbfbf9;/,
+    );
+    expect(rawPage).toMatch(
+      /body:not\(\[data-ready\]\)\s*\.scene,\s*body:not\(\[data-ready\]\)\s*\.topbar\s*\{\s*display:\s*none;/,
+    );
+    const page = localizePage(rawPage, messagesRuntime, setupMessages, "en");
+    const [, body] = /<body[^>]*>([\s\S]*)<\/body>/.exec(page)!;
+    const [, script] = /<script>([\s\S]*)<\/script>/.exec(body!)!;
+    document.body.innerHTML = body!.replace(/<script>[\s\S]*<\/script>/, "");
+    let resolveState!: (next: SetupState) => void;
+    let listener: ((next: SetupState) => void) | undefined;
+    Object.assign(window, {
+      matchMedia: () => ({ matches: true }),
+      lingerSetup: {
+        introMs: 80,
+        nvidiaDriverDownloadUrl: NVIDIA_DRIVER_DOWNLOAD_URL,
+        nvidiaDriverGuideUrl: NVIDIA_DRIVER_GUIDE_URL,
+        minDriverForCuda: minNvidiaDriverForCuda,
+        getState: () =>
+          new Promise<SetupState>((resolve) => {
+            resolveState = resolve;
+          }),
+        onState: (callback: (next: SetupState) => void) => {
+          listener = callback;
+          return () => {};
+        },
+        run: vi.fn(async () => welcome({ state: "checking" })),
+      },
+    });
+    const intervals: ReturnType<typeof setInterval>[] = [];
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    stopPage = () => {
+      intervals.forEach(clearInterval);
+      timeouts.forEach(clearTimeout);
+    };
+    new Function("setInterval", "setTimeout", script!)(
+      (...args: Parameters<typeof setInterval>) => {
+        const id = setInterval(...args);
+        intervals.push(id);
+        return id;
+      },
+      (...args: Parameters<typeof setTimeout>) => {
+        const id = setTimeout(...args);
+        timeouts.push(id);
+        return id;
+      },
+    );
+    expect(document.body.dataset.ready).toBeUndefined();
+    expect(document.body.dataset.look).toBeUndefined();
+
+    resolveState({ ...welcome({ state: "checking" }), windowShown: false });
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('section[data-step="welcome"].active'),
+      ).not.toBeNull(),
+    );
+    expect(document.body.dataset.ready).toBe("true");
+    expect(document.body.dataset.look).toBe("wizard");
+    expect(document.body.dataset.chrome).toBe("off");
+
+    // Non-wizard steps keep data-ready="true" without data-look="wizard" so
+    // scene and topbar display normally.
+    document.querySelector<HTMLElement>('[data-go="server"]')?.click();
+    listener!({
+      ...welcome({ state: "checking" }),
+      signedIn: true,
+      enrolled: false,
+    });
+    expect(document.body.dataset.ready).toBe("true");
+    expect(document.body.dataset.look).toBeUndefined();
+  });
+
   it("holds the welcome intro until windowShown becomes true, then starts INTRO_MS and hands off", async () => {
+    expect(rawPage).toMatch(
+      /\.intro\[data-intro="waiting"\]\s*\{\s*opacity:\s*0;/,
+    );
     const { push } = await openPage(
       { ...welcome({ state: "checking" }), windowShown: false },
       "welcome",
@@ -357,12 +437,16 @@ describe("setup page two-step welcome", () => {
     );
     expect(stage()).toBe("intro");
     expect($("welcome-checking").hidden).toBe(false);
+    expect($("welcome-checking").dataset.intro).toBe("waiting");
     expect($("intro-title").textContent).toBe("Welcome to Linger");
     await new Promise((resolve) => setTimeout(resolve, 140));
     expect(stage()).toBe("intro");
+    expect($("welcome-checking").dataset.intro).toBe("waiting");
     push({ ...welcome({ state: "checking" }), windowShown: true });
     expect(stage()).toBe("intro");
+    expect($("welcome-checking").dataset.intro).toBe("playing");
     await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 2000 });
+    expect($("welcome-checking").dataset.intro).toBeUndefined();
   });
 
   it("holds the welcome intro while hidden and starts once document visibility becomes visible", async () => {
