@@ -14,6 +14,10 @@ import type { TeamHubPersonalProfileDocument } from "@/features/teamhub/teamhub-
 import { useT } from "@/i18n/use-translation";
 
 import { chatMessages } from "./chat.messages";
+import { truncateCodePoints } from "@linger/service-kit";
+
+/** How much of a Profile paragraph the card shows before the ellipsis. */
+const PROFILE_PREVIEW_CHARACTERS = 280;
 
 /** Select a short paragraph from the published Profile's fields. */
 export function profilePreview(
@@ -33,8 +37,8 @@ export function profilePreview(
     .map((text) => text.replace(/\s+/g, " ").trim())
     .find((text) => text.length >= 40);
   if (!paragraph) return undefined;
-  return paragraph.length > 280
-    ? `${paragraph.slice(0, 280).trimEnd()}…`
+  return [...paragraph].length > PROFILE_PREVIEW_CHARACTERS
+    ? `${truncateCodePoints(paragraph, PROFILE_PREVIEW_CHARACTERS).trimEnd()}…`
     : paragraph;
 }
 

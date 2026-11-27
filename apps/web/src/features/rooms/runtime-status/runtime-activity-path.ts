@@ -1,3 +1,4 @@
+import { truncateCodePoints } from "@linger/service-kit";
 import type { TeamHubRuntimePresentationEventRecord } from "@/features/teamhub/teamhub-types";
 
 import { isRunInterruption } from "./runtime-failure-message";
@@ -394,6 +395,13 @@ function commandSummary(activity: RuntimeActivityPresentation) {
   return activity.detail ?? activity.title;
 }
 
+/** A command longer than this many code points is shortened. */
+const COMMAND_TRUNCATE_ABOVE = 88;
+/** How much of that command the activity row keeps. */
+const COMMAND_PREVIEW_CHARACTERS = 85;
+
 function truncateCommand(value: string) {
-  return value.length > 88 ? `${value.slice(0, 85).trimEnd()}...` : value;
+  return [...value].length > COMMAND_TRUNCATE_ABOVE
+    ? `${truncateCodePoints(value, COMMAND_PREVIEW_CHARACTERS).trimEnd()}...`
+    : value;
 }

@@ -107,3 +107,10 @@ export function orderByRegion<T extends string | URL>(
     ...sources.filter((source) => sourceRegion(source) !== region),
   ];
 }
+
+/** A string cut to at most `max` code points, so no cut lands inside a
+ * surrogate pair; a value that fits is returned unchanged. */
+export function truncateCodePoints(value: string, max: number): string {
+  const characters = [...value];
+  return characters.length <= max ? value : characters.slice(0, max).join("");
+}

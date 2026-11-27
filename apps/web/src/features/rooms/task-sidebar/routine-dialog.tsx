@@ -28,6 +28,10 @@ import {
 } from "./routine-cadence";
 import { RoutineTimeField } from "./routine-time-field";
 import { routinesMessages as m } from "./routines.messages";
+import { truncateCodePoints } from "@linger/service-kit";
+
+/** How much of a Routine's first instruction line names it. */
+const ROUTINE_NAME_CHARACTERS = 60;
 
 type When = "tomorrow" | "date" | "daily" | "weekdays" | "weekly" | "hours";
 
@@ -70,7 +74,8 @@ function initialDraft(routine?: TeamHubScheduledRoutine): RoutineDraft {
 
 /** An unnamed Routine takes the first line of its instruction as its name. */
 function routineName(draft: RoutineDraft) {
-  return draft.instruction.trim().split("\n")[0]!.slice(0, 60).trim();
+  const [first = ""] = draft.instruction.trim().split("\n");
+  return truncateCodePoints(first, ROUTINE_NAME_CHARACTERS).trim();
 }
 
 /** Deletes a scheduled Routine at its current revision. */
