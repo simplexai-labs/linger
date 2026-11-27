@@ -83,6 +83,9 @@ type Service struct {
 	// canvasDraftJobs holds, per canvas and Gmail connection, the draft
 	// save a question started.
 	canvasDraftJobs sync.Map
+	// canvasDraftJobsMu serializes claiming the next draft job, so two
+	// concurrent starts cannot both pass the checks and begin a save.
+	canvasDraftJobsMu sync.Mutex
 	// canvasDraftSyncs holds, per Document, the timer that saves its draft
 	// ahead once it stops changing.
 	canvasDraftSyncs sync.Map

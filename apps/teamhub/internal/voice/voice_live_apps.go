@@ -359,6 +359,10 @@ func (s *Service) voiceLiveCanvasDraft(ctx context.Context, session voicelive.Se
 // also writes the draft into the canvas header, which changes the canvas.
 func (s *Service) startVoiceLiveCanvasDraft(ctx context.Context, session voicelive.Session, request teamhubinternal.VoiceLiveToolCall, app voiceLiveAppSession, canvas voiceLiveCanvasState, built agentconnectedapps.CanvasDraft, record bool) {
 	key, digest := voiceLiveDraftKey(canvas, app), canvas.draftDigest()
+	// Claim the job slot under the lock: a plain load-then-store let two
+	// concurrent starts both pass the checks and begin a save each.
+	s.canvasDraftJobsMu.Lock()
+	defer s.canvasDraftJobsMu.Unlock()
 	var previous *canvasDraftJob
 	if loaded, ok := s.canvasDraftJobs.Load(key); ok {
 		if previous = loaded.(*canvasDraftJob); previous.digest == digest {
