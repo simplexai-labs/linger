@@ -4,7 +4,6 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SharedDocumentPage } from "@/features/rooms/documents/shared-document-page";
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
 import { resetLanguageForTest, setLanguage } from "@/i18n/language";
 import zhCN from "@/i18n/locales/zh-CN.json";
@@ -87,24 +86,5 @@ describe("pages opened from a shared link, in the language on screen", () => {
       ),
     ).toBeVisible();
     expect(screen.getByText("Kept as sent")).toBeVisible();
-  });
-
-  it("words a document link that cannot be opened", async () => {
-    await setLanguage("zh-CN");
-    const runtime = createTestTeamHubRuntime();
-    runtime.server.on("GET", "/v0/session", () => ({
-      account_id: "account-1",
-    }));
-    open(runtime, "/shared-documents#not-a-link", <SharedDocumentPage />);
-
-    expect(
-      screen.getByRole("heading", { name: zhCN.sharedDocument.title }),
-    ).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      zhCN.sharedDocument.unavailable,
-    );
-    expect(
-      screen.getByRole("button", { name: zhCN.sharedDocument.refresh }),
-    ).toBeDisabled();
   });
 });

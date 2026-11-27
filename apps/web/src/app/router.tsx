@@ -150,7 +150,6 @@ export function createAppRoutes(
       }),
       path: "/login",
     },
-    { lazy: loadSharedDocumentPage, path: "/shared-documents" },
     {
       path: "/shared-room-history",
       lazy: async () => {
@@ -385,12 +384,6 @@ async function loadConnectComputerPage() {
   const { ConnectComputerPage } =
     await import("@/features/local-computer/connect-computer-page");
   return { Component: ConnectComputerPage };
-}
-
-async function loadSharedDocumentPage() {
-  const { SharedDocumentPage } =
-    await import("@/features/rooms/documents/shared-document-page");
-  return { Component: SharedDocumentPage };
 }
 
 async function loadLibraryLayout() {

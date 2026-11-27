@@ -100,7 +100,6 @@ export function createTeamHubDocumentTransferClient({
         {
           additionalFields: {
             expected_current_version_id: input.expectedCurrentVersionId,
-            ...(input.linkToken ? { link_token: input.linkToken } : {}),
             representation_format: input.representationFormat,
           },
           file: input.file,

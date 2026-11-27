@@ -130,7 +130,7 @@ func (a *App) writeAgentMessageCommitError(c *gin.Context, err error) bool {
 	// Resource publication retains the existing file-domain errors even though
 	// its transaction is now committed with the message.
 	switch {
-	case errors.Is(err, document.ErrAgentTreePathConflict), errors.Is(err, document.ErrFilePublicationForbidden),
+	case errors.Is(err, document.ErrAgentTreePathConflict),
 		errors.Is(err, document.ErrVersionConflict), errors.Is(err, document.ErrIdempotencyConflict),
 		errors.Is(err, document.ErrInvalidInput), errors.Is(err, document.ErrNotFound), errors.Is(err, document.ErrConflict),
 		errors.Is(err, document.ErrRecoveryBudgetExceeded), errors.Is(err, artifactstore.ErrTooLarge):

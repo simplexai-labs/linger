@@ -123,48 +123,6 @@ describe("Unified Document Service public contract", () => {
     expect(schemas.DocumentAccessEnvelopeV2?.properties).not.toHaveProperty(
       "capabilities",
     );
-    expect(schemas.DocumentDirectCollaboratorCreateRequest?.required).toEqual([
-      "target_actor_id",
-      "role",
-    ]);
-    expect(
-      schemas.DocumentDirectCollaboratorCreateRequest?.properties?.role,
-    ).toMatchObject({ enum: ["viewer", "editor", "manager"] });
-    expect(
-      schemas.DocumentDirectCollaboratorCreateRequest?.properties,
-    ).not.toHaveProperty("owner");
-    expect(schemas.DocumentDirectCollaboratorUpdateRequest?.required).toEqual([
-      "expected_version",
-      "role",
-    ]);
-    expect(schemas.DocumentDirectCollaboratorRevokeRequest?.required).toEqual([
-      "expected_version",
-    ]);
-    expect(schemas.DocumentShareViewV2?.required).toEqual([
-      "schema_version",
-      "caller_content_role",
-      "can_manage_collaborators",
-      "sources",
-    ]);
-    expect(schemas.DocumentShareViewV2?.properties).toMatchObject({
-      management_capabilities: expect.any(Object),
-      general_access: expect.any(Object),
-    });
-    expect(schemas.DocumentShareViewV2?.required).not.toContain(
-      "general_access",
-    );
-    expect(schemas.DocumentGeneralAccessV1?.required).toEqual([
-      "scope",
-      "canonical_url",
-    ]);
-    expect(schemas.DocumentShareSourceV2?.properties).toMatchObject({
-      source_group: expect.objectContaining({
-        enum: ["direct", "context", "link"],
-      }),
-      caller_access_state: expect.objectContaining({
-        enum: ["winning", "remaining", "inactive", "not_caller"],
-      }),
-    });
     expect(schemas.DocumentTreeSummary?.properties).toHaveProperty(
       "access_sources",
     );
@@ -174,12 +132,14 @@ describe("Unified Document Service public contract", () => {
     expect(schemas).not.toHaveProperty(
       "DocumentCollaboratorPolicyUpdateRequest",
     );
-    expect(schemas.DocumentManagementCapabilitiesV2?.required).toEqual([
-      "can_change_ownership",
-      "can_update_link_policy",
-      "can_update_external_policy",
-    ]);
     for (const name of [
+      "DocumentShareViewV2",
+      "DocumentShareSourceV2",
+      "DocumentGeneralAccessV1",
+      "DocumentManagementCapabilitiesV2",
+      "DocumentDirectCollaboratorCreateRequest",
+      "DocumentDirectCollaboratorUpdateRequest",
+      "DocumentDirectCollaboratorRevokeRequest",
       "DocumentAccessRequestV2",
       "DocumentAccessRequestCreateRequest",
       "DocumentAccessRequestDecisionRequest",
@@ -716,13 +676,18 @@ describe("Unified Document Service public contract", () => {
         "trashDocument",
         "restoreDocument",
         "downloadLatestDocument",
-        "getDocumentShareView",
-        "createDocumentDirectCollaborator",
-        "updateDocumentDirectCollaborator",
-        "revokeDocumentDirectCollaborator",
       ]),
     );
     for (const removed of [
+      "getDocumentShareView",
+      "createDocumentDirectCollaborator",
+      "updateDocumentDirectCollaborator",
+      "revokeDocumentDirectCollaborator",
+      "getDocumentLinkShare",
+      "setDocumentLinkShare",
+      "revokeDocumentLinkShare",
+      "resolveDocumentLinkShare",
+      "downloadSharedDocument",
       "updateDocumentCollaboratorPolicy",
       "createDocumentAccessRequest",
       "decideDocumentAccessRequest",

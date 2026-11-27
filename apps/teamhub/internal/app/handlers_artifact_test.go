@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"mime"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	artifactstore "github.com/simplexai-labs/linger/apps/teamhub/internal/artifact"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
 )
 
 func TestImmutableContentHeadersRequireRevalidation(t *testing.T) {
@@ -430,69 +428,5 @@ func TestASCIIDispositionFallbackEdgeCases(t *testing.T) {
 		if got := asciiDispositionFallback(tc.filename); got != tc.want {
 			t.Fatalf("asciiDispositionFallback(%q)=%q want %q", tc.filename, got, tc.want)
 		}
-	}
-}
-
-func TestWriteSharedDocumentContentWireHeaders(t *testing.T) {
-	store, err := artifactstore.NewLocalStore(t.TempDir(), 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	object, err := store.Put(context.Background(), strings.NewReader("# Shared\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := hex.EncodeToString(object.SHA256[:])
-	app := &App{artifacts: store}
-
-	for _, tc := range []struct {
-		name          string
-		filename      string
-		wantASCIIPart string
-	}{
-		{name: "ascii", filename: "WIN015-DOC-TITLE.md"},
-		{name: "utf8 cjk", filename: "\u4e2d\u6587\u6587\u6863.md", wantASCIIPart: `filename="document.md"`},
-		{name: "utf8 trailing dot", filename: "\u4e2d\u6587.", wantASCIIPart: `filename="document"`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			response := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(response)
-			c.Request = httptest.NewRequest(http.MethodPost, "/v0/shared-documents/content", nil)
-			app.writeSharedDocumentContent(c, document.AgentFileDownload{
-				AgentFileEntry: document.AgentFileEntry{
-					DocumentID: "doc-1",
-					VersionID:  "ver-1",
-					ReadOnly:   true,
-				},
-				LatestDownloadContent: document.LatestDownloadContent{
-					Filename:  tc.filename,
-					MediaType: "text/markdown",
-					ObjectKey: object.Key,
-					SHA256:    digest,
-					SizeBytes: object.Size,
-				},
-				RepresentationFormat: "markdown",
-			})
-			c.Writer.WriteHeaderNow()
-			if response.Code != http.StatusOK || response.Body.String() != "# Shared\n" {
-				t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
-			}
-			encoded := response.Header().Get("X-Document-Filename")
-			decodedBytes, err := base64.RawURLEncoding.DecodeString(encoded)
-			if err != nil || string(decodedBytes) != tc.filename {
-				t.Fatalf("X-Document-Filename=%q decoded=%q err=%v want %q", encoded, string(decodedBytes), err, tc.filename)
-			}
-			disposition := response.Header().Get("Content-Disposition")
-			if tc.wantASCIIPart != "" && !strings.Contains(disposition, tc.wantASCIIPart) {
-				t.Fatalf("Content-Disposition=%q missing %q", disposition, tc.wantASCIIPart)
-			}
-			mediaType, params, err := mime.ParseMediaType(disposition)
-			if err != nil || mediaType != "attachment" || params["filename"] != tc.filename {
-				t.Fatalf("Content-Disposition=%q parsed=(%q, %v, %v) want filename=%q", disposition, mediaType, params, err, tc.filename)
-			}
-			if got := response.Header().Get("X-Content-Sha256"); got != digest {
-				t.Fatalf("X-Content-Sha256=%q want %q", got, digest)
-			}
-		})
 	}
 }

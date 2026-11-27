@@ -45,8 +45,6 @@ export type TeamHubAgentTemplatePublishInput =
 export type TeamHubAgentTemplateSkillImport =
   components["schemas"]["AgentTemplateSkillImport"];
 export type TeamHubDocument = components["schemas"]["Document"];
-export type TeamHubDocumentShareViewV2 =
-  components["schemas"]["DocumentShareViewV2"];
 export type TeamHubDocumentContentRole =
   components["schemas"]["DocumentContentRoleV2"];
 export type TeamHubDocumentAgentMentionCandidate =
@@ -65,7 +63,6 @@ export type TeamHubDocumentVersion = components["schemas"]["DocumentVersion"];
 export type TeamHubDocumentPreviewSession =
   components["schemas"]["DocumentPreviewSession"];
 export interface TeamHubDocumentVersionUpload {
-  linkToken?: components["schemas"]["DocumentVersionUploadRequest"]["link_token"];
   expectedCurrentVersionId: string;
   file: File;
   representationFormat: string;

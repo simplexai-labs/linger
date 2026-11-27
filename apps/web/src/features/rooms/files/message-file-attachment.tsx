@@ -1,10 +1,17 @@
+import { Cancel01Icon, Download04Icon } from "@hugeicons/core-free-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Icon } from "@/components/ui/icon";
+import { ModalDialog } from "@/components/ui/modal-dialog";
 import { FileTypeIcon } from "@/features/library/workspace-file-icon";
+import { commonMessages } from "@/i18n/common.messages";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { useT } from "@/i18n/use-translation";
 
-import { loadArtifactPreview } from "./artifact-preview-loader";
+import {
+  loadArtifactPreview,
+  triggerArtifactDownload,
+} from "./artifact-preview-loader";
 import {
   chatImageSize,
   localMessageImage,
@@ -26,16 +33,18 @@ import { FileVoiceMaterialButton } from "../chat/voice-mode/file-voice-material-
  * A Document-backed file in a Message. An image shows itself in the chat
  * and a video plays there; any other file, or media that cannot load, is a
  * MessageFileItem whose media type decides whether it previews or opens.
+ * Every file that can open here can also be downloaded; an image opens in
+ * a full-screen viewer.
  */
 export function MessageFileAttachment({
   actionLabel,
   disabled = false,
   documentId,
+  downloadFilename,
   filename,
   iconKind,
   mediaType,
   onOpen,
-  onOpenImage,
   previewEnabled = true,
   sizeBytes,
   sourceFilename = filename,
@@ -46,12 +55,13 @@ export function MessageFileAttachment({
   actionLabel?: "Open" | "Preview";
   disabled?: boolean;
   documentId?: string;
+  /** The saved file's name; defaults to the stored file name. */
+  downloadFilename?: string;
   /** The name people see, such as a Document's current title. */
   filename: string;
   iconKind?: ArtifactFileKind;
   mediaType?: string;
   onOpen: () => void;
-  onOpenImage?: () => void;
   previewEnabled?: boolean;
   sizeBytes?: number;
   /** The stored file name, which with the media type decides previewability. */
@@ -66,6 +76,10 @@ export function MessageFileAttachment({
     sizeBytes: sizeBytes ?? 0,
   }).kind;
   const canOpen = previewEnabled && !disabled;
+  const download = useMessageFileDownload(
+    canOpen ? documentId : undefined,
+    downloadFilename ?? sourceFilename,
+  );
   const image =
     canOpen && documentId && versionId && renderer === "image"
       ? { documentId, versionId }
@@ -96,7 +110,9 @@ export function MessageFileAttachment({
         sizeBytes,
       )}
       disabled={disabled}
+      downloadPending={download.pending}
       name={filename}
+      onDownload={download.start}
       onOpen={canOpen ? onOpen : undefined}
       visual={icon}
     />
@@ -111,7 +127,7 @@ export function MessageFileAttachment({
           fallback={item}
           filename={filename}
           key={`${image.documentId}:${image.versionId}`}
-          onOpen={onOpenImage ?? onOpen}
+          onDownload={download.start}
         />
       ) : video ? (
         <MessageVideo
@@ -123,6 +139,11 @@ export function MessageFileAttachment({
       ) : (
         item
       )}
+      {download.failed ? (
+        <p className="mt-1 text-xs text-destructive" role="alert">
+          {t(chatMessages.downloadFileFailed, { name: filename })}
+        </p>
+      ) : null}
       {documentId && !disabled ? (
         <FileVoiceMaterialButton
           documentId={documentId}
@@ -190,18 +211,55 @@ function MessageVideo({
   );
 }
 
-/** An image shown in the chat at a readable size; opening it previews it. */
+/**
+ * Saves a Message file's latest content under `filename`. Absent
+ * `documentId` means the file cannot be downloaded here.
+ */
+function useMessageFileDownload(
+  documentId: string | undefined,
+  filename: string,
+) {
+  const { client } = useTeamHubRuntime();
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (!documentId) return { failed: false, pending: false, start: undefined };
+  const start = () => {
+    if (pending) return;
+    setPending(true);
+    setFailed(false);
+    client.downloadLatestDocument(documentId).then(
+      (content) => {
+        triggerArtifactDownload(content.blob, safeFilename(filename));
+        setPending(false);
+      },
+      () => {
+        setFailed(true);
+        setPending(false);
+      },
+    );
+  };
+  return { failed, pending, start };
+}
+
+function safeFilename(filename: string) {
+  return filename.replaceAll(/[\\/:*?"<>|]/g, "-");
+}
+
+/**
+ * An image shown in the chat at a readable size; opening it shows it full
+ * screen.
+ */
 function MessageImage({
   documentId,
   fallback,
   filename,
-  onOpen,
+  onDownload,
   versionId,
 }: {
   documentId: string;
   fallback: ReactNode;
   filename: string;
-  onOpen: () => void;
+  onDownload?: () => void;
   versionId: string;
 }) {
   const { client } = useTeamHubRuntime();
@@ -213,6 +271,7 @@ function MessageImage({
   const hasLocalFile = localFile !== undefined;
   const [objectUrl, setObjectUrl] = useState<string>();
   const [failed, setFailed] = useState(false);
+  const [viewing, setViewing] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -283,7 +342,7 @@ function MessageImage({
         <button
           aria-label={t(chatMessages.previewFile, { name: filename })}
           className="block w-fit max-w-[28rem] overflow-hidden rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={onOpen}
+          onClick={() => setViewing(true)}
           type="button"
         >
           <img
@@ -304,6 +363,66 @@ function MessageImage({
           {t(chatMessages.loadingImage)}
         </div>
       )}
+      {viewing && (local || objectUrl) ? (
+        <MessageImageViewer
+          filename={filename}
+          onClose={() => setViewing(false)}
+          onDownload={onDownload}
+          src={local?.url ?? objectUrl ?? ""}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** A Message image at full size over a dimmed screen. */
+function MessageImageViewer({
+  filename,
+  onClose,
+  onDownload,
+  src,
+}: {
+  filename: string;
+  onClose: () => void;
+  onDownload?: () => void;
+  src: string;
+}) {
+  const t = useT();
+  const control =
+    "flex size-9 items-center justify-center rounded-full bg-black/55 text-white transition-colors duration-150 hover:bg-black/75 focus-visible:outline-2 focus-visible:outline-white/70 motion-reduce:transition-none";
+  return (
+    <ModalDialog
+      ariaLabel={t(chatMessages.imageViewer, { name: filename })}
+      className="chat-image-viewer flex items-center justify-center p-10"
+      closeOnBackdrop
+      onClose={onClose}
+    >
+      <img
+        alt={filename}
+        className="block max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+        src={src}
+      />
+      <div className="absolute top-4 right-4 flex gap-2">
+        {onDownload ? (
+          <button
+            aria-label={t(chatMessages.downloadNamedFile, { name: filename })}
+            className={control}
+            onClick={onDownload}
+            title={t(chatMessages.downloadNamedFile, { name: filename })}
+            type="button"
+          >
+            <Icon icon={Download04Icon} size={18} />
+          </button>
+        ) : null}
+        <button
+          aria-label={t(commonMessages.close)}
+          className={control}
+          onClick={onClose}
+          type="button"
+        >
+          <Icon icon={Cancel01Icon} size={18} />
+        </button>
+      </div>
+    </ModalDialog>
   );
 }

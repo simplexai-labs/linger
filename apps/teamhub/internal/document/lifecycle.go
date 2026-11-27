@@ -19,8 +19,7 @@ type RestoreDocumentInput struct {
 }
 
 // Trash moves a Document to the trash in one transaction: the status, the
-// revoked link share, the suspended Bindings and the new permission count
-// commit together, and the Runtime closes the open connections after commit.
+// suspended Bindings and the new permission count commit together, and the Runtime closes the open connections after commit.
 // Trashing a trashed Document changes nothing.
 func (s *Service) Trash(ctx context.Context, input TrashDocumentInput) error {
 	if input.AccountID == "" || input.DocumentID == "" {
@@ -57,9 +56,6 @@ func (s *Service) trashOnce(ctx context.Context, input TrashDocumentInput) error
 		}
 		if updated.RowsAffected() != 1 {
 			return ErrConflict
-		}
-		if err := revokeDocumentLinkForTrash(ctx, tx, tenantID, input.DocumentID, actorID); err != nil {
-			return err
 		}
 		if err := appendLifecycleEvent(ctx, tx, tenantID, input.DocumentID, actorID,
 			commandID, "lifecycle_operation", "document.access_invalidated"); err != nil {

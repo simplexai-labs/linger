@@ -41,34 +41,6 @@ files:
                     $ref: ../components/agent-cli-files.yaml#/components/schemas/AgentCLIFile
       default:
         $ref: ../components/agent-cli-files.yaml#/components/responses/FileError
-linkShare:
-  parameters:
-    - $ref: ../components/agent-cli-files.yaml#/components/parameters/CLIFileDocumentId
-  post:
-    security:
-      - agentBearer: []
-    tags:
-      - Agent Files
-    operationId: publicManageAgentCLIFileLink
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: ../components/agent-cli-files.yaml#/components/schemas/AgentCLIFileLinkCommand
-    responses:
-      "200":
-        description:
-          Current link policy; new capabilities are returned only on create
-          or reset.
-        content:
-          application/json:
-            schema:
-              $ref: ../components/document-link-shares.yaml#/components/schemas/DocumentLinkShare
-      "204":
-        description: Link revoked.
-      default:
-        $ref: ../components/agent-cli-files.yaml#/components/responses/FileError
 content:
   parameters:
     - $ref: ../components/agent-cli-files.yaml#/components/parameters/CLIFileDocumentId
@@ -130,26 +102,6 @@ content:
         description:
           Agent currently authorized; ordinary file unchanged. No body.
           Returns current version, SHA256, filename, read-only flag and ETag headers.
-      default:
-        $ref: ../components/agent-cli-files.yaml#/components/responses/FileError
-share:
-  parameters:
-    - $ref: ../components/agent-cli-files.yaml#/components/parameters/CLIFileDocumentId
-  post:
-    security:
-      - agentBearer: []
-    tags:
-      - Agent Files
-    operationId: publicShareAgentCLIFile
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: ../components/agent-cli-files.yaml#/components/schemas/AgentCLIFileShare
-    responses:
-      "204":
-        description: Target has at least the requested role.
       default:
         $ref: ../components/agent-cli-files.yaml#/components/responses/FileError
 replaceBody:

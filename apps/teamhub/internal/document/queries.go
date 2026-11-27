@@ -30,7 +30,6 @@ SELECT document.id,document.tenant_id,document.title,document.format,
        access.can_manage,access.can_write,access.can_comment,
        EXISTS(SELECT 1 FROM document_bodies body WHERE body.document_id=document.id),
        access.content_role,access.access_sources,
-       coalesce(document.link_share_status='active',false),
        EXISTS(SELECT 1 FROM document_context_bindings WHERE document_id=document.id
               AND tenant_id=document.tenant_id AND binding_kind='wiki_page' AND status='active'),
        access.actor_id,clock_timestamp()
@@ -55,7 +54,7 @@ func get(ctx context.Context, tx pgx.Tx, accountID, documentID string) (Document
 		&value.Creator.ID, &value.Creator.Kind, &value.Creator.DisplayName,
 		&versionID, &versionNumber, &versionSHA,
 		&manage, &write, &comment, &draftAvailable,
-		&projection.role, &projection.sourcesJSON, &projection.hasActiveLink, &wikiPage,
+		&projection.role, &projection.sourcesJSON, &wikiPage,
 		&value.currentActorID, &value.readAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -101,19 +100,17 @@ func get(ctx context.Context, tx pgx.Tx, accountID, documentID string) (Document
 }
 
 type documentAccessProjection struct {
-	role          string
-	sourcesJSON   []byte
-	hasActiveLink bool
+	role        string
+	sourcesJSON []byte
 }
 
 func resolveAccessV2(ctx context.Context, tx pgx.Tx, accountID, documentID string) (*AccessEnvelopeV2, error) {
 	var projection documentAccessProjection
-	err := tx.QueryRow(ctx, `SELECT access.content_role,access.access_sources,
-        coalesce(document.link_share_status='active',false)
+	err := tx.QueryRow(ctx, `SELECT access.content_role,access.access_sources
         FROM documents document
         CROSS JOIN LATERAL resolve_human_document_access_v2($1,document.id) access
         WHERE document.id=$2`, accountID, documentID).Scan(
-		&projection.role, &projection.sourcesJSON, &projection.hasActiveLink)
+		&projection.role, &projection.sourcesJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -128,9 +125,6 @@ func hydrateAccessV2(projection documentAccessProjection) (*AccessEnvelopeV2, er
 	access := &AccessEnvelopeV2{
 		SchemaVersion: 2, ContentRole: projection.role, LinkScope: "restricted",
 		AuthorizationMode: "human_native", Sources: sources,
-	}
-	if projection.hasActiveLink {
-		access.LinkScope = "anyone_with_link"
 	}
 	if err := validateAccessV2Projection(access); err != nil {
 		return nil, err

@@ -9,10 +9,6 @@ import {
   type TeamHubAuthenticationReason,
 } from "./teamhub-authentication";
 import { resolveTeamHubBaseUrl } from "./teamhub-base-url";
-import {
-  createTeamHubDocumentLinks,
-  type TeamHubDocumentLinks,
-} from "./teamhub-document-links";
 import { createTeamHubDocumentTransferClient } from "./teamhub-document-transfer-client";
 import type { TeamHubExternalSourceClient } from "./teamhub-external-source-client";
 import type { TeamHubPersonalProfileClient } from "./teamhub-personal-profile-client";
@@ -46,7 +42,6 @@ export interface TeamHubClient
   extends TeamHubExternalSourceClient, TeamHubPersonalProfileClient {
   /** The typed TeamHub API for features that call a contract path directly. */
   api: TeamHubApi;
-  documentLinks: TeamHubDocumentLinks;
   roomHistory: TeamHubRoomHistory;
   getPersonalKnowledgeGraphVisualization(tenantId: string): Promise<string>;
   uploadPersonalWikiDocument(
@@ -148,7 +143,6 @@ export function createHttpTeamHubClient(
   return {
     api,
     roomHistory: createTeamHubRoomHistory(api),
-    documentLinks: createTeamHubDocumentLinks(api),
     ...externalSources,
     ...personalProfile,
     ...createTeamHubPersonalWikiClient(api),

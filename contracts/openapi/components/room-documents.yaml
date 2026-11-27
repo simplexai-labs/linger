@@ -115,10 +115,6 @@ components:
       required:
         [expected_current_version_id, filename, representation_format, content]
       properties:
-        link_token:
-          type: string
-          pattern: "^doc_link_[A-Za-z0-9_-]{43}$"
-          description: Optional editor capability; revalidated on every write and replay, without creating an Actor grant.
         expected_current_version_id:
           $ref: "./common.yaml#/components/schemas/Id"
         filename:
@@ -344,37 +340,6 @@ components:
           $ref: "./common.yaml#/components/schemas/Timestamp"
         updated_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
-    DocumentDirectCollaboratorCreateRequest:
-      type: object
-      additionalProperties: false
-      required: [target_actor_id, role]
-      properties:
-        target_actor_id:
-          $ref: "./common.yaml#/components/schemas/Id"
-        role:
-          type: string
-          enum: [viewer, editor, manager]
-    DocumentDirectCollaboratorUpdateRequest:
-      type: object
-      additionalProperties: false
-      required: [expected_version, role]
-      properties:
-        expected_version:
-          type: integer
-          format: int64
-          minimum: 1
-        role:
-          type: string
-          enum: [viewer, editor, manager]
-    DocumentDirectCollaboratorRevokeRequest:
-      type: object
-      additionalProperties: false
-      required: [expected_version]
-      properties:
-        expected_version:
-          type: integer
-          format: int64
-          minimum: 1
     DocumentRoomBindingRemoveRequest:
       type: object
       additionalProperties: false
@@ -405,78 +370,6 @@ components:
           type: integer
           format: int64
           minimum: 1
-    DocumentShareSourceV2:
-      type: object
-      additionalProperties: false
-      required: [source, label]
-      properties:
-        source:
-          $ref: "#/components/schemas/DocumentAccessSourceV2"
-        label:
-          type: string
-          minLength: 1
-          maxLength: 255
-        target_actor:
-          $ref: "./common.yaml#/components/schemas/ActorRef"
-        source_group:
-          type: string
-          enum: [direct, context, link]
-          description: Stable Share panel group for this provenance source.
-        caller_access_state:
-          type: string
-          enum: [winning, remaining, inactive, not_caller]
-          description: Explains whether this source currently determines or still contributes to the caller's effective role.
-    DocumentGeneralAccessV1:
-      type: object
-      additionalProperties: false
-      required: [scope, canonical_url]
-      properties:
-        scope:
-          $ref: "#/components/schemas/DocumentLinkScopeV2"
-        canonical_url:
-          type: string
-          format: uri-reference
-          minLength: 1
-          maxLength: 1024
-          description: Stable Product Client URL. Reading or copying it never mutates authorization state.
-    DocumentShareViewV2:
-      type: object
-      additionalProperties: false
-      required:
-        [schema_version, caller_content_role, can_manage_collaborators, sources]
-      properties:
-        schema_version:
-          type: integer
-          const: 2
-        caller_content_role:
-          $ref: "#/components/schemas/DocumentContentRoleV2"
-        can_manage_collaborators:
-          type: boolean
-        management_capabilities:
-          $ref: "#/components/schemas/DocumentManagementCapabilitiesV2"
-        general_access:
-          $ref: "#/components/schemas/DocumentGeneralAccessV1"
-        sources:
-          type: array
-          maxItems: 200
-          items:
-            $ref: "#/components/schemas/DocumentShareSourceV2"
-    DocumentManagementCapabilitiesV2:
-      type: object
-      additionalProperties: false
-      required:
-        [
-          can_change_ownership,
-          can_update_link_policy,
-          can_update_external_policy,
-        ]
-      properties:
-        can_change_ownership:
-          type: boolean
-        can_update_link_policy:
-          type: boolean
-        can_update_external_policy:
-          type: boolean
     DocumentAccessPolicyV2:
       type: object
       additionalProperties: false

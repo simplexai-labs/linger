@@ -386,10 +386,8 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
     description: "Download an authorized Document working copy or export.",
     readOnly: true,
     fileRoute: "docs/get",
-    usage: ["<name-or-id-or-link> [flags]"],
-    arguments: [
-      "<name-or-id-or-link>  Exact name, Document ID or supported share link.",
-    ],
+    usage: ["<name-or-id> [flags]"],
+    arguments: ["<name-or-id>  Exact name or Document ID."],
     options: {
       "-o": { description: "Output path; exclusive with --output." },
       "--output": { description: "Output path relative to cwd." },
@@ -402,19 +400,13 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
     async normalize(args, reader) {
       assertPositionals(args, 1);
       const name = args.positionals[0]!;
-      const isLink =
-        /^doc_link_[A-Za-z0-9_-]{43}$/u.test(name) ||
-        /^https?:\/\/[^\0]+#doc_link_[A-Za-z0-9_-]{43}$/u.test(name);
       if (
-        !isLink &&
-        (!name ||
-          /[/\\\0]/u.test(name) ||
-          [".", ".."].includes(name) ||
-          name.startsWith("-"))
+        !name ||
+        /[/\\\0]/u.test(name) ||
+        [".", ".."].includes(name) ||
+        name.startsWith("-")
       )
-        throw inputError(
-          "Provide an exact Document name, ID or supported share link.",
-        );
+        throw inputError("Provide an exact Document name or ID.");
       const output = option(args, "--output");
       const shortOutput = option(args, "-o");
       if (output !== undefined && shortOutput !== undefined)
@@ -425,7 +417,7 @@ export const documentCommandDefinitions: readonly CommandDefinition[] = [
         !["markdown", "blocks", "html"].includes(format)
       )
         throw inputError("Use markdown, blocks or html for --format.");
-      const filename = output ?? shortOutput ?? (isLink ? "download" : name);
+      const filename = output ?? shortOutput ?? name;
       if (
         !filename ||
         filename === "-" ||

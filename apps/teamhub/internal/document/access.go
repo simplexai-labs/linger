@@ -564,3 +564,10 @@ func ValidDocumentTitle(title string) bool {
 	count := utf8.RuneCountInString(title)
 	return count >= 1 && count <= MaxDocumentTitleCharacters
 }
+
+// canManageCollaboratorsForAccess reports whether the Human may bind the
+// Document to another Context: it owns every active Document except a
+// read-only Wiki page.
+func canManageCollaboratorsForAccess(access *AccessEnvelopeV2) bool {
+	return access != nil && access.ContentRole == "owner"
+}

@@ -229,103 +229,22 @@ func (e AgentAskUserResponseStatus) Valid() bool {
 
 // Defines values for AgentCLIFileRole.
 const (
-	AgentCLIFileRoleEditor  AgentCLIFileRole = "editor"
-	AgentCLIFileRoleManager AgentCLIFileRole = "manager"
-	AgentCLIFileRoleOwner   AgentCLIFileRole = "owner"
-	AgentCLIFileRoleViewer  AgentCLIFileRole = "viewer"
+	Editor  AgentCLIFileRole = "editor"
+	Manager AgentCLIFileRole = "manager"
+	Owner   AgentCLIFileRole = "owner"
+	Viewer  AgentCLIFileRole = "viewer"
 )
 
 // Valid indicates whether the value is a known member of the AgentCLIFileRole enum.
 func (e AgentCLIFileRole) Valid() bool {
 	switch e {
-	case AgentCLIFileRoleEditor:
-		return true
-	case AgentCLIFileRoleManager:
-		return true
-	case AgentCLIFileRoleOwner:
-		return true
-	case AgentCLIFileRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentCLIFileLinkCommandOperation.
-const (
-	Read   AgentCLIFileLinkCommandOperation = "read"
-	Revoke AgentCLIFileLinkCommandOperation = "revoke"
-	Set    AgentCLIFileLinkCommandOperation = "set"
-)
-
-// Valid indicates whether the value is a known member of the AgentCLIFileLinkCommandOperation enum.
-func (e AgentCLIFileLinkCommandOperation) Valid() bool {
-	switch e {
-	case Read:
-		return true
-	case Revoke:
-		return true
-	case Set:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentCLIFileLinkCommandRole.
-const (
-	AgentCLIFileLinkCommandRoleEditor AgentCLIFileLinkCommandRole = "editor"
-	AgentCLIFileLinkCommandRoleViewer AgentCLIFileLinkCommandRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the AgentCLIFileLinkCommandRole enum.
-func (e AgentCLIFileLinkCommandRole) Valid() bool {
-	switch e {
-	case AgentCLIFileLinkCommandRoleEditor:
-		return true
-	case AgentCLIFileLinkCommandRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentCLIFileShareRole.
-const (
-	Editor  AgentCLIFileShareRole = "editor"
-	Manager AgentCLIFileShareRole = "manager"
-	Viewer  AgentCLIFileShareRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the AgentCLIFileShareRole enum.
-func (e AgentCLIFileShareRole) Valid() bool {
-	switch e {
 	case Editor:
 		return true
 	case Manager:
 		return true
+	case Owner:
+		return true
 	case Viewer:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AgentCLIFileShareTargetKind.
-const (
-	AgentCLIFileShareTargetKindActor AgentCLIFileShareTargetKind = "actor"
-	AgentCLIFileShareTargetKindRoom  AgentCLIFileShareTargetKind = "room"
-	AgentCLIFileShareTargetKindTask  AgentCLIFileShareTargetKind = "task"
-)
-
-// Valid indicates whether the value is a known member of the AgentCLIFileShareTargetKind enum.
-func (e AgentCLIFileShareTargetKind) Valid() bool {
-	switch e {
-	case AgentCLIFileShareTargetKindActor:
-		return true
-	case AgentCLIFileShareTargetKindRoom:
-		return true
-	case AgentCLIFileShareTargetKindTask:
 		return true
 	default:
 		return false
@@ -565,19 +484,19 @@ func (e AgentKnowledgeSearchRequestScope) Valid() bool {
 
 // Defines values for AgentMessageCommitResponseTargetType.
 const (
-	Room   AgentMessageCommitResponseTargetType = "room"
-	Task   AgentMessageCommitResponseTargetType = "task"
-	Thread AgentMessageCommitResponseTargetType = "thread"
+	AgentMessageCommitResponseTargetTypeRoom   AgentMessageCommitResponseTargetType = "room"
+	AgentMessageCommitResponseTargetTypeTask   AgentMessageCommitResponseTargetType = "task"
+	AgentMessageCommitResponseTargetTypeThread AgentMessageCommitResponseTargetType = "thread"
 )
 
 // Valid indicates whether the value is a known member of the AgentMessageCommitResponseTargetType enum.
 func (e AgentMessageCommitResponseTargetType) Valid() bool {
 	switch e {
-	case Room:
+	case AgentMessageCommitResponseTargetTypeRoom:
 		return true
-	case Task:
+	case AgentMessageCommitResponseTargetTypeTask:
 		return true
-	case Thread:
+	case AgentMessageCommitResponseTargetTypeThread:
 		return true
 	default:
 		return false
@@ -1007,42 +926,6 @@ func (e ComputerPermissionSubject) Valid() bool {
 	case ComputerPermissionSubjectComputerUse:
 		return true
 	case ComputerPermissionSubjectLinger:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DocumentLinkShareRole.
-const (
-	DocumentLinkShareRoleEditor DocumentLinkShareRole = "editor"
-	DocumentLinkShareRoleViewer DocumentLinkShareRole = "viewer"
-)
-
-// Valid indicates whether the value is a known member of the DocumentLinkShareRole enum.
-func (e DocumentLinkShareRole) Valid() bool {
-	switch e {
-	case DocumentLinkShareRoleEditor:
-		return true
-	case DocumentLinkShareRoleViewer:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for DocumentLinkShareStatus.
-const (
-	Active  DocumentLinkShareStatus = "active"
-	Revoked DocumentLinkShareStatus = "revoked"
-)
-
-// Valid indicates whether the value is a known member of the DocumentLinkShareStatus enum.
-func (e DocumentLinkShareStatus) Valid() bool {
-	switch e {
-	case Active:
-		return true
-	case Revoked:
 		return true
 	default:
 		return false
@@ -1876,33 +1759,6 @@ type AgentCLIFile struct {
 
 // AgentCLIFileRole defines model for AgentCLIFile.Role.
 type AgentCLIFileRole string
-
-// AgentCLIFileLinkCommand defines model for AgentCLIFileLinkCommand.
-type AgentCLIFileLinkCommand struct {
-	ExpectedVersion *int64                           `json:"expected_version,omitempty"`
-	Operation       AgentCLIFileLinkCommandOperation `json:"operation"`
-	Reset           *bool                            `json:"reset,omitempty"`
-	Role            *AgentCLIFileLinkCommandRole     `json:"role,omitempty"`
-}
-
-// AgentCLIFileLinkCommandOperation defines model for AgentCLIFileLinkCommand.Operation.
-type AgentCLIFileLinkCommandOperation string
-
-// AgentCLIFileLinkCommandRole defines model for AgentCLIFileLinkCommand.Role.
-type AgentCLIFileLinkCommandRole string
-
-// AgentCLIFileShare defines model for AgentCLIFileShare.
-type AgentCLIFileShare struct {
-	Role       AgentCLIFileShareRole       `json:"role"`
-	TargetId   string                      `json:"target_id"`
-	TargetKind AgentCLIFileShareTargetKind `json:"target_kind"`
-}
-
-// AgentCLIFileShareRole defines model for AgentCLIFileShare.Role.
-type AgentCLIFileShareRole string
-
-// AgentCLIFileShareTargetKind defines model for AgentCLIFileShare.TargetKind.
-type AgentCLIFileShareTargetKind string
 
 // AgentCapabilityResult The domain receipt. Knowledge keeps the original evidence schema.
 type AgentCapabilityResult map[string]interface{}
@@ -3257,27 +3113,6 @@ type DocumentCommentTextSegment struct {
 	Type    string `json:"type"`
 }
 
-// DocumentLinkShare defines model for DocumentLinkShare.
-type DocumentLinkShare struct {
-	DocumentId string                  `json:"document_id"`
-	Id         string                  `json:"id"`
-	Role       DocumentLinkShareRole   `json:"role"`
-	Status     DocumentLinkShareStatus `json:"status"`
-
-	// Token Returned only on creation or reset. Never persisted as plaintext.
-	Token *string `json:"token,omitempty"`
-
-	// Url Public Web URL with the capability in its fragment; returned only with a new token.
-	Url     *string `json:"url,omitempty"`
-	Version int64   `json:"version"`
-}
-
-// DocumentLinkShareRole defines model for DocumentLinkShare.Role.
-type DocumentLinkShareRole string
-
-// DocumentLinkShareStatus defines model for DocumentLinkShare.Status.
-type DocumentLinkShareStatus string
-
 // DocumentSegment defines model for DocumentSegment.
 type DocumentSegment struct {
 	// Content User-visible Document label included in raw_message.
@@ -4000,12 +3835,6 @@ type CreateAgentDocumentJSONRequestBody = AgentDocumentCreateRequest
 
 // SendAgentEmojiReactionJSONRequestBody defines body for SendAgentEmojiReaction for application/json ContentType.
 type SendAgentEmojiReactionJSONRequestBody = AgentSendEmojiReactionRequest
-
-// PublicManageAgentCLIFileLinkJSONRequestBody defines body for PublicManageAgentCLIFileLink for application/json ContentType.
-type PublicManageAgentCLIFileLinkJSONRequestBody = AgentCLIFileLinkCommand
-
-// PublicShareAgentCLIFileJSONRequestBody defines body for PublicShareAgentCLIFile for application/json ContentType.
-type PublicShareAgentCLIFileJSONRequestBody = AgentCLIFileShare
 
 // ReadAgentKnowledgeJSONRequestBody defines body for ReadAgentKnowledge for application/json ContentType.
 type ReadAgentKnowledgeJSONRequestBody = AgentKnowledgeReadRequest

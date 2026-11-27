@@ -24,8 +24,6 @@ func (a *App) writeAgentCLIFileError(c *gin.Context, err error) bool {
 		code, message, httpStatus = "version_conflict", "Document has a newer version", http.StatusConflict
 	case errors.Is(err, document.ErrAgentTreePathConflict):
 		code, message, httpStatus = "path_conflict", "One or more Document tree paths already exist", http.StatusConflict
-	case errors.Is(err, document.ErrFilePublicationForbidden), errors.Is(err, document.ErrLinkShareForbidden):
-		code, message, httpStatus = "forbidden", "Current permissions do not allow this file operation", http.StatusForbidden
 	case errors.Is(err, document.ErrNotFound):
 		code, message, httpStatus = "not_found", "File or active authority was not found", http.StatusNotFound
 	case errors.Is(err, document.ErrInvalidInput):

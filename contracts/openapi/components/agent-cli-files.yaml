@@ -1,14 +1,5 @@
 components:
   schemas:
-    AgentCLIFileLinkCommand:
-      type: object
-      additionalProperties: false
-      required: [operation]
-      properties:
-        operation: { type: string, enum: [read, set, revoke] }
-        role: { type: string, enum: [viewer, editor] }
-        expected_version: { type: integer, format: int64, minimum: 0 }
-        reset: { type: boolean }
     AgentCLIFile:
       type: object
       additionalProperties: false
@@ -36,14 +27,6 @@ components:
         editable: { type: boolean }
         read_only: { type: boolean }
         shared_with_me: { type: boolean }
-    AgentCLIFileShare:
-      type: object
-      additionalProperties: false
-      required: [target_kind, target_id, role]
-      properties:
-        target_kind: { type: string, enum: [room, actor, task] }
-        target_id: { type: string }
-        role: { type: string, enum: [viewer, editor, manager] }
   parameters:
     CLIFileAgentId:
       name: agentId

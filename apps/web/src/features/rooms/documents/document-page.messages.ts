@@ -11,7 +11,6 @@ export const documentPageMessages = defineMessages("documentPage", {
   openLibraryPages: "Open Library pages",
   libraryPages: "Library pages",
   mail: "Mail",
-  share: "Share",
   comments: "Comments",
   breadcrumb: "Breadcrumb",
   // Where a Document comes from, when it is not in the Library tree.

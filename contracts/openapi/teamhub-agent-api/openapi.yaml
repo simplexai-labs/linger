@@ -1258,10 +1258,6 @@ paths:
     $ref: "../paths/agent-cli-public-files.yaml#/assets"
   /api/agent/v1/files/{documentId}/assets/{assetId}/content:
     $ref: "../paths/agent-cli-public-files.yaml#/assetContent"
-  /api/agent/v1/files/{documentId}/share:
-    $ref: "../paths/agent-cli-public-files.yaml#/share"
-  /api/agent/v1/files/{documentId}/link-share:
-    $ref: "../paths/agent-cli-public-files.yaml#/linkShare"
 components:
   schemas:
     AgentMessageCommitMetadata:

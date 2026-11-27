@@ -179,8 +179,7 @@ func (a *App) uploadDocumentVersion(c *gin.Context, idempotencyKey string) {
 	result, err := a.documents.UploadVersion(c.Request.Context(), document.UploadDocumentVersionInput{
 		AccountID: currentPrincipal(c).Session.AccountID, DocumentID: c.Param("documentId"),
 		ExpectedCurrentVersionID: expectedCurrentVersionID, IdempotencyKey: idempotencyKey,
-		LinkToken: c.PostForm("link_token"),
-		Filename:  upload.Filename, RepresentationFormat: upload.RepresentationFormat,
+		Filename: upload.Filename, RepresentationFormat: upload.RepresentationFormat,
 		MediaType: upload.MediaType, Content: upload.Content,
 	})
 	if a.writeUnifiedDocumentError(c, "upload Document Version", err) {
@@ -228,7 +227,7 @@ func (a *App) parseDocumentVersionUpload(c *gin.Context) (documentUpload, string
 	}
 	allowed := map[string]bool{
 		"expected_current_version_id": true, "filename": true,
-		"representation_format": true, "media_type": true, "link_token": true,
+		"representation_format": true, "media_type": true,
 	}
 	for name, values := range c.Request.MultipartForm.Value {
 		if !allowed[name] || len(values) != 1 {
@@ -822,57 +821,6 @@ func documentRoomBindingModel(value document.RoomBindingResult) httpapi.Document
 	}
 }
 
-func (a *App) createDocumentDirectCollaborator(c *gin.Context) {
-	var request httpapi.DocumentDirectCollaboratorCreateRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Document collaborator request is invalid")
-		return
-	}
-	result, err := a.documents.CreateDirectCollaborator(c.Request.Context(), document.CreateDirectCollaboratorInput{
-		AccountID: currentPrincipal(c).Session.AccountID, DocumentID: c.Param("documentId"),
-		TargetActorID: request.TargetActorId, Role: string(request.Role),
-	})
-	if a.writeUnifiedDocumentError(c, "create Document Direct collaborator", err) {
-		return
-	}
-	c.JSON(http.StatusCreated, documentAccessSourceModel(result.Source))
-}
-
-func (a *App) getDocumentShareView(c *gin.Context) {
-	view, err := a.documents.GetShareView(c.Request.Context(),
-		currentPrincipal(c).Session.AccountID, c.Param("documentId"))
-	if a.writeUnifiedDocumentError(c, "get Document Share view", err) {
-		return
-	}
-	capabilities := httpapi.DocumentManagementCapabilitiesV2{
-		CanChangeOwnership:      view.ManagementCapabilities.CanChangeOwnership,
-		CanUpdateLinkPolicy:     view.ManagementCapabilities.CanUpdateLinkPolicy,
-		CanUpdateExternalPolicy: view.ManagementCapabilities.CanUpdateExternalPolicy,
-	}
-	model := httpapi.DocumentShareViewV2{
-		SchemaVersion: view.SchemaVersion, CallerContentRole: httpapi.DocumentContentRoleV2(view.CallerContentRole),
-		CanManageCollaborators: view.CanManageCollaborators,
-		ManagementCapabilities: &capabilities, Sources: make([]httpapi.DocumentShareSourceV2, 0, len(view.Sources)),
-	}
-	linkScope := httpapi.DocumentLinkScopeV2(view.GeneralAccess.Scope)
-	model.GeneralAccess = &httpapi.DocumentGeneralAccessV1{
-		Scope: linkScope, CanonicalUrl: view.GeneralAccess.CanonicalURL,
-	}
-	for _, source := range view.Sources {
-		item := httpapi.DocumentShareSourceV2{Label: source.Label, Source: documentAccessSourceModel(source.Source)}
-		group := httpapi.DocumentShareSourceV2SourceGroup(source.SourceGroup)
-		state := httpapi.DocumentShareSourceV2CallerAccessState(source.CallerAccessState)
-		item.SourceGroup = &group
-		item.CallerAccessState = &state
-		if source.TargetActor != nil {
-			target := unifiedDocumentActorModel(*source.TargetActor)
-			item.TargetActor = &target
-		}
-		model.Sources = append(model.Sources, item)
-	}
-	c.JSON(http.StatusOK, model)
-}
-
 func (a *App) listDocumentAgentMentionCandidates(c *gin.Context) {
 	params := contractParams[httpapi.ListDocumentAgentMentionCandidatesParams](c)
 	cursor, limit := "", 50
@@ -898,39 +846,6 @@ func (a *App) listDocumentAgentMentionCandidates(c *gin.Context) {
 	c.JSON(http.StatusOK, httpapi.DocumentAgentMentionCandidatePageV1{
 		Items: items, Page: documentPageMeta(page.NextCursor, page.HasMore),
 	})
-}
-
-func (a *App) updateDocumentDirectCollaborator(c *gin.Context) {
-	var request httpapi.DocumentDirectCollaboratorUpdateRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Document collaborator request is invalid")
-		return
-	}
-	result, err := a.documents.UpdateDirectCollaborator(c.Request.Context(), document.UpdateDirectCollaboratorInput{
-		AccountID: currentPrincipal(c).Session.AccountID, DocumentID: c.Param("documentId"),
-		SourceID: c.Param("sourceId"), ExpectedVersion: request.ExpectedVersion,
-		Role: string(request.Role),
-	})
-	if a.writeUnifiedDocumentError(c, "update Document Direct collaborator", err) {
-		return
-	}
-	c.JSON(http.StatusOK, documentAccessSourceModel(result.Source))
-}
-
-func (a *App) revokeDocumentDirectCollaborator(c *gin.Context) {
-	var request httpapi.DocumentDirectCollaboratorRevokeRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "Document collaborator request is invalid")
-		return
-	}
-	result, err := a.documents.RevokeDirectCollaborator(c.Request.Context(), document.RevokeDirectCollaboratorInput{
-		AccountID: currentPrincipal(c).Session.AccountID, DocumentID: c.Param("documentId"),
-		SourceID: c.Param("sourceId"), ExpectedVersion: request.ExpectedVersion,
-	})
-	if a.writeUnifiedDocumentError(c, "revoke Document Direct collaborator", err) {
-		return
-	}
-	c.JSON(http.StatusOK, documentAccessSourceModel(result.Source))
 }
 
 func documentCapabilitiesModel(value document.Capabilities) httpapi.UnifiedDocumentCapabilities {
@@ -1062,8 +977,6 @@ func (a *App) writeUnifiedDocumentError(c *gin.Context, action string, err error
 		a.writeError(c, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was reused with a different request")
 	case errors.Is(err, document.ErrVersionConflict):
 		a.writeError(c, http.StatusConflict, "DOCUMENT_VERSION_CONFLICT", "Document current Version changed")
-	case errors.Is(err, document.ErrCollaboratorConflict):
-		a.writeError(c, http.StatusConflict, "DOCUMENT_COLLABORATOR_CONFLICT", "Document collaborator changed; refresh and try again")
 	case errors.Is(err, document.ErrFolderNotEmpty):
 		a.writeError(c, http.StatusConflict, "DOCUMENT_FOLDER_NOT_EMPTY", "Document Folder is not empty")
 	case errors.Is(err, document.ErrFolderNameTaken):

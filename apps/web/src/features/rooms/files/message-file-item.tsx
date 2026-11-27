@@ -1,4 +1,7 @@
+import { Download04Icon } from "@hugeicons/core-free-icons";
 import type { ReactNode } from "react";
+
+import { Icon } from "@/components/ui/icon";
 
 import type { TeamHubMessageArtifactTreeSegment } from "@/features/teamhub/teamhub-types";
 import type { Translate } from "@/i18n/language";
@@ -11,27 +14,37 @@ import { chatMessages } from "../chat/chat.messages";
  * One file in a chat Message, whatever attached it: an uploaded or delivered
  * file, a shared Document, or a published folder. It sits in a small white box
  * outside the text, as a compact raised card with the file icon, the name
- * and one detail line; the whole card opens or previews it.
+ * and one detail line; the whole card opens or previews it, and a download
+ * button at its end saves the file when the caller offers one.
  */
 export function MessageFileItem({
   actionLabel = "Open",
   detail,
   disabled = false,
+  downloadPending = false,
   name,
+  onDownload,
   onOpen,
   visual,
 }: {
   actionLabel?: "Open" | "Preview";
   detail: string;
   disabled?: boolean;
+  downloadPending?: boolean;
   name: string;
+  /** Absent when the file cannot be downloaded here. */
+  onDownload?: () => void;
   /** Absent when the file has nothing to open here. */
   onOpen?: () => void;
   /** The icon or thumbnail shown beside the name. */
   visual: ReactNode;
 }) {
   const t = useT();
-  const row = "flex w-full min-w-0 items-center gap-3 rounded-xl p-4 text-left";
+  const download = onDownload && !disabled;
+  const row = cn(
+    "flex w-full min-w-0 items-center gap-3 rounded-xl p-4 text-left",
+    download && "pr-14",
+  );
   const content = (
     <>
       <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden">
@@ -48,7 +61,7 @@ export function MessageFileItem({
   return (
     <div
       className={cn(
-        "w-[var(--chat-file-width)] max-w-full rounded-xl border border-app-border bg-card shadow-[var(--chat-card-shadow)]",
+        "relative w-[var(--chat-file-width)] max-w-full rounded-xl border border-app-border bg-card shadow-[var(--chat-card-shadow)]",
         disabled && "opacity-55",
       )}
       data-message-file-item
@@ -84,6 +97,18 @@ export function MessageFileItem({
           {content}
         </div>
       )}
+      {download ? (
+        <button
+          aria-label={t(chatMessages.downloadNamedFile, { name })}
+          className="absolute top-1/2 right-3 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-app-muted transition-colors duration-150 hover:bg-muted hover:text-app-ink focus-visible:outline-2 focus-visible:outline-primary/40 disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
+          disabled={downloadPending}
+          onClick={onDownload}
+          title={t(chatMessages.downloadNamedFile, { name })}
+          type="button"
+        >
+          <Icon icon={Download04Icon} size={16} />
+        </button>
+      ) : null}
     </div>
   );
 }

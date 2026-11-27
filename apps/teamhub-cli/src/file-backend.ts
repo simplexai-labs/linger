@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { TeamHubFileBackend } from "./files/teamhub-working-copies.js";
-import type { components as TeamHubPublic } from "@linger/wire-contracts/teamhub-public/types";
 import { CliError } from "./errors.js";
 import {
   readBounded,
@@ -20,21 +19,6 @@ function query(values: Record<string, unknown>): string {
     if (value !== undefined) params.set(key, displayText(value));
   return params.size ? `?${params.toString()}` : "";
 }
-function linkToken(value: string): string | undefined {
-  if (/^doc_link_[A-Za-z0-9_-]{43}$/.test(value)) return value;
-  try {
-    const url = new URL(value);
-    if (
-      ["http:", "https:"].includes(url.protocol) &&
-      /^#doc_link_[A-Za-z0-9_-]{43}$/.test(url.hash)
-    )
-      return url.hash.slice(1);
-  } catch {
-    /* Ordinary name. */
-  }
-  return undefined;
-}
-
 export function createFileBackend(
   client: TeamHubHttpClient,
 ): TeamHubFileBackend & {
@@ -75,11 +59,10 @@ export function createFileBackend(
   return {
     list,
     async download(name, selectedFormat) {
-      const token = linkToken(name);
       let documentId = /^document_[A-Za-z0-9_-]+$/.test(name)
         ? name
         : undefined;
-      if (!documentId && !token) {
+      if (!documentId) {
         const matches = (await list()).filter((file) => file.name === name);
         if (matches.length === 0)
           throw new CliError(
@@ -94,27 +77,10 @@ export function createFileBackend(
           );
         documentId = matches[0]!.document_id as string;
       }
-      if (
-        token &&
-        selectedFormat !== undefined &&
-        selectedFormat !== "markdown"
-      )
-        throw new CliError(
-          "invalid_input",
-          "Native editing requires a Document ID and Agent read access.",
-        );
-      const response = token
-        ? await client.request("/v0/shared-documents/content", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              token,
-            } satisfies TeamHubPublic["schemas"]["ResolveDocumentLinkShare"]),
-          })
-        : await client.request(
-            `${root}/${encodeURIComponent(documentId!)}${"/content"}${query({ format: selectedFormat })}`,
-            { method: "GET" },
-          );
+      const response = await client.request(
+        `${root}/${encodeURIComponent(documentId)}${"/content"}${query({ format: selectedFormat })}`,
+        { method: "GET" },
+      );
       if (response.status === 202)
         throw new CliError(
           "projection_pending",
@@ -126,9 +92,7 @@ export function createFileBackend(
       const encodedName = response.headers.get("x-document-filename") ?? "";
       const filename = Buffer.from(encodedName, "base64url").toString("utf8");
       const readOnly = response.headers.get("x-document-read-only");
-      documentId ??= response.headers.get("x-document-id") ?? undefined;
       if (
-        !documentId ||
         !versionId ||
         !filename ||
         /[/\\\0]/u.test(filename) ||
@@ -144,7 +108,6 @@ export function createFileBackend(
         sha256,
         readOnly: readOnly === "true",
         content,
-        ...(token ? { linkToken: token } : {}),
       };
     },
     async replace(input) {
