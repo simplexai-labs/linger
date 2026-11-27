@@ -13,6 +13,7 @@ import type {
 import { reportInFinalReply } from "./command-definition.js";
 import {
   assertPositionals,
+  bodySource,
   jsonSource,
   markdownBodySource,
   option,
@@ -334,6 +335,54 @@ async function ordinaryBodies(
     ),
   );
 }
+// Catch callers that pass a complete {"segments":[...]} JSON envelope to the
+// plain-text --content/--file flags so it is not posted literally as Markdown.
+function assertNotStructuredMessageEnvelope(
+  rawBody: string,
+  flag: "--content" | "--file",
+): void {
+  const trimmed = rawBody.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  if (!record(parsed)) return;
+  const keys = Object.keys(parsed);
+  if (keys.length !== 1 || keys[0] !== "segments") return;
+  const segments = parsed.segments;
+  if (!Array.isArray(segments) || segments.length === 0) return;
+  if (
+    !segments.every((item) => record(item) && typeof item.type === "string")
+  ) {
+    return;
+  }
+  if (flag === "--file") {
+    throw invalidInput(
+      '--file sends plain text, not a structured message JSON envelope. Use --message-file <path|-> (or --message <JSON>) for {"segments":[...]}.',
+      [
+        inputIssue(
+          flag,
+          "invalid_value",
+          'received a {"segments":[...]} JSON envelope; pass it with --message-file instead.',
+        ),
+      ],
+    );
+  }
+  throw invalidInput(
+    '--content sends plain text, not a structured message JSON envelope. Use --message <JSON> (or --message-file <path|->) for {"segments":[...]}.',
+    [
+      inputIssue(
+        flag,
+        "invalid_value",
+        'received a {"segments":[...]} JSON envelope; pass it with --message or --message-file instead.',
+      ),
+    ],
+  );
+}
+
 async function normalizeSend(
   args: CommandArguments,
   reader: CommandInputReader,
@@ -366,7 +415,22 @@ async function normalizeSend(
       jsonFlag(args, "--message"),
     ).segments;
   else {
-    const body = await markdownBodySource(args, reader, false);
+    const rawBody = await bodySource(args, reader, false);
+    const bodyFlag =
+      option(args, "--file") !== undefined ? "--file" : "--content";
+    // Check rawBody before decodeInlineEscapes turns \n/\t inside JSON strings
+    // into unescaped control chars, then re-check the decoded body to catch
+    // envelopes wrapped or pretty-printed with inline \n/\t escapes.
+    if (rawBody !== undefined) {
+      assertNotStructuredMessageEnvelope(rawBody, bodyFlag);
+    }
+    const body =
+      rawBody !== undefined && bodyFlag === "--content"
+        ? decodeInlineEscapes(rawBody)
+        : rawBody;
+    if (body !== undefined && body !== rawBody) {
+      assertNotStructuredMessageEnvelope(body, bodyFlag);
+    }
     segments = [
       ...(body === undefined ? [] : parseActorReferences(body)),
       ...attachments.map((value) => ({

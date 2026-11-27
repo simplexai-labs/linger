@@ -7,6 +7,7 @@ import type {
   CommandInputReader,
 } from "./command-definition.js";
 import { createInputReader, parseArguments } from "./command-input.js";
+import { CliError } from "./errors.js";
 import { messageCommandDefinitions } from "./message-commands.js";
 
 const tempDirs: string[] = [];
@@ -203,6 +204,204 @@ describe("redesigned message inputs", () => {
         command("send").normalize(args([["--message", message]]), reader),
       ).rejects.toThrow();
     }
+  });
+  it("rejects structured segments JSON envelopes passed to --content", async () => {
+    const payload =
+      '{"segments":[{"type":"text","content":"Done\\nNext\\t\\u4f60\\u597d"},{"type":"fragment","title":"Bike","content-path":"./playground/room_1/bike.html"}]}';
+    const rejection = command("send").normalize(
+      args([["--content", payload]]),
+      reader,
+    );
+    await expect(rejection).rejects.toBeInstanceOf(CliError);
+    await expect(rejection).rejects.toMatchObject({
+      code: "invalid_input",
+      message:
+        '--content sends plain text, not a structured message JSON envelope. Use --message <JSON> (or --message-file <path|->) for {"segments":[...]}.',
+      details: {
+        issues: [
+          {
+            path: "--content",
+            code: "invalid_value",
+            message:
+              'received a {"segments":[...]} JSON envelope; pass it with --message or --message-file instead.',
+          },
+        ],
+      },
+    });
+    // The same payload succeeds through --message.
+    await expect(
+      command("send").normalize(args([["--message", payload]]), reader),
+    ).resolves.toMatchObject({
+      input: {
+        message_segments: [
+          { type: "text", content: "Done\nNext\t\u4f60\u597d" },
+          {
+            type: "fragment",
+            title: "Bike",
+            "content-path": "./playground/room_1/bike.html",
+          },
+        ],
+      },
+    });
+  });
+  it("rejects structured segments JSON envelopes passed to --file", async () => {
+    const payload =
+      '\n  {"segments":[{"type":"text","content":"Summary"},{"type":"document","document_id":"doc_1","content":"Spec","presentation":"card"}]}\n';
+    for (const source of ["-", "msg.json"]) {
+      const fileReader: CommandInputReader = {
+        ...reader,
+        text: async () => payload,
+        json: async () => JSON.parse(payload),
+      };
+      const rejection = command("send").normalize(
+        args([["--file", source]]),
+        fileReader,
+      );
+      await expect(rejection).rejects.toBeInstanceOf(CliError);
+      await expect(rejection).rejects.toMatchObject({
+        code: "invalid_input",
+        message:
+          '--file sends plain text, not a structured message JSON envelope. Use --message-file <path|-> (or --message <JSON>) for {"segments":[...]}.',
+        details: {
+          issues: [
+            {
+              path: "--file",
+              code: "invalid_value",
+              message:
+                'received a {"segments":[...]} JSON envelope; pass it with --message-file instead.',
+            },
+          ],
+        },
+      });
+      await expect(
+        command("send").normalize(
+          args([["--message-file", source]]),
+          fileReader,
+        ),
+      ).resolves.toMatchObject({
+        input: {
+          message_segments: [
+            { type: "text", content: "Summary" },
+            {
+              type: "document",
+              document_id: "doc_1",
+              content: "Spec",
+              presentation: "card",
+            },
+          ],
+        },
+      });
+    }
+  });
+  it("rejects structured envelopes on --content even with --attach or an incomplete fragment", async () => {
+    await expect(
+      command("send").normalize(
+        args([
+          ["--content", '{"segments":[{"type":"text","content":"Done"}]}'],
+          ["--attach", "./a.pdf"],
+        ]),
+        reader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      details: { issues: [{ path: "--content", code: "invalid_value" }] },
+    });
+    await expect(
+      command("send").normalize(
+        args([
+          [
+            "--content",
+            '{"segments":[{"type":"fragment","content-path":"./a.html"}]}',
+          ],
+        ]),
+        reader,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      details: { issues: [{ path: "--content", code: "invalid_value" }] },
+    });
+  });
+  it("rejects structured envelopes with inline escape whitespace, minimal segments, or unlisted segment types", async () => {
+    for (const payload of [
+      '\\n{"segments":[{"type":"text","content":"Done"}]}\\n',
+      '{\\n\\t"segments": [{"type": "text", "content": "Done"}]\\n}',
+      '{"segments":[{"type":"text"}]}',
+      '{"segments":[{"type":"future_widget","data":"x"}]}',
+      '{"segments":[{"type":"text","content":"Done"},{"type":"file","content-path":"./bike.html"}]}',
+      '{"segments":[{"type":"html_fragment","html":"<p>Hi</p>"}]}',
+    ]) {
+      await expect(
+        command("send").normalize(args([["--content", payload]]), reader),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        details: { issues: [{ path: "--content", code: "invalid_value" }] },
+      });
+    }
+    for (const payload of [
+      '{"segments":[{"type":"text"}]}',
+      '{"segments":[{"type":"future_widget","data":"x"}]}',
+      '{"segments":[{"type":"text","content":"Done"},{"type":"file","content-path":"./bike.html"}]}',
+      '{"segments":[{"type":"html_fragment","html":"<p>Hi</p>"}]}',
+    ]) {
+      await expect(
+        command("send").normalize(args([["--file", "-"]]), {
+          ...reader,
+          text: async () => payload,
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_input",
+        details: { issues: [{ path: "--file", code: "invalid_value" }] },
+      });
+    }
+  });
+  it("allows prose, fenced code blocks, and unrelated JSON on --content and --file", async () => {
+    const allowedBodies = [
+      'Example: {"segments":[{"type":"text","content":"hi"}]}',
+      '```json\n{"segments":[{"type":"text","content":"hi"}]}\n```',
+      '{"status":"ok"}',
+      '{"segments":[1,2,3]}',
+      '{"segments":[]}',
+      '{"segments":[{"id":1,"name":"q1"}]}',
+      '{"segments":[{"type":123}]}',
+      '{"segments":[{"type":"text","content":"hi"}],"extra":true}',
+    ];
+    for (const body of allowedBodies) {
+      await expect(
+        command("send").normalize(args([["--content", body]]), reader),
+      ).resolves.toMatchObject({
+        input: { message_segments: [{ type: "text", content: body }] },
+      });
+      await expect(
+        command("send").normalize(args([["--file", "-"]]), {
+          ...reader,
+          text: async () => body,
+        }),
+      ).resolves.toMatchObject({
+        input: { message_segments: [{ type: "text", content: body }] },
+      });
+    }
+    // Fenced Markdown JSON with inline \n escapes remains allowed on --content.
+    await expect(
+      command("send").normalize(
+        args([
+          [
+            "--content",
+            '```json\\n{"segments":[{"type":"text","content":"hi"}]}\\n```',
+          ],
+        ]),
+        reader,
+      ),
+    ).resolves.toMatchObject({
+      input: {
+        message_segments: [
+          {
+            type: "text",
+            content:
+              '```json\\n{"segments":[{"type":"text","content":"hi"}]}\\n```',
+          },
+        ],
+      },
+    });
   });
   it("maps reply-to independently of the envelope and retains attachments in order", async () => {
     const result = await command("send").normalize(
