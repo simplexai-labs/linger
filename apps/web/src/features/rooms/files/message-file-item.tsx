@@ -1,6 +1,7 @@
 import { Download04Icon } from "@hugeicons/core-free-icons";
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 
 import type { TeamHubMessageArtifactTreeSegment } from "@/features/teamhub/teamhub-types";
@@ -9,6 +10,7 @@ import { useT } from "@/i18n/use-translation";
 import { cn } from "@/lib/cn";
 
 import { chatMessages } from "../chat/chat.messages";
+import { filePreviewMessages } from "./file-preview.messages";
 
 /**
  * One file in a chat Message, whatever attached it: an uploaded or delivered
@@ -98,16 +100,18 @@ export function MessageFileItem({
         </div>
       )}
       {download ? (
-        <button
-          aria-label={t(chatMessages.downloadNamedFile, { name })}
-          className="absolute top-1/2 right-3 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-app-muted transition-colors duration-150 hover:bg-muted hover:text-app-ink focus-visible:outline-2 focus-visible:outline-primary/40 disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
-          disabled={downloadPending}
-          onClick={onDownload}
-          title={t(chatMessages.downloadNamedFile, { name })}
-          type="button"
-        >
-          <Icon icon={Download04Icon} size={16} />
-        </button>
+        <span className="absolute top-1/2 right-3 flex -translate-y-1/2">
+          <Button
+            aria-label={t(filePreviewMessages.downloadFile, { name })}
+            loading={downloadPending}
+            onClick={onDownload}
+            size="icon"
+            title={t(filePreviewMessages.download)}
+            tone="ghost"
+          >
+            {downloadPending ? null : <Icon icon={Download04Icon} />}
+          </Button>
+        </span>
       ) : null}
     </div>
   );

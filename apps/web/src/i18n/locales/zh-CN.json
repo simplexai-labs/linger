@@ -273,7 +273,6 @@
     "fileUnavailable": "{name} 不可用",
     "loadingFile": "正在加载 {name}",
     "loadingImage": "正在加载图片…",
-    "downloadNamedFile": "下载 {name}",
     "downloadFileFailed": "无法下载 {name}",
     "imageViewer": "图片 {name}",
     "fileCount": {

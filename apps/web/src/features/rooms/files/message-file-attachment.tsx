@@ -1,6 +1,7 @@
 import { Cancel01Icon, Download04Icon } from "@hugeicons/core-free-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import { FileTypeIcon } from "@/features/library/workspace-file-icon";
@@ -25,6 +26,7 @@ import {
   artifactFileTypeLabel,
   type ArtifactFileKind,
 } from "./artifact-file-kind";
+import { filePreviewMessages } from "./file-preview.messages";
 import { fileItemDetail, MessageFileItem } from "./message-file-item";
 import { chatMessages } from "../chat/chat.messages";
 import { FileVoiceMaterialButton } from "../chat/voice-mode/file-voice-material-button";
@@ -388,8 +390,6 @@ function MessageImageViewer({
   src: string;
 }) {
   const t = useT();
-  const control =
-    "flex size-9 items-center justify-center rounded-full bg-black/55 text-white transition-colors duration-150 hover:bg-black/75 focus-visible:outline-2 focus-visible:outline-white/70 motion-reduce:transition-none";
   return (
     <ModalDialog
       ariaLabel={t(chatMessages.imageViewer, { name: filename })}
@@ -404,24 +404,25 @@ function MessageImageViewer({
       />
       <div className="absolute top-4 right-4 flex gap-2">
         {onDownload ? (
-          <button
-            aria-label={t(chatMessages.downloadNamedFile, { name: filename })}
-            className={control}
+          <Button
+            aria-label={t(filePreviewMessages.downloadFile, { name: filename })}
             onClick={onDownload}
-            title={t(chatMessages.downloadNamedFile, { name: filename })}
-            type="button"
+            size="icon"
+            title={t(filePreviewMessages.download)}
+            tone="subtle"
           >
-            <Icon icon={Download04Icon} size={18} />
-          </button>
+            <Icon icon={Download04Icon} />
+          </Button>
         ) : null}
-        <button
+        <Button
           aria-label={t(commonMessages.close)}
-          className={control}
           onClick={onClose}
-          type="button"
+          size="icon"
+          title={t(commonMessages.close)}
+          tone="subtle"
         >
-          <Icon icon={Cancel01Icon} size={18} />
-        </button>
+          <Icon icon={Cancel01Icon} />
+        </Button>
       </div>
     </ModalDialog>
   );
