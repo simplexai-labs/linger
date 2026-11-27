@@ -18,6 +18,11 @@ import iconPng from "../../resources/icon.png";
 import logoPng from "../../resources/logo-horizontal.png";
 // The installer's welcome scene, so setup looks like the installer.
 import scenePng from "../../../linger-installer/public/onboarding/welcome-scene.png";
+// OpenAI's Codex mark for the Codex runtime row, unchanged from the official
+// Codex app (Codex.dmg from https://developers.openai.com/codex/app,
+// webview/assets/codex-app-ga-logo.png). Codex and its logo are trademarks of
+// OpenAI, shown only to name the product.
+import codexPng from "../../resources/brand/codex.png";
 // The SPA's typeface, so the setup page reads like the app it opens.
 import geistWoff2 from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2";
 import { localizePage } from "../i18n/page.js";
@@ -643,6 +648,10 @@ export class SetupWindowModule implements Module {
       });
     if (url.pathname === "/logo.png")
       return new Response(Buffer.from(logoPng), {
+        headers: { "content-type": "image/png" },
+      });
+    if (url.pathname === "/codex.png")
+      return new Response(Buffer.from(codexPng), {
         headers: { "content-type": "image/png" },
       });
     if (url.pathname === "/geist.woff2")

@@ -342,6 +342,16 @@ const open = (value: string) => {
 const button = (id: string) => $(id) as HTMLButtonElement;
 
 describe("setup page two-step welcome", () => {
+  it("names Claude Code and Codex with their vendors' marks", async () => {
+    await openPage(welcome({ state: "checking" }), "welcome");
+    expect(inRow("claude", ".tile svg.brand path").getAttribute("fill")).toBe(
+      "#D97757",
+    );
+    expect(inRow("codex", ".tile img.brand").getAttribute("src")).toBe(
+      "codex.png",
+    );
+  });
+
   it("checks this computer first, then offers the three sources with the advice picked", async () => {
     const { run, push } = await openPage(
       welcome({ state: "checking" }),

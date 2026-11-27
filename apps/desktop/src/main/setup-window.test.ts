@@ -98,6 +98,9 @@ vi.mock("../../resources/icon.png", () => ({
 vi.mock("../../resources/logo-horizontal.png", () => ({
   default: new Uint8Array([1, 2]),
 }));
+vi.mock("../../resources/brand/codex.png", () => ({
+  default: new Uint8Array([1, 2]),
+}));
 vi.mock(
   "../../../linger-installer/public/onboarding/welcome-scene.png",
   () => ({
