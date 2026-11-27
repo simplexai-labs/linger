@@ -1,9 +1,19 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useOptionalTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import { useOptionalVoiceControl } from "@/features/rooms/voice-control/voice-control-context";
 import { tryAcquireVoicePublisherLease } from "@/features/rooms/voice-control/voice-publisher-lease";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
+import {
+  createDictationSilenceTimer,
+  type DictationSilenceTimer,
+  VOICE_SILENCE_ACTIVITY_THRESHOLD,
+} from "@/features/voice-settings/dictation-silence-timer";
+import {
+  voiceSettingsQueryKey,
+  voiceSettingsQueryOptions,
+} from "@/features/voice-settings/voice-settings-queries";
 import { translate } from "@/i18n/language";
 
 import {
@@ -54,12 +64,54 @@ export function usePocketDictation({
   const controllerRef = useRef<VoiceModeController | undefined>(undefined);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const startOnRenew = useRef(false);
+  const silenceTimerRef = useRef<DictationSilenceTimer | undefined>(undefined);
+  const stopRef = useRef<() => Promise<string>>(async () => "");
+
+  const voiceSettingsQuery = useQuery({
+    ...(runtime
+      ? voiceSettingsQueryOptions(runtime.client, tenantId)
+      : {
+          queryFn: skipToken,
+          queryKey: voiceSettingsQueryKey(tenantId),
+        }),
+    enabled: Boolean(runtime && roomId),
+  });
+  const silenceTimeoutSeconds =
+    voiceSettingsQuery.data?.silence_timeout_seconds ?? 0;
 
   useEffect(() => {
     if (!runtime || !roomId) return;
     // Warm what the first click would otherwise wait on.
     void import("livekit-client").catch(() => undefined);
   }, [roomId, runtime]);
+
+  useEffect(() => {
+    if (!runtime || !roomId) return;
+    const timer = createDictationSilenceTimer(() => {
+      void stopRef.current();
+    });
+    silenceTimerRef.current = timer;
+    return () => {
+      timer.dispose();
+      if (silenceTimerRef.current === timer) {
+        silenceTimerRef.current = undefined;
+      }
+    };
+  }, [roomId, runtime, tenantId]);
+
+  useEffect(() => {
+    const timer = silenceTimerRef.current;
+    if (!timer) return;
+    timer.setTimeoutSeconds(silenceTimeoutSeconds);
+    timer.setActive(state.status === "listening" && !stopping);
+  }, [
+    roomId,
+    runtime,
+    silenceTimeoutSeconds,
+    state.status,
+    stopping,
+    tenantId,
+  ]);
 
   // The next controller must be ready when the idle control becomes usable.
   // A passive renewal can otherwise cancel a start on the previous session.
@@ -73,10 +125,24 @@ export function usePocketDictation({
           client: runtime.client,
           events: runtime.voiceEvents,
           roomId,
-          receive,
+          receive: (event) => {
+            if (
+              event.kind === "partial" ||
+              event.kind === "speech" ||
+              event.kind === "turn"
+            ) {
+              silenceTimerRef.current?.noteActivity();
+            }
+            receive(event);
+          },
           fail,
           signal: abort.signal,
-          level: setLevel,
+          level: (nextLevel) => {
+            if (nextLevel >= VOICE_SILENCE_ACTIVITY_THRESHOLD) {
+              silenceTimerRef.current?.noteActivity();
+            }
+            setLevel(nextLevel);
+          },
           microphone,
           deviceId: latest.current.hardware?.boundDevice?.deviceId,
           adoptDevice: (deviceId) =>
@@ -121,6 +187,27 @@ export function usePocketDictation({
     state.status === "listening" ||
     state.status === "closing";
 
+  async function stop() {
+    const controller = controllerRef.current;
+    if (!controller) return "";
+    silenceTimerRef.current?.setActive(false);
+    setStopping(true);
+    abortRef.current?.abort();
+    try {
+      await Promise.all([controller.pause(), controller.whenDeliverySettles()]);
+      return controller.getState().text;
+    } finally {
+      setLevel(0);
+      setStopping(false);
+      setState(idle);
+      setSessionKey((key) => key + 1);
+    }
+  }
+
+  useLayoutEffect(() => {
+    stopRef.current = stop;
+  });
+
   return {
     available: offered && Boolean(roomId),
     /** Starting asks for a Soniox key first. */
@@ -145,23 +232,6 @@ export function usePocketDictation({
       void controllerRef.current?.start();
     },
     /** Stops the microphone, drains trailing words, and returns what is left. */
-    async stop() {
-      const controller = controllerRef.current;
-      if (!controller) return "";
-      setStopping(true);
-      abortRef.current?.abort();
-      try {
-        await Promise.all([
-          controller.pause(),
-          controller.whenDeliverySettles(),
-        ]);
-        return controller.getState().text;
-      } finally {
-        setLevel(0);
-        setStopping(false);
-        setState(idle);
-        setSessionKey((key) => key + 1);
-      }
-    },
+    stop,
   };
 }

@@ -222,17 +222,29 @@ function TerminateTasksDialog({
   );
 }
 
+/** UI-only tab union for Settings → Models; Agent LLM ModelSourceMode stays orthogonal. */
+export type ModelsPageTab = ModelSourceMode | "voice";
+
 /** The offered model sources as a segmented control; a dot marks the one in use. */
 export function ModelSourceTabs({
   active,
   onChange,
+  showVoiceTab = false,
   value,
+  voiceActive = false,
+  voiceLabel,
 }: {
   active: ModelSourceMode;
-  onChange: (mode: ModelSourceMode) => void;
-  value: ModelSourceMode;
+  onChange: (mode: ModelsPageTab) => void;
+  showVoiceTab?: boolean;
+  value: ModelsPageTab;
+  voiceActive?: boolean;
+  voiceLabel?: string;
 }) {
   const t = useT();
+  const visibleTabs: readonly ModelsPageTab[] = showVoiceTab
+    ? [...modes, "voice"]
+    : modes;
 
   function handleKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -241,8 +253,8 @@ export function ModelSourceTabs({
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     const step = event.key === "ArrowRight" ? 1 : -1;
-    const nextIndex = (index + step + modes.length) % modes.length;
-    const nextMode = modes[nextIndex];
+    const nextIndex = (index + step + visibleTabs.length) % visibleTabs.length;
+    const nextMode = visibleTabs[nextIndex];
     if (!nextMode) return;
     onChange(nextMode);
     const tabs = event.currentTarget
@@ -258,8 +270,13 @@ export function ModelSourceTabs({
         className="inline-flex w-fit max-w-full items-center gap-0.5 self-start rounded-lg bg-muted p-0.5"
         role="tablist"
       >
-        {modes.map((mode, index) => {
+        {visibleTabs.map((mode, index) => {
           const selected = mode === value;
+          const hasActiveDot = mode === "voice" ? voiceActive : mode === active;
+          const label =
+            mode === "voice"
+              ? (voiceLabel ?? "Voice")
+              : t(modelSourceModeLabels[mode]);
           const tab = (
             <button
               aria-selected={selected}
@@ -274,14 +291,14 @@ export function ModelSourceTabs({
               role="tab"
               type="button"
             >
-              {mode === active ? (
+              {hasActiveDot ? (
                 <span
                   aria-label={t(m.inUse)}
                   className="size-1.5 rounded-full bg-app-success"
                   role="img"
                 />
               ) : null}
-              {t(modelSourceModeLabels[mode])}
+              {label}
             </button>
           );
           return (

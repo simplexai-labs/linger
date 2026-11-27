@@ -756,6 +756,14 @@ function createSettingsRoute(): RouteObject {
       {
         lazy: async () => ({
           Component: (
+            await import("@/features/voice-settings/voice-settings-page")
+          ).VoiceSettingsPage,
+        }),
+        path: "voice",
+      },
+      {
+        lazy: async () => ({
+          Component: (
             await import("@/features/settings/language-settings-page")
           ).LanguageSettingsPage,
         }),

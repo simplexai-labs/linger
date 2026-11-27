@@ -17,6 +17,11 @@ import {
   tenantLocalModelsQueryKey,
 } from "@/features/local-models/local-models-queries";
 import { tenantModelSourceQueryKey } from "@/features/local-models/model-source-queries";
+import {
+  localSpeechQueryKey,
+  tenantLocalSpeechQueryKey,
+  voiceSettingsQueryKey,
+} from "@/features/voice-settings/voice-settings-queries";
 import { teamHubDocumentsQueryKey } from "@/features/teamhub/document-queries";
 import type { TeamHubEventSignal } from "@/features/teamhub/event-transport";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -168,7 +173,10 @@ async function applyInvalidation(
         tenantLocalModelsQueryKey(tenantId),
       ];
       if (hint.resource === "computers") {
-        queries.push(tenantModelSourceQueryKey(tenantId));
+        queries.push(
+          tenantModelSourceQueryKey(tenantId),
+          tenantLocalSpeechQueryKey(tenantId),
+        );
       }
       await Promise.all([
         refreshAgentStatus(queryClient, tenantId),
@@ -181,6 +189,12 @@ async function applyInvalidation(
     case "local-models":
       await refreshActiveQueries(queryClient, [
         localModelsQueryKey(tenantId, hint.id),
+      ]);
+      return;
+    case "local-speech":
+      await refreshActiveQueries(queryClient, [
+        localSpeechQueryKey(tenantId, hint.id),
+        voiceSettingsQueryKey(tenantId),
       ]);
       return;
     case "another-me":

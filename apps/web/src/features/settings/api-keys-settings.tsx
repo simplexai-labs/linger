@@ -2,7 +2,7 @@ import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { StatusPill } from "@/components/ui/status-pill";
 import { AppLogoTile } from "@/features/apps/app-logo";
@@ -16,8 +16,9 @@ import type {
   TeamHubVoiceProvider,
   TeamHubVoiceProviderKeyStatus,
 } from "@/features/teamhub/teamhub-types";
+import { voiceSettingsMessages } from "@/features/voice-settings/voice-settings.messages";
 import { useT } from "@/i18n/use-translation";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 
 import { accountSettingsMessages } from "./account-settings.messages";
 
@@ -56,6 +57,16 @@ export function ApiKeysSettings() {
             <VoiceKeyRow
               detail={t(voiceKeyMessages.sonioxPurpose)}
               environmentVariable="SONIOX_API_KEY"
+              extraAction={
+                tenantId ? (
+                  <Link
+                    className={buttonClassName({ tone: "ghost" })}
+                    to={`/t/${tenantId}/settings/voice?tab=cloud`}
+                  >
+                    {t(voiceSettingsMessages.voiceSettingsLink)}
+                  </Link>
+                ) : null
+              }
               onOpen={() => openVoice("soniox")}
               status={voicePolicy.soniox_key}
               title="Soniox"
@@ -107,6 +118,7 @@ export function ApiKeysSettings() {
             setVoiceDialog(undefined);
           }}
           policy={voicePolicy}
+          preferCloud
           providers={[voiceDialog]}
           tenantId={tenantId}
         />
@@ -136,34 +148,42 @@ function KeySourcePill({
 function VoiceKeyRow({
   detail,
   environmentVariable,
+  extraAction,
   onOpen,
   status,
   title,
 }: {
   detail: string;
   environmentVariable: string;
+  extraAction?: ReactNode;
   onOpen: () => void;
   status: TeamHubVoiceProviderKeyStatus | undefined;
   title: string;
 }) {
   const t = useT();
+  const hasActions = Boolean(status?.can_save || extraAction);
   return (
     <KeyRow
       actions={
-        status?.can_save ? (
-          <Button
-            aria-label={t(
-              status.source === "stored"
-                ? accountSettingsMessages.replaceProviderKey
-                : accountSettingsMessages.addProviderKey,
-              { provider: title },
-            )}
-            onClick={onOpen}
-          >
-            {status.source === "stored"
-              ? t(accountSettingsMessages.replaceKey)
-              : t(accountSettingsMessages.addKey)}
-          </Button>
+        hasActions ? (
+          <>
+            {extraAction}
+            {status?.can_save ? (
+              <Button
+                aria-label={t(
+                  status.source === "stored"
+                    ? accountSettingsMessages.replaceProviderKey
+                    : accountSettingsMessages.addProviderKey,
+                  { provider: title },
+                )}
+                onClick={onOpen}
+              >
+                {status.source === "stored"
+                  ? t(accountSettingsMessages.replaceKey)
+                  : t(accountSettingsMessages.addKey)}
+              </Button>
+            ) : null}
+          </>
         ) : null
       }
       detail={

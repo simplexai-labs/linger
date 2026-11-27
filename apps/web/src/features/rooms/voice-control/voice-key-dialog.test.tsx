@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TeamHubRuntimeProvider } from "@/features/teamhub/teamhub-runtime";
@@ -439,5 +440,171 @@ describe("VoiceKeyDialog", () => {
     expect(
       runtime.server.requestsTo("PUT", "/v0/voice-provider-keys/{provider}"),
     ).toHaveLength(1);
+  });
+
+  it("offers On this computer (Recommended) with FunASR license disclosure and 1-click Download & enable when local speech is available", async () => {
+    const runtime = createTestTeamHubRuntime();
+    const computerId = runtime.seed.localComputers[0]!.computer_id;
+    let modelState: "absent" | "idle" = "absent";
+    const localPolicy: TeamHubVoiceMediaPolicy = {
+      active_speech_provider: "none",
+      live_supported: false,
+      local_speech_available: true,
+      local_speech_ready: false,
+      soniox_key: missing,
+      voice_available: true,
+      voice_media_supported: false,
+      xai_key: missing,
+    };
+    const readyPolicy: TeamHubVoiceMediaPolicy = {
+      ...localPolicy,
+      active_speech_provider: "local",
+      local_speech_ready: true,
+      voice_media_supported: true,
+    };
+
+    const actions: unknown[] = [];
+    const settingsUpdates: unknown[] = [];
+
+    runtime.server
+      .on(
+        "GET",
+        "/v0/tenants/{tenantId}/local-computers/{computerId}/local-speech",
+        () => ({
+          available: true,
+          computer: {
+            computer_id: computerId,
+            display_name: "Studio Mac",
+            status: "online" as const,
+          },
+          models: [
+            {
+              active: false,
+              commercial_notice:
+                "Custom license (FunASR MODEL_LICENSE v1.1); user opt-in download only.",
+              disk_size_bytes: 248_512_512,
+              engine: "sherpa-onnx" as const,
+              gpu_supported: false,
+              id: "sensevoice-small",
+              language_count: 5,
+              languages: ["zh", "en", "ja", "ko", "yue"],
+              license: "FunASR-MODEL-LICENSE-1.1",
+              license_url:
+                "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/blob/main/MODEL_LICENSE",
+              name: "SenseVoice Small (INT8)",
+              quality_rating: "fast-cjk" as const,
+              ram_estimate_bytes: 629_145_600,
+              state: modelState,
+              vram_estimate_bytes: 0,
+            },
+            {
+              active: false,
+              commercial_notice: null,
+              disk_size_bytes: 601_882_624,
+              engine: "whisper.cpp" as const,
+              gpu_supported: true,
+              id: "whisper-large-v3-turbo",
+              language_count: 99,
+              languages: ["auto"],
+              license: "MIT",
+              license_url:
+                "https://huggingface.co/openai/whisper-large-v3-turbo/blob/main/LICENSE",
+              name: "Whisper Large v3 Turbo (Q5_0)",
+              quality_rating: "high-multilingual" as const,
+              ram_estimate_bytes: 1_288_490_188,
+              state: "absent" as const,
+              vram_estimate_bytes: 1_073_741_824,
+            },
+          ],
+          viewer_is_owner: true,
+        }),
+      )
+      .on(
+        "POST",
+        "/v0/tenants/{tenantId}/local-computers/{computerId}/local-speech/actions",
+        ({ body }) => {
+          actions.push(body);
+          const action = (body as { action: string; model_id?: string }).action;
+          if (action === "download") {
+            modelState = "idle";
+          }
+          return Response.json(
+            {
+              action,
+              computer_id: computerId,
+              model_id: (body as { model_id?: string }).model_id,
+            },
+            { status: 202 },
+          );
+        },
+      )
+      .on("PUT", "/v0/tenants/{tenantId}/voice-settings", ({ body }) => {
+        settingsUpdates.push(body);
+        return {
+          keep_loaded_seconds: 900,
+          language: "auto",
+          local_computer_id: computerId,
+          local_model_id: "sensevoice-small",
+          silence_timeout_seconds: 0,
+          speech_provider: "local" as const,
+          use_gpu: true,
+        };
+      })
+      .on(
+        "GET",
+        "/v0/tenants/{tenantId}/voice-media-policy",
+        () => readyPolicy,
+      );
+
+    const onReady = vi.fn();
+    renderWithRuntime(
+      runtime,
+      <MemoryRouter>
+        <VoiceKeyDialog
+          onClose={() => undefined}
+          onReady={onReady}
+          policy={localPolicy}
+          providers={["xai", "soniox"]}
+          tenantId="tenant-1"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("radio", { name: /On this computer \(Recommended\)/u }),
+    ).toBeChecked();
+    expect(
+      await screen.findByText("SenseVoice Small (INT8)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /FunASR MODEL_LICENSE v1\.1/u }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "More voice settings" }),
+    ).toHaveAttribute("href", "/t/tenant-1/settings/voice");
+
+    const senseRow = screen
+      .getByText("SenseVoice Small (INT8)")
+      .closest("[data-quick-speech-model]") as HTMLElement;
+    fireEvent.click(
+      within(senseRow).getByRole("button", { name: "Download & enable" }),
+    );
+
+    await waitFor(() =>
+      expect(onReady).toHaveBeenCalledWith("soniox", readyPolicy),
+    );
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        action: "download",
+        model_id: "sensevoice-small",
+      }),
+    );
+    expect(settingsUpdates).toContainEqual(
+      expect.objectContaining({
+        local_computer_id: computerId,
+        local_model_id: "sensevoice-small",
+        speech_provider: "local",
+      }),
+    );
   });
 });

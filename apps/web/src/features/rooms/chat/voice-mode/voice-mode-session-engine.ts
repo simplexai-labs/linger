@@ -1,8 +1,17 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import type { TeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
+import type { TeamHubVoiceSettings } from "@/features/teamhub/teamhub-types";
 import type { useOptionalVoiceControl } from "@/features/rooms/voice-control/voice-control-context";
 import { tryAcquireVoicePublisherLease } from "@/features/rooms/voice-control/voice-publisher-lease";
+import {
+  createDictationSilenceTimer,
+  VOICE_SILENCE_ACTIVITY_THRESHOLD,
+} from "@/features/voice-settings/dictation-silence-timer";
+import {
+  voiceSettingsQueryKey,
+  voiceSettingsQueryOptions,
+} from "@/features/voice-settings/voice-settings-queries";
 import {
   VoiceModeController,
   VoiceModeReopen,
@@ -124,6 +133,54 @@ export function runVoiceModeSession({
   let mode: "live" | "dictation" = modes.live ? "live" : "dictation";
   let arbiter: VoiceLiveArbiter | undefined;
   let connection: VoiceLiveConnection | undefined;
+  let lastStatus: VoiceModeState["status"] = "idle";
+  let disposed = false;
+  const silenceTimer = createDictationSilenceTimer(() => {
+    if (mode === "dictation" && entered()) {
+      exitByVoice();
+    }
+  });
+  const syncSilenceTimer = () => {
+    silenceTimer.setActive(
+      mode === "dictation" && lastStatus === "listening" && entered(),
+    );
+  };
+  const voiceSettingsKey = voiceSettingsQueryKey(tenantId);
+  const matchesVoiceSettingsKey = (key: readonly unknown[]) =>
+    key.length === voiceSettingsKey.length &&
+    voiceSettingsKey.every((segment, index) => key[index] === segment);
+  let unsubscribeVoiceSettings: (() => void) | undefined;
+  if (queryClient) {
+    const cachedSettings =
+      queryClient.getQueryData<TeamHubVoiceSettings>(voiceSettingsKey);
+    if (cachedSettings) {
+      silenceTimer.setTimeoutSeconds(cachedSettings.silence_timeout_seconds);
+    }
+    unsubscribeVoiceSettings = queryClient
+      .getQueryCache()
+      .subscribe((event) => {
+        if (
+          disposed ||
+          event.type !== "updated" ||
+          !matchesVoiceSettingsKey(event.query.queryKey)
+        ) {
+          return;
+        }
+        const nextSettings =
+          queryClient.getQueryData<TeamHubVoiceSettings>(voiceSettingsKey);
+        if (nextSettings) {
+          silenceTimer.setTimeoutSeconds(nextSettings.silence_timeout_seconds);
+        }
+      });
+    void queryClient
+      .fetchQuery(voiceSettingsQueryOptions(runtime.client, tenantId))
+      .then((settings) => {
+        if (!disposed) {
+          silenceTimer.setTimeoutSeconds(settings.silence_timeout_seconds);
+        }
+      })
+      .catch(() => undefined);
+  }
   const prepare = (text: string, eventId: string) => {
     if (arbiter) return arbiter.prepareTurn(eventId, text);
     const send = prepareMessage(text, eventId);
@@ -136,6 +193,7 @@ export function runVoiceModeSession({
     arbiter = undefined;
     connection = undefined;
     onLive(undefined);
+    syncSilenceTimer();
   };
   const acquireMicrophone = async () => {
     const control = hardware();
@@ -227,10 +285,28 @@ export function runVoiceModeSession({
         // The entry button is enabled only after this same policy has been
         // loaded, so the transport need not spend another startup RTT on it.
 
-        receive,
+        receive: (event) => {
+          if (
+            mode === "dictation" &&
+            (event.kind === "partial" ||
+              event.kind === "speech" ||
+              event.kind === "turn")
+          ) {
+            silenceTimer.noteActivity();
+          }
+          receive(event);
+        },
         fail,
         signal: abort.signal,
-        level: onLevel,
+        level: (nextLevel) => {
+          if (
+            mode === "dictation" &&
+            nextLevel >= VOICE_SILENCE_ACTIVITY_THRESHOLD
+          ) {
+            silenceTimer.noteActivity();
+          }
+          onLevel(nextLevel);
+        },
         microphone,
         deviceId: hardware()?.boundDevice?.deviceId,
         acquireMicrophone,
@@ -241,16 +317,22 @@ export function runVoiceModeSession({
   });
   setController(controller);
   const unsubscribe = controller.subscribe((next) => {
+    lastStatus = next.status;
+    syncSilenceTimer();
     onState(next);
     if (entered()) binding(roomId)?.onChange(present(next));
   });
   const depart = () => {
+    silenceTimer.dispose();
     void controller.pause();
     abortRef.current?.abort();
   };
   window.addEventListener("pagehide", depart);
   void controller.start();
   return () => {
+    disposed = true;
+    unsubscribeVoiceSettings?.();
+    silenceTimer.dispose();
     unsubscribe();
     window.removeEventListener("pagehide", depart);
     abortRef.current?.abort();

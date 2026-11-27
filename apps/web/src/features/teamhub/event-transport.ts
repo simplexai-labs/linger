@@ -61,6 +61,7 @@ const invalidationResources = {
   document: true,
   "document-access": true,
   "local-models": true,
+  "local-speech": true,
   room: true,
   "work-items": true,
 } satisfies Record<TeamHubInvalidationResource, true>;
