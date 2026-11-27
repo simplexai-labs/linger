@@ -93,6 +93,7 @@ const setup = (
     permissions?: ComputerDaemonOptions["permissions"];
     relaunch?: () => void;
     protect?: ComputerDaemonOptions["protect"];
+    localModelsStop?: ComputerDaemonOptions["localModelsStop"];
   } = {},
 ) => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "computer-daemon-"));
@@ -145,6 +146,9 @@ const setup = (
     ...(options.permissions ? { permissions: options.permissions } : {}),
     ...(options.relaunch ? { relaunch: options.relaunch } : {}),
     ...(options.protect ? { protect: options.protect } : {}),
+    ...(options.localModelsStop
+      ? { localModelsStop: options.localModelsStop }
+      : {}),
   });
   return { daemon, ctx, bus, config, children, credentials, directory, spawn };
 };
@@ -613,14 +617,70 @@ describe("ComputerDaemonModule", () => {
     expect(children[0]!.stopped).toBe(true);
   });
 
-  it("stops the daemon by closing its stdin", async () => {
+  it("stops the daemon by sending shutdown and closing its stdin", async () => {
     const { daemon, ctx, children } = setup();
     await daemon.start(ctx);
-    await daemon.stop();
+    await daemon.stop("update");
+    expect(children[0]!.written).toEqual([
+      { type: "shutdown", reason: "update" },
+    ]);
     expect(children[0]!.stopped).toBe(true);
     expect(children[0]!.killed).toBe(false);
     expect(daemon.state()).toBe("stopped");
     expect(daemon.connection()).toBe("disconnected");
+  });
+
+  it("arms and disarms crash local-models stop on launch and local-server changes", async () => {
+    let spec:
+      | {
+          executable: string;
+          args: string[];
+          logFile: string;
+          env: Record<string, string>;
+        }
+      | undefined = {
+      executable: "/Applications/Linger.app/Contents/MacOS/Linger",
+      args: ["/app/installer.js", "--home", "/home/me", "--stop-local-models"],
+      logFile: "/home/me/installer/local-models-stop.log",
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    };
+    const { daemon, ctx, bus, children } = setup({
+      localModelsStop: () => spec,
+    });
+    await daemon.start(ctx);
+    expect(children[0]!.written).toEqual([
+      {
+        type: "local_models_stop.arm",
+        executable: spec.executable,
+        args: spec.args,
+        log_file: spec.logFile,
+        env: spec.env,
+      },
+    ]);
+
+    // Unchanged spec does not resend arming messages.
+    bus.emit("local-server.changed");
+    expect(children[0]!.written).toHaveLength(1);
+
+    // Clearing the local server record disarms crash cleanup.
+    spec = undefined;
+    bus.emit("local-server.changed");
+    expect(children[0]!.written[1]).toEqual({
+      type: "local_models_stop.disarm",
+    });
+
+    // Internal daemon restart sends shutdown("restart") before closing stdin.
+    bus.emit("grants.changed");
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    expect(children[0]!.written[2]).toEqual({
+      type: "shutdown",
+      reason: "restart",
+    });
+    expect(children[1]!.written).toEqual([]);
+    await daemon.stop("logout");
+    expect(children[1]!.written).toEqual([
+      { type: "shutdown", reason: "logout" },
+    ]);
   });
 });
 
@@ -831,6 +891,33 @@ it("keeps handling daemon status after the log disk fills up", async () => {
   } finally {
     launch.mockRestore();
     openLog.mockRestore();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("spawns the daemon detached with windowsHide on every platform so Windows crash EOF reaches it", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "spawn-daemon-opts-"));
+  const log = path.join(directory, "computer-daemon.log");
+  const { spawn } = childProcess;
+  let capturedOptions: childProcess.SpawnOptions | undefined;
+  const launch = vi
+    .spyOn(childProcess, "spawn")
+    .mockImplementationOnce((_cmd, _args, options) => {
+      capturedOptions = options as childProcess.SpawnOptions;
+      return spawn(process.execPath, ["-e", "process.exit(0)"], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    });
+  try {
+    const child = spawnDaemon(process.execPath, log)("config.json", {});
+    const exit = new Promise<number | null>((resolve) => child.onExit(resolve));
+    await expect(exit).resolves.toBe(0);
+    expect(capturedOptions).toMatchObject({
+      detached: true,
+      windowsHide: true,
+    });
+  } finally {
+    launch.mockRestore();
     rmSync(directory, { recursive: true, force: true });
   }
 });

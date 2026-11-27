@@ -4,6 +4,7 @@ import {
   closeSync,
   createReadStream,
   existsSync,
+  mkdirSync,
   openSync,
   readFileSync,
 } from "node:fs";
@@ -89,6 +90,7 @@ import {
   NODE_RUNTIME_VERSION,
   nodeRuntimeDownloadUrls,
 } from "../../../../scripts/local-computer-node-distributions.mjs";
+import type { LocalModelsStopSpec } from "./computer-daemon.js";
 import type { DesktopConfig } from "./config.js";
 import type { Logger } from "./log.js";
 import type { Module, ModuleContext, StopReason } from "./modules.js";
@@ -494,6 +496,27 @@ export function pollDelayMs(
     : basePollMs;
 }
 
+// Non-secret environment variables the detached `--stop-local-models` helper
+// needs when launched by the daemon after an unexpected Desktop crash.
+const LOCAL_MODELS_STOP_ENV_KEYS = [
+  "LINGER_LOCALMODELS_TOOL_JSON",
+  "LINGER_LOCALMODELS_DEV_PYTHON",
+  "LINGER_LOCALMODELS_DEV_MODULE_DIR",
+  "LOCALMODELS_DEBUG",
+  "SIMPLEX_REGION",
+] as const;
+
+export function localModelsStopEnv(
+  environment: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const result: Record<string, string> = { ELECTRON_RUN_AS_NODE: "1" };
+  for (const key of LOCAL_MODELS_STOP_ENV_KEYS) {
+    const value = environment[key];
+    if (value) result[key] = value;
+  }
+  return result;
+}
+
 // The instance the desktop installs.
 export const LOCAL_INSTANCE = "desktop";
 
@@ -581,6 +604,7 @@ export class LocalServerModule implements Module {
   #resuming = false;
   #busyCount = 0;
   #started = false;
+  #localModelsStopped = false;
   #running: Promise<void> | undefined;
   #check: LocalModelsCheck = { state: "unchecked" };
   #checkedAt: number | undefined;
@@ -648,6 +672,7 @@ export class LocalServerModule implements Module {
 
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
+    this.#localModelsStopped = false;
     // After a reboot the local services are gone; start them again while the
     // window still points at them. A record of a Quick Install that stopped
     // before this computer connected (the app quit or the computer went off
@@ -752,7 +777,79 @@ export class LocalServerModule implements Module {
       this.#busyCount = 0;
       this.#ctx?.bus.emit("local-server.busy", false);
     }
-    if (reason === "quit") await this.#stopLocalModels();
+    if (reason === "quit" || reason === "logout") await this.#stopLocalModels();
+  }
+
+  // Returns the detached `--stop-local-models` command for this installation
+  // when a local-server record and bundled installer exist; used by
+  // ComputerDaemon to arm crash-only cleanup and by Windows session-end.
+  localModelsStopSpec(): LocalModelsStopSpec | undefined {
+    if (!this.#readRecordSync() || !existsSync(this.#installerScript()))
+      return undefined;
+    return this.#buildLocalModelsStopSpec();
+  }
+
+  #buildLocalModelsStopSpec(): LocalModelsStopSpec {
+    return {
+      executable: process.execPath,
+      args: [
+        ...linuxNodeFdHygieneArgs(this.#options.platform),
+        this.#installerScript(),
+        "--home",
+        this.#options.home,
+        "--stop-local-models",
+      ],
+      logFile: path.join(
+        this.#options.home,
+        "installer",
+        "local-models-stop.log",
+      ),
+      env: localModelsStopEnv(process.env),
+    };
+  }
+
+  // Synchronously spawns detached `--stop-local-models` during OS session-end
+  // (Windows WM_ENDSESSION) before Windows can terminate the process. Guarded
+  // by `#localModelsStopped` so subsequent `stop("logout")` never spawns twice.
+  stopLocalModelsNow(): void {
+    if (this.#localModelsStopped) return;
+    const spec = this.localModelsStopSpec();
+    if (!spec) return;
+    this.#localModelsStopped = true;
+    let output: number;
+    try {
+      mkdirSync(path.dirname(spec.logFile), { recursive: true, mode: 0o700 });
+      output = openSync(spec.logFile, "w", 0o600);
+    } catch (error) {
+      this.#ctx?.log.warn("local_server.local_models_stop_failed", {
+        error: String(error),
+      });
+      return;
+    }
+    this.#spawnLocalModelsStop(spec, output);
+  }
+
+  #spawnLocalModelsStop(spec: LocalModelsStopSpec, output: number): void {
+    try {
+      const child = spawn(spec.executable, [...spec.args], {
+        detached: true,
+        // A detached Windows process otherwise opens its own console window.
+        windowsHide: true,
+        stdio: ["ignore", output, output],
+        env: { ...process.env, ...spec.env },
+      });
+      child.once("error", (error) =>
+        this.#ctx?.log.warn("local_server.local_models_stop_failed", {
+          error: String(error),
+        }),
+      );
+      child.unref();
+      this.#ctx?.log.info("local_server.local_models_stopping", {
+        home: this.#options.home,
+      });
+    } finally {
+      closeSync(output);
+    }
   }
 
   #acquireBusy(): void {
@@ -776,53 +873,22 @@ export class LocalServerModule implements Module {
   // after the app is gone, its output in the installer's folder. An update
   // or an uninstall stops the models with the services instead.
   async #stopLocalModels(): Promise<void> {
+    if (this.#localModelsStopped) return;
     if (!(await this.#readRecord()) || !existsSync(this.#installerScript()))
       return;
-    const directory = path.join(this.#options.home, "installer");
+    this.#localModelsStopped = true;
+    const spec = this.#buildLocalModelsStopSpec();
     let output: number;
     try {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      output = openSync(
-        path.join(directory, "local-models-stop.log"),
-        "w",
-        0o600,
-      );
+      await mkdir(path.dirname(spec.logFile), { recursive: true, mode: 0o700 });
+      output = openSync(spec.logFile, "w", 0o600);
     } catch (error) {
       this.#ctx?.log.warn("local_server.local_models_stop_failed", {
         error: String(error),
       });
       return;
     }
-    try {
-      const child = spawn(
-        process.execPath,
-        [
-          ...linuxNodeFdHygieneArgs(this.#options.platform),
-          this.#installerScript(),
-          "--home",
-          this.#options.home,
-          "--stop-local-models",
-        ],
-        {
-          detached: true,
-          // A detached Windows process otherwise opens its own console window.
-          windowsHide: true,
-          stdio: ["ignore", output, output],
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-        },
-      );
-      child.once("error", (error) =>
-        this.#ctx?.log.warn("local_server.local_models_stop_failed", {
-          error: String(error),
-        }),
-      );
-      child.unref();
-      this.#ctx?.log.info("local_server.local_models_stopping", {
-        home: this.#options.home,
-      });
-    } finally {
-      closeSync(output);
-    }
+    this.#spawnLocalModelsStop(spec, output);
   }
 
   async resumable(serverUrl: string): Promise<boolean> {
@@ -4612,26 +4678,36 @@ export class LocalServerModule implements Module {
     return this.#desktopDirectory("local-server.json");
   }
 
+  #parseRecord(raw: string): LocalRecord | undefined {
+    const value = JSON.parse(raw) as Partial<LocalRecord>;
+    return typeof value.repo === "string" && typeof value.origin === "string"
+      ? {
+          // Records from before the install location are in the default
+          // home.
+          home:
+            typeof value.home === "string" && path.isAbsolute(value.home)
+              ? value.home
+              : this.#options.home,
+          repo: value.repo,
+          origin: value.origin,
+          ...(typeof value.version === "string"
+            ? { version: value.version }
+            : {}),
+        }
+      : undefined;
+  }
+
+  #readRecordSync(): LocalRecord | undefined {
+    try {
+      return this.#parseRecord(readFileSync(this.#recordFile(), "utf8"));
+    } catch {
+      return undefined;
+    }
+  }
+
   async #readRecord(): Promise<LocalRecord | undefined> {
     try {
-      const value = JSON.parse(
-        await readFile(this.#recordFile(), "utf8"),
-      ) as Partial<LocalRecord>;
-      return typeof value.repo === "string" && typeof value.origin === "string"
-        ? {
-            // Records from before the install location are in the default
-            // home.
-            home:
-              typeof value.home === "string" && path.isAbsolute(value.home)
-                ? value.home
-                : this.#options.home,
-            repo: value.repo,
-            origin: value.origin,
-            ...(typeof value.version === "string"
-              ? { version: value.version }
-              : {}),
-          }
-        : undefined;
+      return this.#parseRecord(await readFile(this.#recordFile(), "utf8"));
     } catch {
       return undefined;
     }

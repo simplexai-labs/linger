@@ -312,6 +312,15 @@ downloaded model that Run's Agent names.
   load it did not start is running. A failed status read (including the first
   one after connecting) is retried with backoff up to one minute until a read
   succeeds, so a transient failure never ends the watch.
+- Desktop crash cleanup. In Desktop mode, Desktop may arm the Daemon over
+  stdin (`local_models_stop.arm` / `local_models_stop.disarm`) with its
+  detached `installer.js --home <home> --stop-local-models` command and send
+  `{"type":"shutdown","reason":...}` before closing stdin on planned quit,
+  logout, restart, or update. When stdin reaches EOF cleanly without a prior
+  `shutdown` line, the Daemon spawns that detached stop helper outside its
+  process group / Job Object (stripping `LINGER_COMPUTER_TOKEN`) before
+  draining and exiting so local model engines and Bifrost do not stay
+  stranded after a Desktop crash.
 - Snapshots. `runner.local_models` carries `library-status/v1` mapped to
   `LocalModelsSnapshot` (pools gain `kind` and `gpu_index`, and keep the
   tool's `external_holders`, the closeable desktop apps it found holding that

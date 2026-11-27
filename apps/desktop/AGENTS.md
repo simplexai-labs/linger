@@ -703,12 +703,32 @@ Gateway and runs Agents. The daemon exits with the app.
   retry.
   On Windows the tool cannot prove and end a controller from a kit that has
   no stop command.
-  A quit the person chose (the tray, the app menu, the Dock) does the same
+  A quit the person chose (the tray, the app menu, the Dock) or an OS
+  logoff/shutdown does the same
   for the local models, except the controller, which serves the services
   that keep running: `LocalServer` starts `installer.js --home <default
 home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   its output in `<home>/installer/local-models-stop.log`, and does not wait
-  for it. If the installed kit fails verification, the helper exits with a
+  for it. On Windows, where Electron never emits `before-quit` at logoff or
+  shutdown, `index.ts` keeps a hidden, renderer-less sentinel `BaseWindow`
+  that catches `session-end` (`WM_ENDSESSION`) even under `--background`,
+  synchronously spawns the detached `--stop-local-models` helper via
+  `LocalServer.stopLocalModelsNow()` before `WM_ENDSESSION` returns, and
+  stops the host with reason `"logout"` (deduplicated through
+  `DesktopShutdownController` in `src/main/app-lifecycle.ts` and
+  `#localModelsStopped`). To cover hard Desktop crashes (`SIGKILL`,
+  Activity Monitor Force Quit, Task Manager End Task) where `before-quit`
+  never runs, `spawnDaemon` launches the daemon detached (`detached: true`,
+  `windowsHide: true`, keeping libuv from placing it in Electron's
+  kill-on-close Job Object on Windows), `ComputerDaemon` arms it over stdin
+  (`local_models_stop.arm` / `local_models_stop.disarm`) with the same
+  detached `--stop-local-models` command (with `LINGER_COMPUTER_TOKEN`
+  stripped) and announces planned stops (`{"type":"shutdown","reason":...}`)
+  before closing stdin for normal quit, logout, daemon restarts, and
+  updates/relaunch; if the daemon hits stdin EOF without a planned
+  `shutdown` line, it spawns the detached `--stop-local-models` helper
+  before exiting so engines and Bifrost exit while `--resume` coordinates on
+  `withLocalModelsLock`. If the installed kit fails verification, the helper exits with a
   failure and logs the repair guidance; the app still quits, and no unverified
   tool runs. It runs only when `desktop/local-server.json` names an
   installation. The Computer exits with the app, so nothing uses the models
