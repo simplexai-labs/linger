@@ -20,6 +20,7 @@ import {
   type RawOriginKind,
 } from "./search/source-store.js";
 import { agentWorkspaceRoot } from "./paths.js";
+import { truncateTitle } from "./text.js";
 
 const MAX_DIRECTORY_ITEMS = 64;
 // One search returns two separately ranked lists, so long derived reports
@@ -441,7 +442,7 @@ function entrySections(
     .sort((a, b) => a - b)
     .map((index) => ({
       sectionId: chunks[index]!.id,
-      title: chunks[index]!.heading.slice(0, 512),
+      title: truncateTitle(chunks[index]!.heading),
     }));
 }
 
@@ -468,7 +469,7 @@ function rawDirectory(chunks: SourceChunk[]) {
   return chunks.slice(0, MAX_DIRECTORY_ITEMS).map((chunk) => ({
     id: chunk.id,
     level: 2,
-    title: chunk.heading.slice(0, 512),
+    title: truncateTitle(chunk.heading),
   }));
 }
 
@@ -538,7 +539,7 @@ async function readRawEvidence(
       const truncated = offset + content.length < chunk.content.length;
       return {
         id: chunk.id,
-        title: chunk.heading.slice(0, 512),
+        title: truncateTitle(chunk.heading),
         level: 2,
         offset,
         content,

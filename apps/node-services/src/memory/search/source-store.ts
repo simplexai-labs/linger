@@ -15,6 +15,7 @@ import { localIsoString } from "../date.js";
 import { markMemoryChanged } from "../fs-utils.js";
 import { agentWorkspaceRoot } from "../paths.js";
 import type { AnotherMeSubject, SessionlyCollection } from "../types.js";
+import { truncateTitle } from "../text.js";
 
 export interface RawSourceReference {
   sourceId: string;
@@ -248,7 +249,7 @@ export function documentRawSource(input: DocumentRawSourceInput): RawSource {
     anchorPath,
     anchorHash: contentHash(anchor),
     contentHash: markdownHash,
-    title: input.title.slice(0, 512),
+    title: truncateTitle(input.title),
     sourceUri:
       input.textSourceKind === "file_version"
         ? `teamhub://documents/${input.documentId}/versions/${input.textSourceId}`
@@ -364,7 +365,7 @@ export function wikiPageRawSource(input: {
       `${JSON.stringify({ page_key: input.pageKey, document_version_id: input.documentVersionId })}\n`,
     ),
     contentHash: contentHash(input.markdown),
-    title: (input.title.trim() || input.pageKey).slice(0, 512),
+    title: truncateTitle(input.title.trim() || input.pageKey),
     sourceUri: `teamhub://documents/${input.documentId}/versions/${input.documentVersionId}`,
     date,
     sourceKind: "wiki_page",
@@ -406,7 +407,7 @@ export function periodReportSource(input: {
     anchorPath,
     anchorHash: contentHash(`${JSON.stringify({ report: key })}\n`),
     contentHash: contentHash(input.markdown),
-    title: (input.title.trim() || key).slice(0, 512),
+    title: truncateTitle(input.title.trim() || key),
     sourceUri: `teamhub://memory/${input.collection}/${input.periodStart}`,
     date: input.periodStart,
     sourceKind: "period_report",
@@ -542,11 +543,9 @@ async function writeSessionSource(
     anchorPath,
     anchorHash: contentHash(anchor),
     contentHash: contentHash(content),
-    title:
-      `${collection.date} ${collection.recording ? `Recording ${collection.recording.captureId}` : room.roomName}`.slice(
-        0,
-        512,
-      ),
+    title: truncateTitle(
+      `${collection.date} ${collection.recording ? `Recording ${collection.recording.captureId}` : room.roomName}`,
+    ),
     sourceUri: sessionSourceUri(collection),
     date: collection.date,
     sourceKind: collection.recording ? "recording_transcript" : "room_message",
