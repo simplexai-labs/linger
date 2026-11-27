@@ -62,17 +62,28 @@ export class ChunkSyncCoordinator {
   ): Promise<R[]> {
     const results = new Array<R>(sources.length);
     let next = 0;
+    let failed = false;
+    let failure: unknown;
     const workers = Array.from(
       { length: Math.min(this.sourceConcurrency, sources.length) },
       async () => {
-        while (next < sources.length) {
+        while (!failed && next < sources.length) {
           const index = next;
           next += 1;
-          results[index] = await operation(sources[index]!, index);
+          try {
+            results[index] = await operation(sources[index]!, index);
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              failure = error;
+            }
+          }
         }
       },
     );
     await Promise.all(workers);
+    // The Agent lock must outlive every source write, including failed batches.
+    if (failed) throw failure;
     return results;
   }
 

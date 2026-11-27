@@ -177,6 +177,9 @@ Core configuration:
   time; `weekly` always runs on Monday; Memory model requests share a 10-minute business
   cancellation, response header and body read timeout, with no streaming; the Chunk reconciliation runs hourly,
   with at most 4 Sources indexed at once per Agent.
+- A failed Chunk source batch stops taking new work and drains its active
+  source operations before releasing the Agent lock or starting its next
+  snapshot. The caller receives the first failure after those writes finish.
 - `TEAMHUB_DATABASE_URL` is required: the Memory role keeps its scheduler state in that database
   and does not start without it. It also enables the Raw Chunk persistent index and search.
 - The full Raw Chunk reconciliation runs once at service start and then at the built-in interval.
