@@ -460,6 +460,13 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   refusals return generic `MODEL_SOURCE_FAILED` (HTTP 502), and timeouts,
   `MODEL_SOURCE_EXPIRED`, or client disconnects return `MODEL_SOURCE_UNCONFIRMED`
   (HTTP 504).
+- Mobile Gateway (`internal/mobilegateway`) keeps one Relay control link per
+  enabled node in `mobile_relay_nodes` (`internal/mobilerelay`): the official
+  nodes TeamHub adds at start, a node `TEAMHUB_MOBILE_RELAY_URL` adds, and
+  custom nodes from `/v0/mobile/relays`. After any list change call
+  `syncMobileRelays`, which hands the enabled nodes to `Gateway.SetRelays`;
+  unchanged links stay up. `TEAMHUB_MOBILE_RELAY_URL` set empty keeps no
+  Relay link. docs/mobile.md and docs/adr/0005 describe the protocol.
 - Permission cards store the owner selected from the Computer's status before
   creation. Embedded Computer Use cards target Linger. Cards settle on grants
   for their stored subject. The request response returns the permission groups

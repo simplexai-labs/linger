@@ -319,14 +319,17 @@ describe("features that need model packages", () => {
         }),
     );
     const spawnWorker = vi.fn(
-      () =>
+      (_worker: string) =>
         Object.assign(new EventEmitter(), {
           kill: vi.fn(() => true),
         }) as unknown as ChildProcess,
     );
     const service = await startVoiceService({
       logger: { log: vi.fn() } as unknown as JsonLogger,
-      http: { mount: () => () => {} } as unknown as HttpHost,
+      http: {
+        mount: () => () => {},
+        mountUpgrade: () => () => {},
+      } as unknown as HttpHost,
       environment: {
         ...environment,
         LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
@@ -336,7 +339,10 @@ describe("features that need model packages", () => {
       installModels,
     });
     await vi.waitFor(() => expect(installModels).toHaveBeenCalledOnce());
-    expect(spawnWorker).not.toHaveBeenCalled();
+    // The Bridge loads no model and starts at once.
+    expect(spawnWorker.mock.calls.map(([worker]) => worker)).not.toContain(
+      "live",
+    );
     installed();
     await vi.waitFor(() =>
       expect(spawnWorker).toHaveBeenCalledWith(
@@ -351,17 +357,26 @@ describe("features that need model packages", () => {
       ),
     );
     const stopping = service.stop();
-    (spawnWorker.mock.results[0]!.value as EventEmitter).emit("exit", 0, null);
+    for (const result of spawnWorker.mock.results)
+      (result.value as EventEmitter).emit("exit", 0, null);
     await stopping;
   });
 
   it("download the voice packages at startup before any key exists", async () => {
     const { startVoiceService } = await import("../src/voice/service.js");
     const installModels = vi.fn(async () => undefined);
-    const spawnWorker = vi.fn();
+    const spawnWorker = vi.fn(
+      (_worker: string) =>
+        Object.assign(new EventEmitter(), {
+          kill: vi.fn(() => true),
+        }) as unknown as ChildProcess,
+    );
     const service = await startVoiceService({
       logger: { log: vi.fn() } as unknown as JsonLogger,
-      http: { mount: () => () => {} } as unknown as HttpHost,
+      http: {
+        mount: () => () => {},
+        mountUpgrade: () => () => {},
+      } as unknown as HttpHost,
       environment: {
         ...environment,
         LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
@@ -372,8 +387,13 @@ describe("features that need model packages", () => {
     });
     await service.reconcile();
     expect(installModels).toHaveBeenCalledOnce();
-    expect(spawnWorker).not.toHaveBeenCalled();
-    await service.stop();
+    expect(spawnWorker.mock.calls.map(([worker]) => worker)).not.toContain(
+      "live",
+    );
+    const stopping = service.stop();
+    for (const result of spawnWorker.mock.results)
+      (result.value as EventEmitter).emit("exit", 0, null);
+    await stopping;
   });
 
   it("download the voice packages from the installer's region first", async () => {
@@ -398,24 +418,36 @@ describe("features that need model packages", () => {
       async (_url: string) => new Response(new Uint8Array(vad)),
     );
     vi.stubGlobal("fetch", download);
+    const spawnWorker = vi.fn(
+      () =>
+        Object.assign(new EventEmitter(), {
+          kill: vi.fn(() => true),
+        }) as unknown as ChildProcess,
+    );
     try {
       const service = await startVoiceService({
         logger: { log: vi.fn() } as unknown as JsonLogger,
-        http: { mount: () => () => {} } as unknown as HttpHost,
+        http: {
+          mount: () => () => {},
+          mountUpgrade: () => () => {},
+        } as unknown as HttpHost,
         environment: {
           ...environment,
           SIMPLEX_REGION: "cn",
           LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
         },
         fetch: async () => Response.json({}),
-        spawnWorker: vi.fn(),
+        spawnWorker,
       });
       await vi.waitFor(() =>
         expect(download.mock.calls.map(([url]) => url)).toEqual([
           "https://registry.npmmirror.com/vad-0.2.7.tgz",
         ]),
       );
-      await service.stop();
+      const stopping = service.stop();
+      for (const result of spawnWorker.mock.results)
+        (result.value as EventEmitter).emit("exit", 0, null);
+      await stopping;
     } finally {
       vi.unstubAllGlobals();
     }
@@ -440,7 +472,10 @@ describe("features that need model packages", () => {
     );
     const service = await startVoiceService({
       logger: { log } as unknown as JsonLogger,
-      http: { mount: () => () => {} } as unknown as HttpHost,
+      http: {
+        mount: () => () => {},
+        mountUpgrade: () => () => {},
+      } as unknown as HttpHost,
       environment: {
         ...environment,
         LINGER_SECRET_SEED: "model-packages-test-seed-0123456789abcdef",
@@ -463,7 +498,8 @@ describe("features that need model packages", () => {
     );
     expect(installModels).toHaveBeenCalledTimes(2);
     const stopping = service.stop();
-    (spawnWorker.mock.results[0]!.value as EventEmitter).emit("exit", 0, null);
+    for (const result of spawnWorker.mock.results)
+      (result.value as EventEmitter).emit("exit", 0, null);
     await stopping;
   });
 });

@@ -30,6 +30,12 @@ fork's, a local or a self-hosted build, hides Send Diagnostics.
 { "diagnosticsUploadUrl": "https://diagnostics.example.com/v1/reports" }
 ```
 
+The Mobile App sends to the same receiver from Settings, Send Diagnostics,
+with `client.name` `linger-mobile`: a zip of the phone's own log (events,
+codes and timings, never content; see `apps/mobile/AGENTS.md`). Its builds
+take the receiver from `LINGER_DIAGNOSTICS_UPLOAD_URL` on EAS; without one
+only Save Diagnostics, the share sheet, shows.
+
 ## Protocol `linger.diagnostics-upload/v1`
 
 Two requests. The receiver never has to accept the zip itself: it can hand

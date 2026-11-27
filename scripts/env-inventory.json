@@ -136,11 +136,12 @@
     },
     "voice-workers": {
       "owner": "runtime",
-      "description": "Private port, internal local-ASR relay URL/token, and NODE_PATH assigned by the node-services voice supervisor to its ASR, recorder and Live child processes; never user configuration settings.",
+      "description": "Private port, internal local-ASR relay URL/token, NODE_PATH and the random per-process Bridge socket token assigned by the node-services voice supervisor to its ASR, recorder, Live and Bridge child processes; never user configuration settings.",
       "names": [
         "NODE_PATH",
         "NODE_SERVICES_INTERNAL_TOKEN",
         "NODE_SERVICES_INTERNAL_URL",
+        "VOICE_BRIDGE_TOKEN",
         "VOICE_WORKER_PORT"
       ]
     },
@@ -153,6 +154,17 @@
       "owner": "out-of-env",
       "description": "Per-instance key the local installer generates into the instance's private local-identity.key and passes to the TeamHub process only (not native.env, which every service and Compose load), which proves with it (POST /v0/local/identity) that it is the installation's server before the desktop app sends the owner password. Unset everywhere else, which turns the endpoint off. Not part of .env.",
       "names": ["TEAMHUB_LOCAL_IDENTITY_KEY"]
+    },
+    "relay": {
+      "owner": "docs",
+      "description": "Relay and Push Service settings read only by apps/relay, which pnpm dev does not run; apps/relay/README.md documents them.",
+      "names": [
+        "RELAY_HTTP_ADDRESS",
+        "RELAY_TRUSTED_PROXIES",
+        "RELAY_PUSH_SEAL_KEY",
+        "RELAY_PUSH_EXPO_ACCESS_TOKEN",
+        "RELAY_PUSH_EXPO_URL"
+      ]
     }
   }
 }

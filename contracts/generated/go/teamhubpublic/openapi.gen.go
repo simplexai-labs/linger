@@ -3299,6 +3299,24 @@ func (e MessageKind) Valid() bool {
 	}
 }
 
+// Defines values for MobileRelayNodeKind.
+const (
+	Custom   MobileRelayNodeKind = "custom"
+	Official MobileRelayNodeKind = "official"
+)
+
+// Valid indicates whether the value is a known member of the MobileRelayNodeKind enum.
+func (e MobileRelayNodeKind) Valid() bool {
+	switch e {
+	case Custom:
+		return true
+	case Official:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ModelSourceErrorCode.
 const (
 	ModelSourceErrorCodeAgentHasActiveRuns            ModelSourceErrorCode = "AGENT_HAS_ACTIVE_RUNS"
@@ -3413,6 +3431,24 @@ func (e NotionResourceKind) Valid() bool {
 	case NotionResourceKindNotionDatabase:
 		return true
 	case NotionResourceKindNotionPage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PairedPhoneStatus.
+const (
+	PairedPhoneStatusApproved PairedPhoneStatus = "approved"
+	PairedPhoneStatusPending  PairedPhoneStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the PairedPhoneStatus enum.
+func (e PairedPhoneStatus) Valid() bool {
+	switch e {
+	case PairedPhoneStatusApproved:
+		return true
+	case PairedPhoneStatusPending:
 		return true
 	default:
 		return false
@@ -3563,6 +3599,24 @@ func (e PersonalWikiState) Valid() bool {
 	case PersonalWikiStateIdle:
 		return true
 	case PersonalWikiStateRefreshing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PhonePlatform.
+const (
+	Android PhonePlatform = "android"
+	Ios     PhonePlatform = "ios"
+)
+
+// Valid indicates whether the value is a known member of the PhonePlatform enum.
+func (e PhonePlatform) Valid() bool {
+	switch e {
+	case Android:
+		return true
+	case Ios:
 		return true
 	default:
 		return false
@@ -4580,6 +4634,24 @@ func (e VoiceProviderKeyStatusSource) Valid() bool {
 	}
 }
 
+// Defines values for VoiceSessionClient.
+const (
+	VoiceSessionClientMobile VoiceSessionClient = "mobile"
+	VoiceSessionClientWeb    VoiceSessionClient = "web"
+)
+
+// Valid indicates whether the value is a known member of the VoiceSessionClient enum.
+func (e VoiceSessionClient) Valid() bool {
+	switch e {
+	case VoiceSessionClientMobile:
+		return true
+	case VoiceSessionClientWeb:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VoiceSessionPurpose.
 const (
 	ChatDictation   VoiceSessionPurpose = "chat_dictation"
@@ -5044,22 +5116,22 @@ func (e WorkItemPriority) Valid() bool {
 
 // Defines values for WorkItemResolution.
 const (
-	Completed  WorkItemResolution = "completed"
-	Duplicate  WorkItemResolution = "duplicate"
-	Failed     WorkItemResolution = "failed"
-	NotPlanned WorkItemResolution = "not_planned"
+	WorkItemResolutionCompleted  WorkItemResolution = "completed"
+	WorkItemResolutionDuplicate  WorkItemResolution = "duplicate"
+	WorkItemResolutionFailed     WorkItemResolution = "failed"
+	WorkItemResolutionNotPlanned WorkItemResolution = "not_planned"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemResolution enum.
 func (e WorkItemResolution) Valid() bool {
 	switch e {
-	case Completed:
+	case WorkItemResolutionCompleted:
 		return true
-	case Duplicate:
+	case WorkItemResolutionDuplicate:
 		return true
-	case Failed:
+	case WorkItemResolutionFailed:
 		return true
-	case NotPlanned:
+	case WorkItemResolutionNotPlanned:
 		return true
 	default:
 		return false
@@ -5984,6 +6056,14 @@ type CreateExternalConnectionRequest struct {
 
 	// DesktopCallbackUrl One-time OAuth return address on the desktop client's IPv4 loopback listener.
 	DesktopCallbackUrl *ExternalConnectionDesktopCallbackURL `json:"desktop_callback_url,omitempty"`
+}
+
+// CreateMobileRelayNodeRequest defines model for CreateMobileRelayNodeRequest.
+type CreateMobileRelayNodeRequest struct {
+	Label *string `json:"label,omitempty"`
+
+	// Url ws or wss origin of a Relay node, such as ws://203.0.113.7:7787. Plain ws is allowed: the session through it is end-to-end encrypted.
+	Url string `json:"url"`
 }
 
 // CreateRoomHistoryShare defines model for CreateRoomHistoryShare.
@@ -8474,6 +8554,41 @@ type MessageThreadSummaryUpdatedPayload struct {
 	Thread    MessageThreadSummary `json:"thread"`
 }
 
+// MobileRelayEndpoint A Relay node a phone may reach this computer through.
+type MobileRelayEndpoint struct {
+	Id    string `json:"id"`
+	Label string `json:"label"`
+
+	// Url ws or wss origin of the node.
+	Url string `json:"url"`
+}
+
+// MobileRelayNode A Relay node in this computer's list. The computer keeps one link to every enabled node, so a phone can reach it through any of them.
+type MobileRelayNode struct {
+	// Connected The computer's link to this node is up now.
+	Connected bool   `json:"connected"`
+	Enabled   bool   `json:"enabled"`
+	Id        string `json:"id"`
+
+	// Kind Official nodes ship with Linger and can be turned off but not removed.
+	Kind  MobileRelayNodeKind `json:"kind"`
+	Label string              `json:"label"`
+
+	// Url ws or wss origin of the node.
+	Url string `json:"url"`
+}
+
+// MobileRelayNodeKind Official nodes ship with Linger and can be turned off but not removed.
+type MobileRelayNodeKind string
+
+// MobileRelayNodeList defines model for MobileRelayNodeList.
+type MobileRelayNodeList struct {
+	Items []MobileRelayNode `json:"items"`
+
+	// LinksOff TEAMHUB_MOBILE_RELAY_URL is set empty on this computer, or it runs on the public development seed, so it keeps no Relay link whatever the list says.
+	LinksOff bool `json:"links_off"`
+}
+
 // ModelSourceError The common error body with error.code narrowed to ModelSourceErrorCode.
 type ModelSourceError struct {
 	// Code error.code of a refused model-source request (403, 409, 502, 503, 504); 400, 401, and 404 use the common codes. LOCAL_COMPUTER_OFFLINE: the Computer is not connected. MODEL_SOURCE_FORBIDDEN: the viewer is not the Computer owner. MODEL_SOURCE_UNAVAILABLE: the Computer has no localmodels tool or cannot switch model sources. AGENT_HAS_ACTIVE_RUNS: Agents on the Computer have running work and force_terminate was false; details carries one entry per such Agent, with field "agent" and the Agent's display name as reason. RUNTIME_NOT_ENABLED, LOCAL_MODEL_NO_ROOM, LOCAL_MODEL_UNKNOWN, and the BYOK endpoint refusals (BYOK_INVALID_CONFIG, BYOK_AUTH_FAILED, BYOK_NOT_FOUND, BYOK_UNREACHABLE, BYOK_UPSTREAM_REJECTED) are the Computer's refusals (409); for BYOK_AUTH_FAILED, BYOK_NOT_FOUND, BYOK_UNREACHABLE and BYOK_UPSTREAM_REJECTED, message is the Computer's own and names the address it sent to and the endpoint's HTTP status. BYOK_GATEWAY_FAILED: the Computer could not start, stop, or configure its local BYOK gateway (502); when the Computer reported a diagnostic message, message carries it and details carries one entry with field "gateway" and that diagnostic as reason. MODEL_SOURCE_FAILED: the Computer failed with an error that has no code of its own here (502). MODEL_SOURCE_SERVICE_UNAVAILABLE: Agent Service could not be reached (503). MODEL_SOURCE_UNCONFIRMED: the Computer had not answered by the deadline; it may still switch (504).
@@ -8576,6 +8691,34 @@ type PageMeta struct {
 
 	// NextCursor Opaque pagination cursor. Clients must not parse or modify it.
 	NextCursor *Cursor `json:"next_cursor,omitempty"`
+}
+
+// PairedPhone defines model for PairedPhone.
+type PairedPhone struct {
+	// ConfirmationCode The six digits the pending phone shows; absent once approved.
+	ConfirmationCode *string `json:"confirmation_code,omitempty"`
+
+	// Connected The phone holds a live session with this computer now.
+	Connected  bool          `json:"connected"`
+	Id         string        `json:"id"`
+	LastSeenAt time.Time     `json:"last_seen_at"`
+	Name       string        `json:"name"`
+	PairedAt   time.Time     `json:"paired_at"`
+	Platform   PhonePlatform `json:"platform"`
+
+	// PushEnabled The phone registered a push token.
+	PushEnabled bool `json:"push_enabled"`
+
+	// Status A pending phone waits for the Human to compare its code and approve it; it can do nothing until then.
+	Status PairedPhoneStatus `json:"status"`
+}
+
+// PairedPhoneStatus A pending phone waits for the Human to compare its code and approve it; it can do nothing until then.
+type PairedPhoneStatus string
+
+// PairedPhoneList defines model for PairedPhoneList.
+type PairedPhoneList struct {
+	Items []PairedPhone `json:"items"`
 }
 
 // PasswordChangeRequest defines model for PasswordChangeRequest.
@@ -8833,6 +8976,51 @@ type PersonalWikiFailureReason string
 
 // PersonalWikiState refreshing while a refresh runs or its follow-up is queued; failed when the latest refresh failed or conflicted.
 type PersonalWikiState string
+
+// PhonePairingCode A one-time code a Mobile App scans to pair with this computer. The URI carries the computer's public key and an invite that works once and only until expires_at; docs/mobile.md defines its format.
+type PhonePairingCode struct {
+	ComputerName string    `json:"computer_name"`
+	ExpiresAt    time.Time `json:"expires_at"`
+
+	// HostId Lowercase hex Host ID the Relay routes this computer by.
+	HostId string `json:"host_id"`
+
+	// LanUrls ws origins the computer answers on in the local network now.
+	LanUrls []string `json:"lan_urls"`
+
+	// PairingUri linger://pair?d=<base64url JSON>; show it as a QR code.
+	PairingUri string `json:"pairing_uri"`
+
+	// RelayUrl Origin of the first Relay node this computer keeps a link to, for clients that know only one; absent when it keeps none.
+	RelayUrl *string `json:"relay_url,omitempty"`
+
+	// Relays Every Relay node this computer keeps a link to now, in list order.
+	Relays *[]MobileRelayEndpoint `json:"relays,omitempty"`
+}
+
+// PhonePlatform defines model for PhonePlatform.
+type PhonePlatform string
+
+// PhonePushGrantRequest defines model for PhonePushGrantRequest.
+type PhonePushGrantRequest struct {
+	// Grant The sealed push grant the Push Service issued to this phone for this computer.
+	Grant string `json:"grant"`
+
+	// ServiceUrl The Push Service that issued the grant; TeamHub sends this phone's alerts there.
+	ServiceUrl string `json:"service_url"`
+}
+
+// PhonePushPreferences defines model for PhonePushPreferences.
+type PhonePushPreferences struct {
+	// Decisions Alert when the Human must make a decision.
+	Decisions bool `json:"decisions"`
+
+	// Replies Alert when an Agent's turn ends with a reply for the Human.
+	Replies bool `json:"replies"`
+
+	// WhenActive Alert even while the Human looks at the Room on another device.
+	WhenActive bool `json:"when_active"`
+}
 
 // PocketNote defines model for PocketNote.
 type PocketNote struct {
@@ -10147,6 +10335,11 @@ type UnifiedDocumentVersionRef struct {
 	VersionNumber int    `json:"version_number"`
 }
 
+// UpdateMobileRelayNodeRequest defines model for UpdateMobileRelayNodeRequest.
+type UpdateMobileRelayNodeRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 // UpdateVoiceSettingsRequest defines model for UpdateVoiceSettingsRequest.
 type UpdateVoiceSettingsRequest struct {
 	KeepLoadedSeconds *int `json:"keep_loaded_seconds,omitempty"`
@@ -10462,8 +10655,13 @@ type VoiceSession struct {
 	UpdatedAt Timestamp `json:"updated_at"`
 }
 
+// VoiceSessionClient The client that publishes the microphone. A mobile Live session has no page, so the live voice offers no page tools.
+type VoiceSessionClient string
+
 // VoiceSessionCreateRequest defines model for VoiceSessionCreateRequest.
 type VoiceSessionCreateRequest struct {
+	// Client The client that publishes the microphone. A mobile Live session has no page, so the live voice offers no page tools.
+	Client  *VoiceSessionClient `json:"client,omitempty"`
 	Purpose VoiceSessionPurpose `json:"purpose"`
 }
 
@@ -11586,6 +11784,18 @@ type ExchangeLocalComputerEnrollmentJSONRequestBody = LocalComputerEnrollmentExc
 
 // ProveLocalIdentityJSONRequestBody defines body for ProveLocalIdentity for application/json ContentType.
 type ProveLocalIdentityJSONRequestBody = LocalIdentityChallenge
+
+// PutPhonePushGrantJSONRequestBody defines body for PutPhonePushGrant for application/json ContentType.
+type PutPhonePushGrantJSONRequestBody = PhonePushGrantRequest
+
+// PutPhonePushPreferencesJSONRequestBody defines body for PutPhonePushPreferences for application/json ContentType.
+type PutPhonePushPreferencesJSONRequestBody = PhonePushPreferences
+
+// CreateMobileRelayNodeJSONRequestBody defines body for CreateMobileRelayNode for application/json ContentType.
+type CreateMobileRelayNodeJSONRequestBody = CreateMobileRelayNodeRequest
+
+// UpdateMobileRelayNodeJSONRequestBody defines body for UpdateMobileRelayNode for application/json ContentType.
+type UpdateMobileRelayNodeJSONRequestBody = UpdateMobileRelayNodeRequest
 
 // UpdateRoomJSONRequestBody defines body for UpdateRoom for application/json ContentType.
 type UpdateRoomJSONRequestBody = RoomUpdateRequest

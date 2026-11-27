@@ -18,7 +18,7 @@ func TestVoiceResumeJobsContinuesFromTheRows(t *testing.T) {
 	env, alice, _ := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 1<<20, 1<<30, nil, skipping(app.VoiceJobs))
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Resume voice jobs", "resume-voice-jobs")
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_resume", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "resume", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_resume", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "resume", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

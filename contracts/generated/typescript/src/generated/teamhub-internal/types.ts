@@ -1520,6 +1520,11 @@ export interface components {
       instructions: string;
       history: components["schemas"]["VoiceLiveContextMessage"][];
       tools: components["schemas"]["VoiceLiveTool"][];
+      /**
+       * @description The client the Human speaks through. The Runtime offers page tools (read_page, page_action) only to web; absent means web.
+       * @enum {string}
+       */
+      client?: "web" | "mobile";
     };
     VoiceLiveReply: {
       event_id: components["schemas"]["VoiceId"];

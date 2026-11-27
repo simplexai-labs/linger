@@ -37,7 +37,7 @@ func newVoiceEventStreamEnv(t *testing.T) (*testEnv, *http.Client, *http.Client,
 	}, withVoiceMedia(media))
 	media.service = voicemedia.New(env.pool, nil, nil)
 	room := env.createRoom(alice, acmeTenant, "Voice events", "voice-events")
-	voice, err := store.New(env.pool).CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{
+	voice, err := store.New(env.pool).CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web",
 		ID: "voice_events_test", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: room, ProviderRoomName: "voice-events", ParticipantIdentity: "voice-events", Purpose: "hardware_control",
 	})
 	if err != nil {
@@ -262,7 +262,7 @@ func TestVoiceEventFeedResumesFromTheTranscriptSnapshot(t *testing.T) {
 	// Concurrent locked writers on two sessions: each feed returns every
 	// segment once, in seq order.
 	otherRoom := env.createRoom(otherBrowser, acmeTenant, "Voice events other", "voice-events-other")
-	other, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{ID: "voice_events_other", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: otherRoom, ProviderRoomName: "voice-events-other", ParticipantIdentity: "voice-events-other", Purpose: "hardware_control"})
+	other, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{Client: "web", ID: "voice_events_other", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: otherRoom, ProviderRoomName: "voice-events-other", ParticipantIdentity: "voice-events-other", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ import {
   AiChipIcon,
   LanguageSkillIcon,
   LaptopIcon,
+  SmartPhone01Icon,
   Mic01Icon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
@@ -46,6 +47,11 @@ export function SettingsLayout() {
             icon={<Icon icon={AiChipIcon} size={14} />}
             label={t(settingsMessages.models)}
             to="models"
+          />
+          <SettingsLink
+            icon={<Icon icon={SmartPhone01Icon} size={14} />}
+            label={t(settingsMessages.phones)}
+            to="phones"
           />
           <SettingsLink
             icon={<Icon icon={Mic01Icon} size={14} />}

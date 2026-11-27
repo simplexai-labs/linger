@@ -150,7 +150,13 @@ export const permissionAllowed = (
 ): boolean => {
   if (!serverUrl || !details.requestingUrl) return false;
   if (!sameOrigin(details.requestingUrl, serverUrl)) return false;
-  if (permission === "notifications") return true;
+  // clipboard-sanitized-write backs navigator.clipboard.writeText, which the
+  // SPA's copy buttons (such as the phone pairing link) use.
+  if (
+    permission === "notifications" ||
+    permission === "clipboard-sanitized-write"
+  )
+    return true;
   if (permission === "media") {
     const types = details.mediaTypes ?? [];
     return types.length > 0 && types.every((t) => t === "audio");

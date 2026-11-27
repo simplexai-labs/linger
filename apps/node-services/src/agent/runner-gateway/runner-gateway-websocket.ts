@@ -7,6 +7,7 @@ import {
 } from "./local-computer-management.js";
 import { logAgentEvent } from "../observability/agent-log.js";
 import type { IncomingMessage, Server } from "node:http";
+import type { HttpHost } from "../../http-host.js";
 import type { Duplex } from "node:stream";
 
 import WebSocket, { WebSocketServer, type RawData } from "ws";
@@ -40,6 +41,12 @@ import type {
 
 export interface AttachRunnerGatewayWebSocketOptions {
   readonly server: Server;
+  /**
+   * The shared listener's upgrade routing. When given, the gateway mounts its
+   * path there and the host answers other paths, instead of listening on
+   * `server` itself.
+   */
+  readonly upgrades?: Pick<HttpHost, "mountUpgrade">;
   readonly gateway: RunnerGateway;
   readonly credentialAuthenticators: readonly RunnerCredentialAuthenticator[];
   readonly path?: string;
@@ -157,12 +164,18 @@ export const attachRunnerGatewayWebSocket = (
       session.start();
     });
   };
-  options.server.on("upgrade", onUpgrade);
+  let unmount: () => void;
+  if (options.upgrades) {
+    unmount = options.upgrades.mountUpgrade(path, onUpgrade);
+  } else {
+    options.server.on("upgrade", onUpgrade);
+    unmount = () => options.server.off("upgrade", onUpgrade);
+  }
 
   return {
     close: () => {
       closePromise ??= (async () => {
-        options.server.off("upgrade", onUpgrade);
+        unmount();
         await Promise.all([...sessions].map((session) => session.close()));
         await new Promise<void>((resolve) =>
           webSocketServer.close(() => resolve()),

@@ -14,6 +14,7 @@ export const USER_ENVIRONMENT_KEYS = [
   "COMPOSIO_API_KEY",
   "SONIOX_API_KEY",
   "XAI_API_KEY",
+  "TEAMHUB_MOBILE_RELAY_URL",
   "TZ",
 ] as const;
 export type UserEnvironmentKey = (typeof USER_ENVIRONMENT_KEYS)[number];
@@ -31,6 +32,9 @@ COMPOSIO_API_KEY=
 SONIOX_API_KEY=
 # Grok Live voice mode (xAI); it does not need Soniox.
 XAI_API_KEY=
+# A Relay node you run yourself for paired phones away from your network,
+# added beside the official nodes, for example wss://relay.example.com.
+TEAMHUB_MOBILE_RELAY_URL=
 # Time zone of the services, for example America/New_York.
 TZ=
 `;

@@ -81,6 +81,16 @@ describe("window policy", () => {
   it("grants only notifications and audio to the server origin", () => {
     const from = { requestingUrl: `${server}/rooms` };
     expect(permissionAllowed("notifications", from, server)).toBe(true);
+    expect(permissionAllowed("clipboard-sanitized-write", from, server)).toBe(
+      true,
+    );
+    expect(
+      permissionAllowed(
+        "clipboard-sanitized-write",
+        { requestingUrl: "https://evil.example.com/" },
+        server,
+      ),
+    ).toBe(false);
     expect(
       permissionAllowed("media", { ...from, mediaTypes: ["audio"] }, server),
     ).toBe(true);

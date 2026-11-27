@@ -51,6 +51,8 @@ tags:
     description: Tenant-scoped immutable Packages, lifecycle management, and Agent Bindings.
   - name: Routines
     description: Room-scoped recurring messages that fire into the Room timeline.
+  - name: Mobile
+    description: Phones paired with this computer through the Mobile Gateway.
 security:
   - sessionCookie: []
 paths:
@@ -187,6 +189,40 @@ paths:
                 $ref: '../components/domain.yaml#/components/schemas/CurrentIdentity'
         '401':
           $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+  /v0/me/phone-pairings:
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/phonePairings'
+  /v0/me/phones:
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/phones'
+  /v0/me/phones/{phoneId}:
+    parameters:
+      - name: phoneId
+        in: path
+        required: true
+        schema:
+          type: string
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/phone'
+  /v0/me/phones/{phoneId}/approve:
+    parameters:
+      - name: phoneId
+        in: path
+        required: true
+        schema:
+          type: string
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/phoneApproval'
+  /v0/me/phone/push-grant:
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/phonePushGrant'
+  /v0/me/phone/push-preferences:
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/phonePushPreferences'
+  /v0/mobile/relays:
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/relays'
+  /v0/mobile/relays/{relayId}:
+    parameters:
+      - name: relayId
+        in: path
+        required: true
+        schema:
+          type: string
+    $ref: '../paths/teamhub-public-mobile-phones.yaml#/relay'
   /v0/events:
     get:
       tags: [Events]

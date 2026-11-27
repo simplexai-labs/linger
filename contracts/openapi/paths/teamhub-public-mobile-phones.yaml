@@ -1,0 +1,279 @@
+phonePairings:
+  post:
+    tags: [Mobile]
+    operationId: createPhonePairingCode
+    summary: Create a one-time code a Mobile App scans to pair with this computer.
+    description: >-
+      The invite inside the code works once and for ten minutes. Answers 503
+      MOBILE_UNAVAILABLE when the deployment has no secret seed, so it has no
+      computer key.
+    responses:
+      "201":
+        description: Pairing code created.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/mobile-phones.yaml#/components/schemas/PhonePairingCode"
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+      "503":
+        description: The Mobile Gateway is not configured.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"
+phones:
+  get:
+    tags: [Mobile]
+    operationId: listPairedPhones
+    summary: List the phones paired with this computer.
+    responses:
+      "200":
+        description: Paired phones, newest first; removed phones are not listed.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/mobile-phones.yaml#/components/schemas/PairedPhoneList"
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+phone:
+  delete:
+    tags: [Mobile]
+    operationId: removePairedPhone
+    summary: Remove a paired phone.
+    description: >-
+      Revokes the phone's device Session and closes its live sessions at once.
+      The phone must pair again with a new code.
+    responses:
+      "204":
+        description: The phone was removed, or was already gone.
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+      "404":
+        { $ref: "../components/common.yaml#/components/responses/NotFound" }
+phoneApproval:
+  post:
+    tags: [Mobile]
+    operationId: approvePairedPhone
+    summary: Approve a pending phone after comparing its confirmation code.
+    description: >-
+      Creates the phone's device Session and lets its live sessions work.
+      Answers 404 when the phone is not pending, for example because it waited
+      longer than ten minutes.
+    responses:
+      "204":
+        description: The phone was approved.
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "404":
+        { $ref: "../components/common.yaml#/components/responses/NotFound" }
+phonePushGrant:
+  put:
+    tags: [Mobile]
+    operationId: putPhonePushGrant
+    summary: Register the calling phone's push grant for this computer.
+    description: >-
+      Only a paired phone may call it, through its session; other callers get
+      403 PHONE_ONLY. The grant comes from the Push Service and never contains
+      the phone's push token in readable form. Pushes carry an event kind and
+      IDs, never content. A service_url other than the Push Service this
+      computer trusts (TEAMHUB_MOBILE_PUSH_SERVICE_URL) gets 400
+      PUSH_SERVICE_NOT_ALLOWED.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/mobile-phones.yaml#/components/schemas/PhonePushGrantRequest"
+    responses:
+      "204":
+        description: Grant saved.
+      "400":
+        { $ref: "../components/common.yaml#/components/responses/BadRequest" }
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+  delete:
+    tags: [Mobile]
+    operationId: deletePhonePushGrant
+    summary: Stop pushes to the calling phone.
+    responses:
+      "204":
+        description: Grant cleared.
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+phonePushPreferences:
+  put:
+    tags: [Mobile]
+    operationId: putPhonePushPreferences
+    summary: Set what the calling phone is alerted about.
+    description: >-
+      Only a paired phone may call it, through its session; other callers get
+      403 PHONE_ONLY. Replies alert once when an Agent's turn in the Human's
+      direct chat, or a group message that mentions them, has waited 30
+      seconds unread; decisions alert at once. Neither alerts while the Human
+      looks at the Room on any device unless when_active is true.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/mobile-phones.yaml#/components/schemas/PhonePushPreferences"
+    responses:
+      "204":
+        description: Preferences saved.
+      "400":
+        { $ref: "../components/common.yaml#/components/responses/BadRequest" }
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+relays:
+  get:
+    tags: [Mobile]
+    operationId: listMobileRelayNodes
+    summary: List the Relay nodes this computer keeps links to.
+    description: >-
+      Answers 503 MOBILE_UNAVAILABLE when the deployment has no secret seed.
+    responses:
+      "200":
+        description: Official nodes first, then custom ones in the order they were added.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/mobile-phones.yaml#/components/schemas/MobileRelayNodeList"
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "503":
+        description: The Mobile Gateway is not configured.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"
+  post:
+    tags: [Mobile]
+    operationId: createMobileRelayNode
+    summary: Add a custom Relay node; the computer links to it at once.
+    description: >-
+      Answers 400 INVALID_RELAY_URL for anything but a ws or wss origin
+      without path, query or credentials, 409 RELAY_EXISTS when the list
+      already has the URL, 409 TOO_MANY_RELAYS when it already has eight
+      custom nodes, 403 RELAY_PRIVATE_FROM_PHONE when a Paired Phone names a
+      host on a loopback, private or link-local address, and 503 MOBILE_UNAVAILABLE without a secret seed.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/mobile-phones.yaml#/components/schemas/CreateMobileRelayNodeRequest"
+    responses:
+      "201":
+        description: The node was added and enabled.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/mobile-phones.yaml#/components/schemas/MobileRelayNode"
+      "400":
+        { $ref: "../components/common.yaml#/components/responses/BadRequest" }
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "403":
+        { $ref: "../components/common.yaml#/components/responses/Forbidden" }
+      "409":
+        description: The list already has this URL, or eight custom nodes.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"
+      "503":
+        description: The Mobile Gateway is not configured.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"
+relay:
+  patch:
+    tags: [Mobile]
+    operationId: updateMobileRelayNode
+    summary: Turn a Relay node on or off.
+    description: >-
+      The computer links to an enabled node and drops its link to a disabled
+      one at once; phones stop using a node they can no longer reach.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/mobile-phones.yaml#/components/schemas/UpdateMobileRelayNodeRequest"
+    responses:
+      "200":
+        description: The node as it is now.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/mobile-phones.yaml#/components/schemas/MobileRelayNode"
+      "400":
+        { $ref: "../components/common.yaml#/components/responses/BadRequest" }
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "404":
+        { $ref: "../components/common.yaml#/components/responses/NotFound" }
+      "503":
+        description: The Mobile Gateway is not configured.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"
+  delete:
+    tags: [Mobile]
+    operationId: removeMobileRelayNode
+    summary: Remove a custom Relay node.
+    description: >-
+      Answers 409 RELAY_OFFICIAL for an official node, which can only be
+      turned off.
+    responses:
+      "204":
+        description: The node was removed, or was already gone.
+      "401":
+        {
+          $ref: "../components/common.yaml#/components/responses/Unauthenticated",
+        }
+      "409":
+        description: Official nodes cannot be removed.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"
+      "503":
+        description: The Mobile Gateway is not configured.
+        content:
+          application/json:
+            schema:
+              $ref: "../components/common.yaml#/components/schemas/ErrorResponse"

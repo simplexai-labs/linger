@@ -134,6 +134,15 @@ describe("realtime session rules", () => {
     );
     expect(realtimeInstructions("base", [])).not.toContain("web_search");
   });
+
+  it("describes the app window only when page tools are offered", () => {
+    expect(realtimeInstructions("base", [{ name: "page_action" }])).toContain(
+      "This app's window",
+    );
+    expect(
+      realtimeInstructions("base", [{ name: "end_voice_mode" }]),
+    ).not.toContain("This app's window");
+  });
 });
 
 describe("localTimeRule", () => {

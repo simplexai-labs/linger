@@ -2,21 +2,48 @@ import { fileURLToPath } from "node:url";
 
 import { cli, ServerOptions, WorkerPermissions } from "@livekit/agents";
 
+import { createJsonLogger } from "@linger/service-kit/node";
+
+import { connectLiveKitMedia } from "./bridge-livekit.js";
+import { startBridgeServer } from "./bridge-server.js";
 import {
   calculateWorkerLoad,
   healthPort,
+  loadBridgeConfig,
   loadConfig,
   maxSessions,
 } from "./config.js";
 
-const config = loadConfig();
-// Node Services supervises separate ASR, recorder and Live worker processes.
+// Node Services supervises separate ASR, recorder, Live and Bridge worker
+// processes.
 const recorder = process.argv.includes("--recorder");
 const live = process.argv.includes("--live");
-if (live && recorder) throw new Error("Worker roles are exclusive");
+const bridge = process.argv.includes("--bridge");
+if ([recorder, live, bridge].filter(Boolean).length > 1)
+  throw new Error("Worker roles are exclusive");
 const production = process.env.NODE_ENV === "production";
+const entry = process.argv[1] === fileURLToPath(import.meta.url);
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (entry && bridge) {
+  // The Bridge is no LiveKit agent: it joins Rooms with phones' grants.
+  if (process.connected)
+    process.once("disconnect", () => process.kill(process.pid, "SIGTERM"));
+  const bridgeConfig = loadBridgeConfig();
+  const logger = createJsonLogger({ service: "voice-bridge" });
+  const server = await startBridgeServer({
+    ...bridgeConfig,
+    port: healthPort,
+    connect: connectLiveKitMedia,
+    logger,
+  });
+  logger.log("info", "voice_bridge.listening", { port: server.port });
+  const stop = () => {
+    void server.close().finally(() => process.exit(0));
+  };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+} else if (entry) {
+  const config = loadConfig();
   // A supervisor crash closes IPC; flush recording before the replacement starts.
   if (process.connected)
     process.once("disconnect", () => process.kill(process.pid, "SIGTERM"));

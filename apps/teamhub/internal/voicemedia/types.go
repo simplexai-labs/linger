@@ -25,6 +25,13 @@ const (
 	PurposeChatLive        = "chat_live"
 )
 
+// The client that publishes a VoiceSession's microphone. A mobile Live
+// session has no page to read or operate.
+const (
+	ClientWeb    = "web"
+	ClientMobile = "mobile"
+)
+
 type VoiceSession struct {
 	ID                   string
 	TenantID             string
@@ -64,6 +71,8 @@ type CreateVoiceSessionRequest struct {
 	AuthSessionID string
 	RoomID        string
 	Purpose       string
+	// Client is ClientWeb or ClientMobile; empty means ClientWeb.
+	Client string
 	// SpeechConfig is optional serialized SpeechDispatchConfig persisted with
 	// the session so reconnects and reconciles emit identical dispatch metadata.
 	SpeechConfig json.RawMessage

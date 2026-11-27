@@ -1066,6 +1066,7 @@ describe("AgentManager HTTP adapter", () => {
             mounted = undefined;
           };
         },
+        mountUpgrade: () => () => {},
         finishStartup() {},
         async close() {},
       };

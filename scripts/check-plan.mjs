@@ -71,6 +71,17 @@ export const TARGETS = [
     packages: ["apps/voice-runtime"],
   },
   {
+    target: "check-relay",
+    lane: "fast",
+    paths: ["apps/relay/", "contracts/mobile-session/"],
+  },
+  {
+    target: "check-mobile",
+    lane: "fast",
+    packages: ["apps/mobile"],
+    paths: ["contracts/mobile-session/"],
+  },
+  {
     target: "check-teamhub-cli",
     lane: "fast",
     ci: "teamhub-cli",

@@ -154,7 +154,12 @@ function MiniWindow({
   const t = useT();
   const { client } = useTeamHubRuntime();
   const navigate = useNavigate();
-  const { roomId, tenantId } = session.target;
+  const { recipient, roomId, tenantId } = session.target;
+  // A direct Agent chat talks with that Agent; any other Room with Another Me.
+  const voiceActorId =
+    recipient?.kind === "agent" ? recipient.id : anotherMeActorId;
+  const voiceName =
+    recipient?.kind === "agent" ? recipient.display_name : "Another Me";
   const routeRoom = useMatch("/t/:tenantId/rooms/:roomId/*");
   const inVoiceRoom = routeRoom?.params.roomId === roomId;
   // The Room's own Chat keeps its caches live; elsewhere this window does,
@@ -475,10 +480,10 @@ function MiniWindow({
         >
           <VoiceAvatarBeat listening={listening} waking={waking}>
             <ActorAvatar
-              actorId={anotherMeActorId}
+              actorId={voiceActorId}
               cheer={cheer}
               kind="agent"
-              name="Another Me"
+              name={voiceName}
               size="xs"
             />
           </VoiceAvatarBeat>

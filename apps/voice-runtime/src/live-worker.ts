@@ -366,6 +366,16 @@ export const pageActionTool: LiveTool = {
   },
 };
 
+/**
+ * The tools the client performs. A phone has no page to read or operate, so
+ * it only leaves Voice Mode; an absent client is a browser.
+ */
+export function clientTools(client: "web" | "mobile" | undefined) {
+  return client === "mobile"
+    ? browserTools.filter((tool) => tool.name === "end_voice_mode")
+    : [...browserTools, pageActionTool];
+}
+
 /** Tools the browser performs: the page, and leaving Voice Mode. */
 const browserToolNames = new Set([
   "read_page",
@@ -810,8 +820,7 @@ export class LiveVoiceWorker {
           instructions: context.instructions,
           tools: [
             ...context.tools,
-            ...browserTools,
-            pageActionTool,
+            ...clientTools(context.client),
             xaiSpeedTool,
           ],
           history: context.history,

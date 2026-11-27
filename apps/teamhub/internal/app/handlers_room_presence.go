@@ -40,6 +40,15 @@ func (t *roomPresenceThrottle) recentlyPresent(roomID string, now time.Time) boo
 	return false
 }
 
+// presentFor reports whether this Account sent an admitted hint for the Room
+// within the window, from any of its devices.
+func (t *roomPresenceThrottle) presentFor(accountID, roomID string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	last, ok := t.seen[accountID+"\x00"+roomID]
+	return ok && now.Sub(last) < roomPresenceRecentWindow
+}
+
 func (t *roomPresenceThrottle) allow(key string, now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -230,11 +230,11 @@ export const createAgentManagerHttpServer = <TRuntimeSettings>(
     if (options.runnerGateway) {
       runnerGatewayWebSocket = attachRunnerGatewayWebSocket({
         server: httpHost.server,
+        upgrades: httpHost,
         gateway: options.runnerGateway,
         credentialAuthenticators: options.runnerCredentialAuthority
           ? [options.runnerCredentialAuthority]
           : [],
-        rejectUnmatchedUpgrades: true,
         onSessionError: (error, context) => {
           logAgentEvent("error", "runner.session.failed", {
             ...context,

@@ -26,7 +26,7 @@ func TestLiveKitCompletionKeepsSpeechAcrossStopBoundary(t *testing.T) {
 		t.Fatalf("direct Room status=%d err=%v", direct.status, direct.err)
 	}
 	hash := sha256.Sum256([]byte("completion-boundary"))
-	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{ID: "voice_completion_boundary", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: direct.roomID, ProviderRoomName: "completion-boundary", ParticipantIdentity: "completion-boundary", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{Client: "web", ID: "voice_completion_boundary", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: direct.roomID, ProviderRoomName: "completion-boundary", ParticipantIdentity: "completion-boundary", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestLiveKitCompletionKeepsSpeechDuringEgressStartupHead(t *testing.T) {
 		t.Fatalf("direct Room status=%d err=%v", direct.status, direct.err)
 	}
 	hash := sha256.Sum256([]byte("egress-head"))
-	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{ID: "voice_egress_head", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: direct.roomID, ProviderRoomName: "egress-head", ParticipantIdentity: "egress-head", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(ctx, store.CreateVoiceSessionParams{Client: "web", ID: "voice_egress_head", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: direct.roomID, ProviderRoomName: "egress-head", ParticipantIdentity: "egress-head", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

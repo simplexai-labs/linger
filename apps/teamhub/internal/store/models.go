@@ -1198,6 +1198,44 @@ type MessageReaction struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type MobilePairingInvite struct {
+	ID         string             `json:"id"`
+	AccountID  string             `json:"account_id"`
+	TokenHash  []byte             `json:"token_hash"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+}
+
+type MobileRelayNode struct {
+	ID        string             `json:"id"`
+	Url       string             `json:"url"`
+	Label     string             `json:"label"`
+	Kind      string             `json:"kind"`
+	Enabled   bool               `json:"enabled"`
+	Position  int32              `json:"position"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type PairedPhone struct {
+	ID               string             `json:"id"`
+	AccountID        string             `json:"account_id"`
+	PublicKey        []byte             `json:"public_key"`
+	Name             string             `json:"name"`
+	Platform         string             `json:"platform"`
+	ConfirmationCode string             `json:"confirmation_code"`
+	ApprovedAt       pgtype.Timestamptz `json:"approved_at"`
+	SessionID        pgtype.Text        `json:"session_id"`
+	PushGrant        pgtype.Text        `json:"push_grant"`
+	PushServiceUrl   pgtype.Text        `json:"push_service_url"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
+	PushReplies      bool               `json:"push_replies"`
+	PushDecisions    bool               `json:"push_decisions"`
+	PushWhenActive   bool               `json:"push_when_active"`
+}
+
 type PersonalInsight struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
@@ -1959,6 +1997,7 @@ type VoiceSession struct {
 	LiveLeaseUntil             pgtype.Timestamptz `json:"live_lease_until"`
 	NextMediaEpoch             int32              `json:"next_media_epoch"`
 	SpeechConfig               []byte             `json:"speech_config"`
+	Client                     string             `json:"client"`
 }
 
 type VoiceSetting struct {

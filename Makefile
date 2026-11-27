@@ -48,7 +48,7 @@ SCRIPT_FAST_PURE_TESTS = $(filter-out $(SCRIPT_FAST_SPAWN_TESTS),$(SCRIPT_FAST_P
 # immutability check inside check-teamhub.
 FAST_CHECKS := check-repository check-docs check-contracts check-packages \
 	check-voice-runtime check-teamhub-cli check-installer check-desktop \
-	check-teamhub check-teamhub-tooling check-scripts-fast
+	check-teamhub check-teamhub-tooling check-scripts-fast check-relay check-mobile
 HEAVY_CHECKS := check-web check-node-services check-computer
 CHECK_JOBS ?= 4
 # The planned targets; `make check` sets them for its sub-make.
@@ -154,6 +154,12 @@ check-voice-runtime:
 
 check-teamhub:
 	$(MAKE) -C apps/teamhub check-code sqlc-verify
+
+check-relay:
+	$(MAKE) -C apps/relay check
+
+check-mobile:
+	pnpm --filter @linger/mobile check
 
 check-teamhub-tooling:
 	$(MAKE) -C apps/teamhub test-scripts

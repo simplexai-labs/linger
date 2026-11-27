@@ -50,6 +50,14 @@ func (a *App) createVoiceSession(c *gin.Context) {
 		a.writeError(c, http.StatusBadRequest, "INVALID_VOICE_PURPOSE", "Voice session purpose is invalid")
 		return
 	}
+	client := voicemedia.ClientWeb
+	if request.Client != nil {
+		client = string(*request.Client)
+	}
+	if client != voicemedia.ClientWeb && client != voicemedia.ClientMobile {
+		a.writeError(c, http.StatusBadRequest, "INVALID_VOICE_CLIENT", "Voice session client is invalid")
+		return
+	}
 	roomID := c.Param("roomId")
 	var speechConfig json.RawMessage
 	if purpose == voicemedia.PurposeChatLive {
@@ -86,7 +94,7 @@ func (a *App) createVoiceSession(c *gin.Context) {
 	principal := currentPrincipal(c)
 	session, err := a.voiceMedia.CreateVoiceSession(c.Request.Context(), voicemedia.CreateVoiceSessionRequest{
 		AccountID: principal.Session.AccountID, AuthSessionID: principal.Session.ID,
-		RoomID: roomID, Purpose: purpose, SpeechConfig: speechConfig,
+		RoomID: roomID, Purpose: purpose, Client: client, SpeechConfig: speechConfig,
 	})
 	if a.writeVoiceMediaError(c, "create VoiceSession", err) {
 		return

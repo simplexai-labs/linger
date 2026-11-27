@@ -54,8 +54,19 @@ func applyDerivedCredentials(cfg *Config) error {
 	} {
 		*link.credential = ServiceCredential(seed, link.label)
 	}
-	if seed == developmentSecretSeed && !isLoopbackOrigin(cfg.PublicWebURL) {
-		return errors.New("LINGER_SECRET_SEED is the public development seed; set a private seed when WEB_PUBLIC_ORIGIN is not localhost")
+	mobileKey, err := hkdf.Key(sha256.New, []byte(seed), []byte(serviceCredentialSalt), "mobile-gateway-static-key", 32)
+	if err != nil {
+		return err
+	}
+	cfg.Mobile.StaticKeySecret = mobileKey
+	if seed == developmentSecretSeed {
+		if !isLoopbackOrigin(cfg.PublicWebURL) {
+			return errors.New("LINGER_SECRET_SEED is the public development seed; set a private seed when WEB_PUBLIC_ORIGIN is not localhost")
+		}
+		// Every checkout on the public seed has the same computer key, so on
+		// a shared Relay one could answer for another's phones. They stay on
+		// the local network.
+		cfg.Mobile.RelayLinksOff = true
 	}
 	return nil
 }

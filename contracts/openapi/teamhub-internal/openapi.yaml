@@ -1409,6 +1409,12 @@ components:
           maxItems: 64
           items:
             $ref: "#/components/schemas/VoiceLiveTool"
+        client:
+          type: string
+          enum: [web, mobile]
+          description:
+            The client the Human speaks through. The Runtime offers page tools (read_page, page_action) only to web;
+            absent means web.
     VoiceLiveReply:
       type: object
       additionalProperties: false

@@ -21,6 +21,7 @@ const SOURCE_PATHSPECS = [
   ":(glob)packages/*/src/**/*.ts",
   ":(glob)apps/teamhub/**/*.go",
   ":(glob)apps/computer/local-daemon/**/*.go",
+  ":(glob)apps/relay/**/*.go",
   ":(exclude,glob)**/*.test.*",
   ":(exclude,glob)**/*_test.go",
   ":(exclude,glob)**/tests/**",

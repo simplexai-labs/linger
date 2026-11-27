@@ -77,6 +77,7 @@ type Config struct {
 	ExternalApps     ExternalAppsConfig
 	PermissionReview PermissionReviewConfig
 	Voice            VoiceConfig
+	Mobile           MobileConfig
 	RoomDocument     RoomDocumentConfig
 	// Jobs paces background work. No environment variable sets it; tests
 	// shorten it.
@@ -120,6 +121,27 @@ type PermissionReviewConfig struct {
 }
 
 // VoiceConfig configures voice media.
+// MobileConfig configures the Mobile Gateway that Paired Phones reach.
+type MobileConfig struct {
+	// StaticKeySecret is the computer's X25519 private key, derived from
+	// LINGER_SECRET_SEED; the Gateway is off without it.
+	StaticKeySecret []byte
+	// RelayURL is TEAMHUB_MOBILE_RELAY_URL: a Relay node TeamHub adds to its
+	// stored node list at start, beside the official nodes.
+	RelayURL string
+	// RelayLinksOff is TEAMHUB_MOBILE_RELAY_URL set empty, or the public
+	// development seed: the Gateway keeps no Relay link, so phones reach it
+	// on the local network only.
+	RelayLinksOff bool
+	// PushServiceURL is the only Push Service a phone's grant may name;
+	// TeamHub posts the grant and alert handles there.
+	PushServiceURL string
+	// LANAddress is where the Gateway listens for phones on the local
+	// network; empty turns the listener off. A taken port falls back to a
+	// free one, because pairing codes carry the port in use.
+	LANAddress string
+}
+
 type VoiceConfig struct {
 	// MediaEnabled is TEAMHUB_VOICE_MEDIA: whether this deployment can run
 	// voice at all (LiveKit and the voice tools). Off keeps voice entirely
@@ -296,6 +318,7 @@ func Default() Config {
 			LiveKitAPIKey:    "devkey",
 			LiveKitAPISecret: "devsecret-livekit-voice-local-only-32-bytes",
 		},
+		Mobile:       MobileConfig{LANAddress: "0.0.0.0:7787", PushServiceURL: "https://relay.heylinger.com"},
 		RoomDocument: defaultRoomDocumentConfig(),
 		Jobs: JobsConfig{
 			// Every job that becomes due is notified, so the fetch poll
@@ -328,6 +351,14 @@ func applyEnvironment(cfg *Config) {
 	setNonemptyEnvironment(&cfg.Voice.XaiAPIKey, "XAI_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.LocalASRURL, "VOICE_LOCAL_ASR_URL")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitURL, "LIVEKIT_URL")
+	if value, ok := os.LookupEnv("TEAMHUB_MOBILE_RELAY_URL"); ok {
+		cfg.Mobile.RelayURL = strings.TrimSpace(value)
+		cfg.Mobile.RelayLinksOff = cfg.Mobile.RelayURL == ""
+	}
+	setNonemptyEnvironment(&cfg.Mobile.PushServiceURL, "TEAMHUB_MOBILE_PUSH_SERVICE_URL")
+	if value, ok := os.LookupEnv("TEAMHUB_MOBILE_LAN_ADDRESS"); ok {
+		cfg.Mobile.LANAddress = strings.TrimSpace(value)
+	}
 	setNonemptyEnvironment(&cfg.Voice.LiveKitAPIURL, "LIVEKIT_API_URL")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitAPIKey, "LIVEKIT_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitAPISecret, "LIVEKIT_API_SECRET")

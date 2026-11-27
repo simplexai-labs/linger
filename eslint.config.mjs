@@ -5,7 +5,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 const typedFiles = [
-  "apps/{web,node-services,voice-runtime,computer,teamhub-cli}/**/*.{ts,tsx,mts,cts}",
+  "apps/{web,node-services,voice-runtime,computer,teamhub-cli,mobile}/**/*.{ts,tsx,mts,cts}",
   "packages/**/*.{ts,tsx,mts,cts}",
 ];
 
@@ -81,6 +81,16 @@ export default [
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "error",
+    },
+  },
+  {
+    files: ["apps/mobile/**/*.{ts,tsx}"],
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "error",
+      // The phone keeps no logs: messages and keys must never reach one.
+      "no-console": "error",
     },
   },
   {

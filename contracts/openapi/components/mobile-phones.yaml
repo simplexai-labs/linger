@@ -1,0 +1,194 @@
+components:
+  schemas:
+    PhonePlatform:
+      type: string
+      enum: [ios, android]
+    PhonePairingCode:
+      type: object
+      additionalProperties: false
+      required: [pairing_uri, expires_at, computer_name, host_id, lan_urls]
+      description: >-
+        A one-time code a Mobile App scans to pair with this computer. The URI
+        carries the computer's public key and an invite that works once and
+        only until expires_at; docs/mobile.md defines its format.
+      properties:
+        pairing_uri:
+          type: string
+          description: linger://pair?d=<base64url JSON>; show it as a QR code.
+        expires_at:
+          type: string
+          format: date-time
+        computer_name:
+          type: string
+        host_id:
+          type: string
+          description: Lowercase hex Host ID the Relay routes this computer by.
+        relay_url:
+          type: string
+          description: >-
+            Origin of the first Relay node this computer keeps a link to, for
+            clients that know only one; absent when it keeps none.
+        relays:
+          type: array
+          description: Every Relay node this computer keeps a link to now, in list order.
+          items:
+            $ref: "#/components/schemas/MobileRelayEndpoint"
+        lan_urls:
+          type: array
+          description: ws origins the computer answers on in the local network now.
+          items:
+            type: string
+    MobileRelayEndpoint:
+      type: object
+      additionalProperties: false
+      required: [id, url, label]
+      description: A Relay node a phone may reach this computer through.
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+          description: ws or wss origin of the node.
+        label:
+          type: string
+    MobileRelayNode:
+      type: object
+      additionalProperties: false
+      required: [id, url, label, kind, enabled, connected]
+      description: >-
+        A Relay node in this computer's list. The computer keeps one link to
+        every enabled node, so a phone can reach it through any of them.
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+          description: ws or wss origin of the node.
+        label:
+          type: string
+        kind:
+          type: string
+          enum: [official, custom]
+          description: Official nodes ship with Linger and can be turned off but not removed.
+        enabled:
+          type: boolean
+        connected:
+          type: boolean
+          description: The computer's link to this node is up now.
+    MobileRelayNodeList:
+      type: object
+      additionalProperties: false
+      required: [items, links_off]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MobileRelayNode"
+        links_off:
+          type: boolean
+          description: >-
+            TEAMHUB_MOBILE_RELAY_URL is set empty on this computer, or it runs
+            on the public development seed, so it keeps no Relay link whatever
+            the list says.
+    CreateMobileRelayNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          maxLength: 256
+          pattern: "^wss?://"
+          description: >-
+            ws or wss origin of a Relay node, such as ws://203.0.113.7:7787.
+            Plain ws is allowed: the session through it is end-to-end
+            encrypted.
+        label:
+          type: string
+          maxLength: 60
+    UpdateMobileRelayNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    PairedPhone:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          name,
+          platform,
+          status,
+          paired_at,
+          last_seen_at,
+          connected,
+          push_enabled,
+        ]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        platform:
+          $ref: "#/components/schemas/PhonePlatform"
+        status:
+          type: string
+          enum: [pending, approved]
+          description: A pending phone waits for the Human to compare its code and approve it; it can do nothing until then.
+        confirmation_code:
+          type: string
+          pattern: "^[0-9]{6}$"
+          description: The six digits the pending phone shows; absent once approved.
+        paired_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        connected:
+          type: boolean
+          description: The phone holds a live session with this computer now.
+        push_enabled:
+          type: boolean
+          description: The phone registered a push token.
+    PairedPhoneList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PairedPhone"
+    PhonePushPreferences:
+      type: object
+      additionalProperties: false
+      required: [replies, decisions, when_active]
+      properties:
+        replies:
+          type: boolean
+          description: Alert when an Agent's turn ends with a reply for the Human.
+        decisions:
+          type: boolean
+          description: Alert when the Human must make a decision.
+        when_active:
+          type: boolean
+          description: Alert even while the Human looks at the Room on another device.
+    PhonePushGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [grant, service_url]
+      properties:
+        service_url:
+          type: string
+          pattern: "^https://"
+          maxLength: 512
+          description: The Push Service that issued the grant; TeamHub sends this phone's alerts there.
+        grant:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: The sealed push grant the Push Service issued to this phone for this computer.

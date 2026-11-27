@@ -75,6 +75,8 @@ func RecordHumanTurn(ctx context.Context, queries *store.Queries, actorID, roomI
 type Session struct {
 	ID, TenantID, RoomID, HumanActorID, AccountID string
 	Agent                                         store.Actor
+	// Client publishes the microphone: voicemedia.ClientWeb or ClientMobile.
+	Client string
 }
 
 // ActiveSession resolves an active chat_live session whose Human is still a
@@ -94,6 +96,7 @@ func ActiveSession(ctx context.Context, queries *store.Queries, sessionID string
 	if err == nil && session.Agent.ID != voice.LiveAgentActorID.String {
 		return Session{}, ErrNotFound
 	}
+	session.Client = voice.Client
 	return session, err
 }
 

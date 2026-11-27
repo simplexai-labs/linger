@@ -2225,6 +2225,24 @@ func (e TrackingItemUpdateStatus) Valid() bool {
 	}
 }
 
+// Defines values for VoiceLiveContextClient.
+const (
+	VoiceLiveContextClientMobile VoiceLiveContextClient = "mobile"
+	VoiceLiveContextClientWeb    VoiceLiveContextClient = "web"
+)
+
+// Valid indicates whether the value is a known member of the VoiceLiveContextClient enum.
+func (e VoiceLiveContextClient) Valid() bool {
+	switch e {
+	case VoiceLiveContextClientMobile:
+		return true
+	case VoiceLiveContextClientWeb:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VoiceLiveContextMessageRole.
 const (
 	VoiceLiveContextMessageRoleAssistant VoiceLiveContextMessageRole = "assistant"
@@ -2314,22 +2332,22 @@ func (e VoiceLiveTaskState) Valid() bool {
 
 // Defines values for VoiceLiveTaskSurface.
 const (
-	VoiceLiveTaskSurfaceApps      VoiceLiveTaskSurface = "apps"
-	VoiceLiveTaskSurfaceDesktop   VoiceLiveTaskSurface = "desktop"
-	VoiceLiveTaskSurfaceWeb       VoiceLiveTaskSurface = "web"
-	VoiceLiveTaskSurfaceWorkspace VoiceLiveTaskSurface = "workspace"
+	Apps      VoiceLiveTaskSurface = "apps"
+	Desktop   VoiceLiveTaskSurface = "desktop"
+	Web       VoiceLiveTaskSurface = "web"
+	Workspace VoiceLiveTaskSurface = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the VoiceLiveTaskSurface enum.
 func (e VoiceLiveTaskSurface) Valid() bool {
 	switch e {
-	case VoiceLiveTaskSurfaceApps:
+	case Apps:
 		return true
-	case VoiceLiveTaskSurfaceDesktop:
+	case Desktop:
 		return true
-	case VoiceLiveTaskSurfaceWeb:
+	case Web:
 		return true
-	case VoiceLiveTaskSurfaceWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -4900,12 +4918,18 @@ type VoiceLiveAlert struct {
 
 // VoiceLiveContext defines model for VoiceLiveContext.
 type VoiceLiveContext struct {
-	AgentName    string                    `json:"agent_name"`
+	AgentName string `json:"agent_name"`
+
+	// Client The client the Human speaks through. The Runtime offers page tools (read_page, page_action) only to web; absent means web.
+	Client       *VoiceLiveContextClient   `json:"client,omitempty"`
 	History      []VoiceLiveContextMessage `json:"history"`
 	Instructions string                    `json:"instructions"`
 	RoomId       VoiceId                   `json:"room_id"`
 	Tools        []VoiceLiveTool           `json:"tools"`
 }
+
+// VoiceLiveContextClient The client the Human speaks through. The Runtime offers page tools (read_page, page_action) only to web; absent means web.
+type VoiceLiveContextClient string
 
 // VoiceLiveContextMessage defines model for VoiceLiveContextMessage.
 type VoiceLiveContextMessage struct {

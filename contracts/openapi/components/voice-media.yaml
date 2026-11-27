@@ -211,6 +211,16 @@ components:
       properties:
         purpose:
           $ref: "#/components/schemas/VoiceSessionPurpose"
+        client:
+          $ref: "#/components/schemas/VoiceSessionClient"
+    VoiceSessionClient:
+      type: string
+      enum: [web, mobile]
+      x-enum-varnames: [VoiceSessionClientWeb, VoiceSessionClientMobile]
+      default: web
+      description:
+        The client that publishes the microphone. A mobile Live session has no page, so the live voice offers no page
+        tools.
     VoiceSession:
       type: object
       additionalProperties: false

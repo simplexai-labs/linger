@@ -92,6 +92,12 @@ func (s *Service) CreateVoiceSession(ctx context.Context, input CreateVoiceSessi
 	if input.Purpose != PurposeHardwareControl && input.Purpose != PurposeChatDictation && input.Purpose != PurposeChatLive {
 		return VoiceSession{}, ErrCaptureConflict
 	}
+	if input.Client == "" {
+		input.Client = ClientWeb
+	}
+	if input.Client != ClientWeb && input.Client != ClientMobile {
+		return VoiceSession{}, ErrCaptureConflict
+	}
 	if _, authorityErr := s.queries.GetRoomForAccount(ctx, store.GetRoomForAccountParams{ID: input.RoomID, AccountID: pgtype.Text{String: input.AccountID, Valid: true}}); authorityErr != nil {
 		return VoiceSession{}, authorityErr
 	}
@@ -104,6 +110,7 @@ func (s *Service) CreateVoiceSession(ctx context.Context, input CreateVoiceSessi
 			ProviderRoomName: "voice-" + id, ParticipantIdentity: "publisher-" + id,
 			Purpose:       input.Purpose,
 			AuthSessionID: pgtype.Text{String: input.AuthSessionID, Valid: true},
+			Client:        input.Client,
 			SpeechConfig:  input.SpeechConfig,
 		})
 		if createErr != nil {

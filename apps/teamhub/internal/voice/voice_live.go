@@ -28,6 +28,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/taskexecution"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicelive"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/voicemedia"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/workitem"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
@@ -1055,6 +1056,7 @@ func (s *Service) LiveContext(ctx context.Context, voiceSessionID string, connec
 		}) + voicelive.CallDocumentsNote(documents),
 		History: make([]teamhubinternal.VoiceLiveContextMessage, 0, len(history)),
 		Tools:   make([]teamhubinternal.VoiceLiveTool, 0, len(voicelive.Tools)),
+		Client:  liveContextClient(session),
 	}
 	for _, message := range history {
 		response.History = append(response.History, teamhubinternal.VoiceLiveContextMessage{
@@ -1078,6 +1080,16 @@ func (s *Service) LiveContext(ctx context.Context, voiceSessionID string, connec
 		})
 	}
 	return response, nil
+}
+
+// liveContextClient tells the Runtime which client the Human speaks
+// through; a mobile session has no page, so it gets no page tools.
+func liveContextClient(session voicelive.Session) *teamhubinternal.VoiceLiveContextClient {
+	client := teamhubinternal.VoiceLiveContextClientWeb
+	if session.Client == voicemedia.ClientMobile {
+		client = teamhubinternal.VoiceLiveContextClientMobile
+	}
+	return &client
 }
 
 // SaveLiveReply records the live voice's spoken reply as the Agent's Message.

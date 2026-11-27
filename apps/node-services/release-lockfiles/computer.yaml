@@ -16,7 +16,7 @@ importers:
     dependencies:
       "@earendil-works/pi-coding-agent":
         specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(ws@8.22.0)(zod@4.4.3)
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(supports-color@10.2.2)(ws@8.22.0)(zod@4.4.3)
       "@playwright/mcp":
         specifier: 0.0.83
         version: 0.0.83
@@ -35,7 +35,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(tsx@4.22.4)(yaml@2.9.0)
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0)
       yauzl:
         specifier: 3.4.0
         version: 3.4.0
@@ -98,7 +98,7 @@ importers:
         version: 11.0.5
       vitest:
         specifier: 4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(tsx@4.22.4)(yaml@2.9.0)
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0)
       yaml:
         specifier: 2.9.0
         version: 2.9.0
@@ -149,7 +149,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(tsx@4.22.4)(yaml@2.9.0)
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0)
   packages/service-kit:
     devDependencies:
       "@types/node":
@@ -160,7 +160,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(tsx@4.22.4)(yaml@2.9.0)
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0)
 packages:
   "@anthropic-ai/sdk@0.129.0":
     resolution:
@@ -657,9 +657,23 @@ packages:
   "@isaacs/nonrecursive-glob-match@1.1.0":
     resolution:
       integrity: sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==
+  "@jridgewell/gen-mapping@0.3.13":
+    resolution:
+      integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==
+  "@jridgewell/resolve-uri@3.1.2":
+    resolution:
+      integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==
+    engines:
+      node: ">=6.0.0"
+  "@jridgewell/source-map@0.3.11":
+    resolution:
+      integrity: sha512-ZMp1V8ZFcPG5dIWnQLr3NSI1MiCU7UETdS/A0G8V/XWHvJv3ZsFqutJn1Y5RPmAPX6F3BiE397OqveU/9NCuIA==
   "@jridgewell/sourcemap-codec@1.5.5":
     resolution:
       integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==
+  "@jridgewell/trace-mapping@0.3.31":
+    resolution:
+      integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==
   "@modelcontextprotocol/sdk@1.30.0":
     resolution:
       integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==
@@ -676,9 +690,9 @@ packages:
     peerDependencies:
       "@emnapi/core": ^1.7.1
       "@emnapi/runtime": ^1.7.1
-  "@noble/hashes@2.2.0":
+  "@noble/hashes@2.4.0":
     resolution:
-      integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==
+      integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==
     engines:
       node: ">= 20.19.0"
   "@opentelemetry/api@1.9.1":
@@ -988,6 +1002,12 @@ packages:
       integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==
     engines:
       node: ">= 0.6"
+  acorn@8.17.0:
+    resolution:
+      integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==
+    engines:
+      node: ">=0.4.0"
+    hasBin: true
   agent-base@7.1.4:
     resolution:
       integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==
@@ -1068,6 +1088,9 @@ packages:
   buffer-equal-constant-time@1.0.1:
     resolution:
       integrity: sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==
+  buffer-from@1.1.2:
+    resolution:
+      integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==
   bytes@3.1.2:
     resolution:
       integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==
@@ -1111,6 +1134,9 @@ packages:
   comma-separated-tokens@2.0.3:
     resolution:
       integrity: sha512-Fu4hJdvzeylCfQPp9SGWidpzrMs7tTrlu6Vb8XGaRGck8QSNZJJp538Wrb60Lax4fPwR64ViY468OIUTbRlGZg==
+  commander@2.20.3:
+    resolution:
+      integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==
   content-disposition@1.1.0:
     resolution:
       integrity: sha512-5jRCH9Z/+DRP7rkvY83B+yGIGX96OYdJmzngqnw2SBSxqCFPd0w2km3s5iawpGX8krnwSGmF0FW5Nhr0Hfai3g==
@@ -1867,9 +1893,9 @@ packages:
   ms@2.1.3:
     resolution:
       integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==
-  nanoid@3.3.16:
+  nanoid@3.3.20:
     resolution:
-      integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==
+      integrity: sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ==
     engines:
       node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1
     hasBin: true
@@ -2003,9 +2029,9 @@ packages:
     engines:
       node: ">=20"
     hasBin: true
-  postcss@8.5.20:
+  postcss@8.5.33:
     resolution:
-      integrity: sha512-lW616l85ucIQL+FocMmL7pQFPqBmwejrCMg+iPxyImlrANNJG9NHq/RkyCZopDhd8C3LA03PHRJDjkbGu8vvug==
+      integrity: sha512-RVHEU9/Pp1Fnjr/MpAJsZoADukCKhfIi15OunEYiGktIkYLkPVvC1sioWolGDS7XByMTx9m/IGbro0Js13zhnQ==
     engines:
       node: ^10 || ^12 || >=14
   proper-lockfile@4.1.2:
@@ -2172,6 +2198,19 @@ packages:
       integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==
     engines:
       node: ">=0.10.0"
+  source-map-js@1.2.4:
+    resolution:
+      integrity: sha512-J7ZjMvHd9O1fcT/5V09QWaaSl2BbWx3F6O08spde82Namf9UB0GxRVIPiNbVsdKkoizHiSpTodo3vp2bAy91MA==
+    engines:
+      node: ">=6.0.0"
+  source-map-support@0.5.21:
+    resolution:
+      integrity: sha512-uBHU3L3czsIyYXKX88fdrGovxdSCoTGDRZ6SYXtSRxLZUzHg5P/66Ht6uoUlHu9EZod+inXhKo3qQgwXUT/y1w==
+  source-map@0.6.1:
+    resolution:
+      integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==
+    engines:
+      node: ">=0.10.0"
   space-separated-tokens@2.0.2:
     resolution:
       integrity: sha512-PEGlAwrG8yXGXRjW32fGbg66JAlOAwbObuqVoJpv/mRgoWDQfgH1wDPvtzWyUSNAXBGSk8h755YDbbcEy3SH2Q==
@@ -2206,6 +2245,12 @@ packages:
   tar-stream@3.1.7:
     resolution:
       integrity: sha512-qJj60CXt7IU1Ffyc3NJMjh6EkuCFej46zUqJ4J7pqYlThyd9bO0XBTmcOIhSzZJVWfsLks0+nle/j538YAW9RQ==
+  terser@5.51.4:
+    resolution:
+      integrity: sha512-VPi1CkDvCWLGUVIToctNBG+NdHbSXwOPjHJnQ3pdB0XknaldnI76wSkAFOGxV2ZdkzOP5d6gpQ5c58XvDghRvw==
+    engines:
+      node: ">=10"
+    hasBin: true
   text-decoder@1.2.7:
     resolution:
       integrity: sha512-vlLytXkeP4xvEq2otHeJfSQIRyWxo/oZGEbXrtEEF9Hnmrdly59sUbzZ/QgyWuLYHctCHxFF4tRQZNQ9k60ExQ==
@@ -2718,7 +2763,7 @@ snapshots:
   "@csstools/css-tokenizer@4.0.0": {}
   "@earendil-works/pi-agent-core@1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)":
     dependencies:
-      "@earendil-works/pi-ai": 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)
+      "@earendil-works/pi-ai": 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(supports-color@10.2.2)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)
       "@earendil-works/pi-schema": 1.5.2
     transitivePeerDependencies:
       - "@aws-sdk/credential-provider-node"
@@ -2732,7 +2777,7 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-  "@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)":
+  "@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(supports-color@10.2.2)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)":
     dependencies:
       "@anthropic-ai/sdk": 0.129.0(zod@4.4.3)
       "@aws-sdk/client-bedrock-runtime": 3.1127.0
@@ -2740,8 +2785,8 @@ snapshots:
       "@earendil-works/pi-telemetry": 1.5.2
       "@google/genai": 2.21.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))
       "@smithy/node-http-handler": 4.12.1
-      http-proxy-agent: 9.1.0
-      https-proxy-agent: 9.1.0
+      http-proxy-agent: 9.1.0(supports-color@10.2.2)
+      https-proxy-agent: 9.1.0(supports-color@10.2.2)
       openai: 7.19.0(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)
       partial-json: 0.1.7
     transitivePeerDependencies:
@@ -2759,10 +2804,10 @@ snapshots:
   "@earendil-works/pi-codemode@1.5.2":
     dependencies:
       quickjs-wasi: 3.6.2
-  "@earendil-works/pi-coding-agent@1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(ws@8.22.0)(zod@4.4.3)":
+  "@earendil-works/pi-coding-agent@1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(supports-color@10.2.2)(ws@8.22.0)(zod@4.4.3)":
     dependencies:
       "@earendil-works/pi-agent-core": 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)
-      "@earendil-works/pi-ai": 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)
+      "@earendil-works/pi-ai": 1.5.2(@aws-sdk/credential-provider-node@3.972.85)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))(@smithy/signature-v4@5.7.4)(supports-color@10.2.2)(undici@8.12.3)(ws@8.22.0)(zod@4.4.3)
       "@earendil-works/pi-codemode": 1.5.2
       "@earendil-works/pi-mcp": 1.5.2
       "@earendil-works/pi-tui": 1.5.2
@@ -2869,9 +2914,9 @@ snapshots:
     optional: true
   "@esbuild/win32-x64@0.28.1":
     optional: true
-  "@exodus/bytes@1.15.1(@noble/hashes@2.2.0)":
+  "@exodus/bytes@1.15.1(@noble/hashes@2.4.0)":
     optionalDependencies:
-      "@noble/hashes": 2.2.0
+      "@noble/hashes": 2.4.0
   "@google/genai@2.21.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1))":
     dependencies:
       google-auth-library: 10.9.1
@@ -2888,7 +2933,20 @@ snapshots:
     dependencies:
       hono: 4.12.32
   "@isaacs/nonrecursive-glob-match@1.1.0": {}
+  "@jridgewell/gen-mapping@0.3.13":
+    dependencies:
+      "@jridgewell/sourcemap-codec": 1.5.5
+      "@jridgewell/trace-mapping": 0.3.31
+  "@jridgewell/resolve-uri@3.1.2": {}
+  "@jridgewell/source-map@0.3.11":
+    dependencies:
+      "@jridgewell/gen-mapping": 0.3.13
+      "@jridgewell/trace-mapping": 0.3.31
   "@jridgewell/sourcemap-codec@1.5.5": {}
+  "@jridgewell/trace-mapping@0.3.31":
+    dependencies:
+      "@jridgewell/resolve-uri": 3.1.2
+      "@jridgewell/sourcemap-codec": 1.5.5
   "@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)":
     dependencies:
       "@hono/node-server": 1.19.15(hono@4.12.32)
@@ -2918,7 +2976,7 @@ snapshots:
       "@emnapi/runtime": 1.11.1
       "@tybys/wasm-util": 0.10.3
     optional: true
-  "@noble/hashes@2.2.0": {}
+  "@noble/hashes@2.4.0": {}
   "@opentelemetry/api@1.9.1": {}
   "@oxc-project/types@0.139.0": {}
   "@playwright/mcp@0.0.83":
@@ -3041,13 +3099,13 @@ snapshots:
       "@vitest/utils": 4.1.9
       chai: 6.2.2
       tinyrainbow: 3.1.0
-  "@vitest/mocker@4.1.9(vite@8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))":
+  "@vitest/mocker@4.1.9(vite@8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0))":
     dependencies:
       "@vitest/spy": 4.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0)
   "@vitest/pretty-format@4.1.9":
     dependencies:
       tinyrainbow: 3.1.0
@@ -3071,6 +3129,7 @@ snapshots:
     dependencies:
       mime-types: 3.0.2
       negotiator: 1.0.0
+  acorn@8.17.0: {}
   agent-base@7.1.4: {}
   agent-base@9.0.0: {}
   ajv-formats@3.0.1(ajv@8.17.1):
@@ -3111,6 +3170,7 @@ snapshots:
       balanced-match: 4.0.4
   buffer-crc32@1.0.0: {}
   buffer-equal-constant-time@1.0.1: {}
+  buffer-from@1.1.2: {}
   bytes@3.1.2: {}
   call-bind-apply-helpers@1.0.2:
     dependencies:
@@ -3128,6 +3188,7 @@ snapshots:
   character-entities@2.0.2: {}
   collapse-white-space@2.1.0: {}
   comma-separated-tokens@2.0.3: {}
+  commander@2.20.3: {}
   content-disposition@1.1.0: {}
   content-type@1.0.5: {}
   content-type@2.0.0: {}
@@ -3148,10 +3209,10 @@ snapshots:
       mdn-data: 2.27.1
       source-map-js: 1.2.1
   data-uri-to-buffer@4.0.1: {}
-  data-urls@7.0.0(@noble/hashes@2.2.0):
+  data-urls@7.0.0(@noble/hashes@2.4.0):
     dependencies:
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
+      whatwg-url: 16.0.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - "@noble/hashes"
   debug@4.4.3(supports-color@10.2.2):
@@ -3444,9 +3505,9 @@ snapshots:
   hosted-git-info@9.0.3:
     dependencies:
       lru-cache: 11.5.1
-  html-encoding-sniffer@6.0.0(@noble/hashes@2.2.0):
+  html-encoding-sniffer@6.0.0(@noble/hashes@2.4.0):
     dependencies:
-      "@exodus/bytes": 1.15.1(@noble/hashes@2.2.0)
+      "@exodus/bytes": 1.15.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - "@noble/hashes"
   html-void-elements@3.0.0: {}
@@ -3457,7 +3518,7 @@ snapshots:
       setprototypeof: 1.2.0
       statuses: 2.0.2
       toidentifier: 1.0.1
-  http-proxy-agent@9.1.0:
+  http-proxy-agent@9.1.0(supports-color@10.2.2):
     dependencies:
       agent-base: 9.0.0
       debug: 4.4.3(supports-color@10.2.2)
@@ -3471,7 +3532,7 @@ snapshots:
       debug: 4.4.3(supports-color@10.2.2)
     transitivePeerDependencies:
       - supports-color
-  https-proxy-agent@9.1.0:
+  https-proxy-agent@9.1.0(supports-color@10.2.2):
     dependencies:
       agent-base: 9.0.0
       debug: 4.4.3(supports-color@10.2.2)
@@ -3492,17 +3553,17 @@ snapshots:
   isexe@2.0.0: {}
   jiti@2.7.0: {}
   jose@6.2.12: {}
-  jsdom@29.1.1(@noble/hashes@2.2.0):
+  jsdom@29.1.1(@noble/hashes@2.4.0):
     dependencies:
       "@asamuzakjp/css-color": 5.1.11
       "@asamuzakjp/dom-selector": 7.1.1
       "@bramus/specificity": 2.4.2
       "@csstools/css-syntax-patches-for-csstree": 1.1.5(css-tree@3.2.1)
-      "@exodus/bytes": 1.15.1(@noble/hashes@2.2.0)
+      "@exodus/bytes": 1.15.1(@noble/hashes@2.4.0)
       css-tree: 3.2.1
-      data-urls: 7.0.0(@noble/hashes@2.2.0)
+      data-urls: 7.0.0(@noble/hashes@2.4.0)
       decimal.js: 10.6.0
-      html-encoding-sniffer: 6.0.0(@noble/hashes@2.2.0)
+      html-encoding-sniffer: 6.0.0(@noble/hashes@2.4.0)
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.1
       parse5: 8.0.1
@@ -3513,7 +3574,7 @@ snapshots:
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
+      whatwg-url: 16.0.1(@noble/hashes@2.4.0)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - "@noble/hashes"
@@ -3864,7 +3925,7 @@ snapshots:
       "@isaacs/nonrecursive-glob-match": 1.1.0
       brace-expansion: 5.0.12
   ms@2.1.3: {}
-  nanoid@3.3.16: {}
+  nanoid@3.3.20: {}
   negotiator@1.0.0: {}
   node-domexception@1.0.0: {}
   node-fetch@3.3.2:
@@ -3914,11 +3975,11 @@ snapshots:
   playwright@1.64.0-alpha-1790635538000:
     dependencies:
       playwright-core: 1.64.0-alpha-1790635538000(patch_hash=78d5eb47c9c7095d8c87a9f21aba2d7f240636ea9a759299d3f99d7f7f9bcd5e)
-  postcss@8.5.20:
+  postcss@8.5.33:
     dependencies:
-      nanoid: 3.3.16
+      nanoid: 3.3.20
       picocolors: 1.1.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.4
   proper-lockfile@4.1.2:
     dependencies:
       graceful-fs: 4.2.11
@@ -4088,6 +4149,12 @@ snapshots:
   siginfo@2.0.0: {}
   signal-exit@3.0.7: {}
   source-map-js@1.2.1: {}
+  source-map-js@1.2.4: {}
+  source-map-support@0.5.21:
+    dependencies:
+      buffer-from: 1.1.2
+      source-map: 0.6.1
+  source-map@0.6.1: {}
   space-separated-tokens@2.0.2: {}
   stackback@0.0.2: {}
   standardwebhooks@1.0.0:
@@ -4118,6 +4185,12 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
+  terser@5.51.4:
+    dependencies:
+      "@jridgewell/source-map": 0.3.11
+      acorn: 8.17.0
+      commander: 2.20.3
+      source-map-support: 0.5.21
   text-decoder@1.2.7:
     dependencies:
       b4a: 1.8.1
@@ -4202,11 +4275,11 @@ snapshots:
     dependencies:
       "@types/unist": 3.0.3
       vfile-message: 4.0.3
-  vite@8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0):
+  vite@8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.5
-      postcss: 8.5.20
+      postcss: 8.5.33
       rolldown: 1.1.5
       tinyglobby: 0.2.17
     optionalDependencies:
@@ -4214,12 +4287,13 @@ snapshots:
       esbuild: 0.28.1
       fsevents: 2.3.3
       jiti: 2.7.0
+      terser: 5.51.4
       tsx: 4.22.4
       yaml: 2.9.0
-  vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(tsx@4.22.4)(yaml@2.9.0):
+  vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
       "@vitest/expect": 4.1.9
-      "@vitest/mocker": 4.1.9(vite@8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      "@vitest/mocker": 4.1.9(vite@8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0))
       "@vitest/pretty-format": 4.1.9
       "@vitest/runner": 4.1.9
       "@vitest/snapshot": 4.1.9
@@ -4236,12 +4310,12 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.0.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.51.4)(tsx@4.22.4)(yaml@2.9.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       "@opentelemetry/api": 1.9.1
       "@types/node": 26.0.1
-      jsdom: 29.1.1(@noble/hashes@2.2.0)
+      jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - "@vitejs/devtools"
       - esbuild
@@ -4262,9 +4336,9 @@ snapshots:
   web-streams-polyfill@3.3.3: {}
   webidl-conversions@8.0.1: {}
   whatwg-mimetype@5.0.0: {}
-  whatwg-url@16.0.1(@noble/hashes@2.2.0):
+  whatwg-url@16.0.1(@noble/hashes@2.4.0):
     dependencies:
-      "@exodus/bytes": 1.15.1(@noble/hashes@2.2.0)
+      "@exodus/bytes": 1.15.1(@noble/hashes@2.4.0)
       tr46: 6.0.0
       webidl-conversions: 8.0.1
     transitivePeerDependencies:

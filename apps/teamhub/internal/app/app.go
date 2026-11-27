@@ -52,6 +52,10 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/mailcanvas"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/mcpcontext"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/memoryclient"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/mobilegateway"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/mobilepush"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/mobilerelay"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/pairedphone"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/permissionreview"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/personalinsight"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/personalprofile"
@@ -163,21 +167,30 @@ type App struct {
 	documents                      *document.Service
 	collaboration                  *collaboration.Service
 	sessions                       *account.Sessions
-	agents                         *agentregistry.Service
-	agentMessages                  *agentmessages.Service
-	canvas                         *agentconnectedapps.Canvas
-	mailCanvas                     *mailcanvas.Service
-	voice                          *voice.Service
-	agentCredentials               *agentcredential.Service
-	tracking                       *reminder.TrackingService
-	documentComments               *document.CommentService
-	externalSources                *externalsource.Service
-	composioClient                 *composio.Client
-	personalInsights               *personalinsight.Service
-	personalProfile                *personalprofile.Service
-	accountProfiles                *account.ProfileService
-	skillPackageAuditState         atomic.Int32
-	retention                      *retention.Sweeper
+	pairedPhones                   *pairedphone.Service
+	mobileGateway                  *mobilegateway.Gateway
+	mobileRelays                   *mobilerelay.Service
+	mobileRelayEnvironment         string
+	mobileRelayLinksOff            bool
+	mobilePushServiceURL           string
+	// mobileRelaySync makes each read of the node list and its hand-over to
+	// the Gateway one step, so an older read never lands last.
+	mobileRelaySync        sync.Mutex
+	agents                 *agentregistry.Service
+	agentMessages          *agentmessages.Service
+	canvas                 *agentconnectedapps.Canvas
+	mailCanvas             *mailcanvas.Service
+	voice                  *voice.Service
+	agentCredentials       *agentcredential.Service
+	tracking               *reminder.TrackingService
+	documentComments       *document.CommentService
+	externalSources        *externalsource.Service
+	composioClient         *composio.Client
+	personalInsights       *personalinsight.Service
+	personalProfile        *personalprofile.Service
+	accountProfiles        *account.ProfileService
+	skillPackageAuditState atomic.Int32
+	retention              *retention.Sweeper
 }
 
 type principal struct {
@@ -274,6 +287,8 @@ const (
 	// SkillPackageProbe checks Skill Package storage before /readyz passes;
 	// skipping it reports ready at once.
 	SkillPackageProbe
+	// MobileGateway serves Paired Phones on the LAN listener and the Relay.
+	MobileGateway
 )
 
 const defaultDatabaseMaxConnections int32 = 16
@@ -556,6 +571,7 @@ func (a *App) registerFeatures(ctx context.Context, cfg config.Config, deps Deps
 	a.registerCollaboration(core.runtimeState)
 	a.registerAgentTools(cfg, deps, agentAuthorization, core.models)
 	a.registerAccounts(deps)
+	a.registerMobile(cfg.Mobile)
 	a.registerVoiceService()
 	return nil
 }
@@ -741,6 +757,14 @@ func (a *App) StartWorkers(ctx context.Context, skip ...Worker) error {
 	} else {
 		a.skillPackageAuditState.Store(skillPackageAuditReady)
 	}
+	if runs(MobileGateway) && a.mobileGateway != nil {
+		a.workerWG.Add(1)
+		go func() {
+			defer a.workerWG.Done()
+			a.startMobileRelays(a.workerContext)
+			a.mobileGateway.Run(a.workerContext)
+		}()
+	}
 	if runs(PresentationLoop) {
 		a.workerWG.Add(1)
 		go func() {
@@ -761,6 +785,18 @@ func (a *App) startJobs(ctx context.Context, runs func(Worker) bool) error {
 		a.addVoiceJobs(features)
 	}
 	a.addExternalAppJobs(features, runs(ReminderJobs))
+	if a.mobileGateway != nil {
+		mobilepush.AddWorker(features.workers, features.queues,
+			mobilepush.NewWorker(a.pool, a.mobileGateway.HostID(), &http.Client{
+				Timeout: 20 * time.Second,
+				// A grant goes only to the service the phone named, never on.
+				CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+			}, a.logger, func(accountID, roomID string) bool {
+				// The Web and the phone both send Room presence while the
+				// Human looks at the Room; only this Human's own counts.
+				return a.roomPresence.presentFor(accountID, roomID, time.Now())
+			}))
+	}
 	riverWorkers := features.workers
 	document.AddJobWorkers(riverWorkers, a.documents, a.publishedWikiGraphUpdater())
 	voice.AddPocketNoteTrackingWorker(riverWorkers, a.queries, a.pocketNoteTrackingRefresher())
@@ -1159,6 +1195,9 @@ func (a *App) streamSessionInvalidationCode(ctx context.Context, digest []byte) 
 }
 
 func (a *App) optionalPrincipal(c *gin.Context) (principal, bool, error) {
+	if digest, ok := mobilegateway.PhoneSession(c.Request.Context()); ok {
+		return a.principalForDigest(c, digest)
+	}
 	value, err := c.Cookie(a.cfg.CookieName)
 	if err != nil {
 		return principal{}, false, nil //nolint:nilerr // an unreadable or malformed session cookie means an anonymous request
@@ -1167,7 +1206,13 @@ func (a *App) optionalPrincipal(c *gin.Context) (principal, bool, error) {
 	if err != nil || len(token) != 32 {
 		return principal{}, false, nil //nolint:nilerr // an unreadable or malformed session cookie means an anonymous request
 	}
-	digest := tokenDigest(token)
+	return a.principalForDigest(c, tokenDigest(token))
+}
+
+// principalForDigest loads the live Session a token digest names: a browser
+// cookie's digest, or a Paired Phone's device Session the Mobile Gateway
+// attached in process.
+func (a *App) principalForDigest(c *gin.Context, digest []byte) (principal, bool, error) {
 	session, err := a.sessions.Active(c.Request.Context(), digest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return principal{}, false, nil

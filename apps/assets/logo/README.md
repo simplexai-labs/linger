@@ -19,6 +19,9 @@ Its L symbol is the first letter of the word, followed directly by `inger`.
 - `tray/`: black L-and-dot template shapes on transparency and full-color tiles, at 16 and 32 pixels.
 - `preview.jpg`: brand lockup and small-size preview.
 
+`apps/mobile/assets` holds the phone's launcher icons and splash, derived from
+`source/linger.svg` by `apps/mobile/scripts/export-app-icons.mjs`.
+
 `apps/web/public` holds the four public favicon/touch-icon copies. `BrandMark`
 uses the same favicon SVG on the login screen, navigation and error surfaces.
 Connector logos and agent avatars are separate identities and stay unchanged.

@@ -31,6 +31,7 @@ describe("readUserEnvironment", () => {
       COMPOSIO_API_KEY: "",
       SONIOX_API_KEY: "",
       XAI_API_KEY: "",
+      TEAMHUB_MOBILE_RELAY_URL: "",
       TZ: "",
     });
     if (process.platform !== "win32")

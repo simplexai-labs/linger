@@ -41,7 +41,7 @@ Memory, and Voice services.
   Memory, and LLM Wiki share one HTTP port; the Document Runtime is the
   Hocuspocus/Yjs protocol and BlockNote/Yjs computation adapter on its own
   port, and it loads and saves native Documents' `document_bodies` rows in
-  TeamHub's database. Voice supervises isolated ASR, recorder and Live workers from the voice-runtime package. TeamHub parses SKILL.md itself.
+  TeamHub's database. Voice supervises isolated ASR, recorder, Live and Bridge workers from the voice-runtime package. TeamHub parses SKILL.md itself.
 - `apps/teamhub-cli`: standalone Agent CLI calling TeamHub business APIs directly
   through the client generated from `teamhub-agent-api`; it owns its command
   schemas and host file helpers.
@@ -126,8 +126,9 @@ Memory, and Voice services.
   strings, prompts, Skills, tests, fixtures, and benchmark data.
   `make check-repository-gate` rejects CJK ideographs in changed files. The
   only exceptions are the translation catalogs under
-  `apps/web/src/i18n/locales/` (Web client) and `apps/desktop/src/i18n/locales/`
-  (desktop shell); text in another language goes nowhere else.
+  `apps/web/src/i18n/locales/` (Web client), `apps/desktop/src/i18n/locales/`
+  (desktop shell) and `apps/mobile/src/i18n/locales/` (Mobile App); text in
+  another language goes nowhere else.
   - NO: a test fixture with a literal Chinese sentence.
   - OK: the same text as escaped code points (`"\u4f60\u597d"`), or kana,
     accented Latin, or emoji when any unspaced script will do.

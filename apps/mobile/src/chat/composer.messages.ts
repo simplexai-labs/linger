@@ -1,0 +1,25 @@
+import { defineMessages } from "../i18n/messages";
+
+export const chatComposerMessages = defineMessages("chatComposer", {
+  connectToAttach: "Connect to your computer to attach files.",
+  cameraNotAllowed: "Allow Linger to use the camera in the Settings app.",
+  cameraUnavailable: "The camera is not available.",
+  pickFailed: "That could not be opened. Try again.",
+  fileTooLarge: "Files from the phone can be up to 25 MB.",
+  fileTooLargeForComputer: "That file is larger than your computer accepts.",
+  uploadFailed: "{name} did not upload. Try again.",
+  notSaved: "The message could not be saved on this phone. Try again.",
+  removeFile: "Remove {name}",
+  attach: "Attach",
+  message: "Message",
+  send: "Send",
+  talkLive: "Talk live",
+  mentionList: "People and Agents to mention",
+  mention: "Mention {name}",
+  photoName: "Photo {time}",
+  videoName: "Video {time}",
+  camera: "Camera",
+  photos: "Photos",
+  files: "Files",
+  closeMenu: "Close",
+});

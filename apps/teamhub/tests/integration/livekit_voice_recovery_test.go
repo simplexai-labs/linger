@@ -46,7 +46,7 @@ func TestLiveKitStartEventProjectsCaptureIdentity(t *testing.T) {
 			t.Fatalf("empty Capture response %d %s", code, body)
 		}
 	}
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_identity", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-identity", ParticipantIdentity: "identity", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_identity", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-identity", ParticipantIdentity: "identity", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestLiveKitRevocationRejectsCallbacksAndClosesMedia(t *testing.T) {
 	env, alice, _ := newVoiceServiceEnv(t, func(cfg *config.Config) { cfg.Voice.RuntimeToken = "voice-test-service-token" })
 	q := store.New(env.pool)
 	roomID := env.createRoom(alice, acmeTenant, "Voice revocation", "voice-revocation")
-	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_revoke", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-revoke", ParticipantIdentity: "publisher-revoke", Purpose: "hardware_control"})
+	voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_revoke", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-revoke", ParticipantIdentity: "publisher-revoke", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestLiveKitBeginCaptureKeepsConcurrentReconcileResult(t *testing.T) {
 			env, alice, _ := newHardwareVoiceCaptureEnvWithStorageAndLimitsAndConfig(t, 1<<20, 1<<30, nil)
 			q := store.New(env.pool)
 			roomID := env.createRoom(alice, acmeTenant, "Start race", "start-race")
-			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_start_race", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-start-race", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
+			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_start_race", AccountID: "account_alice", AuthSessionID: loginSessionOf(t, env, "account_alice"), RoomID: roomID, ProviderRoomName: "voice-start-race", ParticipantIdentity: "publisher", Purpose: "hardware_control"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -245,7 +245,7 @@ func TestLiveKitStopRunsPerCapture(t *testing.T) {
 			client = env.login("alice", alicePassword)
 		}
 		roomID := env.createRoom(client, acmeTenant, "Stop fairness "+id, "stop-fairness-"+id)
-		voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_" + id, AccountID: accountID, AuthSessionID: loginSessionOf(t, env, accountID), RoomID: roomID, ProviderRoomName: "voice-" + id, ParticipantIdentity: "publisher-" + id, Purpose: "hardware_control"})
+		voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_" + id, AccountID: accountID, AuthSessionID: loginSessionOf(t, env, accountID), RoomID: roomID, ProviderRoomName: "voice-" + id, ParticipantIdentity: "publisher-" + id, Purpose: "hardware_control"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -368,7 +368,7 @@ func TestLiveKitVoiceFinalizingCanFailAfterMediaFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := store.New(pool)
-			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{
+			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web",
 				ID: "voice_session_failure", AccountID: "account_alice", RoomID: roomID, ProviderRoomName: "voice-failure", ParticipantIdentity: "publisher-failure", Purpose: "hardware_control",
 			})
 			if err != nil {
@@ -508,7 +508,7 @@ func TestLiveKitVoiceFlushSurvivesMediaSealingOrder(t *testing.T) {
 			env, alice, _ := newVoiceServiceEnv(t, func(cfg *config.Config) { cfg.Voice.RuntimeToken = "voice-test-service-token" })
 			roomID := env.createRoom(alice, acmeTenant, "Voice recovery", "voice-recovery-room")
 			q := store.New(env.pool)
-			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{
+			voice, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web",
 				ID: "voice_session_recovery", AccountID: aliceAccountID, AuthSessionID: loginSessionOf(t, env, aliceAccountID), RoomID: roomID, ProviderRoomName: "voice-recovery", ParticipantIdentity: "publisher-recovery", Purpose: "hardware_control",
 			})
 			if err != nil {

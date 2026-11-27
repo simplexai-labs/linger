@@ -1,4 +1,5 @@
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
+import type { Duplex } from "node:stream";
 
 import { createAdaptorServer } from "@hono/node-server";
 
@@ -15,6 +16,13 @@ export interface HttpRoute {
   readiness?(): RoleReadiness | Promise<RoleReadiness>;
 }
 
+/** Takes over one WebSocket upgrade request. */
+export type UpgradeHandler = (
+  request: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+) => void;
+
 /**
  * The single HTTP listener that the Agent, Memory, and LLM Wiki roles share. It
  * owns the aggregate probes /healthz, /startupz, and /readyz
@@ -30,6 +38,11 @@ export interface HttpHost {
   readonly url: string;
   /** Routes the given prefixes to a role; the returned function unmounts it. */
   mount(route: HttpRoute): () => void;
+  /**
+   * Routes WebSocket upgrades of one exact path to a role; an upgrade no role
+   * mounted answers 404. The returned function unmounts it.
+   */
+  mountUpgrade(path: string, handler: UpgradeHandler): () => void;
   /**
    * Ends startup: /startupz and /readyz stop answering "starting", and paths
    * that no role mounted answer 404 instead of 503.
@@ -117,6 +130,23 @@ export async function startHttpHost(options: {
     // Roles on the main thread must not replace process globals.
     overrideGlobalObjects: false,
   }) as Server;
+  const upgrades = new Map<string, UpgradeHandler>();
+  server.on("upgrade", (request: IncomingMessage, socket: Duplex, head) => {
+    let path: string;
+    try {
+      path = new URL(request.url ?? "", "http://node-services.local").pathname;
+    } catch {
+      path = "";
+    }
+    const handler = upgrades.get(path);
+    if (handler) {
+      handler(request, socket, head);
+      return;
+    }
+    socket.end(
+      "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+    );
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => {
@@ -154,6 +184,15 @@ export async function startHttpHost(options: {
           const index = routes.indexOf(entry);
           if (index >= 0) routes.splice(index, 1);
         }
+      };
+    },
+    mountUpgrade(path, handler) {
+      if (!path.startsWith("/") || upgrades.has(path)) {
+        throw new TypeError(`Invalid or mounted upgrade path: ${path}`);
+      }
+      upgrades.set(path, handler);
+      return () => {
+        if (upgrades.get(path) === handler) upgrades.delete(path);
       };
     },
     finishStartup() {

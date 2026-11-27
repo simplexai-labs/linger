@@ -45,3 +45,5 @@ __pycache__/
 /apps/computer/local-daemon/cmd/linger-computer-daemon/linger-computer-daemon
 
 .idea/
+# The Desktop app builds TeamHub for a source checkout here.
+.simplexai-runtime/

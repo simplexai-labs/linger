@@ -155,7 +155,7 @@ func TestVoiceSessionsBelongToTheirLoginSession(t *testing.T) {
 		t.Fatalf("the other login session's recording session=%s", session)
 	}
 	// A session whose login session was deleted closes the same way.
-	orphan, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{ID: "voice_orphan", AccountID: "account_alice", AuthSessionID: pgtype.Text{}, RoomID: roomID, ProviderRoomName: "voice-orphan", ParticipantIdentity: "orphan", Purpose: "hardware_control"})
+	orphan, err := q.CreateVoiceSession(t.Context(), store.CreateVoiceSessionParams{Client: "web", ID: "voice_orphan", AccountID: "account_alice", AuthSessionID: pgtype.Text{}, RoomID: roomID, ProviderRoomName: "voice-orphan", ParticipantIdentity: "orphan", Purpose: "hardware_control"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -111,6 +111,35 @@ export const loadConfig = (
   return config;
 };
 
+export interface VoiceBridgeConfig {
+  livekitUrl: string;
+  livekitApiKey: string;
+  livekitApiSecret: string;
+  /** The per-process token node-services presents on every Bridge socket. */
+  token: string;
+}
+
+/**
+ * The Voice Bridge needs no TeamHub or provider credential: it joins Rooms
+ * with the phone's own grant on this computer's LiveKit, and verifies that
+ * grant with the LiveKit secret before it attaches a socket to a session.
+ */
+export function loadBridgeConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): VoiceBridgeConfig {
+  const token = env.VOICE_BRIDGE_TOKEN?.trim();
+  if (!token) throw new Error("VOICE_BRIDGE_TOKEN is required");
+  const config: VoiceBridgeConfig = {
+    livekitUrl: env.LIVEKIT_URL || livekitDefaults.LIVEKIT_URL,
+    livekitApiKey: env.LIVEKIT_API_KEY || livekitDefaults.LIVEKIT_API_KEY,
+    livekitApiSecret:
+      env.LIVEKIT_API_SECRET || livekitDefaults.LIVEKIT_API_SECRET,
+    token,
+  };
+  validateUrl(config.livekitUrl, ["ws:", "wss:"], "LIVEKIT_URL");
+  return config;
+}
+
 export const calculateWorkerLoad = (activeJobs: number, maxSessions: number) =>
   activeJobs / maxSessions;
 

@@ -216,6 +216,7 @@ async function harness(
     userFirstMs?: number;
     tasksPollMs?: number;
     browserStepBudgetMs?: number;
+    client?: "web" | "mobile";
   } = {},
 ) {
   const sessions: FakeSession[] = [];
@@ -245,6 +246,7 @@ async function harness(
         { role: "assistant" as const, text: "answer" },
       ],
       tools: [{ name: "start_task", description: "d", parameters: {} }],
+      ...(options.client ? { client: options.client } : {}),
     })),
     reportLiveReply: vi.fn(async (reply: { event_id: string }) => ({
       event_id: reply.event_id,
@@ -576,6 +578,16 @@ describe("LiveVoiceWorker user transcript", () => {
 });
 
 describe("LiveVoiceWorker", () => {
+  it("offers a phone no page tools but still lets it leave Voice Mode", async () => {
+    const test = await harness({ client: "mobile" });
+    expect(
+      (test.setups[0] as { tools: Array<{ name: string }> }).tools.map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["start_task", "end_voice_mode", "set_speed"]);
+    await test.shutdown();
+  });
+
   it("opens the provider with context, tools and history and announces readiness", async () => {
     const test = await harness();
     expect(test.localParticipant.publishTrack).toHaveBeenCalledWith(
