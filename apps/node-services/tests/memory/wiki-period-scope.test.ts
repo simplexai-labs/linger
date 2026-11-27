@@ -140,4 +140,31 @@ describe("unified Wiki period scope", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  it("keeps $ sequences of the week's evidence as written", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "wiki-period-scope-"));
+    try {
+      const text = "Budget US$$48k; regex [$&], shell $'x' and $`y`.";
+      const weekly = await writeWeeklyPrompt(
+        { memoryRoot: root, weekStart: date },
+        {
+          schemaVersion: 1,
+          weekStart: date,
+          weekEnd: "2026-09-08",
+          timeZone: "Asia/Shanghai",
+          generatedAt: new Date().toISOString(),
+          source: { memoryRoot: root },
+          memorySubjectKey: subject,
+          existingMemoryFiles: [{ path: dailyPath, content: text }],
+        },
+        {
+          representedHumanActorId: "actor_alice",
+          representedHumanDisplayName: "Alice",
+        },
+      );
+      expect(await fs.readFile(weekly.promptPath, "utf8")).toContain(text);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -155,8 +155,12 @@ async function renderTemplate(
     path.join(promptRoot, ...segments),
     "utf8",
   );
+  // A replacement function inserts the sources as written: a replacement
+  // string would expand $$, $&, $` and $' inside them.
   return template
     .replaceAll("{{date}}", date)
     .replaceAll("{{historyDate}}", previousDate(date))
-    .replaceAll("{{collectionJson}}", JSON.stringify(collection, null, 2));
+    .replaceAll("{{collectionJson}}", () =>
+      JSON.stringify(collection, null, 2),
+    );
 }

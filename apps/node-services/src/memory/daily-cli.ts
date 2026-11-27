@@ -435,8 +435,9 @@ export async function dailyPrompt(
     .replaceAll("{{date}}", options.date)
     .replaceAll("{{timeZone}}", collection.timeZone)
     .replaceAll("{{historyDate}}", previousDate(options.date))
-    .replaceAll(
-      "{{collectionJson}}",
+    // A replacement function inserts the sources as written: a replacement
+    // string would expand $$, $&, $` and $' inside them.
+    .replaceAll("{{collectionJson}}", () =>
       JSON.stringify(promptCollection, null, 2),
     );
   return {

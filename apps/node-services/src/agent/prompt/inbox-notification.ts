@@ -40,7 +40,9 @@ export const renderInboxNotificationPrompt = (
       renderInboxUpdateSection(variables.changed_inboxes, messagePreviews),
     message_previews: messagePreviews,
   })) {
-    rendered = rendered.replaceAll(`{{${name}}}`, value);
+    // A replacement function inserts the value as written: a replacement
+    // string would expand $$, $&, $` and $' inside a Human's message.
+    rendered = rendered.replaceAll(`{{${name}}}`, () => value);
   }
   // A legacy custom template may predate message_previews. Its instructions
   // must not erase the request and explicitly selected reference material.

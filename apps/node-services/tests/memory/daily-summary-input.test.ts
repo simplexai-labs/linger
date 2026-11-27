@@ -92,6 +92,20 @@ it("reads the day's Raw conversations without waiting for the Wiki", async () =>
     },
   ]);
 });
+it("keeps $ sequences of a conversation as written", async () => {
+  const text = "Budget US$$48k; regex [$&], shell $'x' and $`y`.";
+  await fs.writeFile(
+    path.join(
+      root,
+      "agent_alice/memory-state/evidence",
+      date,
+      "sessions/room_a.md",
+    ),
+    roomFile.replace("We ship the beta on Friday.", () => text),
+  );
+  await runDailyCli(args());
+  expect(await readPrompt()).toContain(text);
+});
 it("adds the day's Pocket Note to the Daily input as its own source", async () => {
   stagedPocketNote.mockResolvedValueOnce(true);
   await expect(runDailyCli(args())).resolves.toEqual({

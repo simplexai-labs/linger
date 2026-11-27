@@ -32,6 +32,23 @@ describe("Inbox notification message previews", () => {
 
 Use the messages shown above when they provide enough context. If more context is needed, use teamhub message read or teamhub message search to read history that is not already represented in your current context. Read earlier messages only when they may affect your response. Follow your role instructions.`);
   });
+
+  it("keeps $ sequences of a message as written", () => {
+    const body = "Is $$E=mc^2$$ right? Try [$&], $'x' and $`y`.";
+    const preview = `    message-5 Alice: ${JSON.stringify(body)}`;
+    const rendered = renderInboxNotificationPrompt(
+      DEFAULT_INBOX_PROMPT_TEMPLATE,
+      {
+        agent_name: "Reviewer",
+        changed_inbox_count: "1",
+        changed_inboxes: "- Inbox room-1",
+        message_previews: preview,
+        triggered_at: "2026-08-26T00:00:00.000Z",
+      },
+    );
+    expect(rendered).toContain(preview);
+    expect(rendered.match(/Follow your role instructions\./gu)).toHaveLength(1);
+  });
 });
 
 describe("renderRuntimeContinuationReminder", () => {
