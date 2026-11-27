@@ -115,7 +115,6 @@ export class SetupWindowModule implements Module {
     this.#account = new SetupAccount({
       read: () => local.account(),
       clipboard,
-      showFile: (file) => shell.showItemInFolder(file),
     });
     const pages = this.#session();
     pages.protocol.handle("app", (request) => this.#serve(request));
@@ -446,9 +445,6 @@ export class SetupWindowModule implements Module {
       case "local.account.copy":
         if (command.what === "email") await this.#account?.copyEmail();
         else await this.#account?.copy();
-        return;
-      case "local.account.reveal":
-        this.#account?.reveal();
         return;
       case "local.account.password":
         // The server takes it first, then local-account.json; a shown

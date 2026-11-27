@@ -173,7 +173,6 @@ const setupCommand = z.discriminatedUnion("op", [
       what: z.enum(["email", "password"]).optional(),
     })
     .strict(),
-  z.object({ op: z.literal("local.account.reveal") }).strict(),
   z
     .object({
       op: z.literal("local.account.password"),

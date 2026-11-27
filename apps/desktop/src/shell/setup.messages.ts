@@ -308,7 +308,6 @@ export const setupMessages = defineMessages("setup", {
   hidePassword: "Hide password",
   copyPassword: "Copy password",
   accountNote: "Use these to log in again if you log out.",
-  accountReveal: "Open account file location",
   legacyNote:
     "Your data from the earlier Simplex app can't be upgraded to Linger, so this is a fresh workspace. The earlier data was moved, not deleted, to {folder}.",
   openLinger: "Open Linger",

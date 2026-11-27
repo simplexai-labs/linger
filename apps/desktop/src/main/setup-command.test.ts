@@ -81,9 +81,6 @@ describe("parseSetupCommand", () => {
     expect(parseSetupCommand({ op: "local.account.copy" })).toEqual({
       op: "local.account.copy",
     });
-    expect(parseSetupCommand({ op: "local.account.reveal" })).toEqual({
-      op: "local.account.reveal",
-    });
     expect(
       parseSetupCommand({ op: "local.signin.switch", runtime: "claude" }),
     ).toEqual({ op: "local.signin.switch", runtime: "claude" });
@@ -270,10 +267,8 @@ describe("parseSetupCommand", () => {
     expect(() =>
       parseSetupCommand({ op: "local.signin.start", device: false }),
     ).toThrow();
-    // The account file is the installation's own; the page never names one.
-    expect(() =>
-      parseSetupCommand({ op: "local.account.reveal", file: "/etc/passwd" }),
-    ).toThrow();
+    // Setup no longer opens the account file's location.
+    expect(() => parseSetupCommand({ op: "local.account.reveal" })).toThrow();
     expect(() => parseSetupCommand({ op: "local.account.show" })).toThrow();
     // Task access modes were removed with the runtime host.
     expect(() =>

@@ -163,9 +163,7 @@ describe("setup page finish screen", () => {
     expect($("account").textContent).not.toContain(PASSWORD);
     expect($("account-show").textContent).toBe("Show");
     expect($("account-copy").textContent).toBe("Copy");
-    expect($("account-reveal").textContent?.trim()).toBe(
-      "Open account file location",
-    );
+    expect(document.getElementById("account-reveal")).toBeNull();
   });
 
   it("shows the password only after Show and hides it again", async () => {
@@ -208,7 +206,7 @@ describe("setup page finish screen", () => {
     expect($("account-password").textContent).toBe("•".repeat(12));
   });
 
-  it("asks the main process to copy the password and reveal the file", async () => {
+  it("asks the main process to copy the password and the email", async () => {
     const { push, run } = await openPage();
     push(state("ready", { email: "admin@gmail.com" }));
     $("account-toggle").click();
@@ -228,10 +226,7 @@ describe("setup page finish screen", () => {
       op: "local.account.copy",
       what: "email",
     });
-    $("account-reveal").click();
-    await vi.waitFor(() =>
-      expect(run).toHaveBeenCalledWith({ op: "local.account.reveal" }),
-    );
+    expect(document.getElementById("account-reveal")).toBeNull();
   });
 
   it("says why the account cannot be shown", async () => {

@@ -497,12 +497,10 @@ export type SetupCommand =
       readonly byok: SetupByokConfig;
     }
   // The finished install's account: show or hide the password, copy it to
-  // the clipboard, show its file in the file manager, or change the
-  // password (8-256 characters without control characters, as the server
+  // the clipboard, or change the password (8-256 characters without control characters, as the server
   // and local-account.json take it).
   | { readonly op: "local.account.show"; readonly on: boolean }
   | { readonly op: "local.account.copy"; readonly what?: "email" | "password" }
-  | { readonly op: "local.account.reveal" }
   | { readonly op: "local.account.password"; readonly password: string }
   | { readonly op: "signin.open" }
   | { readonly op: "computer.connect" }

@@ -3707,12 +3707,6 @@
                   type="button"
                   data-t="changePassword"
                 ></button>
-                <button
-                  class="lnk"
-                  id="account-reveal"
-                  type="button"
-                  data-t="accountReveal"
-                ></button>
               </div>
               <p class="account-error" id="account-error" role="alert"></p>
             </div>
@@ -7260,9 +7254,6 @@
             render();
           }, 1500);
         });
-      $("account-reveal").addEventListener("click", () =>
-        run({ op: "local.account.reveal" }),
-      );
       // A new password goes to the server, which checks the current one;
       // the account file and this computer's sign-in then follow it.
       $("account-change-open").addEventListener("click", () => {
