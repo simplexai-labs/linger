@@ -333,13 +333,14 @@ func setDelegatedTaskStatus(
 		actorID, snapshot.Version, nextRevision, toStatus); err != nil {
 		return 0, err
 	}
-	// Execution Events go to the Task's work Room. The origin Room lists its
-	// running background Tasks and only polls while that list is non-empty, so
-	// a Task resumed after it stopped must also announce itself there.
+	// Execution Events go to the Task's work Room. The origin Room, or the
+	// home Room of a Task Live started, lists its running background Tasks and
+	// only polls while that list is non-empty, so a Task resumed after it
+	// stopped must also announce itself there.
 	origin := snapshot.OriginRoomID
 	if isActiveDelegatedStatus(toStatus) && !isActiveDelegatedStatus(fromStatus) &&
-		origin.Valid && origin.String != snapshot.EventRoomID {
-		if err := appendExecutionEvent(ctx, queries, snapshot.TenantID, origin.String, snapshot.TaskID,
+		origin != "" && origin != snapshot.EventRoomID {
+		if err := appendExecutionEvent(ctx, queries, snapshot.TenantID, origin, snapshot.TaskID,
 			actorID, snapshot.Version, nextRevision, toStatus); err != nil {
 			return 0, err
 		}
