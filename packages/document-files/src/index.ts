@@ -11,6 +11,7 @@ export interface DocumentFileSnapshot {
   sizeBytes: number;
 }
 export class DocumentImageError extends Error {
+  override readonly name = "DocumentImageError";
   constructor(
     readonly code: string,
     message: string,
@@ -24,6 +25,7 @@ const playgroundFilePathSchema = {
       !value.startsWith("./playground/") ||
       value.length > 1037 ||
       value.includes("\\") ||
+      /^[A-Za-z]:/u.test(value.slice(13)) ||
       Array.from(value).some(
         (character) =>
           character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
@@ -151,6 +153,18 @@ function decode(uri: string): { bytes: Buffer; mediaType: string } {
     throw invalid();
   return { bytes, mediaType };
 }
+function decodeUriComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw invalid();
+  }
+}
+function encodeMarkdownUrlSegment(value: string): string {
+  return encodeURIComponent(value).replace(/[()]/gu, (character) =>
+    character === "(" ? "%28" : "%29",
+  );
+}
 export function prepareDocumentSource(snapshot: DocumentFileSnapshot) {
   const source = playgroundFilePathSchema.parse(
     snapshot.filePath.startsWith("./playground/")
@@ -195,7 +209,7 @@ export function extractDocumentImages(snapshot: DocumentFileSnapshot) {
     const extension = mediaType === "image/jpeg" ? "jpg" : mediaType.slice(6);
     const filename = `${prefix}${hash(bytes)}.${extension}`;
     files.set(filename, bytes);
-    node.url = filename;
+    node.url = encodeMarkdownUrlSegment(filename);
   }
   if (!files.size) return { content: snapshot.content, files };
   removeImageDefinitions(tree);
@@ -251,7 +265,7 @@ export async function bundleDocumentImages<T extends DocumentFileSnapshot>(
         );
       if (!match) throw invalid();
       const sourcePath = playgroundFilePathSchema.parse(
-        decodeURIComponent(match[2]!),
+        decodeUriComponent(match[2]!),
       );
       const key = sourcePath + ":" + match[3];
       let available = sources.get(key);
@@ -273,13 +287,9 @@ export async function bundleDocumentImages<T extends DocumentFileSnapshot>(
       if (!uri) throw invalid();
       replaceImage(node, uri);
     } else if (!/^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu.test(node.url)) {
-      const local = decodeURIComponent(node.url);
-      if (
-        local.includes("\\") ||
-        local.includes("\0") ||
-        local.includes("?") ||
-        local.includes("#")
-      )
+      if (node.url.includes("?") || node.url.includes("#")) throw invalid();
+      const local = decodeUriComponent(node.url);
+      if (local.includes("\\") || local.includes("\0") || local.startsWith("/"))
         throw invalid();
       const filePath =
         "./" +

@@ -667,6 +667,31 @@ describe("integrated CLI business requests and outcomes", () => {
     ).toBe(2);
     expect(f.fetcher).not.toHaveBeenCalled();
   });
+  it.each(["![a](50%.png)\n", "![a](photo.png?v=1)\n"])(
+    "maps DocumentImageError from attached Markdown (%j) to invalid_input exit 2 without network",
+    async (markdown) => {
+      const f = fixture();
+      writeFileSync(path.join(f.cwd, "bad.md"), markdown);
+      expect(
+        await runCli(
+          [
+            "message",
+            "send",
+            "--content",
+            "Image check",
+            "--attach",
+            "./bad.md",
+            "--json",
+          ],
+          f.dependencies,
+        ),
+      ).toBe(2);
+      const failure = JSON.parse(f.stderr.join("")).error;
+      expect(failure.code).toBe("invalid_input");
+      expect(failure.code).not.toBe("outcome_unknown");
+      expect(f.fetcher).not.toHaveBeenCalled();
+    },
+  );
 });
 
 it("reads a real message Thread inside the configured Room Context without document-comment scope", async () => {

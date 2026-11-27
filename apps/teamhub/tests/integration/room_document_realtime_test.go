@@ -329,7 +329,7 @@ func newRoomDocumentRealtimeEnvWithRuntimeOptions(
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	artifactRoot := prepareTemplateAppCatalog(t, pool)
+	artifactRoot := copyTemplateSkillObjects(t, pool)
 	broker := realtime.NewBroker(64)
 	appOptions := append(riverTestOnlyOptions(), withRealtimeBroker(broker), skipping(app.SkillInstall),
 		withDocumentTextNormalizer(fixtureTextNormalizer{}))

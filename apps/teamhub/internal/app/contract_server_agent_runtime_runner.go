@@ -74,7 +74,21 @@ func (a *App) connectAgentRuntimeLocalComputer(c *gin.Context) {
 			placements[index].ReasoningEffort = &effort
 		}
 	}
-	c.JSON(http.StatusOK, teamhubinternal.ConnectAgentRuntimeLocalComputerResult{Computer: computer, Placements: placements})
+	c.JSON(http.StatusOK, a.connectAgentRuntimeLocalComputerResult(computer, placements))
+}
+
+func (a *App) connectAgentRuntimeLocalComputerResult(
+	computer teamhubinternal.AgentRuntimeLocalComputer,
+	placements []teamhubinternal.AgentRuntimeRunnerPlacement,
+) teamhubinternal.ConnectAgentRuntimeLocalComputerResult {
+	connectedApps := a.connectionProvidersConfigured()
+	permissionReview := a.permissionReviewEnabled()
+	return teamhubinternal.ConnectAgentRuntimeLocalComputerResult{
+		Computer:         computer,
+		Placements:       placements,
+		ConnectedApps:    &connectedApps,
+		PermissionReview: &permissionReview,
+	}
 }
 
 func (a *App) touchAgentRuntimeLocalComputer(c *gin.Context) {

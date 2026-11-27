@@ -2172,3 +2172,33 @@ exit 1
 		}
 	})
 }
+
+func TestWithBundledPowerShellPath(t *testing.T) {
+	pwshDir := filepath.Join(t.TempDir(), "runtime", "pwsh")
+	pwshPath := filepath.Join(pwshDir, "pwsh.exe")
+
+	env := map[string]string{"Path": `C:\Windows\System32;C:\Users\alice\bin`}
+	updated := withBundledPowerShellPath(env, pwshPath, "windows")
+	if got, want := updated["PATH"], `C:\Windows\System32;C:\Users\alice\bin;`+pwshDir; got != want {
+		t.Fatalf("updated Windows PATH = %q, want %q", got, want)
+	}
+	if _, duplicate := updated["Path"]; duplicate {
+		t.Fatalf("unexpected duplicate Path key: %+v", updated)
+	}
+	if env["Path"] != `C:\Windows\System32;C:\Users\alice\bin` || env["PATH"] != "" {
+		t.Fatalf("caller environment map mutated: %+v", env)
+	}
+
+	existingEntry := strings.ToUpper(pwshDir) + `\`
+	alreadyPresent := withBundledPowerShellPath(map[string]string{"PATH": `C:\Windows\System32;` + existingEntry}, pwshPath, "windows")
+	if got, want := alreadyPresent["PATH"], `C:\Windows\System32;`+existingEntry; got != want {
+		t.Fatalf("deduplicated Windows PATH = %q, want %q", got, want)
+	}
+
+	if got := withBundledPowerShellPath(env, pwshPath, "linux"); !reflect.DeepEqual(got, env) {
+		t.Fatalf("non-Windows modified env: %+v", got)
+	}
+	if got := withBundledPowerShellPath(env, "", "windows"); !reflect.DeepEqual(got, env) {
+		t.Fatalf("empty pwsh path modified env: %+v", got)
+	}
+}

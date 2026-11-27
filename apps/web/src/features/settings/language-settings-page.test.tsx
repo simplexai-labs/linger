@@ -47,7 +47,7 @@ describe("Language settings", () => {
     ).toBeVisible();
     const sections = screen.getByRole("navigation", { name: chinese.sections });
     expect(
-      within(sections).getByRole("link", { name: chinese.profile }),
+      within(sections).getByRole("link", { name: chinese.account }),
     ).toBeVisible();
     expect(
       screen.getByRole("combobox", { name: chinese.interfaceLanguage }),

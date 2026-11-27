@@ -58,8 +58,9 @@ describe("the voice key dialog in the language on screen", () => {
         name: words.title.replace("{provider}", "Soniox"),
       }),
     ).toBeVisible();
+    expect(screen.getByText(words.sonioxPurpose)).toBeVisible();
     expect(
-      screen.getByText(words.stepOpen.replace("{provider}", "Soniox")),
+      screen.getByRole("link", { name: zhCN.connectors.getAKey }),
     ).toBeVisible();
     fireEvent.change(
       screen.getByLabelText(words.apiKey.replace("{provider}", "Soniox")),

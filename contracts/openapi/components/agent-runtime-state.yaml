@@ -1650,6 +1650,14 @@ components:
           maxItems: 1000
           items:
             $ref: "#/components/schemas/AgentRuntimeRunnerPlacement"
+        connected_apps:
+          type: boolean
+          description: >-
+            Whether TeamHub currently has a connected-app provider configured.
+        permission_review:
+          type: boolean
+          description: >-
+            Whether TeamHub currently has a Runtime permission judge enabled.
     TouchAgentRuntimeLocalComputerRequest:
       type: object
       additionalProperties: false

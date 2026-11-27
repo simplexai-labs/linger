@@ -14,6 +14,10 @@ if (process.env.LINGER_PI_INHERITED_NODE_PATH !== undefined) {
 // before Pi runs it; the commands Pi starts do not inherit it.
 const shellTextHook = process.env.LINGER_PI_SHELL_TEXT_HOOK;
 delete process.env.LINGER_PI_SHELL_TEXT_HOOK;
+// One-shot prefix warm-up pin metadata consumed at extension load; cleared
+// immediately so child processes never observe it.
+const strataPinEnvRaw = process.env.LINGER_PI_STRATA_PIN;
+delete process.env.LINGER_PI_STRATA_PIN;
 // An installed Pi may alias bare package imports to its own version. Resolve
 // the pinned public entry by URL so this adapter keeps its shipped API.
 const {
@@ -644,6 +648,81 @@ export async function mountManagedMcp(
   });
 }
 
+const STRATA_PIN_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+const STRATA_PIN_ALLOWED_KEYS = new Set([
+  "name",
+  "prefill_only",
+  "resident",
+  "anchor",
+]);
+
+/**
+ * Validates and normalizes the PolyStrata `strata_pin` payload passed into
+ * one-shot Pi warm-up turns via LINGER_PI_STRATA_PIN.
+ */
+export function parseStrataPinConfig(raw) {
+  if (!raw || typeof raw !== "string") {
+    return undefined;
+  }
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid LINGER_PI_STRATA_PIN payload");
+  }
+  for (const key of Object.keys(parsed)) {
+    if (!STRATA_PIN_ALLOWED_KEYS.has(key)) {
+      throw new Error(`Unsupported strata_pin field: ${key}`);
+    }
+  }
+  if (
+    typeof parsed.name !== "string" ||
+    parsed.name === "." ||
+    parsed.name === ".." ||
+    !STRATA_PIN_NAME_PATTERN.test(parsed.name)
+  ) {
+    throw new Error("Invalid strata_pin.name");
+  }
+  if (typeof parsed.prefill_only !== "boolean") {
+    throw new Error("Invalid strata_pin.prefill_only");
+  }
+  const resident = parsed.resident ?? "ram";
+  if (resident !== "ram" && resident !== "spill") {
+    throw new Error("Invalid strata_pin.resident");
+  }
+  if (
+    parsed.anchor !== undefined &&
+    (typeof parsed.anchor !== "string" || parsed.anchor.length === 0)
+  ) {
+    throw new Error("Invalid strata_pin.anchor");
+  }
+  return {
+    name: parsed.name,
+    prefill_only: parsed.prefill_only,
+    resident,
+    ...(parsed.anchor !== undefined ? { anchor: parsed.anchor } : {}),
+  };
+}
+
+/**
+ * Injects the Bifrost extra-param passthrough header and top-level `strata_pin`
+ * object onto Pi provider requests during post-load prefix warm-up.
+ */
+export function registerStrataPinHooks(pi, pinSpec) {
+  pi.on("before_provider_headers", (event) => {
+    if (event?.headers && typeof event.headers === "object") {
+      event.headers["x-bf-passthrough-extra-params"] = "true";
+    }
+  });
+  pi.on("before_provider_request", (event) => {
+    if (!event?.payload || typeof event.payload !== "object") {
+      return undefined;
+    }
+    return {
+      ...event.payload,
+      strata_pin: pinSpec,
+    };
+  });
+}
+
 // The Daemon loads this extension for every Pi Run to enforce bash pipefail,
 // the shell-text-hook check (POSIX bash and Windows PowerShell), the
 // consecutive shell failure loop guard, permission review, managed MCP
@@ -653,6 +732,10 @@ export async function mountManagedMcp(
 // neither run nor rewritten.
 export default async function managedExtension(pi) {
   registerWindowsPowerShellTool(pi);
+  const strataPinConfig = parseStrataPinConfig(strataPinEnvRaw);
+  if (strataPinConfig) {
+    registerStrataPinHooks(pi, strataPinConfig);
+  }
   const failureLoop = createFailureLoopTracker();
   let cachedPowerShell51;
   const isPowerShell51 = () => {
@@ -661,25 +744,10 @@ export default async function managedExtension(pi) {
     }
     return cachedPowerShell51;
   };
-  pi.on("before_agent_start", () => {
-    failureLoop.reset();
-    if (
-      typeof pi.getActiveTools !== "function" ||
-      typeof pi.setActiveTools !== "function"
-    ) {
-      return undefined;
-    }
-    const current = pi.getActiveTools();
-    const sorted = sortActiveToolNames(current);
-    if (
-      sorted.length !== current.length ||
-      sorted.some((name, index) => name !== current[index])
-    ) {
-      pi.setActiveTools(sorted);
-    }
-    return undefined;
-  });
   pi.on("tool_call", async (event, ctx) => {
+    if (strataPinConfig) {
+      return { block: true, reason: "prefix warmup does not execute tools" };
+    }
     const blocked =
       (await refuseRewrittenShellText(event, shellTextHook, {
         isPowerShell51,
@@ -694,4 +762,39 @@ export default async function managedExtension(pi) {
   if (process.env.LINGER_PI_MANAGED_MCP_CONFIG) {
     await mountManagedMcp(pi, process.env.LINGER_PI_MANAGED_MCP_CONFIG);
   }
+  // Register after mountManagedMcp so createMcpExtension's before_agent_start
+  // (waitForDirectServers) finishes initialize + tools/list + registerTool
+  // before we sort active tool names or validate warm-up readiness.
+  pi.on("before_agent_start", (_event, ctx) => {
+    failureLoop.reset();
+    if (
+      typeof pi.getActiveTools !== "function" ||
+      typeof pi.setActiveTools !== "function"
+    ) {
+      return undefined;
+    }
+    const current = pi.getActiveTools();
+    if (
+      strataPinConfig &&
+      process.env.LINGER_PI_MANAGED_MCP_CONFIG &&
+      typeof pi.getMcpServers === "function" &&
+      pi.getMcpServers().length > 0 &&
+      !current.some((name) => name.startsWith("mcp__"))
+    ) {
+      ctx?.ui?.notify?.(
+        "Managed MCP tools did not register before prefix warm-up",
+        "error",
+      );
+      ctx?.abort?.();
+      return undefined;
+    }
+    const sorted = sortActiveToolNames(current);
+    if (
+      sorted.length !== current.length ||
+      sorted.some((name, index) => name !== current[index])
+    ) {
+      pi.setActiveTools(sorted);
+    }
+    return undefined;
+  });
 }

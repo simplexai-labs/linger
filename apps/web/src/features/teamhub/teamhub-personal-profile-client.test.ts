@@ -4,12 +4,11 @@ import { createHttpTeamHubClient } from "./teamhub-client";
 import { requestBodyText, requestUrlText } from "@linger/service-kit";
 
 describe("TeamHub Personal Profile client", () => {
-  it("maps Profile reads, generations and Insight deletion to the public contract", async () => {
+  it("maps Profile reads and generations to the public contract", async () => {
     const fetchRequest = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ history: [], has_more: false }))
-      .mockResolvedValueOnce(jsonResponse({ id: "generation/a" }, 202))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValueOnce(jsonResponse({ id: "generation/a" }, 202));
     const client = createHttpTeamHubClient({
       baseUrl: "https://teamhub.example.test",
       fetchRequest,
@@ -18,7 +17,6 @@ describe("TeamHub Personal Profile client", () => {
     await client.createPersonalProfileGeneration("tenant/a", {
       sources: [{ kind: "connection", connection_id: "connection/a" }],
     });
-    await client.deletePersonalInsight("tenant/a", "insight/a");
     expect(
       (await sentRequests(fetchRequest)).map(([url, init]) => ({
         body: init?.body ? JSON.parse(requestBodyText(init.body)) : undefined,
@@ -40,12 +38,6 @@ describe("TeamHub Personal Profile client", () => {
         key: null,
         method: "POST",
         url: "https://teamhub.example.test/v0/tenants/tenant%2Fa/personal-profile-generations",
-      },
-      {
-        body: undefined,
-        key: null,
-        method: "DELETE",
-        url: "https://teamhub.example.test/v0/tenants/tenant%2Fa/personal-insights/insight%2Fa",
       },
     ]);
   });

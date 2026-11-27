@@ -495,10 +495,8 @@ describe("Voice Mode without a voice key", () => {
       await screen.findByRole("button", { name: "Start Voice Mode" }),
     );
     const dialog = await screen.findByRole("dialog", { name: "Turn on voice" });
-    expect(
-      within(dialog).getByRole("button", { name: "Soniox" }),
-    ).toBeVisible();
-    fireEvent.click(within(dialog).getByRole("button", { name: "xAI" }));
+    expect(within(dialog).getByRole("radio", { name: "Soniox" })).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("radio", { name: "xAI" }));
     fireEvent.change(within(dialog).getByLabelText("xAI API key"), {
       target: { value: "xai-key" },
     });

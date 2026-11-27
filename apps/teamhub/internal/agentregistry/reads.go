@@ -152,48 +152,6 @@ func (s *Service) ListTenantAgentAvailability(ctx context.Context, accountID, te
 	return httpapi.TenantAgentAvailabilityPage{Items: items, Page: directoryPageMeta(hasMore, rows)}, nil
 }
 
-// ListAgentTemplates lists the built-in and published Agent templates.
-func (s *Service) ListAgentTemplates(ctx context.Context) ([]httpapi.AgentTemplate, error) {
-	rows, err := s.queries.ListAgentTemplates(ctx)
-	if err != nil {
-		return nil, internal("list Agent templates", err)
-	}
-	items := make([]httpapi.AgentTemplate, 0, len(rows))
-	for _, row := range rows {
-		model, err := listedAgentTemplateModel(row)
-		if err != nil {
-			return nil, internal("decode Agent template", err)
-		}
-		items = append(items, model)
-	}
-	return items, nil
-}
-
-// ErrAgentTemplateNotOwned reports a template that was not published from
-// the caller's Space.
-var ErrAgentTemplateNotOwned = errors.New("Agent template was not published from this Space")
-
-// DeleteAgentTemplate removes a template published out of the Space. Removing
-// an absent template succeeds: it is the state the caller asked for.
-func (s *Service) DeleteAgentTemplate(ctx context.Context, tenantID, templateID string) error {
-	owner, err := s.queries.GetAgentTemplateOwner(ctx, templateID)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return nil
-	case err != nil:
-		return internal("load Agent template", err)
-	}
-	// The Space's Human removes templates published out of this Space, never
-	// built-in ones or another deployment's.
-	if owner.Origin != "published" || !owner.TenantID.Valid || owner.TenantID.String != tenantID {
-		return ErrAgentTemplateNotOwned
-	}
-	if _, err := s.queries.DeletePublishedAgentTemplate(ctx, templateID); err != nil {
-		return internal("delete Agent template", err)
-	}
-	return nil
-}
-
 // AvatarImage is an uploaded Agent avatar with its immutable version.
 type AvatarImage struct {
 	ContentType string

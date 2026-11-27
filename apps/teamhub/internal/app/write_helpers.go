@@ -37,11 +37,4 @@ func optionalString(value *string) string {
 	return *value
 }
 
-func pointerSlice[T any](value *[]T) []T {
-	if value == nil {
-		return nil
-	}
-	return *value
-}
-
 func ptr[T any](value T) *T { return &value }

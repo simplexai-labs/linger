@@ -200,13 +200,16 @@ SELECT item.id AS task_id,item.tenant_id,item.title,item.state AS work_item_stat
        item.task_control_outcome,item.task_control_payload,item.task_execution_updated_at,
        generation.result_agent_actor_id,generation.spec,generation.spec_hash,
        COALESCE(work_room.room_id,origin.room_id)::text AS event_room_id,
-       origin.room_id AS origin_room_id
+       COALESCE(origin.room_id,live.home_room_id,'')::text AS origin_room_id
 FROM work_items item
 JOIN task_execution_generations generation
   ON generation.task_id=item.id AND generation.tenant_id=item.tenant_id
  AND generation.generation=item.task_execution_generation
 LEFT JOIN work_item_room_links origin
   ON origin.work_item_id=item.id AND origin.tenant_id=item.tenant_id AND origin.link_type='origin'
+-- A Task Live started is hidden, so it has no origin link; the Room that
+-- lists it is its home Room.
+LEFT JOIN voice_live_tasks live ON live.work_item_id=item.id
 LEFT JOIN work_item_room_links work_room
   ON work_room.work_item_id=item.id AND work_room.tenant_id=item.tenant_id AND work_room.link_type='work'
 WHERE item.id=sqlc.arg(task_id)::text

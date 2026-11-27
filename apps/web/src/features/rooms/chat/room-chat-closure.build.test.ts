@@ -12,7 +12,7 @@ vi.mock("vite", async (importOriginal) => ({
 }));
 
 describe("room-chat static import closure", () => {
-  it("excludes ajv and @mantine/core from the room-chat static closure", async () => {
+  it("excludes @mantine/core from the room-chat static closure", async () => {
     const root = fileURLToPath(new URL("../../../..", import.meta.url));
     const roomChatEntry = fileURLToPath(
       new URL("./room-chat.tsx", import.meta.url),
@@ -65,11 +65,8 @@ describe("room-chat static import closure", () => {
       }
     }
 
-    const forbidden = staticModuleIds.filter(
-      (id) =>
-        id.includes("/node_modules/ajv/") ||
-        id.includes("/node_modules/ajv-draft-04/") ||
-        id.includes("/node_modules/@mantine/core/"),
+    const forbidden = staticModuleIds.filter((id) =>
+      id.includes("/node_modules/@mantine/core/"),
     );
     expect(forbidden).toEqual([]);
   });

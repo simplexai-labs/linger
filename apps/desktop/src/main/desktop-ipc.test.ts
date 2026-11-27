@@ -190,23 +190,6 @@ describe("DesktopIpcModule local account", () => {
   });
 });
 
-describe("DesktopIpcModule voice window", () => {
-  it("shows the main window for the server's page only", async () => {
-    const f = await fixture();
-    await f.invoke(IPC.voiceWindowShowMain);
-    expect(f.windows.show).toHaveBeenCalledOnce();
-    // macOS raises a window only inside the active app.
-    expect(focusApp).toHaveBeenCalledTimes(
-      process.platform === "darwin" ? 1 : 0,
-    );
-    expect(() =>
-      f.invoke(IPC.voiceWindowShowMain, "https://evil.example.com"),
-    ).toThrow("Not allowed");
-    expect(f.windows.show).toHaveBeenCalledOnce();
-    await f.host.stop("quit");
-  });
-});
-
 describe("DesktopIpcModule diagnostics", () => {
   it("saves through the tray's save and returns no path to the page", async () => {
     const f = await fixture();

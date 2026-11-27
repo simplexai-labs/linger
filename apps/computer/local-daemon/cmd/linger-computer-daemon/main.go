@@ -175,6 +175,8 @@ func run(args []string) (resultErr error) {
 		// Agents on this computer then have no browser or computer-control
 		// tools; say so instead of leaving them silently missing.
 		slog.Warn("computer_tools.missing: browser and computer-control tools are disabled", "expected", localtools.ToolsDirectory(executable))
+	} else if toolInstallation.PowerShellPath != "" {
+		baseProviderEnvironment = withBundledPowerShellPath(baseProviderEnvironment, toolInstallation.PowerShellPath, runtime.GOOS)
 	}
 	currentDiscoveryOptions := func() provider.DiscoveryOptions {
 		var managedPi string
@@ -395,6 +397,10 @@ func run(args []string) (resultErr error) {
 	if piEnabled && !hasPi && !piDeferred {
 		libraryHarnessDir = localmodels.HarnessRoot(localModelsStateDir)
 	}
+	var warmupMCPServers func(context.Context) (json.RawMessage, func(), error)
+	if toolManager != nil && resolver.ToolGuide != "" {
+		warmupMCPServers = localtools.OpenWarmupComputerMCP
+	}
 	localModels = localmodels.New(localmodels.Options{
 		Tool: localModelsTool, Environment: baseProviderEnvironment,
 		JobDirectory:        jobDir,
@@ -416,6 +422,39 @@ func run(args []string) (resultErr error) {
 			default:
 			}
 		},
+		WarmupPrefix: (&daemon.PrefixWarmupRunner{
+			ContentURL: func() string {
+				if localDaemon == nil {
+					return ""
+				}
+				return localDaemon.ContentURL()
+			},
+			PiInstallation: func() (lingercontext.ProviderInstallation, bool) {
+				install, ok, lookupErr := providerCatalog.Lookup(context.Background(), "pi")
+				if lookupErr == nil && ok && install.ExecutablePath != "" {
+					return install, true
+				}
+				if localModels != nil {
+					if exe := localModels.PiExecutable(); exe != "" {
+						return lingercontext.ProviderInstallation{
+							Type:           "pi",
+							ExecutablePath: exe,
+							Environment:    currentProviderEnvironment(),
+							ModelGateway:   true,
+							APILink:        true,
+						}, true
+					}
+				}
+				return lingercontext.ProviderInstallation{}, false
+			},
+			ManagedMCPExtension:  piExtension,
+			ServiceCommand:       serviceCommand,
+			ToolGuide:            resolver.ToolGuide,
+			HostEnvironmentGuide: resolver.HostEnvironmentGuide,
+			TeamHubCLI:           teamhubBin != "",
+			TempBase:             operationTempBase,
+			WarmupMCPServers:     warmupMCPServers,
+		}).Warmup,
 	})
 	defer localModels.Close()
 	antigravityExecutable := &antigravityExecutableTracker{path: discovered.Installations["antigravity"].ExecutablePath}
@@ -1060,6 +1099,34 @@ func withManagedPiPath(paths map[string]string, managed string) map[string]strin
 		cloned = make(map[string]string, 1)
 	}
 	cloned["pi"] = managed
+	return cloned
+}
+
+func withBundledPowerShellPath(env map[string]string, powerShellPath, goos string) map[string]string {
+	if goos != "windows" || strings.TrimSpace(powerShellPath) == "" {
+		return env
+	}
+	cloned := maps.Clone(env)
+	if cloned == nil {
+		cloned = make(map[string]string, 1)
+	}
+	var existing string
+	if value, ok := cloned["PATH"]; ok {
+		existing = value
+		delete(cloned, "PATH")
+	}
+	var variantKeys []string
+	for key := range cloned {
+		if strings.EqualFold(key, "PATH") {
+			variantKeys = append(variantKeys, key)
+		}
+	}
+	sort.Strings(variantKeys)
+	for _, key := range variantKeys {
+		existing = provider.AppendWindowsSearchPath(existing, cloned[key])
+		delete(cloned, key)
+	}
+	cloned["PATH"] = provider.AppendWindowsSearchPath(existing, filepath.Dir(powerShellPath))
 	return cloned
 }
 

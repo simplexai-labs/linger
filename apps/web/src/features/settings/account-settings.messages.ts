@@ -1,8 +1,8 @@
 import { defineMessages } from "@/i18n/messages";
 
-/** Settings › Profile and Settings › Security, with the dialogs they open. */
+/** Settings › Account, with the dialogs it opens. */
 export const accountSettingsMessages = defineMessages("accountSettings", {
-  // Profile page
+  // Account page
   loadingAccountProfile: "Loading Account profile",
   loadingAccountProfileStatus: "Loading Account profile...",
 
@@ -20,22 +20,6 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
   imageTooLarge: "Choose an image smaller than 5 MB.",
   imageUnreadable: "Your browser could not read this image.",
   imageTooDetailed: "This image is too detailed. Choose a smaller image.",
-
-  // Bio and organization
-  bio: "Bio",
-  bioPlaceholder: "A short description of how you work.",
-  organization: "Organization",
-  organizationPlaceholder: "Your company or organization",
-  handEditedHint: "Fields you edit won't be overwritten.",
-  accountSaved: "Account saved",
-  saving: "Saving...",
-
-  // Insights
-  insights: "Insights",
-  loadingInsights: "Loading insights...",
-  noInsights: "No insights yet.",
-  deleteInsight: "Delete insight",
-  deleteNamedInsight: "Delete {dimension} insight",
 
   // Add profile sources dialog
   addProfileSources: "Add profile sources",
@@ -152,8 +136,6 @@ export const accountSettingsMessages = defineMessages("accountSettings", {
 
   // API keys
   apiKeys: "API keys",
-  apiKeysDescription:
-    "Shared by everyone on this server. Stored encrypted and never shown again.",
   providerKey: "{provider} key",
   providerKeySaved: "{provider} key saved",
   keySetByServer: "Set by your server",

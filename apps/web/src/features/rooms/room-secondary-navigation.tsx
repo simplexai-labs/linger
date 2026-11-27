@@ -56,35 +56,6 @@ const QuickCreateLocalAgentDialog = lazy(async () => ({
   default: (await import("./quick-create-local-agent-dialog"))
     .QuickCreateLocalAgentDialog,
 }));
-const importCreateAgentFromTemplateFlow = () =>
-  import("./agent-templates/create-agent-from-template-flow");
-const CreateAgentFromTemplateFlow = lazy(async () => ({
-  default: (await importCreateAgentFromTemplateFlow())
-    .CreateAgentFromTemplateFlow,
-}));
-
-/**
- * Warm the template chunk once the browser is idle. It is lazily loaded to stay
- * off the initial JavaScript graph, so without this the very first open waits on
- * a network fetch behind `fallback={null}` and the dialog snaps in; later opens
- * hit the module cache, which is why this only ever showed up once per session.
- */
-function usePrefetchTemplateFlow() {
-  useEffect(() => {
-    // Idle only, with no timer fallback: a fallback fires inside jsdom, which
-    // has no requestIdleCallback, and drags this dynamic import into every test
-    // that renders the sidebar. Where the API is missing the dialog simply
-    // loads on demand as before.
-    const idle = globalThis.requestIdleCallback;
-    if (!idle) return;
-    // A busy Room may never go idle, so the timeout makes the prefetch happen
-    // either way; without it the first open still waits on the fetch.
-    const handle = idle(() => void importCreateAgentFromTemplateFlow(), {
-      timeout: 2000,
-    });
-    return () => globalThis.cancelIdleCallback?.(handle);
-  }, []);
-}
 
 export function RoomSecondaryNavigation({
   activeRoomId,
@@ -115,13 +86,11 @@ export function RoomSecondaryNavigation({
   runningRoomIds?: readonly string[];
   tenant: TeamHubTenant;
 }) {
-  usePrefetchTemplateFlow();
   const t = useT();
   const searchTitle = t(roomListMessages.searchShortcut, {
     shortcut: searchShortcutLabel(),
   });
   const [localAgentOpen, setLocalAgentOpen] = useState(false);
-  const [templateAgentOpen, setTemplateAgentOpen] = useState(false);
   const runningRooms = new Set(runningRoomIds);
   const failedRooms = new Set(failedRoomIds);
   const visibleRoomIds = new Set(
@@ -291,17 +260,6 @@ export function RoomSecondaryNavigation({
           />
         </Suspense>
       ) : null}
-      {templateAgentOpen ? (
-        <Suspense fallback={null}>
-          <CreateAgentFromTemplateFlow
-            onClose={() => {
-              setTemplateAgentOpen(false);
-              onCloseMobile();
-            }}
-            tenantId={tenant.id}
-          />
-        </Suspense>
-      ) : null}
 
       <div
         data-voice-scroll="sidebar"
@@ -328,7 +286,6 @@ export function RoomSecondaryNavigation({
             <NavSection
               action={
                 <AgentCreateMenu
-                  onCreateFromTemplate={() => setTemplateAgentOpen(true)}
                   onCreateRoom={onCreateRoom}
                   onCreateAgent={() => {
                     setLocalAgentOpen(true);

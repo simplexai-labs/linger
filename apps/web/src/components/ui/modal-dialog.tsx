@@ -106,7 +106,10 @@ export function ModalDialog({
         // shows only once the person uses the keyboard.
         const close = closeButtonRef.current;
         if (close && document.activeElement === close) {
+          // A control marked data-autofocus starts the dialog; React's
+          // autoFocus never reaches the DOM, so showModal() cannot see it.
           const target =
+            dialog.querySelector<HTMLElement>("[data-autofocus]") ??
             firstFocusable(dialog.querySelector(".app-dialog-body")) ??
             firstFocusable(dialog.querySelector(".app-dialog-footer")) ??
             close;

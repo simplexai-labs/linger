@@ -29,18 +29,10 @@ describe("createTenantAgent", () => {
     await expect(
       createTenantAgent(client, {
         agentType: "general",
-        description: "Reviews every release boundary.",
         instructions: " Review the Room conversation. ",
         model: " gpt-5.6-luna ",
         name: " Mirror Reviewer ",
         reasoningEffort: "xhigh",
-        skillBindings: [
-          {
-            manifest_version: "2.0.0",
-            name: "Research brief",
-            skill_id: "research-brief",
-          },
-        ],
         tenantId: "tenant-a",
         visibilityScope: "sponsor",
       }),
@@ -50,20 +42,12 @@ describe("createTenantAgent", () => {
         params: { tenantId: "tenant-a" },
         body: {
           agent_type: "general",
-          description: "Reviews every release boundary.",
           instructions: "Review the Room conversation.",
           name: "Mirror Reviewer",
           runtime: {
             model: "gpt-5.6-luna",
             reasoning_effort: "xhigh",
           },
-          skill_bindings: [
-            {
-              manifest_version: "2.0.0",
-              name: "Research brief",
-              skill_id: "research-brief",
-            },
-          ],
           visibility_scope: "sponsor",
         },
       }),
@@ -86,7 +70,6 @@ describe("createTenantAgent", () => {
         workspaceGrantId: "grant-workspace",
       },
       tenantId: "tenant-a",
-      skillBindings: [],
       visibilityScope: "workspace",
     });
     expect(createTenantAgentCall).toHaveBeenLastCalledWith(
@@ -105,7 +88,6 @@ describe("createTenantAgent", () => {
               workspace_grant_id: "grant-workspace",
             },
           },
-          skill_bindings: [],
           visibility_scope: "workspace",
         },
       }),

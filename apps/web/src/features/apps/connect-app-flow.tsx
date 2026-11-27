@@ -19,8 +19,7 @@ import {
   isFeishuConnectError,
 } from "./feishu-connect-guide";
 import { openOAuthUrl } from "./oauth-popup";
-import { ComposioKeyForm } from "./provider-key-form";
-import { ComposioKeyGuide } from "./provider-key-guide";
+import { useComposioKeyForm } from "./provider-key-form";
 import {
   isComposioKeyRejected,
   useCreateExternalConnection,
@@ -142,7 +141,13 @@ function ConnectAppSetupDialog({
 }) {
   const t = useT();
   const appTitle = t(m.connectApp, { app: setupApp.display_name });
+  const keyForm = useComposioKeyForm({
+    onCancel: flow.closeSetup,
+    onSaved: flow.keySaved,
+  });
 
+  // Both states render the same ModalDialog, so a saved key turns the dialog
+  // into the Connect confirmation in place instead of reopening it.
   if (flow.configured && !flow.keyRejected) {
     return (
       <ModalDialog
@@ -184,15 +189,15 @@ function ConnectAppSetupDialog({
 
   return (
     <ModalDialog
-      className="app-key-dialog"
       closeOnBackdrop
       description={
         flow.keyRejected
           ? t(flow.canSaveKey ? m.keyNoLongerAccepted : m.keyRejected)
           : undefined
       }
+      footer={flow.canSaveKey ? keyForm.actions : undefined}
       onClose={flow.closeSetup}
-      size="md"
+      size="sm"
       title={
         <span className="flex items-center gap-2.5">
           <AppLogoTile
@@ -204,12 +209,9 @@ function ConnectAppSetupDialog({
         </span>
       }
     >
-      <div className="space-y-4 px-5 py-5 text-sm text-app-body">
+      <div className="px-5 py-4 text-sm text-app-body">
         {flow.canSaveKey ? (
-          <>
-            <ComposioKeyGuide />
-            <ComposioKeyForm onSaved={flow.keySaved} />
-          </>
+          keyForm.fields
         ) : flow.keyRejected ? (
           <p className="text-app-muted">
             <RichMessage message={m.updateServerKey} tags={CODE_TAGS} />

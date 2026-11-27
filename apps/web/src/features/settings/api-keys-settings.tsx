@@ -4,12 +4,10 @@ import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { ModalDialog } from "@/components/ui/modal-dialog";
 import { StatusPill } from "@/components/ui/status-pill";
 import { AppLogoTile } from "@/features/apps/app-logo";
 import { externalAppsQueryOptions } from "@/features/apps/connected-apps-queries";
-import { ComposioKeyForm } from "@/features/apps/provider-key-form";
-import { ComposioKeyGuide } from "@/features/apps/provider-key-guide";
+import { ComposioKeyDialog } from "@/features/apps/provider-key-form";
 import { voiceKeyMessages } from "@/features/rooms/voice-control/voice-key.messages";
 import { LazyVoiceKeyDialog } from "@/features/rooms/voice-control/lazy-voice-key-dialog";
 import { useVoiceMediaPolicy } from "@/features/rooms/voice-control/use-voice-media-policy";
@@ -48,14 +46,9 @@ export function ApiKeysSettings() {
 
   return (
     <section className="flex flex-col gap-3">
-      <header>
-        <h2 className="text-base text-foreground">
-          {t(accountSettingsMessages.apiKeys)}
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {t(accountSettingsMessages.apiKeysDescription)}
-        </p>
-      </header>
+      <h2 className="text-base text-foreground">
+        {t(accountSettingsMessages.apiKeys)}
+      </h2>
       <div className="rounded-2xl border border-border bg-background">
         <ComposioKeyRow onOpen={open} />
         {voicePolicy?.voice_available ? (
@@ -91,28 +84,19 @@ export function ApiKeysSettings() {
       ) : null}
 
       {dialogOpen ? (
-        <ModalDialog
-          className="app-key-dialog"
-          closeOnBackdrop
+        <ComposioKeyDialog
           onClose={() => setDialogOpen(false)}
-          size="md"
+          onSaved={() => {
+            setSavedProvider("Composio");
+            setDialogOpen(false);
+          }}
           title={
             <span className="flex items-center gap-2.5">
               <AppLogoTile name="Composio" small url={composioLogoUrl} />
               {t(accountSettingsMessages.providerKey, { provider: "Composio" })}
             </span>
           }
-        >
-          <div className="space-y-4 px-5 py-5 text-sm text-app-body">
-            <ComposioKeyGuide />
-            <ComposioKeyForm
-              onSaved={() => {
-                setSavedProvider("Composio");
-                setDialogOpen(false);
-              }}
-            />
-          </div>
-        </ModalDialog>
+        />
       ) : null}
 
       {voiceDialog ? (

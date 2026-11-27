@@ -71,10 +71,7 @@ describe("Connected apps", () => {
     const dialog = await screen.findByRole("dialog", { name: "Connect Slack" });
     expect(dialog.querySelector(".app-dialog-description")).toBeNull();
     expect(dialog.querySelector("ol")).toBeNull();
-    expect(dialog).toHaveTextContent("Get your API key");
-    expect(dialog).toHaveTextContent(
-      "Don't forget to select Read All and Write All.",
-    );
+    expect(dialog).not.toHaveTextContent("Get your API key");
     expect(dialog).not.toHaveTextContent("securely through Composio");
     expect(dialog).not.toHaveTextContent(
       "Permissions cannot be changed after a key is created",
@@ -90,7 +87,9 @@ describe("Connected apps", () => {
 
     listApps.mockRestore();
     const keyInput = within(dialog).getByLabelText("Composio API key");
-    expect(keyInput).not.toHaveAttribute("aria-describedby");
+    expect(keyInput).toHaveAccessibleDescription(
+      "Select Read All and Write All when creating your key.",
+    );
     fireEvent.change(keyInput, {
       target: { value: " ck_live " },
     });
@@ -171,8 +170,8 @@ describe("Connected apps", () => {
     expect(within(card).getByText("Email")).toHaveClass("truncate");
     expect(within(card).getByText("Email")).toHaveAttribute("title", "Email");
     expect(within(card).queryByText(description)).toBeNull();
-    // A saved provider key is not managed from this page.
-    expect(screen.queryByRole("button", { name: "Composio key" })).toBeNull();
+    // A saved provider key has no header button on this page.
+    expect(screen.queryByRole("button", { name: /Composio key/i })).toBeNull();
 
     fireEvent.click(card);
     expect(
@@ -255,29 +254,63 @@ describe("Connected apps", () => {
     expect(screen.getByRole("button", { name: "Connect Slack" })).toBeVisible();
     expect(screen.queryByText("jenny@linger.test")).not.toBeInTheDocument();
 
-    const categories = screen.getByRole("tablist", {
+    // One filter row: All, each app group, and Web search.
+    const categories = screen.getByRole("group", {
       name: "Connector categories",
     });
-    fireEvent.click(within(categories).getByRole("tab", { name: "Messaging" }));
+    const pill = (name: string) =>
+      within(categories).getByRole("button", { name });
     expect(
-      within(categories).getByRole("tab", { name: "Messaging" }),
-    ).toHaveAttribute("aria-selected", "true");
+      within(categories)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual([
+      "All",
+      "Mail & Calendar",
+      "Meetings",
+      "Productivity",
+      "Messaging",
+      "Web search",
+    ]);
+    expect(pill("All")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("region", { name: "Web search" })).toBeVisible();
+
+    // Web search shows only the search backends.
+    fireEvent.click(pill("Web search"));
+    expect(pill("Web search")).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.queryByRole("region", { name: "Application connections" }),
+    ).toBeNull();
+
+    // A group shows its apps without section headings or Web search.
+    fireEvent.click(pill("Messaging"));
+    expect(pill("Messaging")).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Web search" })).toBeNull();
     expect(
       within(screen.getByRole("region", { name: "Application connections" }))
         .getAllByRole("article")
         .map((card) => within(card).getAllByRole("button")[0]!.ariaLabel),
     ).toEqual(["Slack", "Discord"]);
 
-    fireEvent.click(within(categories).getByRole("tab", { name: "All" }));
-    fireEvent.click(screen.getByRole("button", { name: "Connected only" }));
+    // Connected only narrows the open view: empty under Messaging, Gmail
+    // alone under All.
+    const connectedSwitch = screen.getByRole("switch", {
+      name: "Connected only",
+    });
+    expect(connectedSwitch).not.toBeChecked();
+    fireEvent.click(connectedSwitch);
+    expect(connectedSwitch).toBeChecked();
+    expect(screen.getByText("No connected apps yet.")).toBeVisible();
+    fireEvent.click(pill("All"));
     expect(
       within(screen.getByRole("region", { name: "Application connections" }))
         .getAllByRole("article")
         .map((card) => within(card).getAllByRole("button")[0]!.ariaLabel),
     ).toEqual(["Gmail"]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Connected only" }));
+    fireEvent.click(connectedSwitch);
+    expect(connectedSwitch).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Gmail" }));
     expect(await screen.findByText("jenny@linger.test")).toBeVisible();
   });
@@ -350,7 +383,7 @@ describe("Connected apps", () => {
 
     await screen.findByRole("button", { name: "Gmail" });
     expect(screen.queryByRole("button", { name: "Facebook" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Connected only" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Connected only" }));
 
     expect(
       within(screen.getByRole("region", { name: "Application connections" }))

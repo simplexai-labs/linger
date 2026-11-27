@@ -40,6 +40,7 @@ import type {
   ContextRuntimeSkillDescriptor,
 } from "./activation.js";
 import type { RuntimeViewPlan } from "./workspace.js";
+import { COMPACT_INSTRUCTIONS_MAX_CONTEXT_WINDOW } from "../prompt/index.js";
 
 type CliRunContextScope = CliRunContext["scope"];
 
@@ -172,9 +173,6 @@ export const createRuntimeQuestion = async (
 };
 
 const RUNTIME_WORKSPACE = "/workspace";
-// Models with at most a 128K-token context window, such as local models, get
-// the compact instructions.
-const COMPACT_INSTRUCTIONS_MAX_CONTEXT_WINDOW = 128 * 1024;
 const DEFAULT_RELAY_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export interface LocalContextRuntimeGateway

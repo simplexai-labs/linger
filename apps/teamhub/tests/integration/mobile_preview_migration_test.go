@@ -16,10 +16,10 @@ import (
 
 // Databases that recorded the mobile migrations under other versions upgrade
 // cleanly: the mobile preview desktop build put them at 00894 to 00896, and
-// earlier builds of the mobile branch at 00895 to 00899. Goose then skips the
-// main-line migrations that took those numbers, so the repair must create
-// what they make, and the renumbered mobile migrations must run again
-// harmlessly.
+// earlier builds of the mobile branch at 00895 to 00899 or 00897 to 00901.
+// Goose then skips the main-line migrations that took those numbers, so the
+// repair must do what they do, and the renumbered mobile migrations must run
+// again harmlessly.
 func TestMobileMigrationsUpgradeEarlierVersionHistories(t *testing.T) {
 	for _, history := range []struct {
 		name string
@@ -29,8 +29,9 @@ func TestMobileMigrationsUpgradeEarlierVersionHistories(t *testing.T) {
 		// under the versions it recorded them.
 		recorded map[int64]int64
 	}{
-		{"preview build", 893, map[int64]int64{894: 897, 895: 898, 896: 899}},
-		{"earlier branch", 894, map[int64]int64{895: 897, 896: 898, 897: 899, 898: 900, 899: 901}},
+		{"preview build", 893, map[int64]int64{894: 898, 895: 899, 896: 900}},
+		{"earlier branch", 894, map[int64]int64{895: 898, 896: 899, 897: 900, 898: 902, 899: 901}},
+		{"branch before templates were dropped", 896, map[int64]int64{897: 898, 898: 899, 899: 900, 900: 902, 901: 901}},
 	} {
 		t.Run(history.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -70,6 +71,11 @@ func TestMobileMigrationsUpgradeEarlierVersionHistories(t *testing.T) {
 				if err := db.QueryRowContext(ctx, check).Scan(&count); err != nil {
 					t.Errorf("%s: %v", check, err)
 				}
+			}
+			var templates bool
+			if err := db.QueryRowContext(ctx,
+				`SELECT to_regclass('agent_templates') IS NOT NULL`).Scan(&templates); err != nil || templates {
+				t.Errorf("agent_templates left behind: %v %v", templates, err)
 			}
 		})
 	}

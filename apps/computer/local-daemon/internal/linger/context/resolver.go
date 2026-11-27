@@ -88,10 +88,47 @@ const codexWindowsPowerShellGuide = "Shell on Windows: your shell runs PowerShel
 // conventions for Operations running on a Windows Local Computer.
 const WindowsHostEnvironmentGuide = "Windows environment: prefer `python` or `py -3` over `python3`, because Windows Python and Miniconda installs often lack `python3.exe` and `python3` may hit the Microsoft Store stub (`Python was not found`). If Python is not on PATH, check `py -3` or common Miniconda/Anaconda paths such as `%USERPROFILE%\\miniconda3\\python.exe`. Avoid piping commands whose failure matters through `| head` or `| tail`, because pipes can mask non-zero exit codes."
 
-// staticPrefixEndMarker is the internal insertion slot emitted between the
+// StaticPrefixEndMarker is the internal insertion slot emitted between the
 // static prefix and volatile context sections by node-services. It is consumed
 // and removed by assembleResolvedInstructions so the model never sees it.
-const staticPrefixEndMarker = "<!-- LINGER_STATIC_PREFIX_END -->"
+const StaticPrefixEndMarker = "<!-- LINGER_STATIC_PREFIX_END -->"
+
+// PiDaemonStaticGuides returns the trusted Daemon static guides added before
+// StaticPrefixEndMarker for managed Pi Runs, keeping warm-up aligned byte for byte.
+func PiDaemonStaticGuides(serviceCommand []string, toolGuide, hostEnvironmentGuide string, apiLink, modelGateway, teamHubCLI bool) []string {
+	return daemonStaticGuidesFor("trusted", "pi", runtime.GOOS, serviceCommand, toolGuide, hostEnvironmentGuide, apiLink, modelGateway, teamHubCLI)
+}
+
+func daemonStaticGuidesFor(hostAccess, runtimeType, goos string, serviceCommand []string, toolGuide, hostEnvironmentGuide string, apiLink, modelGateway, teamHubCLI bool) []string {
+	var guides []string
+	if hostAccess == "trusted" {
+		guides = append(guides, trustedHostServiceInstructions, boundServiceInstructions(serviceCommand))
+	}
+	if toolGuide != "" {
+		guides = append(guides, toolGuide)
+	}
+	if hostEnvironmentGuide != "" {
+		guides = append(guides, hostEnvironmentGuide)
+	}
+	if webGuide := webToolGuide(runtimeType, apiLink, modelGateway, teamHubCLI); webGuide != "" {
+		guides = append(guides, webGuide)
+	}
+	if shellGuide := shellToolGuide(runtimeType, goos, teamHubCLI); shellGuide != "" {
+		guides = append(guides, shellGuide)
+	}
+	return guides
+}
+
+// AssembleWarmupSystemPrompt combines a static system-prompt prefix from
+// Agent Service with the Daemon's static guides and terminates them with
+// StaticPrefixEndMarker so PolyStrata pins the exact byte prefix of real Runs.
+func AssembleWarmupSystemPrompt(staticPart string, daemonStaticGuides []string) string {
+	staticSection := joinNonEmptySections(append([]string{staticPart}, daemonStaticGuides...)...)
+	if staticSection == "" {
+		return ""
+	}
+	return staticSection + "\n\n" + StaticPrefixEndMarker
+}
 
 func shellToolGuide(runtimeType, goos string, teamHubCLI bool) string {
 	if goos != "windows" || !teamHubCLI {
@@ -228,28 +265,21 @@ func (r ExecutionResolver) Resolve(ctx context.Context, command protocol.Command
 		return provider.OperationSpec{}, errors.New("Codex run.start requires a retained session or an explicit first-run marker")
 	}
 	developerInstructions := instructionValue(request.SessionOptions.DeveloperInstructions)
-	var daemonStaticGuides []string
-	if command.HostAccess == "trusted" {
-		daemonStaticGuides = append(daemonStaticGuides, trustedHostServiceInstructions, boundServiceInstructions(r.ServiceCommand))
-	}
-	if r.ToolGuide != "" {
-		daemonStaticGuides = append(daemonStaticGuides, r.ToolGuide)
-	}
-	if r.HostEnvironmentGuide != "" {
-		daemonStaticGuides = append(daemonStaticGuides, r.HostEnvironmentGuide)
-	}
 	cliInstalled, err := r.cliCredentialInstalled(command.TenantID, command.AgentID)
 	if err != nil {
 		return provider.OperationSpec{}, err
 	}
-	teamHubCLI := cliInstalled && r.TeamHubCLIBin != ""
-	webGuide := webToolGuide(command.RuntimeType, installation.APILink, installation.ModelGateway, teamHubCLI)
-	if webGuide != "" {
-		daemonStaticGuides = append(daemonStaticGuides, webGuide)
-	}
-	if shellGuide := shellToolGuide(command.RuntimeType, r.targetOS(), teamHubCLI); shellGuide != "" {
-		daemonStaticGuides = append(daemonStaticGuides, shellGuide)
-	}
+	daemonStaticGuides := daemonStaticGuidesFor(
+		command.HostAccess,
+		command.RuntimeType,
+		r.targetOS(),
+		r.ServiceCommand,
+		r.ToolGuide,
+		r.HostEnvironmentGuide,
+		installation.APILink,
+		installation.ModelGateway,
+		cliInstalled && r.TeamHubCLIBin != "",
+	)
 	resolvedBase, resolvedDeveloper, systemPrompt, baseHadMarker, devHadMarker := assembleResolvedInstructions(
 		instructionValue(request.SessionOptions.BaseInstructions),
 		developerInstructions,
@@ -544,19 +574,19 @@ func joinNonEmptySections(parts ...string) string {
 	return strings.Join(nonEmpty, "\n\n")
 }
 
-// assembleResolvedInstructions replaces staticPrefixEndMarker (in either
+// assembleResolvedInstructions replaces StaticPrefixEndMarker (in either
 // developer or base instructions) with static Daemon guides and places
 // per-Agent BaseInstructions before the dynamic tail when the slot is in
 // developer instructions. Legacy inputs without the marker keep
 // BaseInstructions first and append guides at the end.
 func assembleResolvedInstructions(base, developer string, daemonStaticGuides []string) (string, string, string, bool, bool) {
-	if staticPart, dynamicPart, hasMarker := strings.Cut(developer, staticPrefixEndMarker); hasMarker {
+	if staticPart, dynamicPart, hasMarker := strings.Cut(developer, StaticPrefixEndMarker); hasMarker {
 		staticSection := joinNonEmptySections(append([]string{staticPart}, daemonStaticGuides...)...)
 		resolvedDeveloper := joinNonEmptySections(staticSection, dynamicPart)
 		systemPrompt := joinNonEmptySections(staticSection, base, dynamicPart)
 		return base, resolvedDeveloper, systemPrompt, false, true
 	}
-	if staticPart, dynamicPart, hasMarker := strings.Cut(base, staticPrefixEndMarker); hasMarker {
+	if staticPart, dynamicPart, hasMarker := strings.Cut(base, StaticPrefixEndMarker); hasMarker {
 		staticSection := joinNonEmptySections(append([]string{staticPart}, daemonStaticGuides...)...)
 		resolvedBase := joinNonEmptySections(staticSection, dynamicPart)
 		systemPrompt := joinNonEmptySections(resolvedBase, developer)

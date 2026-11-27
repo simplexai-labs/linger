@@ -1,5 +1,4 @@
 /* eslint-disable jsx-a11y/no-autofocus -- The name input is mounted only after an explicit edit action. */
-import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   lazy,
@@ -11,9 +10,11 @@ import {
   type ReactNode,
 } from "react";
 
-import { Icon } from "@/components/ui/icon";
+import {
+  inlineNameButtonClassName,
+  inlineNameInputClassName,
+} from "@/components/ui/inline-name";
 import { AgentConnectors } from "@/features/apps/agent-connectors";
-import { Hint } from "@/features/local-computer/computer-hint";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { Message } from "@/i18n/messages";
 import { useT } from "@/i18n/use-translation";
@@ -23,22 +24,11 @@ import type {
   TeamHubTenantAgentAvailabilitySnapshot,
 } from "@/features/teamhub/teamhub-types";
 
-import {
-  teamHubIdentityQueryOptions,
-  tenantAgentsQueryOptions,
-} from "../room-queries";
+import { tenantAgentsQueryOptions } from "../room-queries";
 import { ActorAvatar } from "./actor-avatar";
+import { AvatarEditButton } from "./avatar-edit-button";
 import { agentInfoMessages } from "./agent-info.messages";
-import {
-  AgentSkillUploadPanel,
-  type SkillManageHint,
-} from "./agent-skill-upload-panel";
 import { AgentStatus } from "./agent-status";
-
-const skillUploadHint: SkillManageHint = {
-  title: agentInfoMessages.uploadFormats,
-  detail: agentInfoMessages.uploadUpgrades,
-};
 
 const RemindersPanel = lazy(() =>
   import("../task-sidebar/reminders-panel").then((module) => ({
@@ -66,7 +56,6 @@ export function AgentInfoContent({
   detailsActions,
   dialogs,
   description,
-  headerAction,
   onEditIdentity,
   registration,
   roomId,
@@ -82,13 +71,11 @@ export function AgentInfoContent({
   nameError?: string;
   onSaveName?: (name: string) => Promise<unknown>;
   details: ReactNode;
-  /** Basic info actions placed after the Skills, such as removing the Agent. */
+  /** Basic info actions placed after the instructions, such as removing the Agent. */
   detailsActions?: ReactNode;
   dialogs?: ReactNode;
   runtimeDetails?: ReactNode;
   description?: string;
-  /** A compact action pinned to the identity header's top-right corner. */
-  headerAction?: ReactNode;
   onEditIdentity?: () => void;
   registration?: TeamHubTenantAgent;
   /** Routines are listed per Room, so the Routines tab needs the open Room. */
@@ -96,29 +83,16 @@ export function AgentInfoContent({
 }) {
   const t = useT();
   const { client } = useTeamHubRuntime();
-  const identityQuery = useQuery(teamHubIdentityQueryOptions(client));
   const { data: agents } = useQuery(tenantAgentsQueryOptions(client, tenantId));
   const liveRegistration =
     agents?.items.find((item) => item.actor.id === actor.id) ?? registration;
-  const currentActorId = identityQuery.data?.actors.find(
-    (candidate) => candidate.tenant_id === tenantId,
-  )?.id;
-  const isSponsor = liveRegistration?.created_by.id === currentActorId;
-  const canManageSkills = Boolean(identityQuery.isSuccess && isSponsor);
-  const skillManageHint: SkillManageHint =
-    identityQuery.isSuccess && !isSponsor
-      ? { title: agentInfoMessages.sponsorOnlySkills }
-      : skillUploadHint;
   const [tab, setTab] = useState<AgentInfoTab>("basic");
-  const [showAllSkills, setShowAllSkills] = useState(false);
-  const skills = liveRegistration?.skill_bindings ?? [];
   const tabId = useId();
   return (
     <div className="agent-info-content flex h-full min-h-0 min-w-0 flex-col bg-sidebar/50">
       <AgentInfoIdentity
         actor={actor}
         availability={availability}
-        action={headerAction}
         canEdit={canEditIdentity}
         canEditName={canEditName}
         nameBusy={nameBusy}
@@ -183,20 +157,6 @@ export function AgentInfoContent({
         aria-labelledby={`${tabId}-tab-basic`}
       >
         {details}
-        <AgentSkillUploadPanel
-          agentId={actor.id}
-          canManage={canManageSkills}
-          manageHint={skillManageHint}
-          skills={skills}
-          tenantId={tenantId}
-          visibleLimit={showAllSkills ? undefined : 5}
-          expanded={showAllSkills}
-          onToggleExpanded={
-            skills.length > 5
-              ? () => setShowAllSkills((value) => !value)
-              : undefined
-          }
-        />
         {detailsActions}
       </div>
       {tab === "routines" ? (
@@ -258,7 +218,6 @@ function AgentRoutines({
 }
 
 function AgentInfoIdentity({
-  action,
   actor,
   availability,
   canEdit,
@@ -269,7 +228,6 @@ function AgentInfoIdentity({
   description,
   onEdit,
 }: {
-  action?: ReactNode;
   description?: string;
   actor: TeamHubActor;
   availability?: TeamHubTenantAgentAvailabilitySnapshot["availability"];
@@ -331,30 +289,14 @@ function AgentInfoIdentity({
     />
   );
   return (
-    <div className="relative mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
-      {action ? <div className="absolute right-3 top-3">{action}</div> : null}
+    <div className="mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
       {canEdit ? (
-        <Hint placement="bottom" text={t(agentInfoMessages.editAvatar)}>
-          <button
-            aria-label={t(agentInfoMessages.editAvatar)}
-            className="group relative rounded-[20%] outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
-            onClick={onEdit}
-            type="button"
-          >
-            {/* Pointed at or focused, the avatar dims and a pencil shows at
-                its centre; otherwise the face stays unmarked. */}
-            <span className="block transition-[filter] duration-150 group-hover:brightness-[.55] group-focus-visible:brightness-[.55]">
-              {avatar}
-            </span>
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 flex items-center justify-center text-primary-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-              data-avatar-edit-badge
-            >
-              <Icon icon={PencilEdit02Icon} size={18} />
-            </span>
-          </button>
-        </Hint>
+        <AvatarEditButton
+          label={t(agentInfoMessages.editAvatar)}
+          onClick={onEdit}
+        >
+          {avatar}
+        </AvatarEditButton>
       ) : (
         avatar
       )}
@@ -363,7 +305,7 @@ function AgentInfoIdentity({
           aria-label={t(agentInfoMessages.agentName)}
           ref={nameInput}
           autoFocus
-          className="mt-2.5 max-w-full rounded-md bg-card px-2 text-center text-[15px] font-semibold leading-5 text-foreground shadow-outline outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+          className={`mt-2.5 text-center text-[15px] font-semibold leading-5 text-foreground ${inlineNameInputClassName}`}
           disabled={nameBusy}
           maxLength={120}
           onBlur={() => void saveName()}
@@ -388,8 +330,9 @@ function AgentInfoIdentity({
             aria-label={t(agentInfoMessages.editName, {
               name: actor.display_name,
             })}
-            className="max-w-full break-words rounded-md px-2 py-0.5 hover:bg-sidebar-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus disabled:opacity-50"
+            className={inlineNameButtonClassName}
             disabled={nameBusy}
+            title={actor.display_name}
             onClick={() => {
               setDraft(actor.display_name);
               setEditing(true);
@@ -400,7 +343,10 @@ function AgentInfoIdentity({
           </button>
         </h2>
       ) : (
-        <h2 className="mt-2.5 break-words text-[15px] font-semibold leading-5 text-foreground">
+        <h2
+          className="mt-2.5 max-w-full truncate px-2 text-[15px] font-semibold leading-5 text-foreground"
+          title={actor.display_name}
+        >
           {actor.display_name}
         </h2>
       )}

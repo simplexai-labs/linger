@@ -145,7 +145,7 @@ function installFakeVoicePip() {
   window.open = open;
   const desktop = window as { lingerDesktop?: unknown };
   desktop.lingerDesktop = {
-    voiceWindow: { showMainWindow: vi.fn(async () => {}) },
+    voiceWindow: { floats: true },
   };
   const remove = () => {
     window.open = originalOpen;

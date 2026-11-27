@@ -372,9 +372,6 @@ func insertTenantAgent(ctx context.Context, tx pgx.Tx, queries *store.Queries, t
 	if err != nil {
 		return "", nil, err
 	}
-	if err := reserveAgentTemplateInstallation(ctx, queries, actorID, request); err != nil {
-		return "", nil, err
-	}
 	if err := storeAgentRegistrationBindings(ctx, queries, actorID, tenantID, creatorID, request); err != nil {
 		return "", nil, err
 	}
@@ -392,9 +389,6 @@ func insertTenantAgent(ctx context.Context, tx pgx.Tx, queries *store.Queries, t
 	}
 	creatorActor, err := queries.GetActor(ctx, store.GetActorParams{ID: creatorID, TenantID: tenantID})
 	if err != nil {
-		return "", nil, err
-	}
-	if err := completeAgentTemplateInstallation(ctx, tx, queries, tenantID, actor, creatorActor); err != nil {
 		return "", nil, err
 	}
 	skills, err := listAgentRegistrationBindings(ctx, queries, []string{actorID})

@@ -1,4 +1,14 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +17,12 @@ import {
   validateNativeSource,
   validateNativeVoiceTools,
 } from "@linger/local-installation/native-dependencies";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  BUNDLED_LOCALMODELS_KIT_FILENAME,
+  stageBundledLocalmodelsKit,
+} from "../../scripts/stage-bundled-localmodels-kit.mjs";
 
 // The tracked distribution/<target>.json that build.mjs puts beside the
 // bundled installer.
@@ -94,4 +109,155 @@ describe("desktop distributions", () => {
         `https://cdn.npmmirror.com/packages/@simplexai/${name}/${version}/${name}-${version}.tgz`,
       ]);
     });
+});
+
+describe("stageBundledLocalmodelsKit", () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+    );
+  });
+
+  async function workspace() {
+    const root = await mkdtemp(path.join(os.tmpdir(), "linger-bundled-kit-"));
+    dirs.push(root);
+    const kitDir = path.join(root, "kits");
+    const installerDir = path.join(root, "dist", "installer");
+    await mkdir(kitDir, { recursive: true });
+    await mkdir(installerDir, { recursive: true });
+    return { root, kitDir, installerDir };
+  }
+
+  it("stages a verified <target>.tgz as bundled-localmodels-kit.tgz", async () => {
+    const { kitDir, installerDir } = await workspace();
+    const payload = Buffer.from("fake-localmodels-kit-archive");
+    const sha256 = createHash("sha256").update(payload).digest("hex");
+    await writeFile(path.join(kitDir, "linux-x64.tgz"), payload);
+
+    const staged = await stageBundledLocalmodelsKit({
+      kitDir,
+      distribution: {
+        platform: "linux",
+        arch: "x64",
+        localmodelsTool: { sha256, bytes: payload.length },
+      },
+      installerDir,
+    });
+
+    const destination = path.join(
+      installerDir,
+      BUNDLED_LOCALMODELS_KIT_FILENAME,
+    );
+    expect(staged).toEqual({
+      source: path.join(kitDir, "linux-x64.tgz"),
+      destination,
+      target: "linux-x64",
+      bytes: payload.length,
+      sha256,
+    });
+    expect(await readFile(destination)).toEqual(payload);
+  });
+
+  it("removes any stale bundled-localmodels-kit.tgz when LINGER_BUNDLED_LOCALMODELS_KIT_DIR is unset or empty", async () => {
+    const { installerDir } = await workspace();
+    const stale = path.join(installerDir, BUNDLED_LOCALMODELS_KIT_FILENAME);
+    await writeFile(stale, "stale");
+
+    expect(
+      await stageBundledLocalmodelsKit({
+        kitDir: undefined,
+        distribution: undefined,
+        installerDir,
+      }),
+    ).toBeNull();
+    expect(existsSync(stale)).toBe(false);
+
+    await writeFile(stale, "stale-2");
+    expect(
+      await stageBundledLocalmodelsKit({
+        kitDir: "   ",
+        distribution: undefined,
+        installerDir,
+      }),
+    ).toBeNull();
+    expect(existsSync(stale)).toBe(false);
+  });
+
+  it("fails closed when <target>.tgz is missing, mismatched, or a symlink", async () => {
+    const { root, kitDir, installerDir } = await workspace();
+    const payload = Buffer.from("expected-kit-bytes");
+    const sha256 = createHash("sha256").update(payload).digest("hex");
+    const dist = {
+      platform: "darwin",
+      arch: "arm64",
+      localmodelsTool: { sha256, bytes: payload.length },
+    };
+    const destination = path.join(
+      installerDir,
+      BUNDLED_LOCALMODELS_KIT_FILENAME,
+    );
+
+    await expect(
+      stageBundledLocalmodelsKit({
+        kitDir,
+        distribution: dist,
+        installerDir,
+      }),
+    ).rejects.toThrow(/does not exist/i);
+    expect(existsSync(destination)).toBe(false);
+
+    // Wrong size.
+    await writeFile(
+      path.join(kitDir, "darwin-arm64.tgz"),
+      Buffer.from("short"),
+    );
+    await expect(
+      stageBundledLocalmodelsKit({
+        kitDir,
+        distribution: dist,
+        installerDir,
+      }),
+    ).rejects.toThrow(/size mismatch/i);
+    expect(existsSync(destination)).toBe(false);
+
+    // Same size, wrong sha256.
+    const tampered = Buffer.from(payload);
+    tampered[0] = (tampered[0] ?? 0) ^ 0xff;
+    await writeFile(path.join(kitDir, "darwin-arm64.tgz"), tampered);
+    await expect(
+      stageBundledLocalmodelsKit({
+        kitDir,
+        distribution: dist,
+        installerDir,
+      }),
+    ).rejects.toThrow(/sha256 mismatch/i);
+    expect(existsSync(destination)).toBe(false);
+
+    // Symlink to valid file.
+    if (process.platform !== "win32") {
+      const real = path.join(root, "real.tgz");
+      await writeFile(real, payload);
+      await rm(path.join(kitDir, "darwin-arm64.tgz"));
+      await symlink(real, path.join(kitDir, "darwin-arm64.tgz"));
+      await expect(
+        stageBundledLocalmodelsKit({
+          kitDir,
+          distribution: dist,
+          installerDir,
+        }),
+      ).rejects.toThrow(/regular non-symlink/i);
+      expect(existsSync(destination)).toBe(false);
+    }
+
+    // Missing resolved distribution when kitDir is set.
+    await expect(
+      stageBundledLocalmodelsKit({
+        kitDir,
+        distribution: undefined,
+        installerDir,
+      }),
+    ).rejects.toThrow(/distribution\.json/i);
+  });
 });

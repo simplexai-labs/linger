@@ -107,6 +107,97 @@ export async function assertNoFreshHarnessPi(home) {
   }
 }
 
+function runPowerShellCommand(executable, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    delete env.NODE_PATH;
+    delete env.NODE_OPTIONS;
+    const child = spawn(executable, args, {
+      env,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      child.kill();
+      reject(new Error(`PowerShell smoke: timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stdout?.setEncoding("utf8").on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.setEncoding("utf8").on("data", (chunk) => {
+      stderr = (stderr + chunk).slice(-1500);
+    });
+    child.on("error", (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `PowerShell smoke: process error: ${error.code ?? error.name}`,
+        ),
+      );
+    });
+    child.on("close", (code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        const diagnostic = stderr.trim().slice(-1500);
+        reject(
+          new Error(
+            `PowerShell smoke: exited with ${code}${diagnostic ? `\n${diagnostic}` : ""}`,
+          ),
+        );
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+export async function probeBundledPowerShell(
+  executable,
+  { nodeExecutable, expectedVersion = "7.6.10", timeoutMs = 15_000 } = {},
+) {
+  const versionOutput = await runPowerShellCommand(
+    executable,
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$PSVersionTable.PSVersion.ToString()",
+    ],
+    timeoutMs,
+  );
+  const actualVersion = versionOutput.trim();
+  if (actualVersion !== expectedVersion) {
+    throw new Error(
+      `PowerShell smoke: expected version ${expectedVersion}, got ${actualVersion || "(empty)"}`,
+    );
+  }
+  if (nodeExecutable) {
+    const quotedNode = nodeExecutable.replaceAll("'", "''");
+    const expectedArg = '[{"question":"a b"}]';
+    const command = `& '${quotedNode}' -e 'process.stdout.write(process.argv[1])' '${expectedArg}'`;
+    const echoed = await runPowerShellCommand(
+      executable,
+      ["-NoProfile", "-NonInteractive", "-Command", command],
+      timeoutMs,
+    );
+    if (echoed !== expectedArg) {
+      throw new Error(
+        `PowerShell smoke: native JSON argument mismatch: expected ${expectedArg}, got ${echoed}`,
+      );
+    }
+  }
+}
+
 async function main() {
   const home = process.env.LINGER_HOME;
   if (
@@ -120,6 +211,7 @@ async function main() {
     );
   const resources = join(dirname(process.execPath), "resources");
   const node = join(resources, "runtime", "bin", "node.exe");
+  const bundledPwsh = join(resources, "runtime", "pwsh", "pwsh.exe");
   const installer = join(resources, "app", "dist", "installer", "installer.js");
   const bundledPi = join(resources, "cli", "computer-tools", "bin", "pi.exe");
   const extension = join(
@@ -130,9 +222,20 @@ async function main() {
     "pi-mcp.mjs",
   );
   await access(node);
+  await access(bundledPwsh);
   await access(installer);
   await access(bundledPi);
   await access(extension);
+  const pwshStart = performance.now();
+  await probeBundledPowerShell(bundledPwsh, { nodeExecutable: node });
+  console.log(
+    JSON.stringify({
+      phase: "bundled_pwsh",
+      version: "7.6.10",
+      result: "passed",
+      elapsed_ms: Math.round(performance.now() - pwshStart),
+    }),
+  );
   await mkdir(home);
   const source = join(home, "unused-source");
   await mkdir(source);

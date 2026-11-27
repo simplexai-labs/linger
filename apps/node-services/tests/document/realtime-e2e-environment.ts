@@ -343,7 +343,7 @@ const teamHubBinaryVariables = {
   "./cmd/teamhub": "ROOM_DOCUMENT_E2E_TEAMHUB_BINARY",
 } as const;
 
-// Browser journeys never read built-in Skills or Agent templates, so skip
+// Browser journeys never read built-in Skills, so skip
 // their install and fsync-heavy object writes (most of TeamHub's boot under
 // CI IO load) through TeamHub's existing startup switch. The production
 // startup proof seeds a Skill directory and keeps the full install.

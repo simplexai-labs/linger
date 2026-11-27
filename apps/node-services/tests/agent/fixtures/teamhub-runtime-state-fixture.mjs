@@ -4,29 +4,88 @@ import { readFile } from "node:fs/promises";
 export const createTeamHubRuntimeStateFixture = ({
   serviceToken,
   inboxStateFile,
+  defaultRunReplied = true,
+  hasRunReplied,
 }) => {
   const wakeClients = new Set();
   let currentEpoch = null;
   const computers = new Map();
   const configs = new Map();
+  const deletedConfigs = new Map();
   const contexts = new Map();
   const contextStates = new Map();
   const daemonIdentities = new Map();
   const runtimeRegistrations = new Map();
   const runtimeAssignments = new Map();
   const reconciliations = new Map();
+  const localModels = new Map();
+  const runOperations = new Map();
+  const runStartedAtMs = new Map();
   const receipts = [];
   let receiptOrder = 0;
   let runSequence = 0;
 
-  const createRun = (contextKey, inputs) => ({
-    run_id: `local-run-fixture-${++runSequence}`,
-    context_key: contextKey,
-    status: "queued",
-    initial_input_ids: inputs.map((input) => input.input_id),
-    steer_input_ids: [],
-    input_ids: inputs.map((input) => input.input_id),
-  });
+  const ensureRuntimeRegistration = ({
+    computerId,
+    daemonId,
+    tenantId,
+    ownerActorId,
+    providerType,
+    seenAt,
+    runtimeDiagnostics,
+  }) => {
+    const placeholderDaemonId = `fixture-daemon-${computerId}`;
+    if (daemonId !== placeholderDaemonId) {
+      for (const [existingKey, existing] of runtimeRegistrations) {
+        if (
+          existing.daemon_id === placeholderDaemonId &&
+          existing.computer_id === computerId &&
+          existing.tenant_id === tenantId &&
+          existing.owner_actor_id === ownerActorId &&
+          existing.provider_type === providerType
+        ) {
+          runtimeRegistrations.delete(existingKey);
+        }
+      }
+    }
+    const key = [daemonId, tenantId, ownerActorId, providerType].join("\0");
+    const current = runtimeRegistrations.get(key);
+    const registration = {
+      registration_id:
+        current?.registration_id ??
+        `runtime-registration-${createHash("sha256")
+          .update(key)
+          .digest("hex")
+          .slice(0, 24)}`,
+      computer_id: computerId,
+      daemon_id: daemonId,
+      tenant_id: tenantId,
+      owner_actor_id: ownerActorId,
+      provider_type: providerType,
+      status: "online",
+      observed_revision: current?.observed_revision ?? "1",
+      capabilities: current?.capabilities ?? [],
+      runtime_diagnostics:
+        runtimeDiagnostics ?? current?.runtime_diagnostics ?? {},
+      last_seen_at: seenAt ?? new Date().toISOString(),
+    };
+    runtimeRegistrations.set(key, registration);
+    return registration;
+  };
+
+  const createRun = (contextKey, inputs) => {
+    const runId = `local-run-fixture-${++runSequence}`;
+    runStartedAtMs.set(runId, Date.now());
+    return {
+      run_id: runId,
+      context_key: contextKey,
+      status: "queued",
+      attempt_count: 0,
+      initial_input_ids: inputs.map((input) => input.input_id),
+      steer_input_ids: [],
+      input_ids: inputs.map((input) => input.input_id),
+    };
+  };
 
   // The Inbox input TeamHub freezes for one Message (see the queue migration).
   const queueInboxRun = (context, state, inbox, message, config) => {
@@ -249,38 +308,47 @@ export const createTeamHubRuntimeStateFixture = ({
         const body = await readJson(request);
         const snapshot = configSnapshot(body);
         configs.set(snapshot.agent_id, snapshot);
+        deletedConfigs.delete(snapshot.agent_id);
         const placement = snapshot.runtime.placement;
-        const daemonId = `fixture-daemon-${placement.computer_id}`;
-        const registrationKey = [
-          daemonId,
-          placement.tenant_id,
-          placement.owner_actor_id,
-          placement.runtime_type,
-        ].join("\0");
-        const hasMatchingRegistration = [...runtimeRegistrations.values()].some(
-          (registration) =>
-            registration.computer_id === placement.computer_id &&
-            registration.tenant_id === placement.tenant_id &&
-            registration.owner_actor_id === placement.owner_actor_id &&
-            registration.provider_type === placement.runtime_type,
-        );
-        if (!hasMatchingRegistration) {
-          runtimeRegistrations.set(registrationKey, {
-            registration_id: `runtime-registration-${createHash("sha256")
-              .update(registrationKey)
-              .digest("hex")
-              .slice(0, 24)}`,
-            computer_id: placement.computer_id,
-            daemon_id: daemonId,
-            tenant_id: placement.tenant_id,
-            owner_actor_id: placement.owner_actor_id,
-            provider_type: placement.runtime_type,
-            status: "online",
-            observed_revision: "1",
-            capabilities: [],
-            runtime_diagnostics: {},
-            last_seen_at: new Date().toISOString(),
+        const boundIdentity = daemonIdentities.get(placement.computer_id);
+        if (boundIdentity) {
+          const registration = ensureRuntimeRegistration({
+            computerId: placement.computer_id,
+            daemonId: boundIdentity.daemon_id,
+            tenantId: placement.tenant_id,
+            ownerActorId: placement.owner_actor_id,
+            providerType: placement.runtime_type,
+            seenAt: new Date().toISOString(),
           });
+          if (!runtimeAssignments.has(snapshot.agent_id)) {
+            runtimeAssignments.set(snapshot.agent_id, {
+              agent_management_id: snapshot.agent_id,
+              agent_actor_id: snapshot.actor_id,
+              tenant_id: snapshot.tenant_id,
+              registration_id: registration.registration_id,
+              assignment_revision: placement.assignment_revision,
+            });
+          }
+        } else {
+          const hasMatchingRegistration = [
+            ...runtimeRegistrations.values(),
+          ].some(
+            (registration) =>
+              registration.computer_id === placement.computer_id &&
+              registration.tenant_id === placement.tenant_id &&
+              registration.owner_actor_id === placement.owner_actor_id &&
+              registration.provider_type === placement.runtime_type,
+          );
+          if (!hasMatchingRegistration) {
+            ensureRuntimeRegistration({
+              computerId: placement.computer_id,
+              daemonId: `fixture-daemon-${placement.computer_id}`,
+              tenantId: placement.tenant_id,
+              ownerActorId: placement.owner_actor_id,
+              providerType: placement.runtime_type,
+              seenAt: new Date().toISOString(),
+            });
+          }
         }
         writeJson(response, 200, snapshot);
         return true;
@@ -293,7 +361,19 @@ export const createTeamHubRuntimeStateFixture = ({
           : null;
       if (revokedConfig) {
         if (!authorize(request, response)) return true;
-        configs.delete(decodeURIComponent(revokedConfig[1]));
+        const agentId = decodeURIComponent(revokedConfig[1]);
+        const existing = configs.get(agentId);
+        if (existing) {
+          deletedConfigs.set(agentId, {
+            agent_id: existing.agent_id,
+            actor_id: existing.actor_id,
+            tenant_id: existing.tenant_id,
+            configuration_revision: existing.configuration_revision,
+            runtime: structuredClone(existing.runtime),
+          });
+        }
+        configs.delete(agentId);
+        runtimeAssignments.delete(agentId);
         response.writeHead(204).end();
         return true;
       }
@@ -309,7 +389,7 @@ export const createTeamHubRuntimeStateFixture = ({
           computers.set(body.computer_id, {
             computer_id: body.computer_id,
             display_name: body.display_name,
-            owners: [body.owner],
+            owner: body.owner,
             status: "offline",
             credential_generation: "0",
             runtimes: [],
@@ -337,32 +417,13 @@ export const createTeamHubRuntimeStateFixture = ({
               final_response: run.terminal?.finalResponse ?? null,
             }));
           }),
-          operation_receipts: receipts.flatMap((record) => {
-            const start =
-              record.kind === "operation" ? record.receipt.start : null;
-            if (!start || start.request?.kind !== "run.start") return [];
-            return [
-              {
-                operation_id: start.operation_id,
-                agent_id: start.agent_id,
-                connection_epoch: start.connection_epoch,
-                run_id: start.request.run_context?.execution_run_ref ?? null,
-              },
-            ];
-          }),
-          execution_receipts: receipts.flatMap((record) => {
-            const start =
-              record.kind === "execution" ? record.receipt.start : null;
-            if (start?.request?.kind !== "run.start") return [];
-            return [
-              {
-                operation_id: start.operation_id,
-                agent_id: start.agent_id,
-                connection_epoch: start.connection_epoch,
-                run_id: start.request.run_context?.execution_run_ref ?? null,
-              },
-            ];
-          }),
+          operation_receipts: [...runOperations.values()].map((record) => ({
+            operation_id: record.operation_id,
+            agent_id: record.agent_id,
+            run_id: record.run_id,
+            context_key: record.context_key,
+            runtime_type: record.runtime_type,
+          })),
         });
         return true;
       }
@@ -418,12 +479,51 @@ export const createTeamHubRuntimeStateFixture = ({
         );
         return true;
       }
+      if (request.method === "GET" && route === "deletion-snapshot") {
+        const agentId = url.searchParams.get("agent_id");
+        const deleted = deletedConfigs.get(agentId);
+        if (!deleted) {
+          writeJson(response, 404, { error: "not_found" });
+          return true;
+        }
+        writeJson(response, 200, {
+          ...deleted,
+          contexts: [...contexts.values()]
+            .filter((context) => context.ref.agent_id === agentId)
+            .map(observeContext),
+        });
+        return true;
+      }
+      if (request.method === "GET" && route === "another-me-placements") {
+        writeJson(response, 200, { items: [] });
+        return true;
+      }
+      if (
+        request.method === "POST" &&
+        route === "another-me/background-calls"
+      ) {
+        await readJson(request);
+        response.writeHead(204).end();
+        return true;
+      }
       if (request.method === "GET" && route === "contexts") {
         const agentId = url.searchParams.get("agent_id");
         writeJson(response, 200, {
           contexts: [...contexts.values()]
             .filter((context) => !agentId || context.ref.agent_id === agentId)
             .map(observeContext),
+        });
+        return true;
+      }
+      if (request.method === "POST" && route === "contexts/recently-used") {
+        await readJson(request);
+        writeJson(response, 200, {
+          contexts: [...contexts.values()]
+            .filter(
+              (context) =>
+                (contextStates.get(context.context_key)?.runs.size ?? 0) > 0,
+            )
+            .map((context) => ({ context_key: context.context_key })),
         });
         return true;
       }
@@ -466,6 +566,25 @@ export const createTeamHubRuntimeStateFixture = ({
         writeJson(response, 200, observeContext(updated));
         return true;
       }
+      if (request.method === "POST" && route === "contexts/delete") {
+        const body = await readJson(request);
+        const context = contexts.get(body.context_key);
+        if (!context) {
+          writeJson(response, 404, { error: "context_not_found" });
+          return true;
+        }
+        if (
+          body.expected_revision !== undefined &&
+          context.state_revision !== body.expected_revision
+        ) {
+          writeJson(response, 409, { error: "revision_conflict" });
+          return true;
+        }
+        contexts.delete(body.context_key);
+        contextStates.delete(body.context_key);
+        writeJson(response, 200, { deleted: true });
+        return true;
+      }
 
       if (request.method === "POST" && route === "contexts/reconcile") {
         await readJson(request);
@@ -473,6 +592,7 @@ export const createTeamHubRuntimeStateFixture = ({
           examined_count: 0,
           existing_count: 0,
           created_count: 0,
+          created_context_keys: [],
         });
         return true;
       }
@@ -505,6 +625,19 @@ export const createTeamHubRuntimeStateFixture = ({
         const state = requireContextState(contextStates, body.context_key);
         state.session = checkpointSession(state, body.checkpoint);
         writeJson(response, 200, state.session);
+        return true;
+      }
+      if (request.method === "POST" && route === "sessions/clear") {
+        const body = await readJson(request);
+        if (fenced(body, response)) return true;
+        const state = contextStates.get(body.context_key);
+        if (!state) {
+          writeJson(response, 404, { error: "context_not_found" });
+          return true;
+        }
+        const cleared = state.session !== null;
+        state.session = null;
+        writeJson(response, 200, { cleared });
         return true;
       }
       if (request.method === "POST" && route === "trusted-turns") {
@@ -575,6 +708,7 @@ export const createTeamHubRuntimeStateFixture = ({
           run.status = "running";
           run.epoch = body.epoch;
           run.claim_id = body.claim_id;
+          runStartedAtMs.set(run.run_id, Date.now());
           context.state_revision = increment(context.state_revision);
         }
         const inputs = run.input_ids.map((inputId) =>
@@ -586,12 +720,32 @@ export const createTeamHubRuntimeStateFixture = ({
           run: {
             run_id: run.run_id,
             attempt_count: run.attempt_count,
+            cancellation_requested: Boolean(run.cancellation_requested),
             inputs,
             continues_context: [...state.inputs.values()].some(
               (input) => BigInt(input.sequence) < first,
             ),
           },
         });
+        return true;
+      }
+      if (request.method === "POST" && route === "runs/requeue") {
+        const body = await readJson(request);
+        if (fenced(body, response)) return true;
+        const context = contexts.get(body.context_key);
+        const state = contextStates.get(body.context_key);
+        const run = state?.runs.get(body.run_id);
+        if (!context || !run) {
+          writeJson(response, 404, { error: "run_not_found" });
+          return true;
+        }
+        if (run.status === "running") {
+          run.status = "queued";
+          delete run.claim_id;
+          delete run.epoch;
+          context.state_revision = increment(context.state_revision);
+        }
+        writeJson(response, 200, { success: true });
         return true;
       }
       if (request.method === "GET" && route === "run") {
@@ -601,6 +755,57 @@ export const createTeamHubRuntimeStateFixture = ({
         );
         const run = state.runs.get(url.searchParams.get("local_run_id"));
         writeJson(response, run ? 200 : 404, run ?? { error: "run_not_found" });
+        return true;
+      }
+      if (request.method === "GET" && route === "runs/reply-status") {
+        const key = url.searchParams.get("context_key");
+        const runId = url.searchParams.get("local_run_id");
+        const context = contexts.get(key);
+        const state = contextStates.get(key);
+        const run = state?.runs.get(runId);
+        if (!context || !run) {
+          writeJson(response, 404, { error: "run_not_found" });
+          return true;
+        }
+        const replied =
+          typeof hasRunReplied === "function"
+            ? Boolean(
+                hasRunReplied({
+                  contextKey: key,
+                  runId,
+                  agentId: context.ref.agent_id,
+                  roomId:
+                    context.ref.kind === "meta" ? context.ref.room_id : null,
+                  startedAtMs: runStartedAtMs.get(runId) ?? 0,
+                }),
+              )
+            : Boolean(defaultRunReplied);
+        writeJson(response, 200, { replied });
+        return true;
+      }
+      if (request.method === "POST" && route === "runs/operations") {
+        const body = await readJson(request);
+        if (fenced(body, response)) return true;
+        const context = contexts.get(body.context_key);
+        const existing = runOperations.get(body.operation_id);
+        runOperations.set(body.operation_id, {
+          operation_id: body.operation_id,
+          run_id: body.run_id,
+          context_key: body.context_key,
+          agent_id: context?.ref.agent_id ?? existing?.agent_id ?? null,
+          runtime_type: body.runtime_type,
+          ...(body.turn_id !== undefined
+            ? { turn_id: body.turn_id }
+            : existing?.turn_id !== undefined
+              ? { turn_id: existing.turn_id }
+              : {}),
+          ...(body.usage !== undefined
+            ? { usage: body.usage }
+            : existing?.usage !== undefined
+              ? { usage: existing.usage }
+              : {}),
+        });
+        writeJson(response, 200, { success: true });
         return true;
       }
       if (request.method === "POST" && route === "runs/finish") {
@@ -645,6 +850,8 @@ export const createTeamHubRuntimeStateFixture = ({
           writeJson(response, 200, { status: "canceled" });
           return true;
         }
+        run.cancellation_requested = true;
+        context.state_revision = increment(context.state_revision);
         writeJson(response, 200, { status: "cancel_requested" });
         return true;
       }
@@ -755,8 +962,197 @@ export const createTeamHubRuntimeStateFixture = ({
         return true;
       }
 
+      if (request.method === "GET" && route === "local-computer") {
+        const computer = computers.get(url.searchParams.get("computer_id"));
+        writeJson(
+          response,
+          computer ? 200 : 404,
+          computer ?? { error: "not_found" },
+        );
+        return true;
+      }
       if (request.method === "GET" && route === "local-computers") {
         writeJson(response, 200, { computers: [...computers.values()] });
+        return true;
+      }
+      if (request.method === "POST" && route === "local-computers/connect") {
+        const body = await readJson(request);
+        const current = computers.get(body.computer_id);
+        if (!current) {
+          writeJson(response, 404, {
+            error: { code: "NOT_FOUND", message: "Local Computer not found" },
+          });
+          return true;
+        }
+        if (
+          current.owner?.tenant_id !== body.owner?.tenant_id ||
+          current.owner?.owner_actor_id !== body.owner?.owner_actor_id
+        ) {
+          writeJson(response, 403, {
+            error: {
+              code: "FORBIDDEN",
+              message: "Computer owner does not match",
+            },
+          });
+          return true;
+        }
+        if (
+          String(current.credential_generation) !==
+          String(body.credential_generation)
+        ) {
+          writeJson(response, 401, {
+            error: {
+              code: "UNAUTHORIZED",
+              message: "Computer credential generation mismatch",
+            },
+          });
+          return true;
+        }
+        const existingIdentity = daemonIdentities.get(body.computer_id);
+        const identityConflict =
+          (existingIdentity &&
+            (existingIdentity.daemon_id !== body.daemon_id ||
+              existingIdentity.daemon_public_key !== body.daemon_public_key ||
+              String(existingIdentity.identity_version) !==
+                String(body.identity_version))) ||
+          [...daemonIdentities.entries()].some(
+            ([otherComputerId, otherIdentity]) =>
+              otherComputerId !== body.computer_id &&
+              otherIdentity.daemon_id === body.daemon_id,
+          );
+        if (identityConflict) {
+          writeJson(response, 409, {
+            error: {
+              code: "DAEMON_IDENTITY_IN_USE",
+              message: "Computer daemon identity conflict",
+            },
+          });
+          return true;
+        }
+        daemonIdentities.set(body.computer_id, {
+          computer_id: body.computer_id,
+          daemon_id: body.daemon_id,
+          daemon_public_key: body.daemon_public_key,
+          identity_version: String(body.identity_version),
+        });
+        const computer = {
+          ...current,
+          computer_id: body.computer_id,
+          display_name:
+            body.display_name ?? current.display_name ?? body.computer_id,
+          ...(body.platform ? { platform: body.platform } : {}),
+          owner: current.owner,
+          status: body.status,
+          credential_generation: String(current.credential_generation ?? "0"),
+          ...(body.seen_at ? { last_seen_at: body.seen_at } : {}),
+          runtimes: body.runtimes ?? current.runtimes ?? [],
+          runtime_diagnostics:
+            body.runtime_diagnostics ?? current.runtime_diagnostics ?? [],
+          workspace_grants:
+            body.workspace_grants ?? current.workspace_grants ?? [],
+        };
+        computers.set(body.computer_id, computer);
+        for (const runtimeType of computer.runtimes) {
+          ensureRuntimeRegistration({
+            computerId: body.computer_id,
+            daemonId: body.daemon_id,
+            tenantId: computer.owner.tenant_id,
+            ownerActorId: computer.owner.owner_actor_id,
+            providerType: runtimeType,
+            seenAt: body.seen_at,
+          });
+        }
+        const placements = [];
+        for (const config of configs.values()) {
+          if (config.runtime.placement.computer_id !== body.computer_id)
+            continue;
+          const registration = ensureRuntimeRegistration({
+            computerId: body.computer_id,
+            daemonId: body.daemon_id,
+            tenantId: config.runtime.placement.tenant_id,
+            ownerActorId: config.runtime.placement.owner_actor_id,
+            providerType: config.runtime.placement.runtime_type,
+            seenAt: body.seen_at,
+          });
+          const existingAssignment = runtimeAssignments.get(config.agent_id);
+          const assignmentRevision =
+            existingAssignment?.assignment_revision ??
+            config.runtime.placement.assignment_revision ??
+            "1";
+          runtimeAssignments.set(config.agent_id, {
+            agent_management_id: config.agent_id,
+            agent_actor_id: config.actor_id,
+            tenant_id: config.tenant_id,
+            registration_id: registration.registration_id,
+            assignment_revision: assignmentRevision,
+          });
+          placements.push({
+            agent_id: config.agent_id,
+            actor_id: config.actor_id,
+            tenant_id: config.tenant_id,
+            owner_actor_id: config.runtime.placement.owner_actor_id,
+            runtime_type: config.runtime.placement.runtime_type,
+            model: config.runtime.model,
+            ...(config.runtime.reasoning_effort === undefined
+              ? {}
+              : { reasoning_effort: config.runtime.reasoning_effort }),
+            workspace_grant_id: config.runtime.placement.workspace_grant_id,
+            assignment_revision: assignmentRevision,
+          });
+        }
+        writeJson(response, 200, { computer, placements });
+        return true;
+      }
+      if (request.method === "POST" && route === "local-computers/touch") {
+        const body = await readJson(request);
+        const current = computers.get(body.computer_id);
+        if (!current) {
+          writeJson(response, 404, { error: "not_found" });
+          return true;
+        }
+        const computer = {
+          ...current,
+          status: body.status,
+          ...(body.seen_at ? { last_seen_at: body.seen_at } : {}),
+          ...(body.runtimes !== undefined ? { runtimes: body.runtimes } : {}),
+          ...(body.runtime_diagnostics !== undefined
+            ? { runtime_diagnostics: body.runtime_diagnostics }
+            : {}),
+        };
+        computers.set(computer.computer_id, computer);
+        writeJson(response, 200, computer);
+        return true;
+      }
+      if (request.method === "POST" && route === "local-computers/remove") {
+        const body = await readJson(request);
+        if (!computers.has(body.computer_id)) {
+          writeJson(response, 200, { status: "not_found" });
+          return true;
+        }
+        const hasAgents = [...configs.values()].some(
+          (config) => config.runtime.placement.computer_id === body.computer_id,
+        );
+        if (hasAgents) {
+          writeJson(response, 200, { status: "has_agents" });
+          return true;
+        }
+        computers.delete(body.computer_id);
+        daemonIdentities.delete(body.computer_id);
+        localModels.delete(body.computer_id);
+        writeJson(response, 200, { status: "removed" });
+        return true;
+      }
+      if (
+        request.method === "POST" &&
+        route === "local-computers/local-models"
+      ) {
+        const body = await readJson(request);
+        if (!computers.has(body.computer_id)) {
+          writeJson(response, 404, { error: "not_found" });
+          return true;
+        }
+        localModels.set(body.computer_id, body.snapshot);
+        response.writeHead(204).end();
         return true;
       }
       if (
@@ -769,24 +1165,17 @@ export const createTeamHubRuntimeStateFixture = ({
         writeJson(response, 200, { success: true });
         return true;
       }
-      if (
-        request.method === "POST" &&
-        (route === "local-computers/observe" ||
-          route === "local-computers/touch")
-      ) {
+      if (request.method === "POST" && route === "local-computers/observe") {
         const body = await readJson(request);
         const current = computers.get(body.computer_id);
         const computer = {
           computer_id: body.computer_id,
           display_name:
             body.display_name ?? current?.display_name ?? body.computer_id,
-          owners: body.owners ?? current?.owners ?? [],
+          owner: current?.owner ?? body.owners?.[0],
           status: body.status,
-          credential_generation: current?.credential_generation ?? 0,
+          credential_generation: String(current?.credential_generation ?? "0"),
           ...(body.seen_at ? { last_seen_at: body.seen_at } : {}),
-          ...(body.capacity === undefined && current?.capacity === undefined
-            ? {}
-            : { capacity: body.capacity ?? current.capacity }),
           runtimes: body.runtimes ?? current?.runtimes ?? [],
           runtime_diagnostics:
             body.runtime_diagnostics ?? current?.runtime_diagnostics ?? [],
@@ -900,11 +1289,14 @@ const readInboxFixture = async (filename) =>
 const configSnapshot = (body) => {
   const registration = body.registration;
   const placement = registration.runtime.placement;
-  return {
+  const revision = String(registration.revision ?? "1");
+  const assignmentRevision = String(placement.assignmentRevision ?? "1");
+  const canonicalPayload = {
     agent_id: registration.agentId,
     actor_id: `actor-${registration.agentId}`,
     tenant_id: registration.tenantId,
-    configuration_revision: registration.revision,
+    configuration_revision: revision,
+    runtime_configuration_revision: revision,
     agent: registration.agent,
     runtime: {
       type: "local",
@@ -918,12 +1310,20 @@ const configSnapshot = (body) => {
         computer_id: placement.computerId,
         runtime_type: placement.runtimeType,
         workspace_grant_id: placement.workspaceGrantId,
+        assignment_revision: assignmentRevision,
       },
     },
     resources: {
       skills: registration.resources.skills,
       mcp_servers: registration.resources.mcpServers,
     },
+  };
+  return {
+    ...canonicalPayload,
+    permission_review: false,
+    content_hash: createHash("sha256")
+      .update(JSON.stringify(canonicalPayload))
+      .digest("hex"),
   };
 };
 

@@ -6,6 +6,7 @@ import path from "node:path";
 import { mediaTypeForExtension } from "@linger/document-files/media-type";
 import { sha256Hex } from "@linger/service-kit/node";
 
+import type { StaticPrefixBundle } from "../prompt/static-prefixes.js";
 import type { RuntimeViewPlan } from "../executor/workspace.js";
 import {
   sharedTaskScopeWire,
@@ -126,6 +127,8 @@ export function createContextViewContent(options: {
     computerId: string,
     connectionEpoch: number,
   ) => boolean;
+  /** Optional deployment-wide static system-prompt prefixes for warm-up. */
+  readonly staticPrefixes?: () => StaticPrefixBundle;
 }): ContextViewContent {
   const publicOrigin = new URL(options.publicOrigin).origin;
   if (Buffer.byteLength(options.signingKey) < 32)
@@ -345,7 +348,17 @@ export function createContextViewContent(options: {
     async handle(token, kind, id, request) {
       if (request.method !== "GET") return notFound();
       const principal = authorize(token);
-      if (!principal || !SHA256.test(id)) return notFound();
+      if (!principal) return notFound();
+      if (kind === "static-prefixes" && id === "v1") {
+        if (!options.staticPrefixes) return notFound();
+        return new Response(JSON.stringify(options.staticPrefixes()), {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "no-store",
+          },
+        });
+      }
+      if (!SHA256.test(id)) return notFound();
       const views = published.get(principal.computerId);
       if (kind === "views") {
         const view = views?.get(id);

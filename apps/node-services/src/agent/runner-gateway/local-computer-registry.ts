@@ -64,6 +64,13 @@ export type LocalComputerRemovalResult =
   | "has-agents"
   | "not-found";
 
+/** Placements and deployment flags returned when a Computer connects. */
+export interface LocalComputerConnectResult {
+  readonly placements: readonly RunnerPlacement[];
+  readonly connectedApps?: boolean;
+  readonly permissionReview?: boolean;
+}
+
 /** The Computer rows TeamHub keeps; the Runner Gateway holds no copy. */
 export interface LocalComputerRegistry {
   /** The Computer's credential generation, or null when it is not this owner's active Computer. */
@@ -74,7 +81,7 @@ export interface LocalComputerRegistry {
   /** Records a hello and returns the Agents placed on the Computer. */
   connect(
     connection: LocalComputerConnection,
-  ): Promise<readonly RunnerPlacement[]>;
+  ): Promise<LocalComputerConnectResult>;
   touch(computerId: string, touch: LocalComputerTouch): Promise<void>;
   /** Replaces the Computer's stored model library with its latest snapshot. */
   recordLocalModels(
@@ -161,18 +168,26 @@ const buildTeamHubLocalComputerRegistry = (
       }
       throw error;
     }
-    return result.placements.map((placement) => ({
-      agentId: placement.agent_id,
-      tenantId: placement.tenant_id,
-      ownerActorId: placement.owner_actor_id,
-      runtimeType: placement.runtime_type,
-      model: placement.model,
-      ...(placement.reasoning_effort === undefined
+    return {
+      placements: result.placements.map((placement) => ({
+        agentId: placement.agent_id,
+        tenantId: placement.tenant_id,
+        ownerActorId: placement.owner_actor_id,
+        runtimeType: placement.runtime_type,
+        model: placement.model,
+        ...(placement.reasoning_effort === undefined
+          ? {}
+          : { reasoningEffort: placement.reasoning_effort }),
+        workspaceGrantId: placement.workspace_grant_id,
+        assignmentRevision: Number(placement.assignment_revision),
+      })),
+      ...(result.connected_apps === undefined
         ? {}
-        : { reasoningEffort: placement.reasoning_effort }),
-      workspaceGrantId: placement.workspace_grant_id,
-      assignmentRevision: Number(placement.assignment_revision),
-    }));
+        : { connectedApps: result.connected_apps }),
+      ...(result.permission_review === undefined
+        ? {}
+        : { permissionReview: result.permission_review }),
+    };
   },
   async touch(computerId, touch) {
     await client.touchLocalComputer({

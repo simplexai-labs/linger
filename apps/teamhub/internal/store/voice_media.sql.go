@@ -696,7 +696,9 @@ INSERT INTO voice_sessions(
 )
 SELECT $1::text,authority.tenant_id,$2::text,authority.actor_id,
   'provisioning',$3::text,$4::text,
-  $5::text,$6::text,$7::text
+  $5::text,$6::text,
+  -- A caller that names no client records the column default.
+  COALESCE(NULLIF($7::text, ''), 'web')
 FROM authority
 RETURNING id, tenant_id, room_id, created_by_actor_id, status, provider_room_name, participant_identity, credential_generation, last_failure_code, created_at, updated_at, closed_at, latest_partial_text, latest_partial_start_offset_ms, latest_partial_end_offset_ms, latest_partial_updated_at, last_input_started_ms, last_input_ended_ms, purpose, auth_session_id, live_agent_actor_id, live_lease_until, next_media_epoch, client
 `

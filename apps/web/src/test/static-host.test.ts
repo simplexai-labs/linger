@@ -88,7 +88,6 @@ describe("Web static host routing", () => {
     "/t/tenant-1/apps",
     "/t/tenant-1/settings",
     "/t/tenant-1/settings/account",
-    "/t/tenant-1/settings/security",
     "/t/tenant-1/library/wiki",
     "/documents",
     "/documents/native_document_1",

@@ -40,6 +40,48 @@ export const voiceWindowPosition = (
   ),
 });
 
+// How high the window floats: over the main window and every ordinary window.
+// Windows and Linux know only on top or not, but on Windows Electron moves a
+// window at the levels up to "status" behind the taskbar each time it is
+// activated (electron#34814), so there it takes the first level above them.
+// macOS keeps "floating", under menus and the Dock, and follows the person
+// across Spaces and full-screen apps instead.
+export type VoiceWindowLevel = "floating" | "pop-up-menu";
+export const voiceWindowLevel = (
+  platform: VoiceWindowPlatform,
+): VoiceWindowLevel => (platform === "darwin" ? "floating" : "pop-up-menu");
+
+// The window the page's request opens. It has no parent, so it neither
+// minimizes nor hides with the main window and the main window never covers
+// it; it is moved by its native title bar and only closed, never minimized,
+// so it cannot get lost behind other windows. Windows lists every window in
+// the taskbar; this one belongs to the main window's session, so it is left
+// out there.
+export const voiceWindowOptions = (platform: VoiceWindowPlatform) =>
+  ({
+    title: "Linger",
+    // The page asks for the size of its content, as in a browser.
+    useContentSize: true,
+    minWidth: VOICE_WINDOW_MIN.width,
+    minHeight: VOICE_WINDOW_MIN.height,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: platform === "win32",
+    autoHideMenuBar: true,
+  }) as const;
+
+// Something whose events should put the window back on top.
+export interface VoiceWindowRaiser {
+  on(event: string, listener: () => void): unknown;
+  off(event: string, listener: () => void): unknown;
+}
+export type VoiceWindowRaiseSource = readonly [
+  VoiceWindowRaiser,
+  readonly string[],
+];
+
 // Hiding or minimizing the main window would otherwise throttle the page's
 // timers, which keep the call and the recording going. A window is counted
 // from when it is adopted to when it closes, so a closing window cannot lift
@@ -61,31 +103,52 @@ export function acceptVoiceWindow(
   opener: WebContents,
   previous: (() => void) | undefined,
   platform: VoiceWindowPlatform,
+  raiseOn: readonly VoiceWindowRaiseSource[] = [],
 ): (() => void) | undefined {
   if (child.webContents.opener !== opener.mainFrame) {
     child.destroy();
     return undefined;
   }
   previous?.();
-  return adoptVoiceWindow(child, opener, platform);
+  return adoptVoiceWindow(child, opener, platform, raiseOn);
 }
 
 // Floats `child` over other apps and ties it to `opener`. Returns a function
-// that closes it.
+// that closes it. Each event of `raiseOn` (the main window coming back or
+// taking focus, a screen being added, removed or rearranged) puts the window
+// on top again: Windows can drop a window out of the always-on-top band, and
+// asking again only restacks it without taking focus.
 export function adoptVoiceWindow(
   child: BrowserWindow,
   opener: WebContents,
   platform: VoiceWindowPlatform,
+  raiseOn: readonly VoiceWindowRaiseSource[] = [],
 ): () => void {
-  child.setAlwaysOnTop(true, "floating");
+  const level = voiceWindowLevel(platform);
+  const raise = (): void => {
+    if (!child.isDestroyed()) child.setAlwaysOnTop(true, level);
+  };
+  raise();
+  const sources: VoiceWindowRaiseSource[] = [
+    [child, ["show", "restore"]],
+    ...raiseOn,
+  ];
+  for (const [source, events] of sources)
+    for (const event of events) source.on(event, raise);
   if (platform === "darwin")
     child.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
       skipTransformProcessType: true,
     });
   child.setMenuBarVisibility(false);
-  // The page sets no title; the window keeps its own.
-  child.on("page-title-updated", (event) => event.preventDefault());
+  // The page names the window in the interface language (English "Meeting");
+  // an empty or blank-page title keeps the window's own "Linger".
+  child.on("page-title-updated", (event, title) => {
+    event.preventDefault();
+    const named = title.trim();
+    if (named && named !== "about:blank" && !child.isDestroyed())
+      child.setTitle(named);
+  });
 
   const contents = child.webContents;
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -93,11 +156,13 @@ export function adoptVoiceWindow(
   contents.on("will-attach-webview", (event) => event.preventDefault());
 
   hold(opener, 1);
+  // Destroy rather than close on main-process teardown (navigation, crash,
+  // replacement, or main-window close) so Electron does not dispatch popup
+  // `pagehide` into a still-alive opener page as if the user clicked the
+  // floating window's close button; Electron still emits `closed` on `child`.
   const close = (): void => {
-    if (!child.isDestroyed()) child.close();
+    if (!child.isDestroyed()) child.destroy();
   };
-  // The window belongs to the page that filled it: a reload or a crash leaves
-  // nothing to drive it.
   const onNavigate = (details: {
     isMainFrame: boolean;
     isSameDocument: boolean;
@@ -107,6 +172,8 @@ export function adoptVoiceWindow(
   opener.on("did-start-navigation", onNavigate);
   opener.on("render-process-gone", close);
   child.on("closed", () => {
+    for (const [source, events] of sources)
+      for (const event of events) source.off(event, raise);
     opener.off("did-start-navigation", onNavigate);
     opener.off("render-process-gone", close);
     hold(opener, -1);

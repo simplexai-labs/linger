@@ -2,8 +2,10 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { ProviderKeyForm } from "@/features/apps/provider-key-form";
-import { ProviderKeyGuide } from "@/features/apps/provider-key-guide";
+import {
+  ProviderKeyLink,
+  useProviderKeyForm,
+} from "@/features/apps/provider-key-form";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { TeamHubError } from "@/features/teamhub/teamhub-error";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
@@ -23,6 +25,10 @@ import { voiceKeyMessages as m } from "./voice-key.messages";
 // Where TeamHub keeps saved keys; a server without it can only read keys
 // from its environment.
 const STORAGE_VARIABLE = "TEAMHUB_SECRET_ENCRYPTION_KEY";
+
+const CODE_TAGS = {
+  code: (text: string) => <code className="font-mono">{text}</code>,
+};
 
 const providerDetails: Record<
   TeamHubVoiceProvider,
@@ -141,21 +147,49 @@ export function VoiceKeyDialog({
 
   const details = providerDetails[provider];
   const status = voiceProviderKeyStatus(policy, provider);
+  const canSaveForm =
+    !turnOnFailed &&
+    status?.source !== "environment" &&
+    status?.can_save !== false;
+  // One form for every provider: switching starts a new draft instead of
+  // remounting it, so focus stays on the provider switch.
+  const keyForm = useProviderKeyForm({
+    describeError: (error) => describeSaveError(error, provider, t),
+    helper: t(details.purpose),
+    label: t(m.apiKey, { provider: details.name }),
+    labelAction: <ProviderKeyLink href={details.href} />,
+    onCancel: onClose,
+    // TeamHub answers the save once the voice workers are up.
+    pendingLabel: t(m.turningOn),
+    resetKey: provider,
+    save: async (apiKey) => {
+      await teamHubData(
+        client.api.PUT("/v0/voice-provider-keys/{provider}", {
+          body: { api_key: apiKey },
+          params: { path: { provider } },
+        }),
+      );
+      // The Save button stays pending through this read.
+      await turnOn();
+    },
+  });
+
   return (
     <ModalDialog
       closeOnBackdrop
-      onClose={onClose}
-      size="md"
-      title={
-        providers.length > 1
-          ? t(m.turnOnVoice)
-          : t(m.title, { provider: details.name })
+      description={
+        !turnOnFailed &&
+        status?.source === "stored" &&
+        status.can_save !== false
+          ? t(m.keyReplaceHint)
+          : undefined
       }
-    >
-      <div className="space-y-4 px-5 py-5 text-sm text-app-body">
-        {turnOnFailed ? (
+      footer={
+        turnOnFailed ? (
           <>
-            <p role="alert">{t(m.savedButOff)}</p>
+            <Button disabled={retrying} onClick={onClose} tone="secondary">
+              {t(commonMessages.cancel)}
+            </Button>
             <Button
               loading={retrying}
               onClick={() => {
@@ -167,36 +201,63 @@ export function VoiceKeyDialog({
               {t(commonMessages.tryAgain)}
             </Button>
           </>
+        ) : canSaveForm ? (
+          keyForm.actions
+        ) : undefined
+      }
+      onClose={onClose}
+      size="sm"
+      title={
+        providers.length > 1
+          ? t(m.turnOnVoice)
+          : t(m.title, { provider: details.name })
+      }
+    >
+      <div className="space-y-4 px-5 py-4 text-sm text-app-body">
+        {turnOnFailed ? (
+          <p role="alert">{t(m.savedButOff)}</p>
         ) : (
           <>
             {providers.length > 1 ? (
               <div
                 aria-label={t(m.voiceProvider)}
-                className="flex gap-2"
-                role="group"
+                className="inline-flex w-fit gap-0.5 rounded-lg bg-muted p-0.5"
+                role="radiogroup"
               >
                 {providers.map((option) => (
-                  <Button
-                    aria-pressed={option === provider}
+                  <button
+                    aria-checked={option === provider}
+                    className={`h-7 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
+                      option === provider
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                     key={option}
                     onClick={() => setProvider(option)}
-                    tone={option === provider ? "primary" : "secondary"}
+                    role="radio"
+                    type="button"
                   >
                     {providerDetails[option].name}
-                  </Button>
+                  </button>
                 ))}
               </div>
             ) : null}
-            {providers.length > 1 ? (
-              <p className="text-muted-foreground">{t(details.purpose)}</p>
-            ) : null}
-            {status?.can_save === false ? (
-              <p>
+            {status?.source === "environment" ? (
+              <p className="text-muted-foreground">
+                <RichMessage
+                  message={m.keyFromEnvironmentNotice}
+                  tags={CODE_TAGS}
+                  values={{
+                    provider: details.name,
+                    variable: details.environmentVariable,
+                  }}
+                />
+              </p>
+            ) : status?.can_save === false ? (
+              <p className="text-muted-foreground">
                 <RichMessage
                   message={m.cannotSaveHere}
-                  tags={{
-                    code: (text) => <code className="font-mono">{text}</code>,
-                  }}
+                  tags={CODE_TAGS}
                   values={{
                     provider: details.name,
                     storageVariable: STORAGE_VARIABLE,
@@ -205,37 +266,7 @@ export function VoiceKeyDialog({
                 />
               </p>
             ) : (
-              <>
-                <ProviderKeyGuide
-                  href={details.href}
-                  steps={
-                    <ol className="list-decimal space-y-1.5 pl-5">
-                      <li>{t(m.stepOpen, { provider: details.name })}</li>
-                      <li>{t(m.stepCreate)}</li>
-                      <li>{t(m.stepPaste)}</li>
-                    </ol>
-                  }
-                />
-                <ProviderKeyForm
-                  describeError={(error) =>
-                    describeSaveError(error, provider, t)
-                  }
-                  key={provider}
-                  label={t(m.apiKey, { provider: details.name })}
-                  // TeamHub answers the save once the voice workers are up.
-                  pendingLabel={t(m.turningOn)}
-                  save={async (apiKey) => {
-                    await teamHubData(
-                      client.api.PUT("/v0/voice-provider-keys/{provider}", {
-                        body: { api_key: apiKey },
-                        params: { path: { provider } },
-                      }),
-                    );
-                    // The Save button stays pending through this read.
-                    await turnOn();
-                  }}
-                />
-              </>
+              keyForm.fields
             )}
           </>
         )}

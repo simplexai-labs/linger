@@ -15,6 +15,7 @@ const artifactDirectory = requiredArgument("--artifact-directory");
 const serviceToken = requiredArgument("--service-token");
 const tenantId = requiredArgument("--tenant-id");
 const inboxStateFile = requiredArgument("--inbox-state-file");
+const soakMode = process.argv.includes("--soak");
 const skillManifestId = "skill_manifest_stage_c";
 const artifacts = new Map();
 // This process remains authoritative while the real Agent Service and daemon
@@ -22,6 +23,7 @@ const artifacts = new Map();
 const agentCredentials = new Map();
 let credentialClockOffsetMs = 0;
 const cliReceipts = new Map();
+const publishedMessages = [];
 let taskExecution = null;
 const taskAcceptedInputs = new Map();
 let taskLease = null;
@@ -30,6 +32,18 @@ let publishedMessageSequence = 0;
 const runtimeState = createTeamHubRuntimeStateFixture({
   serviceToken,
   inboxStateFile,
+  ...(soakMode
+    ? { defaultRunReplied: true }
+    : {
+        defaultRunReplied: false,
+        hasRunReplied: ({ agentId, roomId, startedAtMs }) =>
+          publishedMessages.some(
+            (message) =>
+              message.agent_id === agentId &&
+              message.room_id === roomId &&
+              message.at_ms >= startedAtMs,
+          ),
+      }),
 });
 
 const skillFiles = new Map([
@@ -272,10 +286,24 @@ async function handleAgentCli(request, response, url) {
     if (!authorizeService(request, response)) return true;
     const body = JSON.parse(await readBody(request));
     const agentId = decodeURIComponent(credentialMatch[1]);
+    const allowedKeys = new Set([
+      "label",
+      "computer_id",
+      "workspace_grant_id",
+      "held_token_sha256",
+    ]);
     if (
       typeof body.label !== "string" ||
       !body.label.trim() ||
-      Object.keys(body).some((key) => key !== "label")
+      Object.keys(body).some((key) => !allowedKeys.has(key)) ||
+      (body.computer_id !== undefined &&
+        (typeof body.computer_id !== "string" || !body.computer_id.trim())) ||
+      (body.workspace_grant_id !== undefined &&
+        (typeof body.workspace_grant_id !== "string" ||
+          !body.workspace_grant_id.trim())) ||
+      (body.held_token_sha256 !== undefined &&
+        (typeof body.held_token_sha256 !== "string" ||
+          !/^[0-9a-f]{64}$/.test(body.held_token_sha256)))
     ) {
       writeJson(response, 400, { error: "invalid_credential_request" });
       return true;
@@ -284,6 +312,18 @@ async function handleAgentCli(request, response, url) {
     if (!runtimeState.allowsManagedCredential(agentId, tenantId)) {
       writeJson(response, 403, { error: "agent_forbidden" });
       return true;
+    }
+    if (body.held_token_sha256 !== undefined) {
+      const held = [...agentCredentials.values()].find(
+        (record) =>
+          record.agent_id === agentId &&
+          record.token_hash === body.held_token_sha256 &&
+          Date.parse(record.expires_at) > credentialNow(),
+      );
+      if (held) {
+        response.writeHead(204).end();
+        return true;
+      }
     }
     const token = `th_agent_${randomBytes(32).toString("base64url")}`;
     const record = {
@@ -450,6 +490,11 @@ async function handleAgentCli(request, response, url) {
         input.message_segments.map((segment) => segment.content).join(""),
       ),
       idempotency_key_present: true,
+    });
+    publishedMessages.push({
+      agent_id: agentId,
+      room_id: targetId,
+      at_ms: Date.now(),
     });
     cliReceipts.set(key, { digest, result });
     writeJson(response, 200, result);

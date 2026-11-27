@@ -34,6 +34,7 @@ import {
   createContextViewContent,
   type ContextViewContent,
 } from "./context-view-content.js";
+import { renderStaticPrefixBundle } from "../prompt/static-prefixes.js";
 import { RunnerDebugInspection } from "./runner-debug-inspection.js";
 import type {
   AgentCliCredentialEnsure,
@@ -223,6 +224,8 @@ export class RunnerGateway
         ...options.contextContent,
         isCurrentConnection: (computerId, connectionEpoch) =>
           this.#connections.isCurrentConnection(computerId, connectionEpoch),
+        staticPrefixes: () =>
+          renderStaticPrefixBundle(context.deploymentFeatures),
       });
     }
   }

@@ -7,8 +7,6 @@ import {
   onVoicePipClosedByHuman,
   openVoicePip,
   resetVoicePipForTest,
-  returnedToOpener,
-  returnVoicePipToPage,
   voicePipSupported,
 } from "./voice-pip";
 
@@ -51,12 +49,12 @@ function installFakeDesktopVoiceWindow() {
     (_url?: string, _target?: string, _features?: string) =>
       voiceWindow as unknown as Window,
   );
-  const showMain = vi.fn(async () => {});
   defineGlobalProperty(window, "open", { value: open });
+  // The bridge only marks that the app floats the window.
   defineGlobalProperty(window, "lingerDesktop", {
-    value: { voiceWindow: { showMainWindow: showMain } },
+    value: { voiceWindow: { floats: true } },
   });
-  return { document, open, showMain, voiceWindow };
+  return { document, open, voiceWindow };
 }
 
 function removeFakeVoicePip() {
@@ -150,44 +148,26 @@ describe("Voice Mode picture-in-picture window", () => {
     await expect(openVoicePip("voice-mode")).resolves.toBeUndefined();
   });
 
-  it("returns from the desktop app's window only by its return button", async () => {
+  it("ends the session when the desktop app's window is closed", async () => {
     const fake = installFakeDesktopVoiceWindow();
     const closedByHuman = vi.fn();
     const stop = onVoicePipClosedByHuman("voice-mode", closedByHuman);
-    // No timing guess: the answer is there at once and no visibility change
-    // of the page alters it.
-    vi.useFakeTimers();
     try {
       await openVoicePip("voice-mode");
-      returnVoicePipToPage("recording");
-      expect(fake.voiceWindow.close).not.toHaveBeenCalled();
-      returnVoicePipToPage("voice-mode");
-      expect(fake.showMain).toHaveBeenCalledOnce();
-      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
-      expect(closedByHuman).toHaveBeenCalledOnce();
-      await expect(returnedToOpener()).resolves.toBe(true);
-
-      // The window's close button, with the main window coming to the front
-      // at that moment, is still a close.
-      await openVoicePip("voice-mode");
+      expect(closedByHuman).not.toHaveBeenCalled();
+      // The window's close button is the only way out of it.
       fake.voiceWindow.close();
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(closedByHuman).toHaveBeenCalledTimes(2);
-      await expect(returnedToOpener()).resolves.toBe(false);
-      expect(fake.showMain).toHaveBeenCalledOnce();
+      expect(closedByHuman).toHaveBeenCalledOnce();
     } finally {
-      vi.useRealTimers();
       stop();
     }
   });
 
-  it("returns the call to the page even if the main window cannot be shown", async () => {
-    const fake = installFakeDesktopVoiceWindow();
-    fake.showMain.mockRejectedValueOnce(new Error("no window"));
-    await openVoicePip("voice-mode");
-    returnVoicePipToPage("voice-mode");
-    expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
-    await expect(returnedToOpener()).resolves.toBe(true);
+  it("floats with an older desktop app's bridge too", () => {
+    defineGlobalProperty(window, "lingerDesktop", {
+      value: { voiceWindow: { showMainWindow: vi.fn(async () => {}) } },
+    });
+    expect(voicePipSupported()).toBe(true);
   });
 
   it("carries the page's styles and theme, including later ones", async () => {
@@ -209,6 +189,27 @@ describe("Voice Mode picture-in-picture window", () => {
     await vi.waitFor(() =>
       expect(fake.document.head.textContent).toContain(".late {}"),
     );
+  });
+
+  it("follows a later language change and drops the desktop title-bar mark", async () => {
+    document.documentElement.setAttribute("lang", "en");
+    document.documentElement.setAttribute("data-desktop-chrome", "inset");
+    const fake = installFakeDesktopVoiceWindow();
+    // The desktop preload marks every window it runs in.
+    fake.document.documentElement.setAttribute("data-desktop-chrome", "inset");
+    try {
+      await openVoicePip("recording");
+      expect(
+        fake.document.documentElement.hasAttribute("data-desktop-chrome"),
+      ).toBe(false);
+      document.documentElement.setAttribute("lang", "zh-CN");
+      await vi.waitFor(() =>
+        expect(fake.document.documentElement.lang).toBe("zh-CN"),
+      );
+    } finally {
+      document.documentElement.removeAttribute("data-desktop-chrome");
+      document.documentElement.setAttribute("lang", "en");
+    }
   });
 
   it("opens one window and tells a desktop close apart from the page closing it", async () => {
@@ -241,5 +242,65 @@ describe("Voice Mode picture-in-picture window", () => {
     closeVoicePip("voice-mode");
     expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
     stop();
+  });
+
+  it("closes the floating window on opener beforeunload without notifying closedByHuman or double-closing on pagehide", async () => {
+    const fake = installFakeDesktopVoiceWindow();
+    const closedByHuman = vi.fn();
+    const stop = onVoicePipClosedByHuman("recording", closedByHuman);
+    try {
+      await openVoicePip("recording");
+      window.dispatchEvent(new Event("beforeunload"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).not.toHaveBeenCalled();
+
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it("closes the floating window on opener pagehide without notifying closedByHuman", async () => {
+    const fake = installFakeDesktopVoiceWindow();
+    const closedByHuman = vi.fn();
+    const stop = onVoicePipClosedByHuman("voice-mode", closedByHuman);
+    try {
+      await openVoicePip("voice-mode");
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it("removes opener unload listeners after a direct user close of the floating window", async () => {
+    const fake = installFakeDesktopVoiceWindow();
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const closedByHuman = vi.fn();
+    const stop = onVoicePipClosedByHuman("recording", closedByHuman);
+    try {
+      await openVoicePip("recording");
+      fake.voiceWindow.close();
+      expect(closedByHuman).toHaveBeenCalledOnce();
+      expect(removeListener).toHaveBeenCalledWith(
+        "beforeunload",
+        expect.any(Function),
+      );
+      expect(removeListener).toHaveBeenCalledWith(
+        "pagehide",
+        expect.any(Function),
+      );
+
+      window.dispatchEvent(new Event("beforeunload"));
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).toHaveBeenCalledOnce();
+    } finally {
+      stop();
+      removeListener.mockRestore();
+    }
   });
 });
