@@ -5,8 +5,9 @@ import { Icon } from "@/components/ui/icon";
 import { Hint } from "@/features/local-computer/computer-hint";
 
 /**
- * An avatar that opens its editor. Pointed at or focused, the avatar dims and
- * a pencil shows at its centre; otherwise the face stays unmarked.
+ * An avatar that opens its editor. Pointed at or focused, a dark veil and a
+ * pencil cover it; otherwise the face stays unmarked. A veil, not a brightness
+ * filter, so a Human's translucent initials tile dims as much as a portrait.
  */
 export function AvatarEditButton({
   children,
@@ -29,12 +30,13 @@ export function AvatarEditButton({
         onClick={onClick}
         type="button"
       >
-        <span className="block transition-[filter] duration-150 group-hover:brightness-[.55] group-focus-visible:brightness-[.55] motion-reduce:transition-none">
+        {/* Initials hide under the veil so only the pencil reads. */}
+        <span className="block group-hover:*:text-transparent group-focus-visible:*:text-transparent">
           {children}
         </span>
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 flex items-center justify-center text-primary-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[20%] bg-black/45 text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
           data-avatar-edit-badge
         >
           <Icon icon={PencilEdit02Icon} size={18} />

@@ -1,4 +1,4 @@
-import { Camera01Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
+import { Camera01Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -85,6 +85,15 @@ export function AccountProfileHero({
       setProcessing(false);
     }
   }
+  function saveName() {
+    const next = name.trim();
+    if (!next || next === account.name) {
+      setName(account.name);
+      setEditing(false);
+      return;
+    }
+    update.mutate({ name: next });
+  }
   return (
     <section aria-label={t(accountSettingsMessages.profileAppearance)}>
       <div className="relative h-32 overflow-hidden rounded-xl bg-muted">
@@ -93,20 +102,22 @@ export function AccountProfileHero({
           src={account.background_image || background}
           className="absolute inset-0 size-full object-cover"
         />
-        <Button
-          className="absolute right-2.5 top-2.5 bg-card shadow-md"
-          size="compact"
-          disabled={busy}
-          onClick={() => backgroundInput.current?.click()}
-        >
-          <Icon icon={Camera01Icon} size={14} />
-          {t(accountSettingsMessages.changeCover)}
-        </Button>
+        <div className="absolute right-2.5 top-2.5">
+          <Button
+            className="bg-card shadow-md"
+            size="compact"
+            disabled={busy}
+            onClick={() => backgroundInput.current?.click()}
+          >
+            <Icon icon={Camera01Icon} size={14} />
+            {t(accountSettingsMessages.changeCover)}
+          </Button>
+        </div>
       </div>
-      {/* The avatar overlaps the cover's lower edge; a ring in the page's
-          colour keeps it apart from the photo. */}
-      <div className="-mt-9 flex items-end gap-4 px-5">
-        <div className="relative shrink-0 rounded-[20%] bg-background p-1">
+      {/* The avatar overlaps the cover's lower edge; an opaque backing keeps
+          the photo from showing through a Human's translucent tile. */}
+      <div className="-mt-6 flex items-end gap-3 px-5">
+        <div className="relative shrink-0 rounded-[20%] bg-background">
           <AvatarEditButton
             disabled={busy}
             label={t(accountSettingsMessages.uploadProfilePhoto)}
@@ -129,61 +140,44 @@ export function AccountProfileHero({
             )}
           </AvatarEditButton>
         </div>
-        <div className="min-w-0 flex-1 pb-2">
+        <div className="min-w-0 flex-1 pb-1">
+          {/* Edited in place as an Agent's name is: Enter or leaving the
+              field saves, Escape cancels. */}
           {editing ? (
-            <form
-              className="flex max-w-md items-center gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (name.trim() && !busy) update.mutate({ name: name.trim() });
+            <input
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- the field replaces the name the person just clicked
+              autoFocus
+              aria-label={t(accountSettingsMessages.profileDisplayName)}
+              className="max-w-full rounded-md bg-card px-2 py-0.5 text-lg font-semibold leading-6 text-foreground shadow-outline outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+              disabled={busy}
+              maxLength={120}
+              onBlur={saveName}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") {
+                  setName(account.name);
+                  setEditing(false);
+                }
               }}
-            >
-              <input
-                // eslint-disable-next-line jsx-a11y/no-autofocus -- the field is focused on purpose because the user just opened this inline editor
-                autoFocus
-                aria-label={t(accountSettingsMessages.profileDisplayName)}
-                className="ui-field-control min-w-0 flex-1"
-                maxLength={120}
-                value={name}
-                disabled={busy}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <Button
-                size="compact"
-                disabled={busy}
-                onClick={() => setEditing(false)}
-              >
-                {t(commonMessages.cancel)}
-              </Button>
-              <Button
-                type="submit"
-                size="compact"
-                disabled={busy || !name.trim()}
-                tone="primary"
-              >
-                {t(commonMessages.save)}
-              </Button>
-            </form>
+              value={name}
+            />
           ) : (
-            <div className="flex min-w-0 items-center gap-1">
-              <h2 className="truncate text-xl font-medium text-foreground">
-                {account.name}
-              </h2>
-              <Button
+            <h2 className="max-w-full text-lg font-semibold leading-6 text-foreground">
+              <button
                 aria-label={t(accountSettingsMessages.editDisplayName)}
-                className="shrink-0 text-muted-foreground"
+                className="max-w-full break-words rounded-md px-2 py-0.5 text-left hover:bg-sidebar-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus disabled:opacity-50"
                 disabled={busy}
                 onClick={() => {
                   setName(account.name);
                   setEditing(true);
                   update.reset();
                 }}
-                size="compactIcon"
-                tone="ghost"
+                type="button"
               >
-                <Icon icon={PencilEdit02Icon} size={14} />
-              </Button>
-            </div>
+                {account.name}
+              </button>
+            </h2>
           )}
         </div>
       </div>

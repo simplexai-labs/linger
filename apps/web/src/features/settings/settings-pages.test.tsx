@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 describe("Settings surfaces", () => {
-  it("saves the display name from the profile card without changing the overview", async () => {
+  it("saves the display name in place without changing the overview", async () => {
     const runtime = await testRuntime();
     const before = await runtime.client.getPersonalProfile("tenant-northstar");
     const saved = {
@@ -62,16 +62,17 @@ describe("Settings surfaces", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Edit display name" }),
     );
-    fireEvent.change(
-      screen.getByRole("textbox", { name: "Profile display name" }),
-      { target: { value: "Jenny Card" } },
-    );
+    const nameField = screen.getByRole("textbox", {
+      name: "Profile display name",
+    });
+    fireEvent.change(nameField, { target: { value: "Jenny Card" } });
     runtime.server.on(
       "GET",
       "/v0/tenants/{tenantId}/account-profile",
       () => saved,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Enter saves in place, as an Agent's name does.
+    fireEvent.keyDown(nameField, { key: "Enter" });
     await waitFor(() =>
       expect(
         screen.queryByRole("textbox", { name: "Profile display name" }),
