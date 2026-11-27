@@ -122,10 +122,15 @@ export function EditAgentRuntimeDialog({
       : undefined) ?? model;
   const loading = computers.isPending;
   const placementLocked = field === "model" || field === "reasoning";
-  const noWritableGrant = moving && Boolean(computer) && !grant;
+  const reboundGrant =
+    !moving &&
+    grant &&
+    grant.grant_id !== registration.runtime.placement?.workspace_grant_id
+      ? grant
+      : undefined;
+  const noWritableGrant = Boolean(computer) && !grant;
   const unavailable =
-    (computers.isError && !computers.data) ||
-    (!loading && (!computer || (!moving && !grant)));
+    (computers.isError && !computers.data) || (!loading && !computer);
   const canSave = Boolean(modelIsAvailable && localReady && target);
 
   const modelsLink = (text: string) =>
@@ -325,6 +330,8 @@ export function EditAgentRuntimeDialog({
               onRetryComputers={() => void computers.refetch()}
               piGuidanceCoversLocalModels={piGuidanceCoversLocalModels}
               piModelsState={piModelsState}
+              placementLocked={placementLocked}
+              reboundGrant={reboundGrant}
               registration={registration}
               runtime={runtime}
               runtimeType={selection.runtimeType}
@@ -354,6 +361,8 @@ function EditAgentRuntimeFeedback({
   onRetryComputers,
   piGuidanceCoversLocalModels,
   piModelsState,
+  placementLocked,
+  reboundGrant,
   registration,
   runtime,
   runtimeType,
@@ -375,6 +384,8 @@ function EditAgentRuntimeFeedback({
   onRetryComputers: () => void;
   piGuidanceCoversLocalModels: boolean;
   piModelsState: PiLocalModelsState;
+  placementLocked: boolean;
+  reboundGrant?: LocalComputer["workspace_grants"][number];
   registration: TeamHubTenantAgent;
   runtime: LocalComputer["runtimes"][number] | undefined;
   runtimeType: TeamHubLocalRuntimeType | "";
@@ -416,6 +427,13 @@ function EditAgentRuntimeFeedback({
           {t(hint)}
         </p>
       ) : null}
+      {reboundGrant && !showsError ? (
+        <p className="text-sm text-app-subtle" role="status">
+          {t(agentRuntimeMessages.workspaceRebindHint, {
+            workspace: reboundGrant.label,
+          })}
+        </p>
+      ) : null}
       {missingDefault ? (
         <p className="text-sm text-app-danger" role="alert">
           {describeMissingDefault(registration, [computer], t)}
@@ -423,7 +441,14 @@ function EditAgentRuntimeFeedback({
       ) : null}
       {noWritableGrant ? (
         <p className="text-sm text-app-danger" role="alert">
-          {t(agentRuntimeMessages.noWritableWorkspace)}
+          {placementLocked ? (
+            <RichMessage
+              message={agentRuntimeMessages.noWritableWorkspaceLocked}
+              tags={{ link: computersLink }}
+            />
+          ) : (
+            t(agentRuntimeMessages.noWritableWorkspace)
+          )}
         </p>
       ) : null}
       {modelMissing ? (

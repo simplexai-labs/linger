@@ -172,6 +172,142 @@ describe("Direct Agent runtime settings", () => {
       await screen.findByRole("button", { name: "Qwen3 Coder 30B" }),
     ).toBeVisible();
   });
+
+  it("lets Another Me save Runtime=Pi when its saved workspace grant is stale", async () => {
+    const anotherMe: TeamHubTenantAgent = {
+      ...localAgent(),
+      actor: {
+        ...localAgent().actor,
+        display_name: "Linger",
+        id: "actor-another-me",
+      },
+      agent_type: "anotherme",
+      runtime: {
+        model: "gpt-5.6-terra",
+        placement: {
+          computer_id: "computer-1",
+          runtime_type: "codex",
+          type: "local",
+          workspace_grant_id: "grant-stale",
+        },
+        reasoning_effort: "medium",
+      },
+    };
+    const updateTenantAgent = vi.fn(({ body }: { body: unknown }) => ({
+      ...anotherMe,
+      runtime: (body as TeamHubTenantAgentUpdateInput).runtime!,
+      configuration_revision: 5,
+    }));
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on(
+      "PATCH",
+      "/v0/tenants/{tenantId}/agents/{agentId}",
+      updateTenantAgent,
+    );
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/local-computers", () => ({
+      items: [
+        {
+          computer_id: "computer-1",
+          display_name: "Windows PC",
+          status: "online",
+          runtimes: [
+            { type: "codex", status: "ready", models: runtimeModels },
+            {
+              type: "pi",
+              status: "ready",
+              models: [
+                {
+                  id: "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+                  label: "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+                  allowed_reasoning_effort: ["low", "medium"],
+                  default_reasoning_effort: "medium",
+                },
+              ],
+            },
+          ],
+          workspace_grants: [
+            {
+              grant_id: "grant-current",
+              label: "Linger",
+              mode: "workspace-write",
+            },
+          ],
+        },
+      ],
+    }));
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      () => labView(),
+    );
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: { queries: { retry: false } },
+            })
+          }
+        >
+          <DirectAgentModelSwitch
+            client={runtime.client}
+            currentActorId="actor-jenny"
+            registration={anotherMe}
+            tenantId="tenant-northstar"
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "gpt-5.6-terra Medium" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Runtime settings" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Agent model" }),
+      ).toHaveTextContent("gpt-5.6-terra · Unavailable"),
+    );
+    expect(
+      screen.queryByText("Runtime options are unavailable."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent runtime" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Pi/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Agent model" }),
+      ).toHaveTextContent("qwen3.8-flash-next-nvfp4-nvfp4-qad"),
+    );
+
+    const save = screen.getByRole("button", { name: "Save Runtime" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(updateTenantAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: { tenantId: "tenant-northstar", agentId: "actor-another-me" },
+          body: {
+            expected_configuration_revision: 4,
+            runtime: {
+              model: "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+              reasoning_effort: "medium",
+              placement: {
+                type: "local",
+                computer_id: "computer-1",
+                workspace_grant_id: "grant-current",
+                runtime_type: "pi",
+              },
+            },
+          },
+        }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
 });
 
 function renderSwitch({

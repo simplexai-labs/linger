@@ -134,25 +134,279 @@ describe("EditAgentRuntimeDialog", () => {
     expect(model).toHaveTextContent("Codex fast");
   });
 
-  it.each(["computer", "workspace"])(
-    "never falls back to a different %s if the configured binding is missing",
-    async (missing) => {
-      const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
-      const registration = localCodexAgent();
-      if (registration.runtime.placement?.type === "local") {
-        if (missing === "computer")
-          registration.runtime.placement.computer_id = "computer-removed";
-        else
-          registration.runtime.placement.workspace_grant_id = "grant-removed";
-      }
-      renderDialog({ onSave, registration });
-      await screen.findByText("Runtime options are unavailable.");
+  it("never falls back to a different computer if the configured binding is missing", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const registration = localCodexAgent();
+    if (registration.runtime.placement?.type === "local") {
+      registration.runtime.placement.computer_id = "computer-removed";
+    }
+    renderDialog({ onSave, registration });
+    await screen.findByText("Runtime options are unavailable.");
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("rebinds to a writable workspace on the same computer when the saved workspace grant is missing", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const registration = localCodexAgent();
+    registration.agent_type = "anotherme";
+    registration.runtime = {
+      model: "gpt-5.6-terra",
+      reasoning_effort: "medium",
+      placement: {
+        computer_id: "computer-old",
+        runtime_type: "codex",
+        type: "local",
+        workspace_grant_id: "grant-removed",
+      },
+    };
+    const computer = localComputer("computer-old", "My PC", "online", {
+      workspace_grants: [
+        { grant_id: "grant-read", label: "Read only", mode: "read-only" },
+        {
+          grant_id: "grant-current",
+          label: "Linger",
+          mode: "workspace-write",
+        },
+      ],
+    });
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        models: [
+          {
+            id: "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+            label: "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+            allowed_reasoning_effort: ["low", "medium"],
+            default_reasoning_effort: "medium",
+          },
+        ],
+        status: "ready",
+        type: "pi",
+      },
+    ];
+
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave,
+      registration,
+    });
+    await screen.findByText(
+      "The current model is unavailable. Choose another model.",
+    );
+    expect(
+      screen.queryByText("Runtime options are unavailable."),
+    ).not.toBeInTheDocument();
+    expect(setting("Model")).toHaveTextContent("gpt-5.6-terra · Unavailable");
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+
+    await choose("Runtime", "Pi", "Ready");
+    await waitFor(() =>
+      expect(setting("Model")).toHaveTextContent(
+        "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+      ),
+    );
+    expect(
+      screen.queryByText("Runtime options are unavailable."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The saved workspace is unavailable. Saving will use Linger.",
+      ),
+    ).toBeVisible();
+    const save = screen.getByRole("button", { name: "Save Runtime" });
+    expect(save).toBeEnabled();
+
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledWith({
+      runtime: {
+        model: "qwen3.8-flash-next-nvfp4-nvfp4-qad",
+        reasoning_effort: "medium",
+        placement: {
+          computer_id: "computer-old",
+          runtime_type: "pi",
+          type: "local",
+          workspace_grant_id: "grant-current",
+        },
+      },
+    });
+  });
+
+  it("keeps the configured writable workspace grant when multiple writable grants exist", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const registration = localCodexAgent();
+    if (registration.runtime.placement?.type === "local") {
+      registration.runtime.placement.workspace_grant_id = "grant-second";
+    }
+    const computer = localComputer("computer-old", "Old Mac", "online", {
+      workspace_grants: [
+        {
+          grant_id: "grant-first",
+          label: "First",
+          mode: "workspace-write",
+        },
+        {
+          grant_id: "grant-second",
+          label: "Second",
+          mode: "workspace-write",
+        },
+      ],
+    });
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave,
+      registration,
+    });
+    await waitFor(() =>
+      expect(setting("Model")).toHaveTextContent("Codex default"),
+    );
+    expect(
+      screen.queryByText(/The saved workspace is unavailable\./),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
+    expect(onSave).toHaveBeenCalledWith({
+      runtime: {
+        model: "codex-default",
+        placement: {
+          computer_id: "computer-old",
+          runtime_type: "codex",
+          type: "local",
+          workspace_grant_id: "grant-second",
+        },
+      },
+    });
+  });
+
+  it("rebinds when the saved workspace grant is downgraded to read-only and blocks saving when no writable grant exists", async () => {
+    const onSaveWritable = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const downgradedRegistration = localCodexAgent();
+    if (downgradedRegistration.runtime.placement?.type === "local") {
+      downgradedRegistration.runtime.placement.workspace_grant_id =
+        "grant-read";
+    }
+    const mixedComputer = localComputer("computer-old", "Old Mac", "online", {
+      workspace_grants: [
+        { grant_id: "grant-read", label: "Read only", mode: "read-only" },
+        {
+          grant_id: "grant-writable",
+          label: "Writable",
+          mode: "workspace-write",
+        },
+      ],
+    });
+    const { unmount } = renderDialog({
+      computersOverride: { items: [mixedComputer] },
+      onSave: onSaveWritable,
+      registration: downgradedRegistration,
+    });
+    await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Save Runtime" }),
-      ).toBeDisabled();
-      expect(onSave).not.toHaveBeenCalled();
-    },
-  );
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.getByText(
+        "The saved workspace is unavailable. Saving will use Writable.",
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
+    expect(onSaveWritable).toHaveBeenCalledWith({
+      runtime: {
+        model: "codex-default",
+        placement: {
+          computer_id: "computer-old",
+          runtime_type: "codex",
+          type: "local",
+          workspace_grant_id: "grant-writable",
+        },
+      },
+    });
+    unmount();
+
+    const onSaveReadOnly = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const readOnlyComputer = localComputer(
+      "computer-old",
+      "Old Mac",
+      "online",
+      {
+        workspace_grants: [
+          { grant_id: "grant-read", label: "Read only", mode: "read-only" },
+        ],
+      },
+    );
+    const readOnlyView = renderDialog({
+      computersOverride: { items: [readOnlyComputer] },
+      onSave: onSaveReadOnly,
+      registration: downgradedRegistration,
+    });
+    expect(
+      await screen.findByText(
+        "This computer has no writable workspace. Choose another computer.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Runtime options are unavailable."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+    expect(onSaveReadOnly).not.toHaveBeenCalled();
+    readOnlyView.unmount();
+
+    const onCloseLocked = vi.fn();
+    renderDialog({
+      computersOverride: { items: [readOnlyComputer] },
+      field: "model",
+      onClose: onCloseLocked,
+      onSave: onSaveReadOnly,
+      registration: downgradedRegistration,
+    });
+    const computersLink = await screen.findByRole("link", {
+      name: "Settings › Computers",
+    });
+    expect(computersLink).toHaveAttribute(
+      "href",
+      "/t/tenant-northstar/settings/computers",
+    );
+    expect(computersLink.closest("p")).toHaveTextContent(
+      "This computer has no writable workspace. Add a writable folder in Settings › Computers.",
+    );
+    expect(
+      screen.queryByText(/Choose another computer\./),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+    fireEvent.click(computersLink);
+    expect(onCloseLocked).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the chosen runtime and model when re-selecting the already selected computer", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const computer = localComputer("computer-old", "Old Mac", "online");
+    computer.runtimes = [
+      ...computer.runtimes,
+      {
+        models: [{ id: "pi-local", label: "Pi local" }],
+        status: "ready",
+        type: "pi",
+      },
+    ];
+    renderDialog({ computersOverride: { items: [computer] }, onSave });
+    await choose("Runtime", "Pi", "Ready");
+    await waitFor(() => expect(setting("Model")).toHaveTextContent("Pi local"));
+    await choose("Computer", "Old Mac", "Online");
+    expect(setting("Runtime")).toHaveTextContent("Pi");
+    expect(setting("Model")).toHaveTextContent("Pi local");
+    fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
+    expect(onSave).toHaveBeenCalledWith({
+      runtime: {
+        model: "pi-local",
+        placement: {
+          computer_id: "computer-old",
+          runtime_type: "pi",
+          type: "local",
+          workspace_grant_id: "grant-workspace",
+        },
+      },
+    });
+  });
 
   it("keeps the form usable when a background computer refetch fails with cached data", async () => {
     const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
@@ -323,6 +577,61 @@ describe("EditAgentRuntimeDialog", () => {
       "Old Mac needs a Linger update.",
     );
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+  });
+
+  it("ignores stale model entries on a non-ready runtime until it turns ready", async () => {
+    const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
+    const computer = localComputer("computer-old", "Old Mac", "online");
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    renderDialog({
+      computersOverride: { items: [computer] },
+      onSave,
+      queryClient,
+    });
+    await choose("Runtime", "Claude Code", "Sign-in required");
+    expect(setting("Model")).toHaveTextContent("No models available");
+    expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
+
+    await act(async () => {
+      queryClient.setQueryData(localComputersQueryKey("tenant-northstar"), {
+        items: [
+          {
+            ...computer,
+            runtimes: computer.runtimes.map((item) =>
+              item.type === "claude"
+                ? {
+                    models: [
+                      {
+                        id: "claude-sonnet-4-6",
+                        label: "Claude Sonnet 4.6",
+                      },
+                    ],
+                    status: "ready" as const,
+                    type: item.type,
+                  }
+                : item,
+            ),
+          },
+        ],
+      });
+    });
+    await waitFor(() =>
+      expect(setting("Model")).toHaveTextContent("Claude Sonnet 4.6"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
+    expect(onSave).toHaveBeenCalledWith({
+      runtime: {
+        model: "claude-sonnet-4-6",
+        placement: {
+          computer_id: "computer-old",
+          runtime_type: "claude",
+          type: "local",
+          workspace_grant_id: "grant-workspace",
+        },
+      },
+    });
   });
 
   it("picks a model once the chosen runtime turns ready while open", async () => {
@@ -1131,7 +1440,7 @@ function renderDialog({
       : vi.fn().mockResolvedValue(computers),
   };
 
-  render(
+  return render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
         <EditAgentRuntimeDialog
