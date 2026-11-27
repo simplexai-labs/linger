@@ -163,6 +163,35 @@ describe("Web app route contract", () => {
     );
   });
 
+  it("redirects legacy settings/security URLs to settings/account with query params", async () => {
+    const routes = createAppRoutes(
+      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+      createTestTeamHubRuntime(),
+    );
+    const matched = matchRoutes(routes, "/t/tenant-a/settings/security");
+    const route = matched?.at(-1)?.route;
+    expect(route?.path).toBe("security");
+    const loader = route?.loader as LoaderFunction;
+    let thrown: unknown;
+    try {
+      await loader({
+        context: new RouterContextProvider(),
+        params: { tenantId: "tenant-a" },
+        pattern: "/t/:tenantId/settings/security",
+        request: new Request(
+          "http://localhost/t/tenant-a/settings/security?from=link",
+        ),
+        url: new URL("http://localhost/t/tenant-a/settings/security?from=link"),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).headers.get("Location")).toBe(
+      "/t/tenant-a/settings/account?from=link",
+    );
+  });
+
   it("starts /v0/session and /v0/tenants concurrently and backfills identity + tenant caches", async () => {
     const runtime = createTestTeamHubRuntime();
     let sessionInFlight = false;
