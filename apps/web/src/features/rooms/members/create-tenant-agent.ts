@@ -9,10 +9,7 @@ import type {
 } from "@/features/teamhub/teamhub-types";
 
 export interface TenantAgentCreation {
-  templateId?: string;
   agentType: TeamHubCreatableAgentType;
-  avatarKey?: string;
-  description?: string;
   instructions: string;
   model: string;
   reasoningEffort?: TeamHubTenantAgentCreateInput["runtime"]["reasoning_effort"];
@@ -33,15 +30,11 @@ export async function createTenantAgent(
   client: Pick<TeamHubClient, "api">,
   input: TenantAgentCreation,
 ): Promise<TeamHubActor> {
-  const description = input.description?.trim();
   const created = await teamHubData(
     client.api.POST("/v0/tenants/{tenantId}/agents", {
       params: { path: { tenantId: input.tenantId } },
       body: {
         agent_type: input.agentType,
-        ...(input.templateId ? { template_id: input.templateId } : {}),
-        ...(input.avatarKey ? { avatar_key: input.avatarKey } : {}),
-        ...(description ? { description } : {}),
         instructions: input.instructions.trim(),
         name: input.name.trim(),
         visibility_scope: input.visibilityScope,

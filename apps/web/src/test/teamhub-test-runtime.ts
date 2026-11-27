@@ -791,14 +791,6 @@ function installSeedRoutes(server: TeamHubTestServer, seed: TeamHubTestSeed) {
         };
       },
     )
-    .on("GET", "/v0/tenants/{tenantId}/agent-templates", () => ({
-      items: seed.agentTemplates,
-    }))
-    .on(
-      "GET",
-      "/v0/tenants/{tenantId}/agent-templates/{templateId}/skill-imports",
-      () => ({ items: [] }),
-    )
     .on("GET", "/v0/tenants/{tenantId}/another-me", () => {
       const agent = seed.tenantAgents.find(
         (candidate) => candidate.agent_type === "anotherme",

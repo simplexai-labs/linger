@@ -252,9 +252,6 @@ type AgentRegistration struct {
 	RuntimeConfigurationRevision int64              `json:"runtime_configuration_revision"`
 	AvatarImage                  pgtype.Text        `json:"avatar_image"`
 	AvatarUpdatedAt              pgtype.Timestamptz `json:"avatar_updated_at"`
-	TemplateID                   pgtype.Text        `json:"template_id"`
-	TemplateRoutines             []byte             `json:"template_routines"`
-	TemplateInstalledAt          pgtype.Timestamptz `json:"template_installed_at"`
 	AssignmentRevision           int64              `json:"assignment_revision"`
 	ReceivesAllMessages          bool               `json:"receives_all_messages"`
 }
@@ -309,22 +306,6 @@ type AgentSkillBinding struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-}
-
-type AgentTemplate struct {
-	TemplateID         string             `json:"template_id"`
-	Origin             string             `json:"origin"`
-	TenantID           pgtype.Text        `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Description        string             `json:"description"`
-	Instructions       string             `json:"instructions"`
-	AvatarKey          pgtype.Text        `json:"avatar_key"`
-	SkillBindings      []byte             `json:"skill_bindings"`
-	PublishedByActorID pgtype.Text        `json:"published_by_actor_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	ConnectorBindings  []byte             `json:"connector_bindings"`
-	Routines           []byte             `json:"routines"`
 }
 
 type AgentUsageTotal struct {

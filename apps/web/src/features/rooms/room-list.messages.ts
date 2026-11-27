@@ -35,7 +35,6 @@ export const roomListMessages = defineMessages("roomList", {
   createChat: "Create chat",
   createAgent: "Create Agent",
   createRoom: "Create Room",
-  agentTemplates: "Agent templates",
   pocketNotes: "Pocket Notes",
   meetings: "Meetings",
   newMeeting: "New Meeting",

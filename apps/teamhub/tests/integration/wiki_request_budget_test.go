@@ -31,7 +31,7 @@ func TestWikiMemoryRequestBudget(t *testing.T) {
 	f := newUnifiedWikiDispatchCase(t, "request-budget", generator, document.WikiRefreshDispatchOptions{GenerationTimeout: time.Hour, MaxAttempts: 3})
 	databaseURL := f.pool.Config().ConnString()
 	// Publication and download must use the same private object store.
-	if err := os.CopyFS(f.objectRoot, os.DirFS(prepareTemplateAppCatalog(t, f.pool))); err != nil {
+	if err := os.CopyFS(f.objectRoot, os.DirFS(copyTemplateSkillObjects(t, f.pool))); err != nil {
 		t.Fatal(err)
 	}
 	application, err := newTestApp(t.Context(), config.ForTest(func(c *config.Config) {

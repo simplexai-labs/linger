@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	artifactstore "github.com/simplexai-labs/linger/apps/teamhub/internal/artifact"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/platform/agenttemplates"
 )
 
 // copyTemplateSkillObjects pairs a database clone with its own writable object
@@ -71,18 +70,6 @@ func copyTemplateSkillObjects(t *testing.T, pool *pgxpool.Pool) string {
 	}
 	if count == 0 {
 		t.Fatal("Skill-seeded database has no catalog objects")
-	}
-	return root
-}
-
-// prepareTemplateAppCatalog preserves normal startup catalog state while keeping
-// each application's writable objects private. Only the repeated Skill install
-// is skipped by callers; application audits and workers keep their own defaults.
-func prepareTemplateAppCatalog(t *testing.T, pool *pgxpool.Pool) string {
-	t.Helper()
-	root := copyTemplateSkillObjects(t, pool)
-	if err := agenttemplates.Ensure(t.Context(), pool); err != nil {
-		t.Fatal(err)
 	}
 	return root
 }

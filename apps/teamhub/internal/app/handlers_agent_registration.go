@@ -132,8 +132,6 @@ func (a *App) createTenantAgent(c *gin.Context) {
 	// A Human creation is not deduplicated: a repeated one creates another Agent.
 	result, err := a.agents.ExecuteTenantAgentRegistration(c.Request.Context(), currentPrincipal(c).Session.AccountID, c.Param("tenantId"), request, "")
 	switch {
-	case errors.Is(err, agentregistry.ErrAgentTemplateUnavailable):
-		a.writeError(c, http.StatusNotFound, "AGENT_TEMPLATE_NOT_FOUND", "Agent template was not found")
 	case errors.Is(err, pgx.ErrNoRows):
 		a.writeError(c, http.StatusNotFound, "TENANT_NOT_FOUND", "tenant was not found")
 	case errors.Is(err, agentregistry.ErrAgentLimitReached):

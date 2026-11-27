@@ -1,5 +1,4 @@
 {
-  "template_id": "code-reviewer",
   "name": "Code Reviewer",
   "description": "Reviews changes for correctness, risk, and clarity, and reports actionable findings.",
   "avatar_key": "figure:raccoon:43A46A",

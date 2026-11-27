@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,13 +33,8 @@ const (
 	anotherMeGreeting     = "Hi %s, I'm Linger — your personal AI."
 	anotherMeChatName     = "Chat"
 
-	starterResearchAnalystTemplate = "research-analyst"
-	starterRoomName                = "Getting Started"
+	starterRoomName = "Getting Started"
 )
-
-// starterWorkspaceTemplates are created in this order; the first one joins the
-// starter Room.
-var starterWorkspaceTemplates = []string{starterResearchAnalystTemplate, "code-reviewer"}
 
 // anotherMeCreateFailure marks the Computer whose latest Another Me creation
 // attempt failed while placement was otherwise eligible, so GET /another-me
@@ -285,125 +279,6 @@ func (s *Service) logAnotherMePlacementSkipped(tenantID, humanActorID string, co
 		args = append(args, "runtimes", runtimes)
 	}
 	s.logger.Warn("another_me.placement_skipped", args...)
-}
-
-// createStarterWorkspaceTx gives the Human the starter template Agents on the
-// Another Me's placement and one group Room with their Another Me and the
-// Research Analyst. A starter Agent that its template, Skills, placement or
-// the Agent limit rule out is logged and skipped, so the others and the
-// Another Me are still created; any other error fails the whole creation,
-// which the next heartbeat retries.
-func (s *Service) createStarterWorkspaceTx(ctx context.Context, tx pgx.Tx, human store.Actor, anotherMe store.AgentRegistration) error {
-	var researchAnalystID string
-	for _, templateID := range starterWorkspaceTemplates {
-		actorID, err := s.createStarterAgentTx(ctx, tx, human, anotherMe, templateID)
-		if err != nil {
-			return err
-		}
-		if templateID == starterResearchAnalystTemplate {
-			researchAnalystID = actorID
-		}
-	}
-	if researchAnalystID == "" {
-		return nil
-	}
-	_, err := roomcreation.Create(ctx, s.queries.WithTx(tx), roomcreation.Spec{
-		TenantID: human.TenantID, Name: starterRoomName, Creator: human, Owner: human,
-		MemberActorIDs: []string{anotherMe.ActorID, researchAnalystID},
-	})
-	return err
-}
-
-// createStarterAgentTx creates one starter Agent in its own savepoint and
-// returns its Actor ID, or "" when it was skipped.
-func (s *Service) createStarterAgentTx(ctx context.Context, tx pgx.Tx, human store.Actor, anotherMe store.AgentRegistration, templateID string) (string, error) {
-	savepoint, err := tx.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	actorID, err := s.insertStarterAgent(ctx, savepoint, s.queries.WithTx(savepoint), human, anotherMe, templateID)
-	switch {
-	case errors.Is(err, ErrAgentTemplateUnavailable), errors.Is(err, ErrAgentPlacementTargetUnavailable),
-		errors.Is(err, ErrAgentRegistrationManifestNotFound), errors.Is(err, ErrSkillManifestNotCurrent),
-		errors.Is(err, ErrInvalidAgentSkillRegistration), errors.Is(err, ErrAgentLimitReached):
-		s.logger.Error("another_me.starter_agent_skipped", "tenant_id", human.TenantID,
-			"human_actor_id", human.ID, "template_id", templateID, "error", err)
-		return "", savepoint.Rollback(ctx)
-	case err != nil:
-		_ = savepoint.Rollback(ctx)
-		return "", err
-	}
-	return actorID, savepoint.Commit(ctx)
-}
-
-// insertStarterAgent creates one template Agent on the Another Me's placement
-// and returns its Actor ID, or "" when the template is not installed.
-func (s *Service) insertStarterAgent(ctx context.Context, tx pgx.Tx, queries *store.Queries, human store.Actor, anotherMe store.AgentRegistration, templateID string) (string, error) {
-	template, err := queries.GetAgentTemplate(ctx, templateID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		s.logger.Warn("another_me.starter_template_missing", "tenant_id", human.TenantID, "template_id", templateID)
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	bindings, err := currentStarterSkillBindings(ctx, queries, human.TenantID, human.ID, template.SkillBindings)
-	if err != nil {
-		return "", err
-	}
-	agentType := httpapi.CreatableAgentTypeGeneral
-	visibility := httpapi.AgentVisibilityScopeSponsor
-	description := strings.TrimSpace(template.Description)
-	runtime := agentRuntimeConfig(anotherMe)
-	runtime.Model = strings.TrimSpace(runtime.Model)
-	request := httpapi.TenantAgentCreateRequest{
-		AgentType: &agentType, VisibilityScope: &visibility, TemplateId: &templateID,
-		Name: strings.TrimSpace(template.Name), Description: &description,
-		Instructions: strings.TrimSpace(template.Instructions),
-		Runtime:      runtime, SkillBindings: &bindings,
-	}
-	if template.AvatarKey.Valid {
-		request.AvatarKey = &template.AvatarKey.String
-	}
-	if err := NormalizeAgentRegistrationBindings(&request); err != nil {
-		return "", err
-	}
-	actorID, _, err := insertTenantAgent(ctx, tx, queries, human.TenantID, human.ID, request)
-	return actorID, err
-}
-
-// currentStarterSkillBindings binds each template Skill at its current latest
-// active version, since platform Skills accept only that version. A Skill the
-// Human cannot bind is left out.
-func currentStarterSkillBindings(ctx context.Context, queries *store.Queries, tenantID, humanActorID string, encoded []byte) ([]httpapi.AgentSkillRegistration, error) {
-	var bindings []httpapi.AgentSkillRegistration
-	if err := json.Unmarshal(encoded, &bindings); err != nil {
-		return nil, err
-	}
-	current := make([]httpapi.AgentSkillRegistration, 0, len(bindings))
-	for _, binding := range bindings {
-		rows, err := queries.ListBindableSkillManifests(ctx, store.ListBindableSkillManifestsParams{
-			CallerActorID: humanActorID, TenantID: tenantID,
-			CursorSkillID: binding.SkillId, PageLimit: 100,
-		})
-		if err != nil {
-			return nil, err
-		}
-		// A platform Skill lists only its current version.
-		var latest *store.ListBindableSkillManifestsRow
-		for index := range rows {
-			if rows[index].SkillID == binding.SkillId && rows[index].Availability == "active" {
-				latest = &rows[index]
-			}
-		}
-		if latest == nil {
-			continue
-		}
-		current = append(current, httpapi.AgentSkillRegistration{
-			Name: latest.Name, SkillId: latest.SkillID, ManifestVersion: latest.ManifestVersion,
-		})
-	}
-	return current, nil
 }
 
 // AnotherMe returns the Human's Another Me and its Chat. Both are absent

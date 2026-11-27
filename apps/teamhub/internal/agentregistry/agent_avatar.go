@@ -19,6 +19,15 @@ const agentAvatarImageMaxLength = 131072
 
 var agentAvatarImagePrefix = regexp.MustCompile(`^data:image/(?:jpeg|png|webp);base64,`)
 
+var agentAvatarKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$`)
+
+// ValidAgentAvatarKey guards the shape of an avatar key. Avatar keys are a
+// product enumeration owned by the Product Client; TeamHub stores the
+// selection.
+func ValidAgentAvatarKey(value string) bool {
+	return agentAvatarKeyPattern.MatchString(value)
+}
+
 // ValidAgentAvatarImage accepts the empty string (remove) or a bounded JPEG,
 // PNG, or WebP base64 data URL.
 func ValidAgentAvatarImage(value string) bool {

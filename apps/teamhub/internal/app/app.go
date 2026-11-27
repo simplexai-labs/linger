@@ -55,7 +55,6 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/permissionreview"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/personalinsight"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/personalprofile"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/platform/agenttemplates"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/proactive"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/realtime"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/reminder"
@@ -267,7 +266,7 @@ const (
 	PersonalInsightJobs
 	// PresentationLoop paces presentation sequence delivery.
 	PresentationLoop
-	// SkillInstall reconciles the built-in Skills and Agent templates.
+	// SkillInstall reconciles the built-in Skills.
 	SkillInstall
 	// SkillPackageProbe checks Skill Package storage before /readyz passes;
 	// skipping it reports ready at once.
@@ -723,9 +722,6 @@ func (a *App) StartWorkers(ctx context.Context, skip ...Worker) error {
 	if runs(SkillInstall) {
 		if err := skill.Ensure(ctx, a.pool, a.artifacts); err != nil {
 			return fmt.Errorf("install built-in platform Skills: %w", err)
-		}
-		if err := agenttemplates.Ensure(ctx, a.pool); err != nil {
-			return fmt.Errorf("install built-in Agent templates: %w", err)
 		}
 	}
 	if runs(JobQueue) {

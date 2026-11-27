@@ -77,7 +77,7 @@ function isAgentFigure(value: string): value is AgentFigure {
   return figureBackgrounds.has(value);
 }
 
-export function isAgentAvatarKey(value: string): value is AgentAvatarKey {
+function isAgentAvatarKey(value: string): value is AgentAvatarKey {
   const figure = /^figure:([a-z_]+):[0-9a-fA-F]{6}$/.exec(value);
   if (figure) return isAgentFigure(figure[1]!);
   return /^image:[0-9a-fA-F]{6}$/.test(value);
@@ -125,9 +125,7 @@ export function randomAgentAvatarKey(): AgentAvatarKey {
 
 const AVATAR_STORAGE_KEY = "linger.agent-avatar-keys";
 
-export function readStoredAgentAvatarKey(
-  actorId: string,
-): AgentAvatarKey | undefined {
+function readStoredAgentAvatarKey(actorId: string): AgentAvatarKey | undefined {
   if (typeof window === "undefined") return undefined;
   try {
     const value = readAvatarMap()[actorId];

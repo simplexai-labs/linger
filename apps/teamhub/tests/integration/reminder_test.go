@@ -23,7 +23,6 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/app"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/reminder"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 )
 
 func TestRoomRemindersCreatePauseAndFire(t *testing.T) {
@@ -245,27 +244,6 @@ func TestRoutineReplyLabelSkipsAgentSelfScheduledFollowUp(t *testing.T) {
 			var created reminder.Reminder
 			decode(t, body, &created)
 			return created.ID
-		}},
-		{name: "template", labeled: true, create: func(t *testing.T, roomID, suffix string) string {
-			role := "agent"
-			tx, err := env.pool.Begin(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback(t.Context())
-			if err := reminder.InstallTemplateInTx(t.Context(), tx, store.New(tx), reminder.Authority{TenantID: acmeTenant, RoomID: roomID, ActorID: "actor_acme_alice"}, agent, []reminder.TemplateRoutine{{
-				Key: "follow-up-" + suffix, Name: "Follow up", Instruction: "Follow up", Cadence: recurring, Enabled: true, CreatedByRole: "agent", MentionRole: &role,
-			}}); err != nil {
-				t.Fatal(err)
-			}
-			if err := tx.Commit(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			var id string
-			if err := env.pool.QueryRow(t.Context(), `SELECT id FROM room_reminders WHERE room_id=$1`, roomID).Scan(&id); err != nil {
-				t.Fatal(err)
-			}
-			return id
 		}},
 	}
 	for _, tc := range cases {

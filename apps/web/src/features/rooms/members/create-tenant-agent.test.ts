@@ -29,7 +29,6 @@ describe("createTenantAgent", () => {
     await expect(
       createTenantAgent(client, {
         agentType: "general",
-        description: "Reviews every release boundary.",
         instructions: " Review the Room conversation. ",
         model: " gpt-5.6-luna ",
         name: " Mirror Reviewer ",
@@ -50,7 +49,6 @@ describe("createTenantAgent", () => {
         params: { tenantId: "tenant-a" },
         body: {
           agent_type: "general",
-          description: "Reviews every release boundary.",
           instructions: "Review the Room conversation.",
           name: "Mirror Reviewer",
           runtime: {
