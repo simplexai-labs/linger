@@ -22,7 +22,8 @@ export function partitionTestFiles(
 ): TestFilePartition {
   const isolated: string[] = [];
   const shared: string[] = [];
-  for (const file of globSync(pattern, { cwd: root }).sort()) {
+  for (const rawFile of globSync(pattern, { cwd: root }).sort()) {
+    const file = rawFile.replaceAll("\\", "/");
     const source = readFileSync(join(root, file), "utf8");
     (usesModuleMocks(source) ? isolated : shared).push(file);
   }

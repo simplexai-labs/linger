@@ -10,8 +10,6 @@
 .PHONY: check-container-web check-container-node-services check-container-other check-containers
 .PHONY: check-e2e-room-document check-e2e check-all
 
-OAPI_CODEGEN_VERSION := v2.7.1
-OAPI_CODEGEN_COMMAND ?= go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
 BASE ?=
 SCRIPT_TEST_FILTER ?= %
 SCRIPT_PROCESS_TEST_FILTER ?= $(SCRIPT_TEST_FILTER)
@@ -294,7 +292,7 @@ source-dependencies:
 		$${SOURCE_ARCHIVE_URL_BASE:+--url-base "$$SOURCE_ARCHIVE_URL_BASE"}
 
 contracts-generate:
-	OAPI_CODEGEN_COMMAND='$(OAPI_CODEGEN_COMMAND)' pnpm exec tsx contracts/codegen/contracts.ts generate
+	pnpm exec tsx contracts/codegen/contracts.ts generate
 
 contracts-verify:
-	OAPI_CODEGEN_COMMAND='$(OAPI_CODEGEN_COMMAND)' pnpm exec tsx contracts/codegen/contracts.ts verify
+	pnpm exec tsx contracts/codegen/contracts.ts verify

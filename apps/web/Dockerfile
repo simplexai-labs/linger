@@ -37,6 +37,7 @@ COPY packages/document-files ./packages/document-files
 COPY packages/knowledge-format ./packages/knowledge-format
 COPY packages/service-kit ./packages/service-kit
 COPY scripts/ci/build-web-runtime.sh ./scripts/ci/build-web-runtime.sh
+COPY scripts/run-with-env.mjs ./scripts/run-with-env.mjs
 ENV NODE_ENV=production
 # Production browser URLs follow the page origin. The Agent Service serves the
 # Computer release on /install/.

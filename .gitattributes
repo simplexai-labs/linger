@@ -11,3 +11,10 @@ scripts/install-linger-computer.sh text eol=lf
 scripts/uninstall-linger-computer.sh text eol=lf
 scripts/install-linger-computer.ps1 text eol=lf
 scripts/uninstall-linger-computer.ps1 text eol=lf
+
+# Go sources, golden fixtures, and manifest-hashed Skill assets stay LF so
+# gofmt and byte-exact verification match on Windows checkouts with autocrlf.
+*.go text eol=lf
+*.golden text eol=lf
+apps/teamhub/internal/personalprofile/skill/** text eol=lf
+skills/** text eol=lf
