@@ -292,6 +292,11 @@ with its size and SHA-256:
       "file": "Linger-0.16.36-windows-x64-setup.exe",
       "sha256": "…",
       "size": 123
+    },
+    "win32-x64-archive": {
+      "file": "Linger-0.16.36-windows-x64-portable.zip",
+      "sha256": "…",
+      "size": 123
     }
   }
 }
@@ -301,23 +306,31 @@ The app downloads the package from `releases/download/desktop-v<version>/` and
 checks its size and SHA-256 while downloading. What happens next depends on
 how Linger was installed:
 
-| Install                 | Update                                                                                                                                                                                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS `Linger.app`      | The archive is unpacked beside the app. "Restart to Update" waits for running tasks, swaps the bundle and relaunches.                                                                                                                                                  |
-| Windows setup program   | The setup program is downloaded. "Restart to Update" waits for running tasks, checks the file again, starts it with `/update /relaunch` and quits; the installer stops the services, replaces the app in the folder it was installed to and starts it (details below). |
-| Windows portable folder | No download: the tray offers "Download Linger <version>…", which opens the release page.                                                                                                                                                                               |
-| Linux                   | The same as the portable folder.                                                                                                                                                                                                                                       |
+| Install                 | Update                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS `Linger.app`      | The archive is unpacked beside the app. "Restart to Update" waits for running tasks, swaps the bundle and relaunches.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Windows setup program   | When `win32-x64-archive` is present in the manifest, the portable zip is unpacked in the background beside the install folder and its runtime assets are pre-staged before announcing ready; "Restart to Update" waits for running tasks, launches a copied `apply-windows-update` helper outside the install folder, and quits (keeping warm local services running) so the helper swaps the folders atomically and relaunches `Linger.exe`. Older clients and manifests without `win32-x64-archive` fall back to `win32-x64` (`setup.exe` with `/update /relaunch`, details below). |
+| Windows portable folder | No download: the tray offers "Download Linger <version>…", which opens the release page.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Linux                   | The same as the portable folder.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
-On Windows, `/update` runs the setup program in passive mode: it shows only its
-progress page, titled "Updating Linger to <version>...", and needs no click.
-It closes by itself when the files are in place, and `/relaunch` starts the new
-Linger. If a file stays locked, the same "Linger is running ... Retry" question
-as in a normal install appears, and Retry stops Linger's services again. After
-Cancel, or a file the setup could not write, the setup says Linger was not
-updated: if it had not replaced any file yet it starts the earlier Linger,
-which offers the update again; otherwise it names the setup program to run
-again. The install stays per user without administrator rights. `/S` still
-installs with no window at all, for scripted installs.
+On Windows, `manifest.json` keeps `win32-x64` pointing at `setup.exe` for
+backward compatibility with earlier installed releases while adding
+`win32-x64-archive` pointing at `Linger-<version>-windows-x64-portable.zip`.
+The background archive swap helper preserves `Uninstall Linger.exe` and
+`resources\stops-services`, retries directory renames across transient locks,
+rolls back automatically and relaunches the previous version if promotion
+fails, updates `DisplayVersion` in the per-user uninstall key when
+`InstallLocation` matches, and writes diagnostics to `<userData>/logs`.
+When falling back to `setup.exe`, `/update` runs the setup program in passive
+mode: it shows only its progress page, titled "Updating Linger to <version>...",
+and needs no click. It closes by itself when the files are in place, and
+`/relaunch` starts the new Linger. If a file stays locked, the same "Linger is
+running ... Retry" question as in a normal install appears, and Retry stops
+Linger's services again. After Cancel, or a file the setup could not write, the
+setup says Linger was not updated: if it had not replaced any file yet it starts
+the earlier Linger, which offers the update again; otherwise it names the setup
+program to run again. The install stays per user without administrator rights.
+`/S` still installs with no window at all, for scripted installs.
 
 A system notification announces each new version once, and the tray shows the
 state; after a failure "Try Updating Again" checks at once. The account menu

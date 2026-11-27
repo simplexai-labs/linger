@@ -1,6 +1,15 @@
+import { execFileSync } from "node:child_process";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import path from "node:path";
 
@@ -702,6 +711,662 @@ describe("UpdaterModule with the Windows setup program", () => {
   });
 });
 
+describe("UpdaterModule with Windows archive self-update", () => {
+  const SETUP = "Linger-0.17.0-windows-x64-setup.exe";
+  const ARCHIVE = "Linger-0.17.0-windows-x64-portable.zip";
+  const SETUP_BODY = Buffer.from("windows setup exe");
+  const ARCHIVE_BODY = Buffer.from("windows portable zip");
+  const HELPER_BODY = Buffer.from("MZ-fake-daemon-helper");
+
+  const windowsRelease = (
+    version: string,
+    {
+      includeArchive = true,
+      archiveBody = ARCHIVE_BODY,
+      setupBody = SETUP_BODY,
+      feed = RELEASES,
+    } = {},
+  ) => {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const packages: Record<
+      string,
+      { file: string; sha256: string; size: number }
+    > = {
+      "win32-x64": {
+        file: `Linger-${version}-windows-x64-setup.exe`,
+        sha256: createHash("sha256").update(setupBody).digest("hex"),
+        size: setupBody.length,
+      },
+    };
+    const files: Record<string, Buffer> = {
+      [`${feed}/download/desktop-v${version}/Linger-${version}-windows-x64-setup.exe`]:
+        setupBody,
+    };
+    if (includeArchive) {
+      const archiveFile = `Linger-${version}-windows-x64-portable.zip`;
+      packages["win32-x64-archive"] = {
+        file: archiveFile,
+        sha256: createHash("sha256").update(archiveBody).digest("hex"),
+        size: archiveBody.length,
+      };
+      files[`${feed}/download/desktop-v${version}/${archiveFile}`] =
+        archiveBody;
+    }
+    const manifest = Buffer.from(
+      JSON.stringify({ schema: 2, version, packages }),
+    );
+    files[`${feed}/latest/download/manifest.json`] = manifest;
+    files[`${feed}/latest/download/manifest.json.sig`] = Buffer.from(
+      sign(null, manifest, privateKey).toString("base64"),
+    );
+    const requested: string[] = [];
+    const fetch = (async (url: URL) => {
+      requested.push(url.toString());
+      const content = files[url.toString()];
+      return content
+        ? new Response(new Uint8Array(content))
+        : new Response("missing", { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+    return {
+      fetch,
+      files,
+      requested,
+      publicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
+    };
+  };
+
+  const validWinExtract = async (_archive: string, directory: string) => {
+    const app = path.join(directory, "Linger");
+    const computer = path.join(app, "resources", "computer");
+    mkdirSync(computer, { recursive: true });
+    writeFileSync(path.join(app, "Linger.exe"), "MZ-new-linger");
+    writeFileSync(
+      path.join(computer, "linger-computer-daemon.exe"),
+      HELPER_BODY,
+    );
+  };
+
+  const recorder = () => {
+    const calls: {
+      file: string;
+      args: readonly string[];
+      options: { detached: true; stdio: "ignore"; windowsHide?: boolean };
+    }[] = [];
+    const spawn: SpawnSetup = (file, args, options) => {
+      calls.push({ file, args, options });
+      const child = Object.assign(new EventEmitter(), { unref: () => {} });
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    };
+    return { calls, spawn };
+  };
+
+  const setupWin = async (
+    feed: ReturnType<typeof windowsRelease>,
+    options: Partial<UpdaterOptions> = {},
+  ) => {
+    const root = tempDirectory();
+    const programs = path.join(root, "Programs");
+    const installDir = path.join(programs, "Linger");
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(path.join(installDir, "Linger.exe"), "MZ-old-linger");
+    writeFileSync(
+      path.join(installDir, "Uninstall Linger.exe"),
+      "MZ-uninstaller",
+    );
+    const result = await setup(feed, {
+      platform: "win32",
+      arch: "x64",
+      install: { kind: "windows-setup", installDir },
+      extract: validWinExtract,
+      ...options,
+    });
+    return { ...result, programs, installDir };
+  };
+
+  it("downloads, extracts, pre-stages via prepareUpdate, and spawns a detached external helper before quitting", async () => {
+    const feed = windowsRelease("0.17.0");
+    const { calls, spawn } = recorder();
+    const order: string[] = [];
+    const preparedPaths: string[] = [];
+    const {
+      updater,
+      programs,
+      installDir,
+      downloads,
+      setRunning,
+      quits,
+      restarts,
+      host,
+    } = await setupWin(feed, {
+      spawn,
+      announce: (state) => {
+        order.push(`announce:${state.kind}`);
+      },
+      prepareUpdate: async (stagedPath, signal) => {
+        expect(signal.aborted).toBe(false);
+        expect(updater.state()).toEqual({
+          kind: "downloading",
+          version: "0.17.0",
+        });
+        preparedPaths.push(stagedPath);
+        order.push("prepare");
+      },
+    });
+
+    await updater.check();
+    const expectedStaged = path.join(
+      programs,
+      ".Linger-update-0.17.0",
+      "Linger",
+    );
+    expect(feed.requested).toEqual([
+      `${RELEASES}/latest/download/manifest.json`,
+      `${RELEASES}/latest/download/manifest.json.sig`,
+      `${RELEASES}/download/desktop-v0.17.0/${ARCHIVE}`,
+    ]);
+    expect(preparedPaths).toEqual([expectedStaged]);
+    expect(order).toEqual(["prepare", "announce:ready"]);
+    expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+    // Downloaded zip was deleted after extraction.
+    expect(readdirSync(downloads)).toEqual([]);
+
+    setRunning(1);
+    await updater.install();
+    expect(updater.state()).toEqual({ kind: "waiting", version: "0.17.0" });
+    expect(calls).toEqual([]);
+
+    setRunning(0);
+    await waitFor(() => quits() === 1);
+    expect(restarts()).toBe(0);
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    // Helper binary is copied into downloadDirectory, outside both installDir and stagedDir.
+    expect(path.dirname(call.file)).toBe(downloads);
+    expect(path.basename(call.file)).toMatch(/^update-helper-.*\.exe$/);
+    expect(readFileSync(call.file)).toEqual(HELPER_BODY);
+    expect(call.args[0]).toBe("apply-windows-update");
+    const configPath = call.args[1]!;
+    expect(path.dirname(configPath)).toBe(downloads);
+    expect(path.basename(configPath)).toMatch(/^update-apply-.*\.json$/);
+    expect(call.options).toEqual({
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(config).toEqual({
+      parentPid: process.pid,
+      installDir,
+      stagedDir: expectedStaged,
+      version: "0.17.0",
+      logPath: path.join(downloads, "update-apply-0.17.0.log"),
+    });
+    await host.stop("update");
+  });
+
+  it("falls back to setup.exe when win32-x64-archive is absent from the manifest", async () => {
+    const feed = windowsRelease("0.17.0", { includeArchive: false });
+    const { calls, spawn } = recorder();
+    const prepareUpdate = vi.fn(async () => {});
+    const { updater, downloads, quits, host } = await setupWin(feed, {
+      spawn,
+      prepareUpdate,
+    });
+
+    await updater.check();
+    expect(feed.requested.at(-1)).toBe(
+      `${RELEASES}/download/desktop-v0.17.0/${SETUP}`,
+    );
+    expect(prepareUpdate).not.toHaveBeenCalled();
+    expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+
+    await updater.install();
+    expect(quits()).toBe(1);
+    expect(calls).toEqual([
+      {
+        file: path.join(downloads, SETUP),
+        args: ["/update", "/relaunch"],
+        options: { detached: true, stdio: "ignore" },
+      },
+    ]);
+    await host.stop("update");
+  });
+
+  it("falls back to setup.exe when installDir is omitted even if win32-x64-archive exists", async () => {
+    const feed = windowsRelease("0.17.0", { includeArchive: true });
+    const { calls, spawn } = recorder();
+    const prepareUpdate = vi.fn(async () => {});
+    const { updater, downloads, quits, host } = await setup(feed, {
+      platform: "win32",
+      arch: "x64",
+      install: { kind: "windows-setup" },
+      spawn,
+      prepareUpdate,
+    });
+
+    await updater.check();
+    expect(feed.requested.at(-1)).toBe(
+      `${RELEASES}/download/desktop-v0.17.0/${SETUP}`,
+    );
+    expect(prepareUpdate).not.toHaveBeenCalled();
+    await updater.install();
+    expect(quits()).toBe(1);
+    expect(calls[0]?.file).toBe(path.join(downloads, SETUP));
+    await host.stop("update");
+  });
+
+  it.each([
+    [
+      "missing Linger.exe",
+      async (_archive: string, directory: string) => {
+        const computer = path.join(
+          directory,
+          "Linger",
+          "resources",
+          "computer",
+        );
+        mkdirSync(computer, { recursive: true });
+        writeFileSync(
+          path.join(computer, "linger-computer-daemon.exe"),
+          HELPER_BODY,
+        );
+      },
+      "Update package has no Linger.exe",
+    ],
+    [
+      "missing linger-computer-daemon.exe",
+      async (_archive: string, directory: string) => {
+        const app = path.join(directory, "Linger");
+        mkdirSync(path.join(app, "resources", "computer"), { recursive: true });
+        writeFileSync(path.join(app, "Linger.exe"), "MZ-new");
+      },
+      "Update package has no update helper",
+    ],
+    [
+      "missing helper directory",
+      async (_archive: string, directory: string) => {
+        const app = path.join(directory, "Linger");
+        mkdirSync(app, { recursive: true });
+        writeFileSync(path.join(app, "Linger.exe"), "MZ-new");
+      },
+      "Update package has an invalid helper directory",
+    ],
+  ])(
+    "fails and cleans staged folder and zip when extracted archive has %s",
+    async (_label, extract, expectedError) => {
+      const feed = windowsRelease("0.17.0");
+      const prepareUpdate = vi.fn(async () => {});
+      const { updater, programs, downloads, host } = await setupWin(feed, {
+        extract,
+        prepareUpdate,
+      });
+
+      await updater.check();
+      expect(updater.state()).toEqual({
+        kind: "failed",
+        error: expectedError,
+      });
+      expect(prepareUpdate).not.toHaveBeenCalled();
+      expect(readdirSync(programs)).toEqual(["Linger"]);
+      expect(readdirSync(downloads)).toEqual([]);
+      await host.stop("quit");
+    },
+  );
+
+  it("cleans .Linger-old-* and .Linger-update-* case-insensitively beside installDir and preserves fallback apply logs on Windows", async () => {
+    const feed = windowsRelease("0.16.7");
+    const { host, programs, downloads } = await setupWin(feed, {
+      cleanupDelayMs: 0,
+    });
+    await host.stop("quit");
+
+    mkdirSync(path.join(programs, ".linger-old-1111"), { recursive: true });
+    mkdirSync(path.join(programs, ".LINGER-UPDATE-0.16.6"), {
+      recursive: true,
+    });
+    mkdirSync(downloads, { recursive: true });
+    writeFileSync(path.join(downloads, "update-helper-old.exe"), "old");
+    writeFileSync(path.join(downloads, "update-apply-old.json"), "{}");
+    writeFileSync(path.join(downloads, "update-apply-0.16.6.log"), "diag");
+
+    const next = new UpdaterModule({
+      version: "0.17.0",
+      platform: "win32",
+      arch: "x64",
+      install: {
+        kind: "windows-setup",
+        installDir: path.join(programs, "Linger"),
+      },
+      downloadDirectory: downloads,
+      restart: async () => {},
+      quit: async () => {},
+      openExternal: async () => {},
+      checkDelayMs: 60 * 60_000,
+      cleanupDelayMs: 0,
+    });
+    const nextHost = testHost([
+      stubModule("Config"),
+      stubModule("ComputerDaemon"),
+      next,
+    ]);
+    await nextHost.start();
+    await waitFor(
+      () =>
+        readdirSync(programs).length === 1 &&
+        readdirSync(downloads).length === 1,
+    );
+    expect(readdirSync(programs)).toEqual(["Linger"]);
+    expect(readdirSync(downloads)).toEqual(["update-apply-0.16.6.log"]);
+    await nextHost.stop("quit");
+  });
+
+  it("writes Windows apply helper log into logDirectory when configured so diagnostics retain it across cleanup", async () => {
+    const feed = windowsRelease("0.17.0");
+    const logDir = path.join(tempDirectory(), "logs");
+    const { calls, spawn } = recorder();
+    const { updater, downloads, quits, host } = await setupWin(feed, {
+      logDirectory: logDir,
+      spawn,
+    });
+    await updater.check();
+    await updater.install();
+    expect(quits()).toBe(1);
+    const configPath = calls[0]!.args[1]!;
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+      logPath: string;
+    };
+    expect(config.logPath).toBe(path.join(logDir, "update-apply-0.17.0.log"));
+    expect(existsSync(logDir)).toBe(true);
+    await host.stop("update");
+
+    // Simulate helper writing log, then verify next-launch cleanup removes
+    // downloadDirectory leftovers while keeping logDirectory untouched.
+    writeFileSync(config.logPath, "apply failed\n");
+    const next = new UpdaterModule({
+      version: "0.17.0",
+      platform: "win32",
+      arch: "x64",
+      install: { kind: "windows-setup" },
+      downloadDirectory: downloads,
+      logDirectory: logDir,
+      restart: async () => {},
+      quit: async () => {},
+      openExternal: async () => {},
+      checkDelayMs: 60 * 60_000,
+      cleanupDelayMs: 0,
+    });
+    const nextHost = testHost([
+      stubModule("Config"),
+      stubModule("ComputerDaemon"),
+      next,
+    ]);
+    await nextHost.start();
+    await waitFor(() => readdirSync(downloads).length === 0);
+    expect(readFileSync(config.logPath, "utf8")).toBe("apply failed\n");
+    await nextHost.stop("quit");
+  });
+
+  it("retries spawning the copied Windows update helper on transient Defender EBUSY locks and fails cleanly after exhausting retries", async () => {
+    const feed = windowsRelease("0.17.0");
+    let attempts = 0;
+    const flakySpawn: SpawnSetup = () => {
+      attempts += 1;
+      const child = Object.assign(new EventEmitter(), { unref: () => {} });
+      queueMicrotask(() => {
+        if (attempts <= 2) {
+          child.emit(
+            "error",
+            Object.assign(new Error("spawn EBUSY"), { code: "EBUSY" }),
+          );
+        } else {
+          child.emit("spawn");
+        }
+      });
+      return child;
+    };
+    const okRun = await setupWin(feed, {
+      spawn: flakySpawn,
+      spawnRetryDelayMs: 5,
+    });
+    await okRun.updater.check();
+    await okRun.updater.install();
+    expect(attempts).toBe(3);
+    expect(okRun.quits()).toBe(1);
+    await okRun.host.stop("update");
+
+    let exhaustedAttempts = 0;
+    const failingSpawn: SpawnSetup = () => {
+      exhaustedAttempts += 1;
+      const child = Object.assign(new EventEmitter(), { unref: () => {} });
+      queueMicrotask(() =>
+        child.emit(
+          "error",
+          Object.assign(new Error("spawn EPERM"), { code: "EPERM" }),
+        ),
+      );
+      return child;
+    };
+    const failRun = await setupWin(windowsRelease("0.17.0"), {
+      spawn: failingSpawn,
+      spawnRetryDelayMs: 5,
+    });
+    await failRun.updater.check();
+    await failRun.updater.install();
+    expect(exhaustedAttempts).toBe(10);
+    expect(failRun.quits()).toBe(0);
+    expect(failRun.updater.state()).toEqual({
+      kind: "failed",
+      error: "Error: spawn EPERM",
+    });
+    expect(readdirSync(failRun.downloads)).toEqual([]);
+    await failRun.host.stop("quit");
+  });
+
+  it("refuses install without spawning or quitting when staged files or helper directory vanish or become a link before install()", async () => {
+    // 1. Staged Linger.exe deleted between check() and install().
+    const { calls: calls1, spawn: spawn1 } = recorder();
+    const run1 = await setupWin(windowsRelease("0.17.0"), { spawn: spawn1 });
+    await run1.updater.check();
+    const stagedApp1 = path.join(
+      run1.programs,
+      ".Linger-update-0.17.0",
+      "Linger",
+    );
+    rmSync(path.join(stagedApp1, "Linger.exe"));
+    await run1.updater.install();
+    expect(run1.updater.state()).toEqual({
+      kind: "failed",
+      error: "Update package has no Linger.exe",
+    });
+    expect(calls1).toEqual([]);
+    expect(run1.quits()).toBe(0);
+    await run1.host.stop("quit");
+
+    // 2. resources/computer replaced by a directory junction/symlink before install().
+    const { calls: calls2, spawn: spawn2 } = recorder();
+    const run2 = await setupWin(windowsRelease("0.17.0"), { spawn: spawn2 });
+    await run2.updater.check();
+    const computerDir = path.join(
+      run2.programs,
+      ".Linger-update-0.17.0",
+      "Linger",
+      "resources",
+      "computer",
+    );
+    const outsideDir = path.join(tempDirectory(), "outside-computer");
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(
+      path.join(outsideDir, "linger-computer-daemon.exe"),
+      HELPER_BODY,
+    );
+    rmSync(computerDir, { recursive: true, force: true });
+    if (process.platform === "win32") {
+      execFileSync("cmd.exe", ["/c", "mklink", "/J", computerDir, outsideDir], {
+        windowsHide: true,
+      });
+    } else {
+      symlinkSync(outsideDir, computerDir, "dir");
+    }
+    await run2.updater.install();
+    expect(run2.updater.state()).toEqual({
+      kind: "failed",
+      error: "Update package has an invalid helper directory",
+    });
+    expect(calls2).toEqual([]);
+    expect(run2.quits()).toBe(0);
+    await run2.host.stop("quit");
+  });
+
+  it("aborts Windows archive prepareUpdate on stop() without announcing ready, and ignores prepareUpdate errors", async () => {
+    const feed = windowsRelease("0.17.0");
+    let releasePrepare!: () => void;
+    let capturedSignal: AbortSignal | undefined;
+    const { updater, announced, host } = await setupWin(feed, {
+      prepareUpdate: async (_stagedPath, signal) => {
+        capturedSignal = signal;
+        await new Promise<void>((resolve) => {
+          releasePrepare = resolve;
+        });
+      },
+    });
+    const checking = updater.check();
+    await waitFor(() => capturedSignal !== undefined);
+    await updater.stop();
+    expect(capturedSignal!.aborted).toBe(true);
+    releasePrepare();
+    await checking;
+    expect(announced).toEqual([]);
+    await host.stop("quit");
+
+    const resilient = await setupWin(windowsRelease("0.17.0"), {
+      prepareUpdate: async () => {
+        throw new Error("offline cache miss");
+      },
+    });
+    await resilient.updater.check();
+    expect(resilient.updater.state()).toEqual({
+      kind: "ready",
+      version: "0.17.0",
+    });
+    expect(resilient.announced).toEqual([{ kind: "ready", version: "0.17.0" }]);
+    await resilient.host.stop("quit");
+  });
+
+  it("cleans up copied helper and config without quitting if spawning the Windows update helper fails", async () => {
+    const feed = windowsRelease("0.17.0");
+    const spawn: SpawnSetup = () => {
+      const child = Object.assign(new EventEmitter(), { unref: () => {} });
+      queueMicrotask(() => child.emit("error", new Error("spawn EPERM")));
+      return child;
+    };
+    const { updater, downloads, quits, host } = await setupWin(feed, { spawn });
+    await updater.check();
+    expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+
+    await updater.install();
+    expect(updater.state()).toEqual({
+      kind: "failed",
+      error: "Error: spawn EPERM",
+    });
+    expect(quits()).toBe(0);
+    expect(readdirSync(downloads)).toEqual([]);
+    await host.stop("quit");
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "extracts a real Windows portable zip using native System32\\tar.exe",
+    async () => {
+      const sourceRoot = tempDirectory();
+      const zipStage = path.join(sourceRoot, "Linger");
+      mkdirSync(path.join(zipStage, "resources", "computer"), {
+        recursive: true,
+      });
+      writeFileSync(path.join(zipStage, "Linger.exe"), "MZ-real-zip-linger");
+      writeFileSync(
+        path.join(
+          zipStage,
+          "resources",
+          "computer",
+          "linger-computer-daemon.exe",
+        ),
+        HELPER_BODY,
+      );
+      const zipFile = path.join(sourceRoot, "portable.zip");
+      const systemRoot =
+        process.env.SystemRoot?.trim() ||
+        process.env.windir?.trim() ||
+        "C:\\Windows";
+      execFileSync(
+        path.win32.join(systemRoot, "System32", "tar.exe"),
+        ["-a", "-cf", zipFile, "-C", sourceRoot, "Linger"],
+        { windowsHide: true },
+      );
+      const zipBytes = readFileSync(zipFile);
+
+      const feed = windowsRelease("0.17.0", { archiveBody: zipBytes });
+      const { calls, spawn } = recorder();
+      const { updater, programs, downloads, quits, host } = await setupWin(
+        feed,
+        {
+          extract: undefined,
+          spawn,
+        },
+      );
+
+      await updater.check();
+      expect(updater.state()).toEqual({ kind: "ready", version: "0.17.0" });
+      const stagedExe = path.join(
+        programs,
+        ".Linger-update-0.17.0",
+        "Linger",
+        "Linger.exe",
+      );
+      expect(existsSync(stagedExe)).toBe(true);
+      expect(readFileSync(stagedExe, "utf8")).toBe("MZ-real-zip-linger");
+      expect(readdirSync(downloads)).toEqual([]);
+
+      await updater.install();
+      expect(quits()).toBe(1);
+      expect(calls).toHaveLength(1);
+      await host.stop("update");
+
+      // Also verify non-ASCII download folder paths trigger the pure-ASCII
+      // .archive.zip staging fallback and clean up .archive.zip afterwards.
+      const nonAsciiDownloads = path.join(
+        tempDirectory(),
+        "caf\u00e9-downloads",
+      );
+      const nonAsciiRun = await setupWin(
+        windowsRelease("0.17.0", { archiveBody: zipBytes }),
+        {
+          downloadDirectory: nonAsciiDownloads,
+          extract: undefined,
+          spawn,
+        },
+      );
+      await nonAsciiRun.updater.check();
+      expect(nonAsciiRun.updater.state()).toEqual({
+        kind: "ready",
+        version: "0.17.0",
+      });
+      expect(
+        existsSync(
+          path.join(
+            nonAsciiRun.programs,
+            ".Linger-update-0.17.0",
+            ".archive.zip",
+          ),
+        ),
+      ).toBe(false);
+      await nonAsciiRun.host.stop("quit");
+    },
+  );
+});
+
 describe("UpdaterModule for a download", () => {
   it("links a newer release without downloading it", async () => {
     const feed = release("0.17.0", {
@@ -1274,7 +1939,7 @@ describe("updateInstallFor", () => {
         `${installed}\\Linger.exe`,
         (file) => file === `${installed}\\Uninstall Linger.exe`,
       ),
-    ).toEqual({ kind: "windows-setup" });
+    ).toEqual({ kind: "windows-setup", installDir: installed });
     // The portable folder has no uninstaller.
     expect(updateInstallFor("win32", "D:\\Linger\\Linger.exe", none)).toEqual({
       kind: "download",

@@ -1,7 +1,17 @@
 import { execFile, spawn as spawnProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -13,6 +23,7 @@ import {
   DEFAULT_FEED_URL,
   ManifestError,
   UPDATE_PUBLIC_KEY,
+  archivePackageFor,
   compareVersions,
   feedUrls,
   packageFor,
@@ -48,9 +59,10 @@ export type AnnouncedUpdate = Extract<
 export type UpdateInstall =
   // macOS: the installed Linger.app, swapped for the release's app archive.
   | { readonly kind: "app-bundle"; readonly appBundle: string }
-  // Windows, installed by the setup program: the release's setup program
-  // runs silently over the installation and starts Linger again.
-  | { readonly kind: "windows-setup" }
+  // Windows, installed by the setup program: background-extracts the portable
+  // archive into a sibling directory when available, falling back to running
+  // the setup program silently over the installation.
+  | { readonly kind: "windows-setup"; readonly installDir?: string }
   // Linux and the portable Windows folder: the person downloads the release.
   | { readonly kind: "download" };
 
@@ -62,6 +74,10 @@ export interface UpdaterOptions {
   readonly install: UpdateInstall | undefined;
   // Downloads live here until they are installed.
   readonly downloadDirectory: string;
+  // Directory where Windows apply helper logs are preserved across restarts
+  // (e.g. <userData>/logs for DiagnosticsModule). Falls back to
+  // downloadDirectory when omitted.
+  readonly logDirectory?: string;
   // Stops modules, including the daemon, and relaunches the app from
   // the app bundle, which by then holds the new version and its daemon.
   readonly restart: () => Promise<void>;
@@ -85,6 +101,7 @@ export interface UpdaterOptions {
   readonly checkIntervalMs?: number;
   readonly retryDelayMs?: number;
   readonly cleanupDelayMs?: number;
+  readonly spawnRetryDelayMs?: number;
 }
 
 export interface SetupProcess {
@@ -95,12 +112,33 @@ export interface SetupProcess {
 export type SpawnSetup = (
   file: string,
   args: readonly string[],
-  options: { detached: true; stdio: "ignore" },
+  options: { detached: true; stdio: "ignore"; windowsHide?: boolean },
 ) => SetupProcess;
 
 // installer.nsi: /update shows only its progress page and the questions about
 // a locked file, then closes; /relaunch starts Linger after.
 export const SETUP_ARGS = ["/update", "/relaunch"] as const;
+
+type StagedUpdate =
+  | {
+      readonly mode: "app-bundle";
+      readonly path: string;
+      readonly version: string;
+      readonly pkg: UpdatePackage;
+    }
+  | {
+      readonly mode: "windows-archive";
+      readonly path: string;
+      readonly installDir: string;
+      readonly version: string;
+      readonly pkg: UpdatePackage;
+    }
+  | {
+      readonly mode: "windows-setup";
+      readonly path: string;
+      readonly version: string;
+      readonly pkg: UpdatePackage;
+    };
 
 const CHECK_DELAY_MS = 60_000;
 const CHECK_INTERVAL_MS = 60 * 60_000;
@@ -110,12 +148,90 @@ const CLEANUP_DELAY_MS = 60_000;
 const POST_BUSY_CLEANUP_DELAY_MS = 5_000;
 const STAGED_PREFIX = ".Linger-update-";
 const OLD_PREFIX = ".Linger-old-";
+const WINDOWS_APPLY_COMMAND = "apply-windows-update";
+const WINDOWS_RM_RETRY = { maxRetries: 10, retryDelay: 200 } as const;
+const WINDOWS_APPLY_LOG_PATTERN = /^update-apply-.*\.log$/i;
+const SPAWN_RETRY_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
+const SPAWN_MAX_ATTEMPTS = 10;
+const SPAWN_RETRY_DELAY_MS = 200;
 
 const run = promisify(execFile);
 
 // /usr/bin/tar keeps the symlinks and code signatures inside the bundle.
 const untar = async (archive: string, directory: string): Promise<void> => {
   await run("/usr/bin/tar", ["-xzf", archive, "-C", directory]);
+};
+
+const windowsTarCommand = (env: NodeJS.ProcessEnv = process.env): string => {
+  const systemRoot =
+    env.SystemRoot?.trim() || env.windir?.trim() || "C:\\Windows";
+  return path.win32.join(systemRoot, "System32", "tar.exe");
+};
+
+const isAsciiPath = (value: string): boolean => {
+  if (value.length === 0) return false;
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) > 0x7f) return false;
+  }
+  return true;
+};
+
+// Windows' native bsdtar extracts zips without external tools. Running inside
+// the resolved destination with a pure-ASCII relative path (copying to a local
+// ASCII temp file when cross-drive or non-ASCII) avoids ANSI code-page argv
+// failures for non-ASCII user profiles.
+const untarWindows = async (
+  archive: string,
+  directory: string,
+): Promise<void> => {
+  const realDirectory = await realpath(directory).catch(() => directory);
+  const realArchive = await realpath(archive).catch(() => archive);
+  const relativeArchive = path.win32.relative(realDirectory, realArchive);
+  let archiveArg =
+    relativeArchive && !path.win32.isAbsolute(relativeArchive)
+      ? relativeArchive
+      : realArchive;
+  let tempCopy: string | undefined;
+  if (!isAsciiPath(archiveArg)) {
+    tempCopy = path.join(realDirectory, ".archive.zip");
+    await copyFile(realArchive, tempCopy);
+    archiveArg = ".archive.zip";
+  }
+  try {
+    await run(windowsTarCommand(), ["-xf", archiveArg, "-C", "."], {
+      cwd: realDirectory,
+      windowsHide: true,
+    });
+  } finally {
+    if (tempCopy) {
+      await rm(tempCopy, {
+        force: true,
+        ...WINDOWS_RM_RETRY,
+      }).catch(() => undefined);
+    }
+  }
+};
+
+const verifyStagedWindowsApp = async (appDir: string): Promise<void> => {
+  const resourcesDir = path.join(appDir, "resources");
+  const computerDir = path.join(resourcesDir, "computer");
+  const exePath = path.join(appDir, "Linger.exe");
+  const helperPath = path.join(computerDir, "linger-computer-daemon.exe");
+  const [appStat, resStat, compStat, exeStat, helperStat] = await Promise.all([
+    lstat(appDir).catch(() => undefined),
+    lstat(resourcesDir).catch(() => undefined),
+    lstat(computerDir).catch(() => undefined),
+    lstat(exePath).catch(() => undefined),
+    lstat(helperPath).catch(() => undefined),
+  ]);
+  if (!appStat?.isDirectory())
+    throw new UpdateError("Update package has no Linger folder");
+  if (!resStat?.isDirectory() || !compStat?.isDirectory())
+    throw new UpdateError("Update package has an invalid helper directory");
+  if (!exeStat?.isFile())
+    throw new UpdateError("Update package has no Linger.exe");
+  if (!helperStat?.isFile())
+    throw new UpdateError("Update package has no update helper");
 };
 
 export class UpdateError extends Error {}
@@ -130,9 +246,9 @@ export class UpdaterModule implements Module {
   readonly #options: UpdaterOptions;
   #ctx: ModuleContext | undefined;
   #state: UpdateState = { kind: "idle" };
-  // The unpacked app bundle (macOS) or the downloaded setup program
-  // (Windows), with the package it came from.
-  #staged: { path: string; pkg: UpdatePackage } | undefined;
+  // The unpacked app bundle (macOS), unpacked portable folder (Windows
+  // archive), or downloaded setup program (Windows fallback).
+  #staged: StagedUpdate | undefined;
   #timer: NodeJS.Timeout | undefined;
   #cleanupTimer: NodeJS.Timeout | undefined;
   #cleanupOnce: Promise<void> | undefined;
@@ -248,7 +364,10 @@ export class UpdaterModule implements Module {
     this.#setState({ kind: "installing", version: state.version });
     this.#ctx!.log.info("update.installing", { version: state.version });
     try {
-      if (this.#options.install?.kind === "windows-setup") {
+      if (this.#staged?.mode === "windows-archive") {
+        await this.#runWindowsArchiveApply();
+        await this.#options.quit();
+      } else if (this.#options.install?.kind === "windows-setup") {
         await this.#runSetup();
         await this.#options.quit();
       } else {
@@ -292,9 +411,18 @@ export class UpdaterModule implements Module {
         this.#options.platform,
         this.#options.arch,
       );
+      const archivePkg =
+        install.kind === "windows-setup" && install.installDir
+          ? archivePackageFor(
+              manifest,
+              this.#options.platform,
+              this.#options.arch,
+            )
+          : undefined;
+      const selectedPkg = archivePkg ?? pkg;
       if (
         compareVersions(manifest.version, this.#options.version) <= 0 ||
-        !pkg
+        !selectedPkg
       ) {
         this.#clearCheckFailures();
         this.#setState({ kind: "idle" });
@@ -315,18 +443,59 @@ export class UpdaterModule implements Module {
       this.#setState({ kind: "downloading", version });
       await this.#runCleanupOnce();
       if (this.#generation !== generation) return;
-      const file = path.join(this.#options.downloadDirectory, pkg.file);
-      await this.#download(packageUrl(feed, version, pkg.file), file, pkg);
+      const file = path.join(this.#options.downloadDirectory, selectedPkg.file);
+      await this.#download(
+        packageUrl(feed, version, selectedPkg.file),
+        file,
+        selectedPkg,
+      );
       if (this.#generation !== generation) return;
-      const stagedPath =
-        install.kind === "app-bundle"
-          ? await this.#extract(file, version)
-          : file;
-      if (install.kind === "app-bundle") await rm(file, { force: true });
+      let staged: StagedUpdate;
+      if (install.kind === "app-bundle") {
+        let stagedPath: string;
+        try {
+          stagedPath = await this.#extract(file, version);
+        } finally {
+          await rm(file, { force: true });
+        }
+        staged = {
+          mode: "app-bundle",
+          path: stagedPath,
+          version,
+          pkg: selectedPkg,
+        };
+      } else if (archivePkg && install.installDir) {
+        let stagedPath: string;
+        try {
+          stagedPath = await this.#extractWindowsArchive(
+            file,
+            version,
+            install.installDir,
+          );
+        } finally {
+          await rm(file, this.#rmOptions()).catch((error) => {
+            ctx.log.warn("update.cleanup_failed", { error: String(error) });
+          });
+        }
+        staged = {
+          mode: "windows-archive",
+          path: stagedPath,
+          installDir: install.installDir,
+          version,
+          pkg: selectedPkg,
+        };
+      } else {
+        staged = {
+          mode: "windows-setup",
+          path: file,
+          version,
+          pkg: selectedPkg,
+        };
+      }
       if (this.#generation !== generation) return;
-      this.#staged = { path: stagedPath, pkg };
+      this.#staged = staged;
       if (
-        install.kind === "app-bundle" &&
+        (staged.mode === "app-bundle" || staged.mode === "windows-archive") &&
         this.#options.prepareUpdate &&
         this.#staged
       ) {
@@ -383,7 +552,7 @@ export class UpdaterModule implements Module {
         createWriteStream(file, { mode: 0o600 }),
       );
     } catch (error) {
-      await rm(file, { force: true });
+      await rm(file, this.#rmOptions()).catch(() => undefined);
       throw error;
     }
   }
@@ -427,6 +596,121 @@ export class UpdaterModule implements Module {
     });
     child.unref();
     this.#staged = undefined;
+  }
+
+  // Copies the staged daemon binary outside both installDir and stagedDir so
+  // the helper holds no handle inside either directory while swapping them.
+  async #runWindowsArchiveApply(): Promise<void> {
+    const staged = this.#staged;
+    if (staged?.mode !== "windows-archive")
+      throw new UpdateError("No update is ready");
+    const sourceHelper = path.join(
+      staged.path,
+      "resources",
+      "computer",
+      "linger-computer-daemon.exe",
+    );
+    const nonce = randomUUID();
+    const helperPath = path.join(
+      this.#options.downloadDirectory,
+      `update-helper-${nonce}.exe`,
+    );
+    const configPath = path.join(
+      this.#options.downloadDirectory,
+      `update-apply-${nonce}.json`,
+    );
+    const logDirectory =
+      this.#options.logDirectory ?? this.#options.downloadDirectory;
+    const logPath = path.join(
+      logDirectory,
+      `update-apply-${staged.version}.log`,
+    );
+    await mkdir(this.#options.downloadDirectory, {
+      recursive: true,
+      mode: 0o700,
+    });
+    if (logDirectory !== this.#options.downloadDirectory) {
+      await mkdir(logDirectory, { recursive: true, mode: 0o700 });
+    }
+    try {
+      await verifyStagedWindowsApp(staged.path);
+      await copyFile(sourceHelper, helperPath);
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          parentPid: process.pid,
+          installDir: staged.installDir,
+          stagedDir: staged.path,
+          version: staged.version,
+          logPath,
+        }),
+        { mode: 0o600 },
+      );
+      const spawnFn = this.#options.spawn ?? (spawnProcess as SpawnSetup);
+      const retryDelayMs =
+        this.#options.spawnRetryDelayMs ?? SPAWN_RETRY_DELAY_MS;
+      let child: SetupProcess | undefined;
+      for (let attempt = 1; attempt <= SPAWN_MAX_ATTEMPTS; attempt++) {
+        try {
+          const candidate = spawnFn(
+            helperPath,
+            [WINDOWS_APPLY_COMMAND, configPath],
+            { detached: true, stdio: "ignore", windowsHide: true },
+          );
+          await new Promise<void>((resolve, reject) => {
+            candidate.once("spawn", resolve);
+            candidate.once("error", reject);
+          });
+          child = candidate;
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (
+            !code ||
+            !SPAWN_RETRY_CODES.has(code) ||
+            attempt === SPAWN_MAX_ATTEMPTS
+          )
+            throw error;
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, retryDelayMs),
+          );
+        }
+      }
+      child!.unref();
+    } catch (error) {
+      await rm(helperPath, this.#rmOptions()).catch(() => undefined);
+      await rm(configPath, this.#rmOptions()).catch(() => undefined);
+      throw error;
+    }
+    this.#staged = undefined;
+  }
+
+  // Unpacks the Windows portable zip next to the installed folder so the swap
+  // helper replaces installDir with two renames on the same volume.
+  async #extractWindowsArchive(
+    archive: string,
+    version: string,
+    installDir: string,
+  ): Promise<string> {
+    const parent = path.dirname(installDir);
+    const stagedParent = path.join(parent, `${STAGED_PREFIX}${version}`);
+    await rm(stagedParent, this.#rmOptions(true));
+    await mkdir(stagedParent, { recursive: true });
+    try {
+      await (this.#options.extract ?? untarWindows)(archive, stagedParent);
+      const app = path.join(stagedParent, "Linger");
+      await verifyStagedWindowsApp(app);
+      return app;
+    } catch (error) {
+      await rm(stagedParent, this.#rmOptions(true)).catch((cleanupError) => {
+        this.#ctx?.log.warn("update.cleanup_failed", {
+          error: String(cleanupError),
+        });
+      });
+      throw error instanceof UpdateError
+        ? error
+        : new UpdateError(`Couldn't unpack the update: ${String(error)}`);
+    }
   }
 
   // Unpacks next to the installed bundle so the swap is two renames on one
@@ -494,28 +778,66 @@ export class UpdaterModule implements Module {
     return (this.#cleanupOnce ??= this.#cleanup());
   }
 
+  #rmOptions(recursive = false): {
+    readonly force: true;
+    readonly recursive?: true;
+    readonly maxRetries?: number;
+    readonly retryDelay?: number;
+  } {
+    return {
+      force: true,
+      ...(recursive ? { recursive: true } : {}),
+      ...(this.#options.platform === "win32" ? WINDOWS_RM_RETRY : {}),
+    };
+  }
+
   // Leftovers from an earlier update: downloads, the replaced bundle and
   // unused stages.
   async #cleanup(): Promise<void> {
     const leftovers: string[] = [];
+    const preserveFallbackLogs = this.#options.logDirectory === undefined;
     try {
-      for (const name of await readdir(this.#options.downloadDirectory))
+      for (const name of await readdir(this.#options.downloadDirectory)) {
+        if (preserveFallbackLogs && WINDOWS_APPLY_LOG_PATTERN.test(name))
+          continue;
         leftovers.push(path.join(this.#options.downloadDirectory, name));
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
         this.#ctx?.log.warn("update.cleanup_failed", { error: String(error) });
     }
     try {
       const install = this.#options.install;
-      if (install?.kind === "app-bundle") {
-        const parent = path.dirname(install.appBundle);
-        for (const name of await readdir(parent)) {
-          if (name.startsWith(OLD_PREFIX) || name.startsWith(STAGED_PREFIX))
-            leftovers.push(path.join(parent, name));
+      const swapParent =
+        install?.kind === "app-bundle"
+          ? path.dirname(install.appBundle)
+          : install?.kind === "windows-setup" && install.installDir
+            ? path.dirname(install.installDir)
+            : undefined;
+      if (swapParent) {
+        const isWindows = this.#options.platform === "win32";
+        const oldPrefix = isWindows ? OLD_PREFIX.toLowerCase() : OLD_PREFIX;
+        const stagedPrefix = isWindows
+          ? STAGED_PREFIX.toLowerCase()
+          : STAGED_PREFIX;
+        for (const name of await readdir(swapParent)) {
+          const normalized = isWindows ? name.toLowerCase() : name;
+          if (
+            normalized.startsWith(oldPrefix) ||
+            normalized.startsWith(stagedPrefix)
+          )
+            leftovers.push(path.join(swapParent, name));
         }
       }
-      for (const leftover of leftovers)
-        await rm(leftover, { recursive: true, force: true });
+      for (const leftover of leftovers) {
+        try {
+          await rm(leftover, this.#rmOptions(true));
+        } catch (error) {
+          this.#ctx?.log.warn("update.cleanup_failed", {
+            error: String(error),
+          });
+        }
+      }
     } catch (error) {
       this.#ctx?.log.warn("update.cleanup_failed", { error: String(error) });
     }
@@ -608,12 +930,10 @@ export function updateInstallFor(
     const appBundle = appBundleOf(execPath);
     if (appBundle) return { kind: "app-bundle", appBundle };
   }
-  if (
-    platform === "win32" &&
-    exists(
-      path.win32.join(path.win32.dirname(execPath), "Uninstall Linger.exe"),
-    )
-  )
-    return { kind: "windows-setup" };
+  if (platform === "win32") {
+    const installDir = path.win32.dirname(execPath);
+    if (exists(path.win32.join(installDir, "Uninstall Linger.exe")))
+      return { kind: "windows-setup", installDir };
+  }
   return { kind: "download" };
 }

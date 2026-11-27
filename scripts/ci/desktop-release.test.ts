@@ -207,6 +207,49 @@ describe("desktop-release.sh manifest", () => {
     expect(sums).toContain("  manifest.json.sig\n");
   });
 
+  it("includes win32-x64-archive alongside win32-x64 when windows-x64-portable.zip is present", () => {
+    const dir = release();
+    const portableZip = `Linger-${version}-windows-x64-portable.zip`;
+    writeFileSync(join(dir, portableZip), "portable-archive-payload");
+    const repo = checkout();
+
+    const result = run(
+      ["manifest", dir, version],
+      { DESKTOP_UPDATE_KEY: repo.key },
+      repo.script,
+    );
+
+    expect(result.status).toBe(0);
+    const bytes = readFileSync(join(dir, "manifest.json"));
+    const signature = readFileSync(join(dir, "manifest.json.sig"), "utf8");
+    expect(
+      verify(null, bytes, repo.publicKey, Buffer.from(signature, "base64")),
+    ).toBe(true);
+    const parsed = JSON.parse(bytes.toString()) as {
+      schema: number;
+      version: string;
+      packages: Record<string, { file: string; sha256: string; size: number }>;
+    };
+    expect(parsed.packages["win32-x64"]).toEqual({
+      file: packages["win32-x64"],
+      sha256: createHash("sha256").update(packages["win32-x64"]).digest("hex"),
+      size: packages["win32-x64"].length,
+    });
+    expect(parsed.packages["win32-x64-archive"]).toEqual({
+      file: portableZip,
+      sha256: createHash("sha256")
+        .update("portable-archive-payload")
+        .digest("hex"),
+      size: "portable-archive-payload".length,
+    });
+
+    run(["checksums", dir, version]);
+    const sums = readFileSync(join(dir, "SHA256SUMS.txt"), "utf8");
+    expect(sums).toContain(`  ${portableZip}\n`);
+    expect(sums).toContain("  manifest.json\n");
+    expect(sums).toContain("  manifest.json.sig\n");
+  });
+
   it("warns and writes nothing without the key", () => {
     const dir = release();
 

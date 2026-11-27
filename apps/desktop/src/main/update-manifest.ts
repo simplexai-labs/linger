@@ -31,7 +31,8 @@ export type UpdatePackage = z.infer<typeof updatePackage>;
 const updateManifest = z.object({
   schema: z.literal(2),
   version: z.string().regex(VERSION),
-  // Keyed by `${platform}-${arch}`, e.g. darwin-arm64.
+  // Keyed by `${platform}-${arch}` (e.g. darwin-arm64) or
+  // `${platform}-${arch}-archive` (e.g. win32-x64-archive).
   packages: z.record(z.string(), updatePackage),
 });
 export type UpdateManifest = z.infer<typeof updateManifest>;
@@ -129,4 +130,12 @@ export function packageFor(
   arch: string,
 ): UpdatePackage | undefined {
   return manifest.packages[`${platform}-${arch}`];
+}
+
+export function archivePackageFor(
+  manifest: UpdateManifest,
+  platform: string,
+  arch: string,
+): UpdatePackage | undefined {
+  return manifest.packages[`${platform}-${arch}-archive`];
 }

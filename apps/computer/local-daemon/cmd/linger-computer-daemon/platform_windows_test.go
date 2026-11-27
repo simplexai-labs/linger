@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/winupdate"
 )
 
 func TestPlatformEntryUsesStdinAndReturnsJSONWithoutStartingDaemon(t *testing.T) {
@@ -217,5 +218,63 @@ func TestRunPlatformWorkerHandlesMultipleRequestsAndEOF(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(lines[4]), &r5); err != nil || r5.OK || r5.Error == "" {
 		t.Fatalf("unexpected response 5: %s", lines[4])
+	}
+}
+
+func TestPlatformEntryApplyWindowsUpdate(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "Programs")
+	installDir := filepath.Join(parent, "Linger")
+	stagedDir := filepath.Join(parent, ".Linger-update-0.17.0", "Linger")
+	if err := os.MkdirAll(filepath.Join(installDir, "resources"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "Linger.exe"), []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, winupdate.UninstallerFileName), []byte("uninst"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, winupdate.StopMarkerRelPath), []byte("marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagedDir, "Linger.exe"), []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	relaunch := false
+	cfgPath := filepath.Join(t.TempDir(), "apply.json")
+	payload, err := json.Marshal(winupdate.Request{
+		InstallDir:   installDir,
+		StagedDir:    stagedDir,
+		Version:      "0.17.0",
+		SkipRegistry: true,
+		Relaunch:     &relaunch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	handled, err := platformEntry([]string{"apply-windows-update", cfgPath})
+	if !handled || err != nil {
+		t.Fatalf("platformEntry(apply-windows-update) = (%v, %v), want (true, nil)", handled, err)
+	}
+	gotExe, err := os.ReadFile(filepath.Join(installDir, "Linger.exe"))
+	if err != nil || string(gotExe) != "new" {
+		t.Fatalf("Linger.exe = %q (err=%v), want new", string(gotExe), err)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, winupdate.UninstallerFileName)); err != nil {
+		t.Fatalf("uninstaller missing after swap: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, winupdate.StopMarkerRelPath)); err != nil {
+		t.Fatalf("stop marker missing after swap: %v", err)
+	}
+	if _, err := os.Lstat(cfgPath); !os.IsNotExist(err) {
+		t.Fatalf("config file %s was not removed: %v", cfgPath, err)
 	}
 }

@@ -65,6 +65,7 @@ import {
   SignInRejectedError,
   signInFailure,
   signInWithPassword,
+  tarCommand,
   type LocalServerIdentity,
   type LocalServerOptions,
 } from "./local-server.js";
@@ -587,8 +588,13 @@ const fixture = (
     }),
   );
   const node = path.join(home, "desktop", "node", `v${NODE_RUNTIME_VERSION}`);
-  mkdirSync(path.join(node, "bin"), { recursive: true });
-  fixtureNode(path.join(node, "bin", "node"));
+  if (platform === "win32") {
+    mkdirSync(node, { recursive: true });
+    fixtureNode(path.join(node, "node.exe"));
+  } else {
+    mkdirSync(path.join(node, "bin"), { recursive: true });
+    fixtureNode(path.join(node, "bin", "node"));
+  }
   prepare(home);
   const setServer = vi.fn(() => true);
   const showUpdating = vi.fn();
@@ -6033,7 +6039,9 @@ describe("LocalServerModule after a restart", () => {
       includeNode?: boolean;
       source?: ReturnType<typeof sourceArchive>;
       teamhubDigest?: string;
+      windowsBinaries?: boolean;
       runtimeDigest?: string;
+      runtimeLayout?: "directory" | "zst";
       includeTool?: boolean;
       toolUrl?: string;
       toolBytes?: Buffer;
@@ -6043,14 +6051,21 @@ describe("LocalServerModule after a restart", () => {
     },
   ) => {
     const target = options.target ?? `${process.platform}-${process.arch}`;
-    const staged = path.join(root, "Staged.app");
+    const bundlePlatform =
+      options.platform ??
+      (target.startsWith("win32-") ? "win32" : process.platform);
+    const isWinBundle = bundlePlatform === "win32";
+    const staged = path.join(root, isWinBundle ? "Linger" : "Staged.app");
+    const resourcesDir = isWinBundle
+      ? path.join(staged, "resources")
+      : path.join(staged, "Contents", "Resources");
     const installerDir =
       options.installerDir ??
-      path.join(staged, "Contents", "Resources", "app", "dist", "installer");
+      path.join(resourcesDir, "app", "dist", "installer");
     mkdirSync(installerDir, { recursive: true });
     if (options.includeTool !== false || options.nativeSources !== undefined) {
       const distribution: Record<string, unknown> = {
-        platform: options.platform ?? process.platform,
+        platform: bundlePlatform,
         arch: options.arch ?? process.arch,
       };
       if (options.nativeSources !== undefined) {
@@ -6079,15 +6094,17 @@ describe("LocalServerModule after a restart", () => {
     if (options.teamhubDigest) {
       const teamhubDir = path.join(installerDir, "native", `teamhub-${target}`);
       mkdirSync(teamhubDir, { recursive: true });
+      const ext = options.windowsBinaries ? ".exe" : "";
       const binaries = Object.fromEntries(
         ["teamhub", "migrate", "account"].map((command) => {
-          writeFileSync(path.join(teamhubDir, command), command, {
+          const fileName = `${command}${ext}`;
+          writeFileSync(path.join(teamhubDir, fileName), command, {
             mode: 0o755,
           });
           return [
             command,
             {
-              file: command,
+              file: fileName,
               sha256: sha256Hex(command),
               bytes: command.length,
             },
@@ -6107,12 +6124,6 @@ describe("LocalServerModule after a restart", () => {
     }
     const runtimeDir = path.join(installerDir, "native", `runtime-${target}`);
     if (options.runtimeDigest) {
-      mkdirSync(path.join(runtimeDir, "runtime", "web", "dist"), {
-        recursive: true,
-      });
-      mkdirSync(path.join(runtimeDir, "runtime", "node-services", "dist"), {
-        recursive: true,
-      });
       const files: Record<string, string> = {
         "web/static-host.mjs": "console.log('ok');",
         "web/dist/index.html": "<html></html>",
@@ -6121,53 +6132,107 @@ describe("LocalServerModule after a restart", () => {
       };
       const manifestFiles: Record<string, { bytes: number; sha256: string }> =
         {};
-      for (const [rel, body] of Object.entries(files)) {
-        writeFileSync(path.join(runtimeDir, "runtime", rel), body);
-        manifestFiles[rel] = {
-          bytes: Buffer.byteLength(body),
-          sha256: sha256Hex(body),
-        };
-      }
-      const filesJson = JSON.stringify({
-        schema: 1,
-        target,
-        sourceCommit: "a".repeat(40),
-        sourceArchiveSha256: options.runtimeDigest,
-        files: manifestFiles,
-      });
-      writeFileSync(path.join(runtimeDir, "runtime", "files.json"), filesJson);
-      let nodeManifest:
-        | {
-            readonly version: string;
-            readonly file: string;
-            readonly sha256: string;
-          }
-        | undefined;
-      if (options.includeNode) {
-        mkdirSync(path.join(runtimeDir, "node", "bin"), { recursive: true });
-        fixtureNode(path.join(runtimeDir, "node", "bin", "node"));
-        nodeManifest = {
-          version: NODE_RUNTIME_VERSION,
-          file: "node/bin/node",
-          sha256: sha256Hex(readFileSync(process.execPath)),
-        };
-      }
-      writeFileSync(
-        path.join(runtimeDir, "manifest.json"),
-        JSON.stringify({
+      if (options.runtimeLayout === "zst") {
+        const treeRoot = path.join(root, "zst-runtime-tree");
+        const runtimeTree = path.join(treeRoot, "runtime");
+        mkdirSync(path.join(runtimeTree, "web", "dist"), { recursive: true });
+        mkdirSync(path.join(runtimeTree, "node-services", "dist"), {
+          recursive: true,
+        });
+        for (const [rel, body] of Object.entries(files)) {
+          writeFileSync(path.join(runtimeTree, rel), body);
+          manifestFiles[rel] = {
+            bytes: Buffer.byteLength(body),
+            sha256: sha256Hex(body),
+          };
+        }
+        const filesJson = JSON.stringify({
+          schema: 1,
           target,
           sourceCommit: "a".repeat(40),
           sourceArchiveSha256: options.runtimeDigest,
-          layout: "directory",
-          directory: {
-            file: "runtime/files.json",
-            sha256: sha256Hex(filesJson),
-          },
-          ...(nodeManifest ? { node: nodeManifest } : {}),
-        }),
-      );
+          files: manifestFiles,
+        });
+        writeFileSync(path.join(runtimeTree, "files.json"), filesJson);
+        mkdirSync(runtimeDir, { recursive: true });
+        const archiveBytes = zstdCompressSync(
+          execFileSync(tarCommand(), ["-cf", "-", "-C", treeRoot, "runtime"], {
+            env: { ...process.env, COPYFILE_DISABLE: "1" },
+          }),
+        );
+        writeFileSync(path.join(runtimeDir, "runtime.tar.zst"), archiveBytes);
+        writeFileSync(
+          path.join(runtimeDir, "manifest.json"),
+          JSON.stringify({
+            target,
+            sourceCommit: "a".repeat(40),
+            sourceArchiveSha256: options.runtimeDigest,
+            layout: "archive",
+            archive: {
+              file: "runtime.tar.zst",
+              sha256: sha256Hex(archiveBytes),
+              bytes: archiveBytes.length,
+            },
+          }),
+        );
+      } else {
+        mkdirSync(path.join(runtimeDir, "runtime", "web", "dist"), {
+          recursive: true,
+        });
+        mkdirSync(path.join(runtimeDir, "runtime", "node-services", "dist"), {
+          recursive: true,
+        });
+        for (const [rel, body] of Object.entries(files)) {
+          writeFileSync(path.join(runtimeDir, "runtime", rel), body);
+          manifestFiles[rel] = {
+            bytes: Buffer.byteLength(body),
+            sha256: sha256Hex(body),
+          };
+        }
+        const filesJson = JSON.stringify({
+          schema: 1,
+          target,
+          sourceCommit: "a".repeat(40),
+          sourceArchiveSha256: options.runtimeDigest,
+          files: manifestFiles,
+        });
+        writeFileSync(
+          path.join(runtimeDir, "runtime", "files.json"),
+          filesJson,
+        );
+        let nodeManifest:
+          | {
+              readonly version: string;
+              readonly file: string;
+              readonly sha256: string;
+            }
+          | undefined;
+        if (options.includeNode) {
+          mkdirSync(path.join(runtimeDir, "node", "bin"), { recursive: true });
+          fixtureNode(path.join(runtimeDir, "node", "bin", "node"));
+          nodeManifest = {
+            version: NODE_RUNTIME_VERSION,
+            file: "node/bin/node",
+            sha256: sha256Hex(readFileSync(process.execPath)),
+          };
+        }
+        writeFileSync(
+          path.join(runtimeDir, "manifest.json"),
+          JSON.stringify({
+            target,
+            sourceCommit: "a".repeat(40),
+            sourceArchiveSha256: options.runtimeDigest,
+            layout: "directory",
+            directory: {
+              file: "runtime/files.json",
+              sha256: sha256Hex(filesJson),
+            },
+            ...(nodeManifest ? { node: nodeManifest } : {}),
+          }),
+        );
+      }
     }
-    return { staged, installerDir, runtimeDir };
+    return { staged, resourcesDir, installerDir, runtimeDir };
   };
 
   const buildLocalmodelsArchive = (root: string) => {
@@ -6389,7 +6454,10 @@ describe("LocalServerModule after a restart", () => {
       }) as typeof fetch;
 
       // Without a local installation record, nothing is downloaded.
-      const unconfigured = fixture({ fetch: fetcher }, {});
+      const unconfigured = fixture(
+        { platform: process.platform, arch: process.arch, fetch: fetcher },
+        {},
+      );
       await unconfigured.host.start();
       await unconfigured.module.prepareUpdateTool(
         staged,
@@ -6412,17 +6480,21 @@ describe("LocalServerModule after a restart", () => {
           method: "probe",
         }),
       );
-      const f = fixture({ fetch: fetcher }, enrolled, (home) => {
-        mkdirSync(path.join(home, "desktop"), { recursive: true });
-        writeFileSync(
-          path.join(home, "desktop", "local-server.json"),
-          JSON.stringify({
-            home: customHome,
-            repo: "/source",
-            origin: "http://localhost:3000",
-          }),
-        );
-      });
+      const f = fixture(
+        { platform: process.platform, arch: process.arch, fetch: fetcher },
+        enrolled,
+        (home) => {
+          mkdirSync(path.join(home, "desktop"), { recursive: true });
+          writeFileSync(
+            path.join(home, "desktop", "local-server.json"),
+            JSON.stringify({
+              home: customHome,
+              repo: "/source",
+              origin: "http://localhost:3000",
+            }),
+          );
+        },
+      );
       await f.host.start();
       await waitForInstaller(() =>
         expect(f.module.status().phase).toBe("ready"),
@@ -7294,21 +7366,29 @@ describe("LocalServerModule after a restart", () => {
       const target = `${process.platform}-${process.arch}`;
       const nextNodeVersion = "99.1.0";
       const nextArchive = sourceArchive(path.join(root, "node-src"), "next");
-      const { staged, runtimeDir } = buildStagedUpdateBundle(root, {
-        target,
-        source: nextArchive,
-        teamhubDigest: nextArchive.sha256,
-        runtimeDigest: nextArchive.sha256,
-        includeTool: false,
-      });
+      const { staged, resourcesDir, runtimeDir } = buildStagedUpdateBundle(
+        root,
+        {
+          target,
+          source: nextArchive,
+          teamhubDigest: nextArchive.sha256,
+          runtimeDigest: nextArchive.sha256,
+          includeTool: false,
+        },
+      );
 
+      const nodeBinaryName = isWindowsHost ? "node.exe" : "node";
+      const expectedSharedBinary = isWindowsHost
+        ? "runtime/bin/node.exe"
+        : "runtime/bin/node";
+      const wrongSharedBinary = isWindowsHost
+        ? "runtime/bin/node"
+        : "runtime/bin/node.exe";
       const stagedNodePath = path.join(
-        staged,
-        "Contents",
-        "Resources",
+        resourcesDir,
         "runtime",
         "bin",
-        "node",
+        nodeBinaryName,
       );
       mkdirSync(path.dirname(stagedNodePath), { recursive: true });
       const nodePayload = "#!/bin/sh\necho node-99\n";
@@ -7323,7 +7403,7 @@ describe("LocalServerModule after a restart", () => {
       manifest.node = {
         version: nextNodeVersion,
         shared: true,
-        binary: "runtime/bin/node",
+        binary: expectedSharedBinary,
         sha256: nodeSha,
       };
       writeFileSync(manifestPath, JSON.stringify(manifest));
@@ -7333,7 +7413,7 @@ describe("LocalServerModule after a restart", () => {
         "current-app",
         "runtime",
         "bin",
-        "node",
+        nodeBinaryName,
       );
       mkdirSync(path.dirname(currentNodePath), { recursive: true });
       writeFileSync(currentNodePath, "#!/bin/sh\necho node-old\n", {
@@ -7351,14 +7431,22 @@ describe("LocalServerModule after a restart", () => {
       await f.module.prepareUpdateTool(staged, new AbortController().signal);
       offChanged();
 
-      const expectedNode = path.join(
-        f.home,
-        "desktop",
-        "node",
-        `v${nextNodeVersion}`,
-        "bin",
-        "node",
-      );
+      const expectedNode = isWindowsHost
+        ? path.join(
+            f.home,
+            "desktop",
+            "node",
+            `v${nextNodeVersion}`,
+            "node.exe",
+          )
+        : path.join(
+            f.home,
+            "desktop",
+            "node",
+            `v${nextNodeVersion}`,
+            "bin",
+            "node",
+          );
       expect(existsSync(expectedNode)).toBe(true);
       expect(readFileSync(expectedNode, "utf8")).toBe(nodePayload);
       expect(changed).not.toHaveBeenCalled();
@@ -7392,7 +7480,7 @@ describe("LocalServerModule after a restart", () => {
           node: {
             version: "../escape",
             shared: true,
-            binary: "runtime/bin/node",
+            binary: expectedSharedBinary,
             sha256: nodeSha,
           },
         },
@@ -7401,7 +7489,7 @@ describe("LocalServerModule after a restart", () => {
           node: {
             version: "99.4.0",
             shared: true,
-            binary: "runtime/bin/node.exe",
+            binary: wrongSharedBinary,
             sha256: nodeSha,
           },
         },
@@ -7410,7 +7498,7 @@ describe("LocalServerModule after a restart", () => {
           node: {
             version: "99.5.0",
             shared: true,
-            binary: "runtime/bin/node",
+            binary: expectedSharedBinary,
             sha256: "",
           },
         },
@@ -7419,7 +7507,7 @@ describe("LocalServerModule after a restart", () => {
           node: {
             version: "99.6.0",
             shared: false,
-            binary: "runtime/bin/node",
+            binary: expectedSharedBinary,
             sha256: nodeSha,
           },
         },
@@ -7429,7 +7517,7 @@ describe("LocalServerModule after a restart", () => {
           node: {
             version: "99.7.0",
             shared: true,
-            binary: "runtime/bin/node",
+            binary: expectedSharedBinary,
             sha256: nodeSha,
           },
         },
@@ -7462,7 +7550,7 @@ describe("LocalServerModule after a restart", () => {
         node: {
           version: "99.2.0",
           shared: true,
-          binary: "runtime/bin/node",
+          binary: expectedSharedBinary,
           sha256: nodeSha,
         },
       };
@@ -7505,21 +7593,22 @@ describe("LocalServerModule after a restart", () => {
         path.join(root, "node-mismatch-src"),
         "next-mismatch",
       );
-      const { staged, runtimeDir } = buildStagedUpdateBundle(root, {
-        target,
-        source: nextArchive,
-        teamhubDigest: nextArchive.sha256,
-        runtimeDigest: nextArchive.sha256,
-        includeTool: false,
-      });
+      const { staged, resourcesDir, runtimeDir } = buildStagedUpdateBundle(
+        root,
+        {
+          target,
+          source: nextArchive,
+          teamhubDigest: nextArchive.sha256,
+          runtimeDigest: nextArchive.sha256,
+          includeTool: false,
+        },
+      );
 
       const stagedNodePath = path.join(
-        staged,
-        "Contents",
-        "Resources",
+        resourcesDir,
         "runtime",
         "bin",
-        "node",
+        isWindowsHost ? "node.exe" : "node",
       );
       mkdirSync(path.dirname(stagedNodePath), { recursive: true });
       writeFileSync(stagedNodePath, "#!/bin/sh\necho tampered-node\n", {
@@ -7534,7 +7623,7 @@ describe("LocalServerModule after a restart", () => {
       manifest.node = {
         version: nextNodeVersion,
         shared: true,
-        binary: "runtime/bin/node",
+        binary: isWindowsHost ? "runtime/bin/node.exe" : "runtime/bin/node",
         sha256: "0".repeat(64),
       };
       writeFileSync(manifestPath, JSON.stringify(manifest));
@@ -7607,6 +7696,230 @@ describe("LocalServerModule after a restart", () => {
       await f.host.stop("quit");
     } finally {
       removeSpy.mockRestore();
+      info.mockRestore();
+    }
+  });
+
+  it("pre-stages Windows source checkout, TeamHub binaries, runtime.tar.zst, shared node.exe, and localmodels kit from resources/app/dist/installer", async () => {
+    const info = vi.spyOn(silentLog, "info");
+    try {
+      const root = tempDirectory();
+      const target = "win32-x64";
+      const nextNodeVersion = "99.8.0";
+      const checkLocalmodelsTool =
+        process.platform === "win32" && process.arch === "x64";
+      const tool = checkLocalmodelsTool
+        ? buildLocalmodelsArchive(root)
+        : undefined;
+      const nextArchive = sourceArchive(path.join(root, "win-next"), "win");
+      const { staged, resourcesDir, runtimeDir } = buildStagedUpdateBundle(
+        root,
+        {
+          target,
+          platform: "win32",
+          arch: "x64",
+          nativeSources: [{ target }],
+          source: nextArchive,
+          teamhubDigest: nextArchive.sha256,
+          windowsBinaries: true,
+          runtimeDigest: nextArchive.sha256,
+          runtimeLayout: "zst",
+          includeTool: checkLocalmodelsTool,
+          ...(tool
+            ? {
+                toolBytes: tool.bytes,
+                toolSha256: tool.sha256,
+                toolManifestSha256: tool.manifestSha256,
+              }
+            : {}),
+        },
+      );
+
+      // Confirm Windows layout places installer assets under resources/app/dist/installer.
+      expect(
+        existsSync(
+          path.join(
+            staged,
+            "resources",
+            "app",
+            "dist",
+            "installer",
+            "distribution.json",
+          ),
+        ),
+      ).toBe(true);
+      expect(existsSync(path.join(staged, "Contents"))).toBe(false);
+
+      const stagedNodePath = path.join(
+        resourcesDir,
+        "runtime",
+        "bin",
+        "node.exe",
+      );
+      mkdirSync(path.dirname(stagedNodePath), { recursive: true });
+      const nodePayload = Buffer.from("MZ-windows-node-99");
+      writeFileSync(stagedNodePath, nodePayload);
+      const nodeSha = sha256Hex(nodePayload);
+
+      const manifestPath = path.join(runtimeDir, "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      manifest.node = {
+        version: nextNodeVersion,
+        shared: true,
+        binary: "runtime/bin/node.exe",
+        sha256: nodeSha,
+      };
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+
+      let toolFetches = 0;
+      const fetcher = (async (input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (tool && url === "https://cdn.example/localmodels.tgz") {
+          toolFetches += 1;
+          return new Response(tool.bytes, {
+            headers: { "content-length": String(tool.bytes.length) },
+          });
+        }
+        return new Response(null, { status: 404 });
+      }) as typeof fetch;
+
+      const f = fixture(
+        {
+          platform: "win32",
+          arch: "x64",
+          fetch: fetcher,
+        },
+        enrolled,
+        (home) => {
+          const activeRepo = path.join(home, "desktop", "source", "active");
+          unpackedSource(activeRepo);
+          mkdirSync(path.join(home, "desktop"), { recursive: true });
+          writeFileSync(
+            path.join(home, "desktop", "local-server.json"),
+            JSON.stringify({
+              home,
+              repo: activeRepo,
+              origin: "http://localhost:3000",
+            }),
+          );
+          writeFileSync(
+            path.join(home, "region.json"),
+            JSON.stringify({
+              schema: 1,
+              region: "global",
+              resolved_at: new Date().toISOString(),
+              method: "probe",
+            }),
+          );
+        },
+        installerApi(),
+      );
+      await f.host.start();
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+
+      const beforeStatus = f.module.status();
+      const changed = vi.fn();
+      const offChanged = f.bus.on("local-server.changed", changed);
+      await f.module.prepareUpdateTool(staged, new AbortController().signal);
+      offChanged();
+
+      const preStagedSource = path.join(
+        f.home,
+        "desktop",
+        "source",
+        nextArchive.sha256.slice(0, 16),
+      );
+      expect(
+        existsSync(path.join(preStagedSource, "scripts/source-native.mjs")),
+      ).toBe(true);
+      expect(
+        readFileSync(
+          path.join(preStagedSource, ".simplexai-runtime/prebuilt/teamhub.exe"),
+          "utf8",
+        ),
+      ).toBe("teamhub");
+      expect(
+        readFileSync(
+          path.join(preStagedSource, ".simplexai-runtime/prebuilt/migrate.exe"),
+          "utf8",
+        ),
+      ).toBe("migrate");
+      expect(
+        readFileSync(
+          path.join(preStagedSource, ".simplexai-runtime/prebuilt/account.exe"),
+          "utf8",
+        ),
+      ).toBe("account");
+      expect(
+        existsSync(
+          path.join(
+            preStagedSource,
+            ".simplexai-runtime/offline/verified.json",
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        readFileSync(
+          path.join(
+            preStagedSource,
+            ".simplexai-runtime/offline/web/static-host.mjs",
+          ),
+          "utf8",
+        ),
+      ).toBe("console.log('ok');");
+
+      const expectedNode = path.join(
+        f.home,
+        "desktop",
+        "node",
+        `v${nextNodeVersion}`,
+        "node.exe",
+      );
+      expect(existsSync(expectedNode)).toBe(true);
+      expect(readFileSync(expectedNode)).toEqual(nodePayload);
+
+      if (tool) {
+        expect(toolFetches).toBe(1);
+        const resolvedTool = await ensureLocalmodelsTool(
+          f.home,
+          {},
+          {
+            source: {
+              url: "https://cdn.example/localmodels.tgz",
+              sha256: tool.sha256,
+              bytes: tool.bytes.length,
+              sourceCommit: "a".repeat(40),
+              manifestSha256: tool.manifestSha256,
+            },
+          },
+        );
+        expect(resolvedTool.moduleDir).toBe(
+          path.join(f.home, "tools", "localmodels", tool.sha256, "modules"),
+        );
+        expect(info).toHaveBeenCalledWith(
+          "local_server.update_tool_prepared",
+          expect.objectContaining({ sha256: tool.sha256.slice(0, 12) }),
+        );
+      }
+
+      expect(changed).not.toHaveBeenCalled();
+      expect(f.module.status()).toEqual(beforeStatus);
+      expect(info).toHaveBeenCalledWith(
+        "local_server.update_source_prepared",
+        expect.objectContaining({ source: path.basename(preStagedSource) }),
+      );
+      expect(info).toHaveBeenCalledWith(
+        "local_server.update_node_prepared",
+        expect.objectContaining({ version: nextNodeVersion }),
+      );
+
+      await f.host.stop("quit");
+    } finally {
       info.mockRestore();
     }
   });

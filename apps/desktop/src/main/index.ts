@@ -309,6 +309,7 @@ async function main(): Promise<void> {
       ? updateInstallFor(process.platform, process.execPath, existsSync)
       : undefined,
     downloadDirectory: path.join(userData, "updates"),
+    logDirectory: path.join(userData, "logs"),
     prepareUpdate: (stagedPath, signal) =>
       localServer.prepareUpdateTool(stagedPath, signal),
     announce: (state) => {

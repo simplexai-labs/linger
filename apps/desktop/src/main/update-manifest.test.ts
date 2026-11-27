@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FEED_URL,
   ManifestError,
+  archivePackageFor,
   compareVersions,
   feedUrls,
   packageFor,
@@ -47,6 +48,40 @@ describe("update manifest", () => {
       "Linger-0.16.1-arm64.tar.gz",
     );
     expect(packageFor(parsed, "darwin", "x64")).toBeUndefined();
+    expect(archivePackageFor(parsed, "win32", "x64")).toBeUndefined();
+  });
+
+  it("resolves archivePackageFor independently from packageFor", () => {
+    const { privateKey, publicPem } = keys();
+    const withArchive = {
+      schema: 2,
+      version: "0.17.0",
+      packages: {
+        "win32-x64": {
+          file: "Linger-0.17.0-windows-x64-setup.exe",
+          sha256: "a".repeat(64),
+          size: 100,
+        },
+        "win32-x64-archive": {
+          file: "Linger-0.17.0-windows-x64-portable.zip",
+          sha256: "b".repeat(64),
+          size: 200,
+        },
+      },
+    };
+    const { bytes, signature } = signed(withArchive, privateKey);
+    const parsed = verifyManifest(bytes, signature, publicPem);
+    expect(packageFor(parsed, "win32", "x64")).toEqual({
+      file: "Linger-0.17.0-windows-x64-setup.exe",
+      sha256: "a".repeat(64),
+      size: 100,
+    });
+    expect(archivePackageFor(parsed, "win32", "x64")).toEqual({
+      file: "Linger-0.17.0-windows-x64-portable.zip",
+      sha256: "b".repeat(64),
+      size: 200,
+    });
+    expect(archivePackageFor(parsed, "darwin", "arm64")).toBeUndefined();
   });
 
   it("rejects tampered bytes and other keys", () => {
