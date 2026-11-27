@@ -243,4 +243,64 @@ describe("Voice Mode picture-in-picture window", () => {
     expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
     stop();
   });
+
+  it("closes the floating window on opener beforeunload without notifying closedByHuman or double-closing on pagehide", async () => {
+    const fake = installFakeDesktopVoiceWindow();
+    const closedByHuman = vi.fn();
+    const stop = onVoicePipClosedByHuman("recording", closedByHuman);
+    try {
+      await openVoicePip("recording");
+      window.dispatchEvent(new Event("beforeunload"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).not.toHaveBeenCalled();
+
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it("closes the floating window on opener pagehide without notifying closedByHuman", async () => {
+    const fake = installFakeDesktopVoiceWindow();
+    const closedByHuman = vi.fn();
+    const stop = onVoicePipClosedByHuman("voice-mode", closedByHuman);
+    try {
+      await openVoicePip("voice-mode");
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it("removes opener unload listeners after a direct user close of the floating window", async () => {
+    const fake = installFakeDesktopVoiceWindow();
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const closedByHuman = vi.fn();
+    const stop = onVoicePipClosedByHuman("recording", closedByHuman);
+    try {
+      await openVoicePip("recording");
+      fake.voiceWindow.close();
+      expect(closedByHuman).toHaveBeenCalledOnce();
+      expect(removeListener).toHaveBeenCalledWith(
+        "beforeunload",
+        expect.any(Function),
+      );
+      expect(removeListener).toHaveBeenCalledWith(
+        "pagehide",
+        expect.any(Function),
+      );
+
+      window.dispatchEvent(new Event("beforeunload"));
+      window.dispatchEvent(new Event("pagehide"));
+      expect(fake.voiceWindow.close).toHaveBeenCalledOnce();
+      expect(closedByHuman).toHaveBeenCalledOnce();
+    } finally {
+      stop();
+      removeListener.mockRestore();
+    }
+  });
 });

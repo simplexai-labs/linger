@@ -32,7 +32,13 @@ const pipTitles = {
   recording: voiceWindowMessages.meetingTitle,
 } satisfies Record<VoicePipOwner, Message<string>>;
 
-let pip: { owner: VoicePipOwner; window: Window } | undefined;
+interface ActiveVoicePip {
+  cleanup: () => void;
+  owner: VoicePipOwner;
+  window: Window;
+}
+
+let pip: ActiveVoicePip | undefined;
 const listeners = new Set<() => void>();
 const closedByHuman = new Set<(owner: VoicePipOwner) => void>();
 
@@ -86,15 +92,34 @@ export async function openVoicePip(
     if (!opened) return undefined;
     opened.document.title = translate(pipTitles[owner]);
     const stopMirroring = mirrorStyles(opened.document);
-    opened.addEventListener("pagehide", () => {
+    let cleanedUp = false;
+    const onOpenerLeave = () => {
+      if (pip?.window !== opened) return;
+      // The opener page is reloading or unloading: detach and close the
+      // floating window without firing closedByHuman or notifying React
+      // subscribers, which would otherwise reopen a replacement window.
+      pip = undefined;
+      cleanup();
+      opened.close();
+    };
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      window.removeEventListener("beforeunload", onOpenerLeave);
+      window.removeEventListener("pagehide", onOpenerLeave);
       stopMirroring();
+    };
+    opened.addEventListener("pagehide", () => {
+      cleanup();
       if (pip?.window !== opened) return;
       // Closed from the window itself rather than from the page: the desktop
       // window has no way back into the page, so this ends its session.
       publish(undefined);
       for (const listener of closedByHuman) listener(owner);
     });
-    publish({ owner, window: opened });
+    window.addEventListener("beforeunload", onOpenerLeave);
+    window.addEventListener("pagehide", onOpenerLeave);
+    publish({ cleanup, owner, window: opened });
     return opened;
   } catch {
     return undefined;
@@ -103,9 +128,10 @@ export async function openVoicePip(
 
 export function closeVoicePip(owner: VoicePipOwner) {
   if (pip?.owner !== owner) return;
-  const current = pip.window;
+  const current = pip;
   publish(undefined);
-  current.close();
+  current.cleanup();
+  current.window.close();
 }
 
 /** Runs when this owner's window closes from the window, not from the page. */
@@ -173,6 +199,7 @@ function mirrorStyles(target: Document) {
 }
 
 export function resetVoicePipForTest() {
+  pip?.cleanup();
   pip = undefined;
   listeners.clear();
   closedByHuman.clear();

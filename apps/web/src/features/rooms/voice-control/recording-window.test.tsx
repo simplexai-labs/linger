@@ -1206,6 +1206,23 @@ describe("Recording window", () => {
       ).toBeNull();
     },
   );
+
+  it("closes the floating window without stopping the recording when the opener unloads", async () => {
+    const { open, pipWindow } = stubDesktopVoiceWindow();
+    const voice = voiceValue();
+    renderWindow(voice);
+    await waitFor(() => expect(open).toHaveBeenCalledOnce());
+
+    act(() => {
+      window.dispatchEvent(new Event("beforeunload"));
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(pipWindow.close).toHaveBeenCalledOnce();
+    expect(voice.leavePage).not.toHaveBeenCalled();
+    expect(voice.stopCapture).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledOnce();
+  });
 });
 
 function expectInDocument(element: HTMLElement, target: Document) {

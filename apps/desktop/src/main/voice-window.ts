@@ -156,11 +156,13 @@ export function adoptVoiceWindow(
   contents.on("will-attach-webview", (event) => event.preventDefault());
 
   hold(opener, 1);
+  // Destroy rather than close on main-process teardown (navigation, crash,
+  // replacement, or main-window close) so Electron does not dispatch popup
+  // `pagehide` into a still-alive opener page as if the user clicked the
+  // floating window's close button; Electron still emits `closed` on `child`.
   const close = (): void => {
-    if (!child.isDestroyed()) child.close();
+    if (!child.isDestroyed()) child.destroy();
   };
-  // The window belongs to the page that filled it: a reload or a crash leaves
-  // nothing to drive it.
   const onNavigate = (details: {
     isMainFrame: boolean;
     isSameDocument: boolean;

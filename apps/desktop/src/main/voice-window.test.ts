@@ -23,7 +23,10 @@ function fakes() {
     setTitle: vi.fn(),
     isDestroyed: vi.fn(() => false),
     close: vi.fn(() => child.emit("closed")),
-    destroy: vi.fn(),
+    destroy: vi.fn(() => {
+      child.isDestroyed.mockReturnValue(true);
+      child.emit("closed");
+    }),
   });
   const mainFrame = {};
   const opener = Object.assign(new EventEmitter(), {
@@ -138,36 +141,74 @@ describe("adoptVoiceWindow", () => {
     expect(first.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(true);
   });
 
-  it("closes when the page navigates to another document or crashes", () => {
-    const sameDocument = fakes();
-    adopt(sameDocument);
-    sameDocument.opener.emit("did-start-navigation", {
+  it("destroys the window without calling close when the page navigates to another document or crashes", () => {
+    const navigated = fakes();
+    const main = new EventEmitter();
+    const screen = new EventEmitter();
+    adoptVoiceWindow(
+      navigated.child as never,
+      navigated.opener as never,
+      "linux",
+      [
+        [main, ["show", "restore", "focus"]],
+        [screen, ["display-removed"]],
+      ],
+    );
+    navigated.opener.emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: true,
     });
-    sameDocument.opener.emit("did-start-navigation", {
+    navigated.opener.emit("did-start-navigation", {
       isMainFrame: false,
       isSameDocument: false,
     });
-    expect(sameDocument.child.close).not.toHaveBeenCalled();
-    sameDocument.opener.emit("did-start-navigation", {
+    expect(navigated.child.destroy).not.toHaveBeenCalled();
+    expect(navigated.child.close).not.toHaveBeenCalled();
+
+    navigated.opener.emit("did-start-navigation", {
       isMainFrame: true,
       isSameDocument: false,
     });
-    expect(sameDocument.child.close).toHaveBeenCalledOnce();
+    expect(navigated.child.destroy).toHaveBeenCalledOnce();
+    expect(navigated.child.close).not.toHaveBeenCalled();
+    expect(navigated.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(
+      true,
+    );
+    expect(navigated.opener.listenerCount("did-start-navigation")).toBe(0);
+    expect(navigated.opener.listenerCount("render-process-gone")).toBe(0);
+    expect(main.listenerCount("focus")).toBe(0);
+    expect(screen.listenerCount("display-removed")).toBe(0);
 
     const crashed = fakes();
-    adopt(crashed);
+    const crashedMain = new EventEmitter();
+    adoptVoiceWindow(crashed.child as never, crashed.opener as never, "linux", [
+      [crashedMain, ["focus"]],
+    ]);
     crashed.opener.emit("render-process-gone");
-    expect(crashed.child.close).toHaveBeenCalledOnce();
+    expect(crashed.child.destroy).toHaveBeenCalledOnce();
+    expect(crashed.child.close).not.toHaveBeenCalled();
+    expect(crashed.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(
+      true,
+    );
+    expect(crashed.opener.listenerCount("did-start-navigation")).toBe(0);
+    expect(crashed.opener.listenerCount("render-process-gone")).toBe(0);
+    expect(crashedMain.listenerCount("focus")).toBe(0);
   });
 
-  it("returns a close function that is safe after the window is gone", () => {
-    const f = fakes();
-    const close = adopt(f);
-    f.child.isDestroyed.mockReturnValue(true);
-    close();
-    expect(f.child.close).not.toHaveBeenCalled();
+  it("returns a teardown function that destroys an open window and is safe after it is gone", () => {
+    const open = fakes();
+    const teardown = adopt(open);
+    teardown();
+    expect(open.child.destroy).toHaveBeenCalledOnce();
+    expect(open.child.close).not.toHaveBeenCalled();
+    expect(open.opener.setBackgroundThrottling).toHaveBeenLastCalledWith(true);
+
+    const gone = fakes();
+    const closeGone = adopt(gone);
+    gone.child.isDestroyed.mockReturnValue(true);
+    closeGone();
+    expect(gone.child.destroy).not.toHaveBeenCalled();
+    expect(gone.child.close).not.toHaveBeenCalled();
   });
 
   it("keeps the window on its empty page", () => {
