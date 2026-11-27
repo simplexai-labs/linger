@@ -5,6 +5,10 @@ import {
   Link01Icon,
   Logout01Icon,
 } from "@hugeicons/core-free-icons";
+import {
+  inlineNameButtonClassName,
+  inlineNameInputClassName,
+} from "@/components/ui/inline-name";
 import { Icon } from "@/components/ui/icon";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -291,7 +295,7 @@ function RoomHeader({
         <input
           aria-label={t(m.name)}
           ref={nameInput}
-          className="mt-2.5 max-w-full rounded-md bg-card px-2 text-center text-[15px] font-semibold leading-5 text-foreground shadow-outline outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+          className={`mt-2.5 text-center text-[15px] font-semibold leading-5 text-foreground ${inlineNameInputClassName}`}
           disabled={rename.isPending}
           maxLength={120}
           onBlur={save}
@@ -310,7 +314,8 @@ function RoomHeader({
         <h2 className="mt-2.5 max-w-full text-[15px] font-semibold leading-5 text-foreground">
           <button
             aria-label={t(m.renameRoom, { name: room.name })}
-            className="max-w-full break-words rounded-md px-2 py-0.5 hover:bg-sidebar-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+            className={inlineNameButtonClassName}
+            title={room.name}
             onClick={() => {
               rename.reset();
               setDraft(room.name);
@@ -322,7 +327,10 @@ function RoomHeader({
           </button>
         </h2>
       ) : (
-        <h2 className="mt-2.5 break-words text-[15px] font-semibold leading-5 text-foreground">
+        <h2
+          className="mt-2.5 max-w-full truncate px-2 text-[15px] font-semibold leading-5 text-foreground"
+          title={room.name}
+        >
           {room.name}
         </h2>
       )}

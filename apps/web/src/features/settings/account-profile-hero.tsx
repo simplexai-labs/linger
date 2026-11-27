@@ -1,4 +1,8 @@
 import { Camera01Icon } from "@hugeicons/core-free-icons";
+import {
+  inlineNameButtonClassName,
+  inlineNameInputClassName,
+} from "@/components/ui/inline-name";
 import { Icon } from "@/components/ui/icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -148,7 +152,7 @@ export function AccountProfileHero({
               // eslint-disable-next-line jsx-a11y/no-autofocus -- the field replaces the name the person just clicked
               autoFocus
               aria-label={t(accountSettingsMessages.profileDisplayName)}
-              className="max-w-full rounded-md bg-card px-2 py-0.5 text-lg font-semibold leading-6 text-foreground shadow-outline outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+              className={`text-lg font-semibold leading-6 text-foreground ${inlineNameInputClassName}`}
               disabled={busy}
               maxLength={120}
               onBlur={saveName}
@@ -166,7 +170,8 @@ export function AccountProfileHero({
             <h2 className="max-w-full text-lg font-semibold leading-6 text-foreground">
               <button
                 aria-label={t(accountSettingsMessages.editDisplayName)}
-                className="max-w-full break-words rounded-md px-2 py-0.5 text-left hover:bg-sidebar-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus disabled:opacity-50"
+                className={`text-left ${inlineNameButtonClassName}`}
+                title={account.name}
                 disabled={busy}
                 onClick={() => {
                   setName(account.name);

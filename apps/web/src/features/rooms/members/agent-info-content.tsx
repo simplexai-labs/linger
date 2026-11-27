@@ -10,6 +10,10 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  inlineNameButtonClassName,
+  inlineNameInputClassName,
+} from "@/components/ui/inline-name";
 import { AgentConnectors } from "@/features/apps/agent-connectors";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { Message } from "@/i18n/messages";
@@ -301,7 +305,7 @@ function AgentInfoIdentity({
           aria-label={t(agentInfoMessages.agentName)}
           ref={nameInput}
           autoFocus
-          className="mt-2.5 max-w-full rounded-md bg-card px-2 text-center text-[15px] font-semibold leading-5 text-foreground shadow-outline outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
+          className={`mt-2.5 text-center text-[15px] font-semibold leading-5 text-foreground ${inlineNameInputClassName}`}
           disabled={nameBusy}
           maxLength={120}
           onBlur={() => void saveName()}
@@ -326,8 +330,9 @@ function AgentInfoIdentity({
             aria-label={t(agentInfoMessages.editName, {
               name: actor.display_name,
             })}
-            className="max-w-full break-words rounded-md px-2 py-0.5 hover:bg-sidebar-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-focus disabled:opacity-50"
+            className={inlineNameButtonClassName}
             disabled={nameBusy}
+            title={actor.display_name}
             onClick={() => {
               setDraft(actor.display_name);
               setEditing(true);
@@ -338,7 +343,10 @@ function AgentInfoIdentity({
           </button>
         </h2>
       ) : (
-        <h2 className="mt-2.5 break-words text-[15px] font-semibold leading-5 text-foreground">
+        <h2
+          className="mt-2.5 max-w-full truncate px-2 text-[15px] font-semibold leading-5 text-foreground"
+          title={actor.display_name}
+        >
           {actor.display_name}
         </h2>
       )}
