@@ -65,6 +65,10 @@ line breaks into its opening line.
   desktop's offline runtime bundles each entry into one file
   (`apps/desktop/scripts/bundle-node-services.mjs`), where every module shares
   the entry's URL and relative paths resolve against the directory it runs in.
+- Voice readiness applies only to the complete wanted-worker set checked by a
+  probe batch. After all probes finish, recheck each child's identity and key
+  generation and reject results from workers that exited, were replaced, or
+  were joined by a newly wanted worker during the batch.
 - Packages that hold model data (the Voice VAD binding)
   resolve through `src/model-packages.ts`: from node_modules in development
   and images, downloaded on first use where the offline runtime lists them in

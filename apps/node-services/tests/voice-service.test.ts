@@ -29,6 +29,7 @@ async function harness(
     env?: NodeJS.ProcessEnv;
     failure?: "network" | number | "json";
     healthy?: boolean;
+    probeWorker?: (port: number) => Promise<boolean>;
   } = {},
 ) {
   vi.useFakeTimers();
@@ -79,7 +80,7 @@ async function harness(
     installModels: async () => undefined,
     probeWorker: async (port) => {
       probed.push(port);
-      return health.healthy;
+      return options.probeWorker ? options.probeWorker(port) : health.healthy;
     },
     allocatePort: async () => nextPort++,
     spawnWorker: (worker, spec) => {
@@ -349,6 +350,67 @@ describe("voice worker reconcile", () => {
     await answered;
     expect(answer).toEqual({ ready: true });
     await shutdown();
+  });
+
+  it.each(["rotates", "exits", "adds"] as const)(
+    "rejects a pending health result when the worker set %s",
+    async (change) => {
+      let release!: (healthy: boolean) => void;
+      const held = new Promise<boolean>((resolve) => {
+        release = resolve;
+      });
+      const { route, teamHub, service, of, shutdown } = await harness({
+        keys: { xai_api_key: XAI },
+        probeWorker: async () => held,
+      });
+      try {
+        const reading = route.readiness!();
+        if (change === "exits") of("live")[0]!.child.emit("exit", 1, null);
+        else {
+          teamHub.keys =
+            change === "rotates"
+              ? { xai_api_key: "xai-key-2" }
+              : { xai_api_key: XAI, soniox_api_key: SONIOX };
+          await service.reconcile();
+        }
+        release(true);
+        expect(await reading).toEqual({
+          ready: false,
+          reason: "voice_worker_reconnecting",
+        });
+        if (change === "adds")
+          expect(await route.readiness!()).toEqual({ ready: true });
+      } finally {
+        release(true);
+        await shutdown();
+      }
+    },
+  );
+
+  it("rechecks an earlier worker after the last outstanding probe finishes", async () => {
+    const releases = new Map<number, (healthy: boolean) => void>();
+    const { route, teamHub, service, shutdown, of } = await harness({
+      keys: { xai_api_key: XAI, soniox_api_key: SONIOX },
+      probeWorker: (port) =>
+        new Promise<boolean>((resolve) => {
+          releases.set(port, resolve);
+        }),
+    });
+    try {
+      const reading = route.readiness!();
+      releases.get(Number(of("asr")[0]!.spec.env.VOICE_WORKER_PORT))!(true);
+      await Promise.resolve();
+      teamHub.keys = { xai_api_key: XAI, soniox_api_key: "soniox-key-2" };
+      await service.reconcile();
+      for (const release of releases.values()) release(true);
+      expect(await reading).toEqual({
+        ready: false,
+        reason: "voice_worker_reconnecting",
+      });
+    } finally {
+      for (const release of releases.values()) release(true);
+      await shutdown();
+    }
   });
 
   it("answers not ready when the workers miss the wait", async () => {
