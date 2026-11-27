@@ -187,7 +187,7 @@ export function LibraryDocumentResults({
     pendingUploads.length === 0
   ) {
     return (
-      <p className="border-y border-app-border py-16 text-center text-sm text-app-muted">
+      <p className="py-16 text-center text-sm text-app-muted">
         {activeView.empty}
       </p>
     );

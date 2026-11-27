@@ -161,4 +161,52 @@ describe("Runtime Debug history", () => {
       ]),
     );
   });
+
+  it("redacts Antigravity PLANNER_RESPONSE thinking in the second pass while keeping content and tool_calls", () => {
+    const page = redactRuntimeHistoryPage({
+      status: "available",
+      providerKind: "antigravity",
+      source: "antigravity_transcript",
+      snapshot: {
+        id: "snapshot-agy",
+        threadId: "conv-agy-1",
+        capturedAt: "2026-11-20T10:00:00Z",
+        recordCount: 1,
+        tailState: "clean",
+      },
+      instructions: {
+        status: "unavailable",
+        source: "antigravity_transcript",
+        reason: "instructions_unavailable",
+        blocks: [],
+      },
+      records: [
+        {
+          ordinal: 0,
+          category: "message",
+          nativeType: "PLANNER_RESPONSE",
+          role: "assistant",
+          nativeRecord: {
+            type: "PLANNER_RESPONSE",
+            thinking: "private chain of thought",
+            content: "Final visible answer",
+            tool_calls: [{ name: "run_command", args: { CommandLine: "ls" } }],
+          },
+          redactedFields: [],
+        },
+      ],
+    });
+    expect(page.status).toBe("available");
+    if (page.status !== "available") return;
+    expect(page.records[0]?.nativeRecord).toEqual({
+      type: "PLANNER_RESPONSE",
+      content: "Final visible answer",
+      tool_calls: [{ name: "run_command", args: { CommandLine: "ls" } }],
+    });
+    expect(page.records[0]?.redactedFields).toEqual(
+      expect.arrayContaining([
+        { path: "/thinking", reason: "reasoning_content" },
+      ]),
+    );
+  });
 });

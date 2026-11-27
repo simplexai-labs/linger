@@ -191,7 +191,7 @@ export function MakeRoomDialog({
             <legend className="mb-1.5 text-xs font-medium text-muted-foreground">
               {t(m.unloadTheseLegend)}
             </legend>
-            <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
               {check.loaded.map((item) => (
                 <label
                   className={cn(
@@ -250,7 +250,7 @@ export function MakeRoomDialog({
             {inUse.length ? (
               <ul
                 aria-label={t(m.alsoUsingMemory)}
-                className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border bg-muted/40"
+                className="overflow-hidden rounded-lg border border-border bg-muted/40"
               >
                 {inUse.map((holder) => (
                   <li

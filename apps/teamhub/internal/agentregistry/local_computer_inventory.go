@@ -71,6 +71,23 @@ func listOwnedLocalComputers(ctx context.Context, queries *store.Queries, tenant
 }
 
 func projectStoredLocalComputer(row store.RuntimeLocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, bool, error) {
+	item, listed, err := projectStoredLocalComputerWithGrants(row, tenantID, now, true)
+	if err != nil || !listed {
+		return httpapi.LocalComputer{}, false, err
+	}
+	return item, true, nil
+}
+
+// projectStoredLocalComputerForPlacement projects a Computer even when it has
+// no owner-scoped workspace grant in tenantID yet, so Another Me placement
+// diagnostics can distinguish a missing writable grant from an offline or
+// unlisted Computer.
+func projectStoredLocalComputerForPlacement(row store.RuntimeLocalComputer, tenantID string, now time.Time) (httpapi.LocalComputer, error) {
+	item, _, err := projectStoredLocalComputerWithGrants(row, tenantID, now, false)
+	return item, err
+}
+
+func projectStoredLocalComputerWithGrants(row store.RuntimeLocalComputer, tenantID string, now time.Time, requireGrant bool) (httpapi.LocalComputer, bool, error) {
 	var storedGrants []storedWorkspaceGrant
 	if err := json.Unmarshal(row.WorkspaceGrants, &storedGrants); err != nil {
 		return httpapi.LocalComputer{}, false, err
@@ -87,7 +104,7 @@ func projectStoredLocalComputer(row store.RuntimeLocalComputer, tenantID string,
 		}
 		grants = append(grants, httpapi.LocalComputerWorkspaceGrant{GrantId: grant.GrantID, Label: label, Mode: mode})
 	}
-	if len(grants) == 0 {
+	if requireGrant && len(grants) == 0 {
 		return httpapi.LocalComputer{}, false, nil
 	}
 	slices.SortFunc(grants, func(left, right httpapi.LocalComputerWorkspaceGrant) int {
@@ -123,7 +140,7 @@ func projectStoredLocalComputer(row store.RuntimeLocalComputer, tenantID string,
 	if row.LastSeenAt.Valid {
 		item.LastSeenAt = &row.LastSeenAt.Time
 	}
-	return item, true, nil
+	return item, len(grants) > 0, nil
 }
 
 func projectStoredRuntimes(raw []byte) ([]httpapi.LocalComputerRuntime, error) {

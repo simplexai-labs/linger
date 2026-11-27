@@ -4,10 +4,9 @@ import { useEffect } from "react";
 const SCROLL_IDLE_MS = 900;
 
 /**
- * Marks the workspace scroll panes while they are scrolling, and the Room list
- * header once its list has moved off the top, so the floating scrollbar pill
- * and the header hairline can fade in and out. One capturing document listener
- * covers every pane, so individual panes need no wiring.
+ * Marks the workspace scroll panes while they are scrolling, so the floating
+ * scrollbar pill can fade in and out. One capturing document listener covers
+ * every pane, so individual panes need no wiring.
  */
 export function useScrollPaneActivity() {
   useEffect(() => {
@@ -19,11 +18,6 @@ export function useScrollPaneActivity() {
         target.classList.contains("room-timeline") ||
         target.classList.contains("room-secondary-navigation-list");
       if (!isPane) return;
-      if (target.classList.contains("room-secondary-navigation-list")) {
-        target
-          .closest(".app-secondary-navigation")
-          ?.setAttribute("data-scrolled", String(target.scrollTop > 0));
-      }
       target.setAttribute("data-scrolling", "true");
       clearTimeout(timers.get(target));
       timers.set(

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 const antigravityProbeSeedLimit = 4 << 20
@@ -36,41 +37,62 @@ func PrepareAntigravityProtocolProbe() ([]string, func(), error) {
 	return args, release, err
 }
 
-func prepareAntigravityProbe(env map[string]string, seedCredentials bool) ([]string, string, func(), error) {
-	root, err := os.MkdirTemp("", "linger-antigravity-probe-")
-	if err != nil {
-		return nil, "", nil, err
-	}
-	release := func() { _ = os.RemoveAll(root) }
-	geminiDir := filepath.Join(root, "gemini")
+func prepareAntigravityIsolatedDir(baseDir string, env map[string]string, seedCredentials bool) (string, string, error) {
+	geminiDir := filepath.Join(baseDir, "gemini")
 	appDataDir := filepath.Join(geminiDir, "antigravity-cli")
-	workDir := filepath.Join(root, "workspace")
-	for _, dir := range []string{root, geminiDir, appDataDir, workDir} {
+	for _, dir := range []string{baseDir, geminiDir, appDataDir} {
 		if err := privatefs.EnsureDir(dir); err != nil {
-			release()
-			return nil, "", nil, err
+			return "", "", err
 		}
 	}
 	if seedCredentials {
-		if home := antigravityProbeHome(env); home != "" {
-			sourceDir := filepath.Join(home, ".gemini", "antigravity-cli")
+		if sourceDir := antigravityStoreRoot(env); sourceDir != "" {
 			for _, name := range antigravityProbeSeedFiles {
 				if err := copyAntigravityProbeFile(filepath.Join(sourceDir, name), filepath.Join(appDataDir, name)); err != nil {
-					release()
-					return nil, "", nil, err
+					return "", "", err
 				}
 			}
 		}
 	}
-	args := []string{"--gemini-dir", geminiDir, "--log-file", filepath.Join(root, "acp.log")}
+	return geminiDir, filepath.Join(baseDir, "acp.log"), nil
+}
+
+func prepareAntigravityProbe(env map[string]string, seedCredentials bool) ([]string, string, func(), error) {
+	root, removeRoot, err := localworkspace.PrivateTempRoot("", "linger-antigravity-probe-")
+	if err != nil {
+		return nil, "", nil, err
+	}
+	release := func() { _ = removeRoot() }
+	geminiDir, logFile, err := prepareAntigravityIsolatedDir(root, env, seedCredentials)
+	if err != nil {
+		release()
+		return nil, "", nil, err
+	}
+	workDir := filepath.Join(root, "workspace")
+	if err := privatefs.EnsureDir(workDir); err != nil {
+		release()
+		return nil, "", nil, err
+	}
+	args := []string{"--gemini-dir", geminiDir, "--log-file", logFile}
 	return args, workDir, release, nil
 }
 
 func antigravityProbeHome(env map[string]string) string {
-	if home := env["HOME"]; home != "" {
+	if home := localworkspace.EnvLookup(env, "HOME"); home != "" {
 		return home
 	}
-	return env["USERPROFILE"]
+	return localworkspace.EnvLookup(env, "USERPROFILE")
+}
+
+func antigravityStoreRoot(env map[string]string) string {
+	if antigravityProbeHome(env) == "" {
+		return ""
+	}
+	storeRoot, err := localworkspace.AntigravitySourceHome(env)
+	if err != nil {
+		return ""
+	}
+	return storeRoot
 }
 
 func copyAntigravityProbeFile(source, destination string) error {

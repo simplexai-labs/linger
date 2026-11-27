@@ -135,13 +135,14 @@ distinguishing), cancels on disconnect and drain, loads a named Pi library model
 on demand through `ensureLocalModel` (matching `run.start`), clamps reasoning
 effort against the requested model, and checks before sending that
 the encoded `executed` (kind `model_invoke`) fits the 4 MiB frame limit (otherwise
-it reports `failed`). `internal/provider/model_invoke.go` and
-`internal/provider/pi_model_invoke.go` run one `codex exec`, `claude -p`, or
-ephemeral `pi` RPC turn in a temporary directory, passing the requested `model`
-explicitly when supplied: the prompt goes through stdin, tools and
-user customization are off, and it refuses workspace files at the root named
-`AGENTS.md`, `AGENTS.override.md` or `CLAUDE.md` and anything under `.codex` or
-`.claude` at any depth. `internal/workspace/codex_invoke_home.go` prepares a
+it reports `failed`). `internal/provider/model_invoke.go`, `internal/provider/pi_model_invoke.go`,
+and `internal/provider/antigravity_model_invoke.go` run one `codex exec`,
+`claude -p`, ephemeral `pi` RPC turn, or isolated tool-disabled `agy acp` turn
+in a temporary directory, passing the requested `model` explicitly when
+supplied: the prompt goes through stdin or ACP, tools and user customization
+are off, and it refuses workspace files at the root named `AGENTS.md`,
+`AGENTS.override.md` or `CLAUDE.md` and anything under `.codex` or `.claude`
+at any depth. `internal/workspace/codex_invoke_home.go` prepares a
 temporary `CODEX_HOME` holding only an `auth.json` link, provider settings and
 a seeded models cache (see below).
 Claude uses the fixed `model-invoke/claude/.claude` under the state directory as
@@ -539,8 +540,11 @@ heredoc (`internal/permission/shell_text.go`). Named variables such as `"$id"`,
   uses the built-in `powershell` tool instead of `bash`, so it skips the POSIX
   `shell-text-hook` and `pipefail`, and the managed extension overrides
   `powershell` to set UTF-8 `$OutputEncoding` and console encodings.
-- Antigravity is not checked: its permission request can only allow or reject
-  a call, with no reason the Agent would read.
+- Antigravity runs the same `permission.ShellTextRewritten` check inside its
+  managed `PreToolUse` hook for `run_command` (except on Windows, where shells
+  are PowerShell), returning `{"decision":"deny","reason":...}` so the model
+  reads the refusal directly and `{"decision":"allow"}` otherwise so ACP
+  `session/request_permission` review still runs.
 
 A hook that cannot run lets the command through.
 
@@ -599,13 +603,14 @@ for a browser sign-in when signed out.
   turns never park and confirm process-tree exit.
 - Idle session compaction (`session_compact`, Computer 0.66.0 or later) takes a
   parked Antigravity process (never an unadopted pre-start), rejects every
-  `session/request_permission` during the compaction turn, submits
-  `/compact <instructions>` over ACP while its `mcpFront` stays unbound, and
-  verifies compaction deterministically from `CHECKPOINT` entries appended to
-  the session's JSONL transcript (never from model prose). It records the first
-  positive `usage_update` `used` value as `pre_tokens`, parks the process back
-  only when the turn ends cleanly with no open tool calls and a valid release
-  fence, and otherwise retires the process before returning.
+  `session/request_permission` (and denies `run_command` via `PreToolUse` on
+  POSIX) during the compaction turn, submits `/compact <instructions>` over ACP
+  while its `mcpFront` stays unbound, and verifies compaction deterministically
+  from `CHECKPOINT` entries appended to the session's JSONL transcript via
+  symlink-safe `runtimehistory` openers (never from model prose). It records the
+  first positive `usage_update` `used` value as `pre_tokens`, parks the process
+  back only when the turn ends cleanly with no open tool calls and a valid
+  release fence, and otherwise retires the process before returning.
 - Managed Antigravity hooks (`--add-dir`) canonicalize their temp directory path
   via symlink resolution and keep the loopback callback URL unquoted on Windows
   (wrapping the full command in outer quotes only when the Daemon executable
@@ -653,8 +658,32 @@ for a browser sign-in when signed out.
   model turn reports usage or activity, the adapter fails such a Run, retires
   the process instead of parking it, and surfaces the trimmed redacted notice in
   `failure.detail` when the Agent Service announces `runtime_failure_detail`.
-- History reads, Local Skill scans and local models do not support
-  Antigravity, so Agent Memory skips Antigravity Agents.
+- Managed Antigravity hooks (`PreInvocation`, `PreToolUse`, and `Stop`) bridge
+  back to the Daemon over a loopback endpoint (`AntigravityHookTimeout` = 15s).
+  Resident `hooks.json` scopes `PreToolUse` to `"matcher": "run_command"` on
+  POSIX (enforcing `ShellTextHook` during normal turns and denying `run_command`
+  during compaction) and omits resident `PreToolUse` on Windows where
+  `ShellTextHook` is inactive. On an idle `Stop` (`fullyIdle` true/omitted, no
+  error, and normal `NO_TOOL_CALL` termination), the turn invokes `StopHook`
+  and answers `{"decision":"continue","reason":...}` on block, guarding against
+  repeat blocking via `continuationActive || executionNum > 0 || stopHookBlocked`.
+- Native history reads (`runtimehistory.InspectAntigravity`, Computer 0.67.0 or
+  later) read bounded, symlink-checked `transcript.jsonl` files under
+  `~/.gemini/antigravity-cli/brain/<sessionID>/.system_generated/logs/` with
+  `thinking` redacted as `reasoning_content`, and are served over `debug_history`
+  only when `runner.welcome`'s `service_features` names `antigravity_history`.
+  Because `agy`'s `transcript.jsonl` currently omits ACP `toolCallId` and
+  `turn_id`, Antigravity native history serves Debug History, Agent Memory, and
+  `.previous-context.md` export (TeamHub per-Message/Run activity linking
+  requires persisted turn or tool call IDs).
+- Background stateless model calls (`execute` `model_invoke`, Computer 0.67.0
+  or later) run a single tool-disabled `agy acp` turn
+  (`--include-default-customizations=false` plus a sealed `PreToolUse`
+  `--deny-tools` hook and denied permission requests) inside an isolated
+  temporary `--gemini-dir` seeded with user OAuth token and settings, leaving
+  `~/.gemini/antigravity-cli` untouched; workspace mode
+  answers `unsupported`. Local Skill scans and local models do not support
+  Antigravity.
 - The Gateway hello leaves out the Antigravity diagnostic while `agy` is not
   installed, so such a Computer still connects to an Agent Service released
   before Antigravity support. When `agy` is installed later, the next
@@ -777,7 +806,13 @@ system permissions or taking the foreground; an Agent that never uses the
 computer tools pays only this one background start. Preparation only reads the
 catalog; it opens no pages and sends no input.
 
-macOS uses the signed CuaDriver.app. The Computer starts the service with the
+On macOS, a desktop host can set `desktop.cua_socket` to connect the Computer
+to its embedded Cua service. The host starts the driver directly, provides a
+Unix socket in its private directory, and stops the driver when the daemon
+exits. Each new daemon gets a fresh driver and socket. Desktop actions require
+the driver to report both Accessibility and Screen Recording with host attribution.
+
+Without that socket the Computer launches the signed CuaDriver.app with the
 automatic permission wizard off and sets `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS` to
 0: by default Cua waits up to 1 second after each action for a window change,
 adding 0.3–0.4 seconds to every click and key press, and the Agent reads the
@@ -807,7 +842,8 @@ browser calls, unless the app is a Chromium browser other than the Computer's
 own Chrome. A queued call that is cancelled returns
 `COMPUTER_BUSY` without sending input. `check_permissions` only reads permissions
 and never requests them, and the permission answer must come from the Cua service
-itself. Only the owner's Request on a permission card asks macOS: the Daemon runs
+itself. An embedded service reports Linger's permissions and the desktop app
+handles the owner's request. For an independent service, the Daemon runs
 `cua-driver permissions grant` in the background, one at a time for at most 10
 minutes, because CuaDriver refuses to prompt from its tools.
 
@@ -938,7 +974,10 @@ every tool description and the model's tool listing would be truncated.
 
 When the default browser is not Chrome, the local browser uses a separate Agent
 profile directory, stored under `computer-tools/browser-profiles/` in the state
-directory. Cua can observe the native Chrome window that Playwright connects to.
+directory. That profile runs in Google Chrome, or on macOS and Windows in
+Microsoft Edge when Chrome is not installed. With neither, a browser call fails
+with `BROWSER_UNAVAILABLE` before anything runs, which Live reports as
+`browser_unavailable`. Cua can observe the native Chrome window that Playwright connects to.
 
 On macOS, `launch_app` with `agent_browser: true` opens the Computer's own
 browser window for a site that watches for automated browsers. The Agent drives
@@ -1090,21 +1129,27 @@ Agent reads the window again first. Windows Operations get `WindowsToolGuide`.
 
 Linux controls the signed-in user's X11 desktop. The driver `local_linux.py` is
 embedded in the Go binary; it reads windows through AT-SPI and sends input with
-`xdotool`. The host needs `python3-pyatspi`, `xdotool`, ImageMagick, `xclip` and a
-user systemd manager. The Daemon must run as the desktop user and inherit
+`xdotool`. The host needs `python3-pyatspi`, `xdotool`, ImageMagick and `xclip`;
+a reachable user systemd manager is used when available, with detached session
+fallback otherwise. The Daemon must run as the desktop user and inherit
 `DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_SESSION_TYPE`. With a
 missing dependency or under Wayland, `check_permissions` explains why; browser and
 file tools still work.
 
-`open_application` and `open_url` start the program through `systemd-run --user`
-with `KillMode=process`, so it outlives the tool call. `xdg-open` hands a URL to
-`gio`, which exits as soon as it started the browser; the default control-group
-mode would kill the browser with it. `open_url` then waits up to 8 seconds for
-the active window or its title to change, and fails when neither does. After
-any input, a page that is still loading is read again until it loads, for at
-most 8 seconds; the result marks `loading` when it has not. A desktop with no
-active window, as right after a GNOME login, still launches: any window that
-appears counts as opened.
+`open_application` and `open_url` launch the program in its own session inside a
+transient user scope (`systemd-run --user --scope` under `app.slice`) when
+`org.freedesktop.systemd1` is reachable on the user session bus, or directly
+detached otherwise, so launched apps outlive the tool call and Snap apps can
+create their own tracking scope without `.service` cgroup rejections. The driver
+observes startup briefly and surfaces immediate non-zero exits (with stderr from
+the user journal stream, or an unlinked temporary file fallback) as confirmed
+errors without waiting 8 seconds or blocking the action record. Otherwise
+`open_url` waits up to 8 seconds for the active window or its title to change,
+failing with any post-exit launch stderr when neither does. After any input, a
+page that is still loading is read again until it loads, for at most 8 seconds;
+the result marks `loading` when it has not. A desktop with no active window, as
+right after a GNOME login, still launches: any window that appears counts as
+opened.
 
 `type_text` pastes the text. A terminal emulator gets it on both the clipboard
 and the primary selection and receives `shift+Insert`, which every common
@@ -1119,6 +1164,27 @@ last observed fails with `WINDOW_CHANGED` when another window, such as one the
 user clicked, became active since. The result shows the active window, and the
 next input to it goes through. `open_application` and `open_url` are not
 checked, because they bring up a window of their own.
+
+When no X11 window is active—or GNOME Shell's `OverviewActive` D-Bus property
+is true, as in the Activities Overview even after a single `Escape` restores
+`_NET_ACTIVE_WINDOW` to a background window—`type_text` and non-exempt
+`press_key` inputs (including `Return` and chords such as `Super+l` or `ctrl+a`)
+fail with `NO_ACTIVE_WINDOW` before any input is sent (`not_dispatched`) for
+single-step calls and before step 1 of `run_actions`, preserving the last
+observed window so returning to it does not trigger `WINDOW_CHANGED`. Mid-batch
+in `run_actions`, after earlier steps have already run, hitting an empty active
+window stops the batch early with `completed_steps`, `total_steps`, a desktop
+screenshot, and a `NO_ACTIVE_WINDOW` `stopped` reason rather than reporting
+`not_dispatched`, while still preserving the last observed window. Bare
+overview-dismiss and toggle keys (`Escape`, `Esc`, `Super`, `Super_L`,
+`Super_R`, `win`, `meta`) remain allowed while no window is active—including
+immediately after observing another window—alongside pointer, observation,
+launch, and semantic element tools. In `run_actions`, bare overview keys wait a
+250 ms settle pause before the inter-step active-window check so GNOME Shell
+finishes toggling Overview before the next step runs; bare `Super`/`Meta`/`Win`
+keys also unconditionally stop the batch before any subsequent keyboard or text
+step so the Agent observes the overview/launcher state regardless of compositor
+latency (while `Escape` inside a still-focused window continues normally).
 
 GTK4 applications report their controls as sensitive rather than enabled, and
 on X11 report every control at the screen origin. The driver counts either

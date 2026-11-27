@@ -177,26 +177,43 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 		t.Fatalf("initialization notices=%d", got)
 	}
 
-	// Changing an established identity, even one's own, waits for the Sponsor.
+	// Renaming changes no behavior, so it runs at once, even for an
+	// established identity.
 	status, body = inRoom.post("agents/updates", map[string]any{"invocation_id": agentInvocation("rename"), "name": "Planner"})
 	var rename agentChangeResult
 	decode(t, body, &rename)
-	if status != http.StatusOK || rename.Status != "confirmation_pending" {
+	if status != http.StatusOK || rename.Status != "applied" || rename.ActorID != caller.Actor.ID {
 		t.Fatalf("rename=%d %s", status, body)
 	}
 	if replay, again := inRoom.post("agents/updates", map[string]any{"invocation_id": agentInvocation("rename"), "name": "Planner"}); replay != http.StatusOK || !bytes.Equal(again, body) {
 		t.Fatalf("replay=%d %s want %s", replay, again, body)
 	}
-	decideAgentChange(t, env, alice, rename, map[string]any{"decision": "approve"}, "succeeded")
 	if got := countRows(t, env, `SELECT count(*) FROM actors WHERE id=$1 AND display_name='Planner'`, caller.Actor.ID); got != 1 {
-		t.Fatal("approved rename was not applied")
+		t.Fatal("rename was not applied")
 	}
 	if got := roomNotices(t, env, roomID, "agent_profile_changed", `{"initialized":false,"instructions_changed":false,"changes":[{"field":"name","after":"Planner"}]}`); got != 1 {
-		t.Fatalf("approved rename notices=%d", got)
+		t.Fatalf("rename notices=%d", got)
+	}
+	// Changing an established prompt, even one's own, waits for the Sponsor.
+	status, body = inRoom.post("agents/updates", map[string]any{"invocation_id": agentInvocation("reprompt"), "prompt": "Plan the work in small steps."})
+	var reprompt agentChangeResult
+	decode(t, body, &reprompt)
+	if status != http.StatusOK || reprompt.Status != "confirmation_pending" {
+		t.Fatalf("prompt change=%d %s", status, body)
+	}
+	if replay, again := inRoom.post("agents/updates", map[string]any{"invocation_id": agentInvocation("reprompt"), "prompt": "Plan the work in small steps."}); replay != http.StatusOK || !bytes.Equal(again, body) {
+		t.Fatalf("replay=%d %s want %s", replay, again, body)
+	}
+	decideAgentChange(t, env, alice, reprompt, map[string]any{"decision": "approve"}, "succeeded")
+	if got := countRows(t, env, `SELECT count(*) FROM agent_registrations WHERE actor_id=$1 AND instructions='Plan the work in small steps.'`, caller.Actor.ID); got != 1 {
+		t.Fatal("approved prompt change was not applied")
+	}
+	if got := roomNotices(t, env, roomID, "agent_profile_changed", `{"initialized":false,"instructions_changed":true}`); got != 1 {
+		t.Fatalf("approved prompt change notices=%d", got)
 	}
 	// The card raced against initialization was opened at the old revision.
 	decideAgentChange(t, env, alice, raced, map[string]any{"decision": "approve"}, "failed")
-	if got := roomNotices(t, env, roomID, "agent_profile_changed", ""); got != 2 {
+	if got := roomNotices(t, env, roomID, "agent_profile_changed", ""); got != 3 {
 		t.Fatalf("a failed change posted a notice: %d", got)
 	}
 	// The Sponsor's own Web edit announces nothing.
@@ -206,7 +223,7 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 	}
 	status, _, body = env.request(alice, http.MethodPatch, "/v0/tenants/"+acmeTenant+"/agents/"+caller.Actor.ID,
 		map[string]any{"expected_configuration_revision": revision, "description": "Plans the work."}, "web-description-edit")
-	if status != http.StatusOK || roomNotices(t, env, roomID, "agent_profile_changed", "") != 2 {
+	if status != http.StatusOK || roomNotices(t, env, roomID, "agent_profile_changed", "") != 3 {
 		t.Fatalf("Web edit=%d %s", status, body)
 	}
 
@@ -255,7 +272,9 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 		t.Fatalf("list as a General Agent=%d %s", status, body)
 	}
 
-	// In the Sponsor's Direct Room nobody can join, so creation needs the card.
+	// In the Sponsor's Direct Room only the Sponsor can have asked, so the
+	// Agent is created at once; nobody can join a Direct Room, so it opens
+	// with its own direct Room instead.
 	status, _, body = env.request(alice, http.MethodPost, "/v0/tenants/"+acmeTenant+"/direct-rooms", map[string]any{"peer_actor_id": caller.Actor.ID}, "")
 	var direct struct {
 		ID string `json:"id"`
@@ -265,39 +284,69 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 		t.Fatalf("open Direct Room=%d %s", status, body)
 	}
 	directRoomID := direct.ID
-	status, body = agent.in("room", directRoomID).post("agents", map[string]any{"invocation_id": agentInvocation("create-critic"), "name": "Critic", "prompt": "Challenge every claim."})
-	var critic agentChangeResult
-	decode(t, body, &critic)
-	if status != http.StatusOK || critic.Status != "confirmation_pending" || critic.RoomID != directRoomID {
-		t.Fatalf("create in Direct Room=%d %s", status, body)
-	}
-	decideAgentChange(t, env, alice, critic, map[string]any{"decision": "deny", "comment": "Not now"}, "denied")
-	if got := countRows(t, env, `SELECT count(*) FROM actors WHERE display_name='Critic' AND tenant_id=$1`, acmeTenant); got != 0 {
-		t.Fatal("a denied creation created an Agent")
-	}
-	// An approved creation is announced once in the card's Room, naming the approver.
-	status, body = agent.in("room", directRoomID).post("agents", map[string]any{"invocation_id": agentInvocation("create-editor"), "name": "Editor", "prompt": "Edit for clarity."})
-	var editor agentChangeResult
-	decode(t, body, &editor)
-	if status != http.StatusOK || editor.Status != "confirmation_pending" {
-		t.Fatalf("create Editor=%d %s", status, body)
-	}
-	decideAgentChange(t, env, alice, editor, map[string]any{"decision": "approve"}, "succeeded")
-	if got := roomNotices(t, env, directRoomID, "agent_created", `{"agent":{"display_name":"Editor"},"approved_by":{"id":"actor_acme_alice"}}`); got != 1 {
-		t.Fatalf("approved creation notices=%d", got)
-	}
-	// The approved Agent opens with the Sponsor's direct Room, which lists it
-	// in the sidebar; a rerun of the decision reopens that Room.
-	var editorID string
-	if err := env.pool.QueryRow(t.Context(), `SELECT id FROM actors WHERE tenant_id=$1 AND display_name='Editor' AND kind='agent'`, acmeTenant).Scan(&editorID); err != nil {
+	inDirect := agent.in("room", directRoomID)
+	createEditor := map[string]any{"invocation_id": agentInvocation("create-editor"), "name": "Editor", "prompt": "Edit for clarity."}
+	// A publication failure lands after registration and after the notice row
+	// would be inserted. The retry must publish exactly once for the same Agent.
+	if _, err := env.pool.Exec(t.Context(), `CREATE FUNCTION reject_created_notice() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'injected notice event failure'; END $$;
+		CREATE TRIGGER reject_created_notice BEFORE INSERT ON room_events FOR EACH ROW
+		WHEN (NEW.payload #>> '{message,notice,type}' = 'agent_created') EXECUTE FUNCTION reject_created_notice()`); err != nil {
 		t.Fatal(err)
 	}
-	editorRooms := func() int {
-		return countRows(t, env, `SELECT count(*) FROM rooms room JOIN active_room_members member ON member.room_id=room.id AND member.actor_id=$2
-			WHERE room.tenant_id=$1 AND room.direct_human_actor_id='actor_acme_alice' AND room.direct_agent_actor_id=$2`, acmeTenant, editorID)
+	status, body = inDirect.post("agents", createEditor)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("injected notice failure=%d %s", status, body)
 	}
-	if got := editorRooms(); got != 1 {
-		t.Fatalf("approved Agent direct Rooms=%d want=1", got)
+	if got := roomNotices(t, env, directRoomID, "agent_created", ""); got != 0 {
+		t.Fatalf("unpublished notices after failed creation=%d", got)
+	}
+	var registeredID string
+	if err := env.pool.QueryRow(t.Context(), `SELECT id FROM actors WHERE tenant_id=$1 AND kind='agent' AND display_name='Editor'`, acmeTenant).Scan(&registeredID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(t.Context(), "DROP TRIGGER reject_created_notice ON room_events; DROP FUNCTION reject_created_notice()"); err != nil {
+		t.Fatal(err)
+	}
+	directHeaders := headers.Clone()
+	directHeaders.Set("X-TeamHub-Context-Id", directRoomID)
+	for range 2 {
+		if err := startAsyncJSONRequestWithHeaders(results, "retry-create-editor", env.server.Client(), http.MethodPost, env.server.URL+"/api/agent/v1/agents", "", createEditor, directHeaders); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil || first.status != http.StatusOK || second.status != http.StatusOK || !bytes.Equal(first.body, second.body) {
+		t.Fatalf("concurrent Direct Room retries=%d %s (%v), %d %s (%v)", first.status, first.body, first.err, second.status, second.body, second.err)
+	}
+	status, body = first.status, first.body
+	var editor agentChangeResult
+	decode(t, body, &editor)
+	if status != http.StatusOK || editor.Status != "applied" || editor.ActorID != registeredID || editor.RoomID != "" {
+		t.Fatalf("create in Direct Room=%d %s", status, body)
+	}
+	if replay, again := inDirect.post("agents", createEditor); replay != http.StatusOK || !bytes.Equal(again, body) {
+		t.Fatalf("Direct Room create replay=%d %s", replay, again)
+	}
+	editorID := editor.ActorID
+	if got := countRows(t, env, `SELECT count(*) FROM messages WHERE room_id=$1 AND author_actor_id=$2 AND message_kind='room_notice'
+		AND notice @> jsonb_build_object('type','agent_created','agent',jsonb_build_object('id',$3::text)) AND NOT notice ? 'approved_by'`,
+		directRoomID, caller.Actor.ID, editorID); got != 1 {
+		t.Fatalf("Direct Room creation notices=%d", got)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM room_events WHERE room_id=$1 AND event_type='message.created'
+		AND payload #>> '{message,notice,type}'='agent_created' AND payload #>> '{message,notice,agent,id}'=$2`, directRoomID, editorID); got != 1 {
+		t.Fatalf("Direct Room creation events=%d", got)
+	}
+	if got := countRows(t, env, `SELECT count(*) FROM active_room_members WHERE room_id=$1 AND actor_id=$2`, directRoomID, editorID); got != 0 {
+		t.Fatal("created Agent joined the Sponsor's Direct Room")
+	}
+	agentDirectRooms := func(agentID string) int {
+		return countRows(t, env, `SELECT count(*) FROM rooms room JOIN active_room_members member ON member.room_id=room.id AND member.actor_id=$2
+			WHERE room.tenant_id=$1 AND room.direct_human_actor_id='actor_acme_alice' AND room.direct_agent_actor_id=$2`, acmeTenant, agentID)
+	}
+	if got := agentDirectRooms(editorID); got != 1 {
+		t.Fatalf("created Agent direct Rooms=%d want=1", got)
 	}
 	status, _, body = env.request(alice, http.MethodGet, "/v0/tenants/"+acmeTenant+"/rooms", nil, "")
 	var listed struct {
@@ -317,18 +366,59 @@ func TestAgentCLIManagesSponsorAgents(t *testing.T) {
 	if status != http.StatusOK || sidebar != 1 {
 		t.Fatalf("Sponsor room list status=%d direct Editor Rooms=%d body=%s", status, sidebar, body)
 	}
-	claim := typedcard.ClaimedDecision{ID: editor.InteractionID}
+
+	// In a Room the Sponsor is not in, someone else asked, so creation needs
+	// the Sponsor's card, which goes to the Sponsor's Direct Room.
+	elsewhereID := createPrivateRoom(t, env, alice, "Without the Sponsor", "agent-cli-elsewhere-room")
+	if status, body := putRoomMember(t, env, alice, elsewhereID, caller.Actor.ID, "member"); status != http.StatusOK {
+		t.Fatalf("membership=%d %s", status, body)
+	}
+	if _, err := env.pool.Exec(t.Context(), `DELETE FROM room_members WHERE room_id=$1 AND actor_id='actor_acme_alice'`, elsewhereID); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := agent.in("room", elsewhereID)
+	status, body = elsewhere.post("agents", map[string]any{"invocation_id": agentInvocation("create-critic"), "name": "Critic", "prompt": "Challenge every claim."})
+	var critic agentChangeResult
+	decode(t, body, &critic)
+	if status != http.StatusOK || critic.Status != "confirmation_pending" || critic.RoomID != directRoomID {
+		t.Fatalf("create without the Sponsor=%d %s", status, body)
+	}
+	decideAgentChange(t, env, alice, critic, map[string]any{"decision": "deny", "comment": "Not now"}, "denied")
+	if got := countRows(t, env, `SELECT count(*) FROM actors WHERE display_name='Critic' AND tenant_id=$1`, acmeTenant); got != 0 {
+		t.Fatal("a denied creation created an Agent")
+	}
+	// An approved creation is announced once in the card's Room, naming the approver.
+	status, body = elsewhere.post("agents", map[string]any{"invocation_id": agentInvocation("create-reviewer"), "name": "Reviewer", "prompt": "Review for accuracy."})
+	var reviewer agentChangeResult
+	decode(t, body, &reviewer)
+	if status != http.StatusOK || reviewer.Status != "confirmation_pending" {
+		t.Fatalf("create Reviewer=%d %s", status, body)
+	}
+	decideAgentChange(t, env, alice, reviewer, map[string]any{"decision": "approve"}, "succeeded")
+	if got := roomNotices(t, env, directRoomID, "agent_created", `{"agent":{"display_name":"Reviewer"},"approved_by":{"id":"actor_acme_alice"}}`); got != 1 {
+		t.Fatalf("approved creation notices=%d", got)
+	}
+	// The approved Agent opens with the Sponsor's direct Room; a rerun of the
+	// decision reopens that Room.
+	var reviewerID string
+	if err := env.pool.QueryRow(t.Context(), `SELECT id FROM actors WHERE tenant_id=$1 AND display_name='Reviewer' AND kind='agent'`, acmeTenant).Scan(&reviewerID); err != nil {
+		t.Fatal(err)
+	}
+	if got := agentDirectRooms(reviewerID); got != 1 {
+		t.Fatalf("approved Agent direct Rooms=%d want=1", got)
+	}
+	claim := typedcard.ClaimedDecision{ID: reviewer.InteractionID}
 	if err := env.pool.QueryRow(t.Context(), `SELECT kind, tenant_id, room_id, requested_by_actor_id, decider_actor_id, request FROM decisions WHERE id=$1`,
-		editor.InteractionID).Scan(&claim.Kind, &claim.TenantID, &claim.RoomID, &claim.RequestedByActorID, &claim.DeciderActorID, &claim.Request); err != nil {
+		reviewer.InteractionID).Scan(&claim.Kind, &claim.TenantID, &claim.RoomID, &claim.RequestedByActorID, &claim.DeciderActorID, &claim.Request); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.DiscardHandler)
 	registry := agentregistry.New(env.pool, nil, collaboration.New(env.pool, nil, nil, nil, nil, logger), nil, logger)
 	replayed, err := registry.RunAgentChangeDecision(t.Context(), claim)
-	if err != nil || replayed.Status != "succeeded" || replayed.Data.(map[string]string)["actor_id"] != editorID {
+	if err != nil || replayed.Status != "succeeded" || replayed.Data.(map[string]string)["actor_id"] != reviewerID {
 		t.Fatalf("replayed decision=%+v err=%v", replayed, err)
 	}
-	if got := editorRooms(); got != 1 {
+	if got := agentDirectRooms(reviewerID); got != 1 {
 		t.Fatalf("direct Rooms after replay=%d want=1", got)
 	}
 }

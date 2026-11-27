@@ -260,7 +260,7 @@ const agentGet = definition(
 const agentCreate = definition(
   ["agent", "create"],
   "create_agent",
-  "Create a General Agent in this Room; a Direct Room needs the sponsor's card.",
+  "Create a General Agent of your sponsor; it joins this Room when your sponsor is a member.",
   {
     "--name": flag("Stable role-oriented Agent name."),
     "--description": flag("Optional Human-facing description."),
@@ -280,8 +280,9 @@ const agentCreate = definition(
     approval: "confirm",
     unavailableInTask: agentsUnavailableInTask,
     notes: [
-      "Outside a Direct Room the new Agent joins this Room at once; wake it there with an Agent reference.",
-      "In a Direct Room the sponsor first approves a confirmation card in the chat; TeamHub then creates the Agent and sends you the result, or the denial and its reason.",
+      "In a Room your sponsor is in, the new Agent joins it at once; wake it there with an Agent reference.",
+      "In your sponsor's Direct Room TeamHub creates the Agent at once without adding it to that chat; the sponsor finds it in their own chat with it.",
+      "In a Room your sponsor is not in, the sponsor first approves a confirmation card; TeamHub then creates the Agent and sends you the result, or the denial and its reason.",
     ],
   },
 );
@@ -319,7 +320,7 @@ const agentUpdate = definition(
     approval: "confirm",
     unavailableInTask: agentsUnavailableInTask,
     notes: [
-      "TeamHub applies the change at once only to an uninitialized Agent in this Room. Otherwise the sponsor approves a confirmation card in the chat; TeamHub then applies it and sends you the result, or the denial and its reason.",
+      "A change of only --name or --description applies at once. A prompt change applies at once only to an uninitialized Agent in this Room; otherwise the sponsor approves a confirmation card in the chat, and TeamHub then applies it and sends you the result, or the denial and its reason.",
     ],
   },
 );
@@ -825,7 +826,7 @@ const skillPublish = definition(
 const roomCreate = definition(
   ["room", "create"],
   "create_room",
-  "Request Human approval for a Room and its first message.",
+  "Create a collaboration Room with its members and first message; your sponsor owns it.",
   {
     "--name": flag("Proposed Room name."),
     ...creationOptions,

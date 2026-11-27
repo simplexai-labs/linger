@@ -90,7 +90,7 @@ export function TaskActivitiesPanelTab({
       data-testid="task-activities-panel"
       aria-label={t(m.taskActivities)}
     >
-      <header className="shrink-0 border-b border-app-border px-4 pb-3 pt-4">
+      <header className="shrink-0 px-4 pb-3 pt-4">
         <div className="flex items-center gap-2 text-xs text-app-muted">
           <Icon icon={Activity01Icon} size={14} />
           <span>
@@ -132,7 +132,7 @@ export function TaskActivitiesPanelTab({
       </header>
       <nav
         aria-label={t(m.taskSections)}
-        className="flex shrink-0 gap-1 border-b border-border px-3 py-2"
+        className="flex shrink-0 gap-1 px-3 py-2"
       >
         {tabs.map((value) => (
           <button
@@ -205,7 +205,7 @@ export function TaskActivitiesPanelTab({
                   </>
                 )}
                 {data.roomId ? (
-                  <div className="border-t border-app-border px-4 py-4">
+                  <div className="px-4 py-4">
                     <h3 className="mb-3 text-xs font-medium text-app-body">
                       {t(m.taskMessages)}
                     </h3>
@@ -330,7 +330,7 @@ function TaskActivityGroup({
         ? "interrupted"
         : "ended";
   return (
-    <div className="border-b border-app-border">
+    <div>
       <button
         type="button"
         aria-expanded={expanded}

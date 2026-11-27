@@ -7,7 +7,6 @@ import type { ReactNode } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import { useT } from "@/i18n/use-translation";
-import { cn } from "@/lib/cn";
 
 import { localModelsMessages as m } from "./local-models.messages";
 
@@ -30,12 +29,7 @@ export function FeaturedModelSpotlight({ children }: { children?: ReactNode }) {
       data-featured-spotlight="inkling-2-mini"
       data-in-catalog={hasEntry ? "true" : "false"}
     >
-      <div
-        className={cn(
-          "flex flex-col gap-2.5 bg-[var(--app-card-info-surface)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4",
-          hasEntry && "border-b border-border/80",
-        )}
-      >
+      <div className="flex flex-col gap-2.5 bg-[var(--app-card-info-surface)] px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           {!hasEntry ? (
             <span

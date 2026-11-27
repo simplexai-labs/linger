@@ -1883,7 +1883,7 @@ func (c *cuaSession) requirePermissions(ctx context.Context) error {
 	}
 	owner := "the signed CuaDriver application"
 	if c.op.manager.options.CuaEmbedded {
-		owner = "the trusted embedding host"
+		owner = "Linger"
 	}
 	return errors.New("COMPUTER_PERMISSION_REQUIRED: " + owner + " lacks Accessibility or Screen Recording. Run `teamhub computer permissions request --for computer-use --permissions accessibility,screen_recording` to post a permission card for the user, then end your turn; the card wakes you once they grant them. Never operate System Settings or privacy prompts yourself")
 }

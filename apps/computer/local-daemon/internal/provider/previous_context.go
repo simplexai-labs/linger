@@ -41,10 +41,13 @@ func exportPreviousContext(ctx context.Context, runtimeHomeRoot string, spec Ope
 	if spec.OperationKind != "run.start" || spec.ResumeSessionID != "" || spec.PreviousSession == nil {
 		return "", false
 	}
-	if runtimeHomeRoot == "" || spec.WorkingDirectory == "" {
+	if spec.WorkingDirectory == "" {
 		return "", false
 	}
 	prev := spec.PreviousSession
+	if prev.ProviderType != "antigravity" && runtimeHomeRoot == "" {
+		return "", false
+	}
 	var inspect func(context.Context, runtimehistory.Request) runtimehistory.Page
 	switch prev.ProviderType {
 	case "codex":
@@ -53,17 +56,25 @@ func exportPreviousContext(ctx context.Context, runtimeHomeRoot string, spec Ope
 		inspect = runtimehistory.InspectClaude
 	case "pi":
 		inspect = runtimehistory.InspectPi
+	case "antigravity":
+		inspect = runtimehistory.InspectAntigravity
 	default:
 		removeStalePreviousContext(spec.WorkingDirectory)
 		return "", false
 	}
-	home, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
-		TenantID:     spec.TenantID,
-		OwnerActorID: spec.OwnerActorID,
-		AgentID:      spec.AgentID,
-		ScopeID:      spec.ScopeID,
-		ProviderType: prev.ProviderType,
-	})
+	var home string
+	var err error
+	if prev.ProviderType == "antigravity" {
+		home, err = localworkspace.AntigravitySourceHome(spec.Environment)
+	} else {
+		home, err = localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+			TenantID:     spec.TenantID,
+			OwnerActorID: spec.OwnerActorID,
+			AgentID:      spec.AgentID,
+			ScopeID:      spec.ScopeID,
+			ProviderType: prev.ProviderType,
+		})
+	}
 	if err != nil {
 		removeStalePreviousContext(spec.WorkingDirectory)
 		return "", false
@@ -239,6 +250,8 @@ func renderHistoryRecordSections(providerType string, record runtimehistory.Reco
 		return renderClaudeRecordSections(record, raw, ts)
 	case "pi":
 		return renderPiRecordSections(record, raw, ts)
+	case "antigravity":
+		return renderAntigravityRecordSections(record, raw, ts)
 	default:
 		return nil
 	}
@@ -350,6 +363,62 @@ func renderPiRecordSections(record runtimehistory.Record, raw map[string]any, ts
 			heading += ": " + name
 		}
 		return []string{heading + ts + "\n```\n" + clipRunes(text, previousContextToolOutRunes) + "\n```"}
+	}
+	return nil
+}
+
+func renderAntigravityRecordSections(_ runtimehistory.Record, raw map[string]any, ts string) []string {
+	kind, _ := raw["type"].(string)
+	switch kind {
+	case "USER_INPUT":
+		text, _ := raw["content"].(string)
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil
+		}
+		return []string{"### User" + ts + "\n" + clipRunes(text, previousContextMessageRunes)}
+	case "PLANNER_RESPONSE":
+		var sections []string
+		if text, _ := raw["content"].(string); strings.TrimSpace(text) != "" {
+			sections = append(sections, "### Assistant"+ts+"\n"+clipRunes(text, previousContextMessageRunes))
+		}
+		if toolCalls, ok := raw["tool_calls"].([]any); ok {
+			for _, item := range toolCalls {
+				call, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				name, _ := call["name"].(string)
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
+				entry := "### Tool Call: " + name + ts
+				if args := stringifyCompact(call["args"]); args != "" {
+					entry += "\n```\n" + clipRunes(args, previousContextToolArgRunes) + "\n```"
+				}
+				sections = append(sections, entry)
+			}
+		}
+		return sections
+	case "GENERIC":
+		out, _ := raw["content"].(string)
+		out = strings.TrimSpace(out)
+		if out == "" {
+			out, _ = raw["error"].(string)
+			out = strings.TrimSpace(out)
+		}
+		if out == "" {
+			return nil
+		}
+		return []string{"### Tool Output" + ts + "\n```\n" + clipRunes(out, previousContextToolOutRunes) + "\n```"}
+	case "CHECKPOINT":
+		summary, _ := raw["content"].(string)
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			return nil
+		}
+		return []string{"### Compaction Summary" + ts + "\n" + clipRunes(summary, previousContextMessageRunes)}
 	}
 	return nil
 }

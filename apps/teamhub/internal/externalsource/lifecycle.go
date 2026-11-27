@@ -10,6 +10,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/feishu"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 )
 
 // ErrStaleRevision reports a Connection revision that changed since the caller read it.
@@ -183,8 +184,16 @@ func (s *Service) reconcileConnectionJob(ctx context.Context, connectionID strin
 		return s.abandonConnectionAttempt(ctx, connection)
 	}
 
-	status, err := s.connectionStatus(ctx, connection)
+	report, err := s.connectionStatus(ctx, connection)
+	status := report.Status
 	if linkExpired && (err == nil && status != composio.ConnectionActive || err != nil && upstreamGone(err)) {
+		s.logger.Warn("external connection attempt abandoned",
+			"connection_id", connection.ID,
+			"provider", connection.Provider,
+			"previous_status", connection.Status,
+			"status", string(status),
+			"reason", string(report.Reason),
+			"upstream_gone", err != nil && upstreamGone(err))
 		return s.abandonConnectionAttempt(ctx, connection)
 	}
 	if err != nil {
@@ -214,6 +223,11 @@ func (s *Service) reconcileConnectionJob(ctx context.Context, connectionID strin
 			result, err := tx.Exec(ctx, query, connection.ID, connection.Revision, errorCode, durationInterval(retryAfter))
 			if err != nil {
 				return false, err
+			}
+			if result.RowsAffected() == 1 && failConnection && connection.Status == "pending" {
+				if err = jobs.InsertTx(ctx, tx, ConnectionAuthorizationSettleArgs{ConnectionID: connection.ID}, nil); err != nil {
+					return false, err
+				}
 			}
 			return result.RowsAffected() == 1 && (connection.StatusErrorCode != errorCode || connection.StatusCheckRequestedAt != nil || (failConnection && connection.Status != "failed")), nil
 		})
@@ -248,6 +262,10 @@ func (s *Service) reconcileConnectionJob(ctx context.Context, connectionID strin
 		if err = s.connectionActivatedTx(ctx, tx, connection.AccountID, connection.ID, connection.Status); err != nil {
 			return err
 		}
+	} else if connection.Status == "pending" && (status == composio.ConnectionFailed || status == composio.ConnectionExpired) {
+		if err = jobs.InsertTx(ctx, tx, ConnectionAuthorizationSettleArgs{ConnectionID: connection.ID}, nil); err != nil {
+			return err
+		}
 	}
 	changed := connection.Status != string(status) || connection.StatusErrorCode != "" || connection.StatusCheckRequestedAt != nil ||
 		(identityLabel != "" && connection.IdentityLabel != identityLabel) ||
@@ -261,6 +279,15 @@ func (s *Service) reconcileConnectionJob(ctx context.Context, connectionID strin
 		}
 	} else if err = s.commitAccountExternalConnectionsChange(ctx, tx, connection.AccountID); err != nil {
 		return err
+	}
+	if (status == composio.ConnectionFailed || status == composio.ConnectionExpired) && connection.Status != string(status) {
+		s.logger.Warn("external connection status transitioned",
+			"connection_id", connection.ID,
+			"provider", connection.Provider,
+			"previous_status", connection.Status,
+			"status", string(status),
+			"reason", string(report.Reason),
+			"first_attempt", firstAttempt)
 	}
 	if status == composio.ConnectionPending {
 		return &connectionPending{poll: pendingPoll}
@@ -364,7 +391,7 @@ func (s *Service) reconcileDuplicateConnection(ctx context.Context, connection C
 		// The newly authorized upstream is the recovery credential for the existing
 		// principal. Preserve the canonical Connection ID and all of its dependencies.
 		temporaryUpstream := idgen.New("superseded_upstream")
-		candidateUpdate, updateErr := tx.Exec(ctx, `UPDATE external_connections SET upstream_connection_id=$3,status='revoked',connect_url=NULL,identity_label=coalesce(nullif($4,''),identity_label),status_checked_at=now(),status_error_code='duplicate_remote_principal',status_check_requested_at=NULL,updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('disconnecting','revoke_pending','revoked')`, connection.ID, connection.Revision, temporaryUpstream, identity.Label)
+		candidateUpdate, updateErr := tx.Exec(ctx, `UPDATE external_connections SET upstream_connection_id=$3,status='revoked',connect_url=NULL,identity_label=coalesce(nullif($4,''),identity_label),remote_principal_key=nullif($5,''),status_checked_at=now(),status_error_code='duplicate_remote_principal',status_check_requested_at=NULL,updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('disconnecting','revoke_pending','revoked')`, connection.ID, connection.Revision, temporaryUpstream, identity.Label, identity.PrincipalKey)
 		if updateErr != nil {
 			return duplicateConnectionNone, updateErr
 		}
@@ -380,6 +407,9 @@ func (s *Service) reconcileDuplicateConnection(ctx context.Context, connection C
 			return duplicateConnectionNone, ErrStaleRevision
 		}
 		if err = s.connectionActivatedTx(ctx, tx, connection.AccountID, duplicateID, duplicate.status); err != nil {
+			return duplicateConnectionNone, err
+		}
+		if err = jobs.InsertTx(ctx, tx, ConnectionAuthorizationSettleArgs{ConnectionID: connection.ID}, nil); err != nil {
 			return duplicateConnectionNone, err
 		}
 		candidateSwap, updateErr := tx.Exec(ctx, `UPDATE external_connections SET upstream_connection_id=$2 WHERE id=$1 AND upstream_connection_id=$3`, connection.ID, duplicate.upstream, temporaryUpstream)
@@ -406,6 +436,11 @@ func (s *Service) reconcileDuplicateConnection(ctx context.Context, connection C
 	}
 	if result.RowsAffected() != 1 {
 		return duplicateConnectionNone, ErrStaleRevision
+	}
+	if candidate.status == "pending" {
+		if err = jobs.InsertTx(ctx, tx, ConnectionAuthorizationSettleArgs{ConnectionID: connection.ID}, nil); err != nil {
+			return duplicateConnectionNone, err
+		}
 	}
 	if err = enqueueRevokeTx(ctx, tx, connection.ID, connection.UpstreamConnectionID); err != nil {
 		return duplicateConnectionNone, err

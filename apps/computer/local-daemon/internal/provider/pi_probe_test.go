@@ -32,7 +32,7 @@ func TestPiAuthenticationBoundsUnresponsiveModelCatalog(t *testing.T) {
 	defer cancel()
 	result := make(chan runtimeProbeOutcome, 1)
 	go func() {
-		result <- probePiAuthentication(ctx, executable, map[string]string{"HOME": root, "PATH": root}, time.Second)
+		result <- probePiAuthentication(ctx, executable, map[string]string{"HOME": root, "PATH": root}, time.Second, "")
 	}()
 	select {
 	case outcome := <-result:
@@ -299,7 +299,7 @@ exit 1
 
 	t.Run("incompatible", func(t *testing.T) {
 		home := t.TempDir()
-		outcome := probeRuntime(t.Context(), "pi", executable, map[string]string{"HOME": home, "PATH": root, "FIXTURE_MODE": "incompatible"}, 5*time.Second)
+		outcome := probeRuntime(t.Context(), "pi", executable, map[string]string{"HOME": home, "PATH": root, "FIXTURE_MODE": "incompatible"}, 5*time.Second, probeOptions{})
 		if outcome.Status != "incompatible" || outcome.Code != "RUNTIME_INCOMPATIBLE" || outcome.protocolVerified {
 			t.Fatalf("incompatible outcome = %+v", outcome)
 		}
@@ -307,7 +307,7 @@ exit 1
 
 	t.Run("timeout", func(t *testing.T) {
 		home := t.TempDir()
-		outcome := probeRuntime(t.Context(), "pi", executable, map[string]string{"HOME": home, "PATH": root, "FIXTURE_MODE": "timeout"}, 300*time.Millisecond)
+		outcome := probeRuntime(t.Context(), "pi", executable, map[string]string{"HOME": home, "PATH": root, "FIXTURE_MODE": "timeout"}, 300*time.Millisecond, probeOptions{})
 		if outcome.Status != "error" || outcome.Code != "RUNTIME_DIAGNOSTIC_FAILED" || outcome.Message != "Runtime protocol handshake could not be completed within its deadline" || outcome.protocolVerified {
 			t.Fatalf("timeout outcome = %+v", outcome)
 		}
@@ -315,7 +315,7 @@ exit 1
 
 	t.Run("models_failure", func(t *testing.T) {
 		home := t.TempDir()
-		outcome := probeRuntime(t.Context(), "pi", executable, map[string]string{"HOME": home, "PATH": root, "FIXTURE_MODE": "models_failed"}, 5*time.Second)
+		outcome := probeRuntime(t.Context(), "pi", executable, map[string]string{"HOME": home, "PATH": root, "FIXTURE_MODE": "models_failed"}, 5*time.Second, probeOptions{})
 		if outcome.Status != "error" || outcome.Code != "RUNTIME_DIAGNOSTIC_FAILED" || outcome.Message != "Pi authentication could not be verified" || !outcome.protocolVerified {
 			t.Fatalf("models failure outcome = %+v", outcome)
 		}

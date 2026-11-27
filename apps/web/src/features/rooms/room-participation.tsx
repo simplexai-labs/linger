@@ -56,7 +56,7 @@ export function RoomRejoinBanner({ room }: { room: TeamHubRoom }) {
   const t = useT();
   const roomName = parent.data?.name ?? room.name;
   return (
-    <div className="shrink-0 border-t border-app-border bg-app-surface p-4 text-center">
+    <div className="shrink-0 bg-app-surface p-4 text-center">
       <p className="mb-2 text-sm text-app-muted">{t(chatMessages.leftRoom)}</p>
       <Button
         tone="primary"

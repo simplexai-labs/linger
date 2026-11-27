@@ -149,7 +149,7 @@ export function AudioPreviewPlayer({
       >
         <source src={objectUrl} type={mediaType} />
       </audio>
-      <span className="mb-[18px] flex size-[54px] items-center justify-center rounded-[18px] bg-sidebar-muted text-muted-foreground">
+      <span className="mb-[18px] flex size-[54px] items-center justify-center rounded-2xl bg-sidebar-muted text-muted-foreground">
         <Icon icon={AudioWave01Icon} size={24} />
       </span>
       <h3 className="max-w-full break-all text-center text-base font-medium">

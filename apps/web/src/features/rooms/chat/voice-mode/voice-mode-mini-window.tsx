@@ -356,7 +356,7 @@ function MiniWindow({
     <div
       aria-label={t(m.conversation)}
       aria-live="polite"
-      className="workspace-scrollbar min-h-24 overflow-y-auto border-t border-app-border px-3 py-3"
+      className="workspace-scrollbar min-h-24 overflow-y-auto px-3 py-3"
       onScroll={(event) => {
         const element = event.currentTarget;
         const top = element.scrollTop;
@@ -582,14 +582,14 @@ function MiniWindow({
         )}
         {notice ? (
           <p
-            className="h-[29px] shrink-0 truncate border-t border-app-border bg-app-canvas px-3 py-1.5 text-[12px] leading-4 text-app-muted"
+            className="h-[29px] shrink-0 truncate bg-app-canvas px-3 py-1.5 text-[12px] leading-4 text-app-muted"
             role="status"
           >
             {notice}
           </p>
         ) : null}
         {pendingMaterials ? (
-          <p className="h-[29px] shrink-0 truncate border-t border-app-border bg-app-canvas px-3 py-1.5 text-[12px] leading-4 text-app-muted">
+          <p className="h-[29px] shrink-0 truncate bg-app-canvas px-3 py-1.5 text-[12px] leading-4 text-app-muted">
             {t(m.pendingSelections, { count: pendingMaterials })}
           </p>
         ) : null}

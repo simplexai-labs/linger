@@ -150,9 +150,8 @@ function MessagePreview({
       {shown.length ? (
         <dl
           className={cn(
-            "border-b border-app-border",
             email
-              ? "divide-y divide-app-border text-sm"
+              ? "text-sm"
               : "grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 px-3 py-2 text-xs leading-5",
           )}
         >
@@ -189,7 +188,7 @@ function MessagePreview({
       {message.attachments?.length ? (
         <ul
           aria-label={t(cardsMessages.attachments)}
-          className="flex flex-wrap gap-1.5 border-t border-app-border px-3 py-2"
+          className="flex flex-wrap gap-1.5 px-3 py-2"
         >
           {message.attachments.map((name, index) => (
             <li

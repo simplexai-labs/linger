@@ -57,7 +57,7 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == "stop-hook" {
 		os.Exit(permission.CodexRunStopHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
-	// Antigravity runs this for managed PreInvocation and Stop hooks.
+	// Antigravity runs this for managed PreInvocation, PreToolUse, and Stop hooks.
 	if len(os.Args) == 3 && os.Args[1] == "antigravity-hook" {
 		os.Exit(native.AntigravityRunHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2]))
 	}
@@ -149,6 +149,8 @@ func run(args []string) (resultErr error) {
 	} else if removed > 0 {
 		slog.Info("pruned abandoned Operation temp directories", "removed", removed, "bytes_freed", bytesFreed)
 	}
+	native.ConfigureAntigravityHookTempBase(operationTempBase)
+	defer func() { _ = native.CloseAntigravitySharedHookEndpoint() }()
 	baseProviderEnvironment := runtimeProviderEnvironment(environment, computer.GatewayToken, computer.CodexAuthFile)
 	var localModelsStateDir string
 	if computer.LocalModels != nil {
@@ -187,6 +189,7 @@ func run(args []string) (resultErr error) {
 			Runtimes:         computer.EnabledRuntimes,
 			PreferredRuntime: computer.PreferredRuntime,
 			RuntimeHomeRoot:  filepath.Join(computer.StateDirectory, "runtime-homes"),
+			TempBase:         operationTempBase,
 			Environment:      currentProviderEnvironment(),
 		}
 	}
@@ -316,9 +319,14 @@ func run(args []string) (resultErr error) {
 		if override := os.Getenv("LINGER_COMPUTER_CUA_PATH"); override != "" {
 			cuaPath = override
 		}
+		var cuaSocket string
+		if computer.Desktop != nil {
+			cuaSocket = computer.Desktop.CuaSocket
+		}
 		toolManager, err = localtools.New(localtools.Options{
 			StateDirectory: computer.StateDirectory, Environment: providerEnvironment,
 			NodePath: toolInstallation.NodePath, PlaywrightEntry: toolInstallation.PlaywrightEntry, CuaPath: cuaPath,
+			CuaEmbedded: cuaSocket != "", CuaSocket: cuaSocket,
 		})
 		if err != nil {
 			return err
@@ -343,6 +351,7 @@ func run(args []string) (resultErr error) {
 	if computer.Desktop != nil {
 		desktop = newDesktopChannel(os.Stdout)
 		permissionOptions.Linger = desktop
+		permissionOptions.EmbeddedCua = computer.Desktop.CuaSocket != ""
 	}
 	if toolManager != nil {
 		permissionOptions.Cua = toolManager
@@ -446,6 +455,7 @@ func run(args []string) (resultErr error) {
 		},
 	})
 	codexModelSessions := &provider.CodexSessions{Root: filepath.Join(computer.StateDirectory, "model-invoke", "codex-sessions")}
+	antigravityHome, _ := localworkspace.AntigravitySourceHome(providerEnvironment)
 	localDaemon, err = daemon.New(daemon.Options{
 		ComputerID: computer.ComputerID, DisplayName: computer.DisplayName,
 		Runtimes:           runtimes,
@@ -453,6 +463,7 @@ func run(args []string) (resultErr error) {
 		RuntimeDiagnostics: diagnostics, WorkspaceGrants: encodedGrants,
 		StateDirectory:      computer.StateDirectory,
 		RuntimeHomeRoot:     filepath.Join(computer.StateDirectory, "runtime-homes"),
+		AntigravityHome:     antigravityHome,
 		RuntimeObservations: runtimeObservations(computer, provider.GatewayDiagnostics(discovered.Diagnostics), runtimeObservationRevision),
 		OnModelUnavailable:  inventory.reject,
 		ModelInvokeUnready: func(runtimeType string) bool {

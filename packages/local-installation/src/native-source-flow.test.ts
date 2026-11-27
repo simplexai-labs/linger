@@ -77,6 +77,10 @@ import {
   restoreLocalModels,
 } from "./local-models.js";
 import {
+  readResumeLocalModels,
+  writeResumeLocalModels,
+} from "./localmodels-tool.js";
+import {
   inspectNativeListeners,
   inspectNativeProcess,
   nativeConfigurationChanged,
@@ -632,24 +636,223 @@ test("choosing a subscription again replaces a saved BYOK source", async () => {
   expect(restoreByokSource).not.toHaveBeenCalled();
 });
 
-test("a restart keeps a saved subscription source as before", async () => {
+test("a restart keeps a saved subscription source without re-applying it or unloading local models", async () => {
   const { result } = await restartAfter("codex", {
     mode: "subscription",
     runtime: "codex",
   });
   expect(result.code).toBe(0);
-  expect(applyNativeSource).toHaveBeenCalledWith(
-    expect.any(String),
-    "subscription",
-    "codex",
-    { signal: expect.any(AbortSignal), onEvent: expect.any(Function) },
-  );
+  expect(applyNativeSource).not.toHaveBeenCalled();
   expect(restoreByokSource).not.toHaveBeenCalled();
+  expect(restoreLocalModels).not.toHaveBeenCalled();
   expect(prepareModelGateway).toHaveBeenCalledWith(
     expect.anything(),
     "codex",
     expect.anything(),
   );
+});
+
+test("a subscription restart or update restores previously loaded library models and reports them", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "claude",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  await saveModelSource(f.home, "subscription", "claude");
+  await writeResumeLocalModels(f.home, ["spark-x2.6-4b:Q4_K_M"]);
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(restoreLocalModels).mockClear();
+  vi.mocked(restoreLocalModels).mockImplementationOnce(async (_inst, opts) => {
+    opts.onRestored?.(["spark-x2.6-4b:Q4_K_M"]);
+    return undefined;
+  });
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    externalComputer: true,
+    degradeLocalModels: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result).toMatchObject({
+    code: 0,
+    state: "ready",
+    details: {
+      localModelsRestored: true,
+      restoredLocalModels: ["spark-x2.6-4b:Q4_K_M"],
+    },
+  });
+  expect(applyNativeSource).not.toHaveBeenCalled();
+  expect(restoreLocalModels).toHaveBeenCalledTimes(1);
+});
+
+test("a BYOK restart mounts BYOK before restoring previously loaded library models", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "codex",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  await saveModelSource(f.home, "byok", "pi");
+  await writeResumeLocalModels(f.home, ["spark-x2.6-4b:Q4_K_M"]);
+  const order: string[] = [];
+  vi.mocked(restoreByokSource).mockImplementationOnce(async () => {
+    order.push("byok");
+    return undefined;
+  });
+  vi.mocked(restoreLocalModels).mockImplementationOnce(async (_inst, opts) => {
+    order.push("local");
+    opts.onRestored?.(["spark-x2.6-4b:Q4_K_M"]);
+    return undefined;
+  });
+  vi.mocked(applyNativeSource).mockClear();
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result).toMatchObject({
+    code: 0,
+    details: {
+      localModelsRestored: true,
+      restoredLocalModels: ["spark-x2.6-4b:Q4_K_M"],
+    },
+  });
+  expect(order).toEqual(["byok", "local"]);
+  expect(applyNativeSource).not.toHaveBeenCalled();
+});
+
+test("an explicit setup choice clears any stale post-stop local model resume record", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  await writeResumeLocalModels(f.home, ["spark-x2.6-4b:Q4_K_M"]);
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "codex",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(await readResumeLocalModels(f.home)).toBeUndefined();
+});
+
+test("a cold resume in local-models mode restores models from resume-models.json even when model-source.json is absent", async () => {
+  const f = await fixture();
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "local-models",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  await writeResumeLocalModels(f.home, ["spark-x2.6-4b:Q4_K_M"]);
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(prepareLocalModels).mockClear();
+  vi.mocked(restoreLocalModels).mockClear();
+  vi.mocked(restoreLocalModels).mockImplementationOnce(async (_inst, opts) => {
+    opts.onRestored?.(["spark-x2.6-4b:Q4_K_M"]);
+    return undefined;
+  });
+
+  const result = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    resume: true,
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(result).toMatchObject({
+    code: 0,
+    details: {
+      localModelsRestored: true,
+      restoredLocalModels: ["spark-x2.6-4b:Q4_K_M"],
+    },
+  });
+  expect(prepareLocalModels).toHaveBeenCalledTimes(1);
+  expect(restoreLocalModels).toHaveBeenCalledTimes(1);
+  expect(applyNativeSource).not.toHaveBeenCalled();
+});
+
+test("a legacy subscription restart without model-source.json preserves source apply when idle and avoids unloading when local models are pending", async () => {
+  const f = await fixture();
+  vi.mocked(prepareRuntime).mockResolvedValue({
+    code: 0,
+    state: "ready",
+    message: "ok",
+  });
+  await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    setupChoice: "codex",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  // No model-source.json on disk and no pending local models: creates
+  // model-source.json via source apply --mode subscription.
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(restoreLocalModels).mockClear();
+  const migrated = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(migrated.code).toBe(0);
+  expect(applyNativeSource).toHaveBeenCalledWith(
+    path.resolve(f.home),
+    "subscription",
+    "codex",
+    { signal: expect.any(AbortSignal), onEvent: expect.any(Function) },
+  );
+  expect(restoreLocalModels).not.toHaveBeenCalled();
+
+  // With pending local models and still no model-source.json: skips
+  // subscription source apply so active local models are not unloaded.
+  await writeResumeLocalModels(f.home, ["spark-x2.6-4b:Q4_K_M"]);
+  vi.mocked(applyNativeSource).mockClear();
+  vi.mocked(restoreLocalModels).mockClear();
+  const preserved = await installNativeSource({
+    home: f.home,
+    repo: f.repo,
+    name: "native-flow",
+    signal: new AbortController().signal,
+    onEvent: () => {},
+  });
+  expect(preserved.code).toBe(0);
+  expect(applyNativeSource).not.toHaveBeenCalled();
+  expect(restoreLocalModels).toHaveBeenCalledTimes(1);
 });
 
 test("a restart keeps a saved local source as before", async () => {

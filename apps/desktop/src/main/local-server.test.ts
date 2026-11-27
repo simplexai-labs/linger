@@ -601,6 +601,9 @@ const fixture = (
   const enroll = vi.fn(async () => {});
   const unenroll = vi.fn(async () => {});
   const syncLocalGatewayUrl = vi.fn(() => false);
+  const defaultGrantFailure = vi.fn<
+    () => { readonly directory: string; readonly error: string } | undefined
+  >(() => undefined);
   let context: ModuleContext | undefined;
   const signIn = vi.fn(async () => {});
   // The installed server proves itself unless a test says otherwise.
@@ -655,6 +658,10 @@ const fixture = (
           context = ctx;
         },
       } as never,
+      {
+        ...stubModule("WorkspaceGrants"),
+        defaultFailure: defaultGrantFailure,
+      } as never,
       module,
     ],
     config,
@@ -676,6 +683,7 @@ const fixture = (
     enroll,
     unenroll,
     syncLocalGatewayUrl,
+    defaultGrantFailure,
     config: () => context!.config.get(),
     signIn,
     proveServer,
@@ -1431,6 +1439,153 @@ describe("LocalServerModule", () => {
     await expect(f.module.begin()).rejects.toThrow(
       "No signed-in AI runtime is reported by this computer. It found Claude Code: not found on this computer; Codex: not signed in.",
     );
+    expect(f.module.status().phase).toBe("failed");
+    await f.host.stop("quit");
+  });
+
+  it("surfaces server placement_blocker diagnostics while polling and on timeout", async () => {
+    let polls = 0;
+    const server = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v0/me")
+        return Response.json({ actors: [{ kind: "human", tenant_id: "t1" }] });
+      if (url.pathname === "/v0/tenants/t1/another-me") {
+        polls += 1;
+        return Response.json({
+          placement_blocker: {
+            reason: "no_ready_runtime_with_models",
+            computer_id: "cmp_win_1",
+            runtimes: [
+              {
+                type: "codex",
+                status: "error",
+                model_count: 0,
+                message: "node.exe not found",
+              },
+              {
+                type: "pi",
+                status: "ready",
+                model_count: 0,
+              },
+            ],
+          },
+        });
+      }
+      // Even when /local-computers returns 404, server placement_blocker explains why.
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        fetch: server,
+        sessionCookie: async () => "session=s",
+        pollMs: 1,
+        agentsTimeoutMs: 15,
+      }),
+      { computerId: "cmp_win_1" },
+      checkout,
+    );
+    const messages: string[] = [];
+    f.host.ctx.bus.on("local-server.changed", () => {
+      messages.push(f.module.status().message);
+    });
+    await f.host.start();
+    await expect(f.module.begin()).rejects.toThrow(
+      "No signed-in AI runtime is reported by this computer. It found Codex: check failed (node.exe not found); Pi: signed in but reports no models.",
+    );
+    expect(polls).toBeGreaterThanOrEqual(1);
+    expect(messages).toContain("Waiting for a signed-in AI runtime…");
+    expect(f.module.status().phase).toBe("failed");
+    await f.host.stop("quit");
+  });
+
+  it("completes setup when placement_blocker clears after the runtime becomes ready", async () => {
+    let polls = 0;
+    const server = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v0/me")
+        return Response.json({ actors: [{ kind: "human", tenant_id: "t1" }] });
+      if (url.pathname === "/v0/tenants/t1/another-me") {
+        polls += 1;
+        return Response.json(
+          polls < 3
+            ? {
+                placement_blocker: {
+                  reason: "no_ready_runtime_with_models",
+                  computer_id: "cmp_win_1",
+                  runtimes: [
+                    {
+                      type: "codex",
+                      status: "authentication_required",
+                      model_count: 0,
+                    },
+                  ],
+                },
+              }
+            : { agent_actor_id: "actor_anotherme_1" },
+        );
+      }
+      if (url.pathname === "/v0/tenants/t1/rooms")
+        return Response.json({ items: [{ name: "Getting Started" }] });
+      if (url.pathname === "/v0/tenants/t1/local-computers")
+        return Response.json({
+          items: [{ computer_id: "cmp_win_1", status: "online" }],
+        });
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        fetch: server,
+        sessionCookie: async () => "session=s",
+        pollMs: 1,
+      }),
+      { computerId: "cmp_win_1" },
+      checkout,
+    );
+    await f.host.start();
+    await f.module.begin();
+    expect(polls).toBe(3);
+    expect(f.module.status().phase).toBe("ready");
+    await f.host.stop("quit");
+  });
+
+  it("stops waiting immediately when creating the default workspace folder failed", async () => {
+    let polls = 0;
+    const server = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v0/me")
+        return Response.json({ actors: [{ kind: "human", tenant_id: "t1" }] });
+      if (url.pathname === "/v0/tenants/t1/another-me") {
+        polls += 1;
+        return Response.json({
+          placement_blocker: {
+            reason: "no_writable_workspace_grant",
+            computer_id: "cmp_1",
+          },
+        });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    const f = fixture(
+      (home) => ({
+        ...withCheckout(home),
+        fetch: server,
+        sessionCookie: async () => "session=s",
+        pollMs: 1,
+      }),
+      { computerId: "cmp_1" },
+      checkout,
+    );
+    await f.host.start();
+    f.defaultGrantFailure.mockReturnValue({
+      directory: "/Users/alice/Linger",
+      error: "EACCES: permission denied",
+    });
+    await expect(f.module.begin()).rejects.toThrow(
+      "Linger could not create its default workspace folder (/Users/alice/Linger): EACCES: permission denied. Choose a writable folder in Linger Settings, then try again.",
+    );
+    expect(polls).toBe(1);
     expect(f.module.status().phase).toBe("failed");
     await f.host.stop("quit");
   });
@@ -7342,6 +7497,7 @@ describe("LocalServerModule after a restart", () => {
         {
           ...stubModule("WorkspaceGrants", ["Config"]),
           ensureDefault: vi.fn(async () => {}),
+          defaultFailure: vi.fn(() => undefined),
         } as never,
         enrollment,
         module,
@@ -7721,6 +7877,59 @@ describe("anotherMeMissing", () => {
     [{ ...online, runtimes: [] }, "codex login"],
   ])("names the reason for %j", (computer, reason) => {
     expect(anotherMeMissing(computer, 60_000).split("\n")[1]).toContain(reason);
+  });
+
+  it.each([
+    [
+      { reason: "no_online_computer", computer_id: "cmp_1" },
+      "computer-daemon.log",
+    ],
+    [
+      { reason: "computer_upgrade_required", computer_id: "cmp_1" },
+      "Update Linger",
+    ],
+    [
+      { reason: "no_writable_workspace_grant", computer_id: "cmp_1" },
+      "no folder",
+    ],
+    [
+      {
+        reason: "no_ready_runtime_with_models",
+        computer_id: "cmp_win_1",
+        runtimes: [
+          {
+            type: "codex",
+            status: "authentication_required",
+            model_count: 0,
+            message: "Sign in required",
+          },
+          { type: "pi", status: "ready", model_count: 0 },
+        ],
+      },
+      "Codex: not signed in (Sign in required); Pi: signed in but reports no models",
+    ],
+    [
+      {
+        reason: "create_failed",
+        computer_id: "cmp_1",
+      },
+      "another_me.create_failed",
+    ],
+  ])("prefers server placement_blocker for %j", (blocker, reason) => {
+    expect(anotherMeMissing(null, 60_000, blocker).split("\n")[1]).toContain(
+      reason,
+    );
+  });
+
+  it("includes default workspace grant failure details when no writable grant exists", () => {
+    const [, detail] = anotherMeMissing(
+      undefined,
+      60_000,
+      { reason: "no_writable_workspace_grant", computer_id: "cmp_1" },
+      { directory: "C:\\Users\\alice\\Linger", error: "EPERM: access denied" },
+    ).split("\n");
+    expect(detail).toContain("C:\\Users\\alice\\Linger");
+    expect(detail).toContain("EPERM: access denied");
   });
 });
 

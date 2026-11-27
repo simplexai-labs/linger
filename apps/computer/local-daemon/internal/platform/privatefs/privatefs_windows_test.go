@@ -393,3 +393,106 @@ func TestWindowsProtectDirectoryRepairsInheritedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWindowsProtectFileRepairsWeakACLAndRejectsHardLinks(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "claude")
+	if err := EnsureDir(root); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := CurrentSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	broad, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;" + sid.String() + ")(A;;FA;;;SY)(A;;0x1301bf;;;AU)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acl, _, err := broad.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred := filepath.Join(root, ".credentials.json")
+	if err := os.WriteFile(cred, []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(cred, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckPath(cred, "file", true); err == nil {
+		t.Fatal("broadly accessible file passed CheckPath before ProtectFile")
+	}
+	if err := ProtectFile(cred); err != nil {
+		t.Fatalf("ProtectFile: %v", err)
+	}
+	if err := CheckPath(cred, "file", true); err != nil {
+		t.Fatalf("CheckPath after ProtectFile: %v", err)
+	}
+	// Hard-linked file with weak ACL must be rejected without modifying its ACL.
+	linked := filepath.Join(root, "linked.json")
+	if err := os.Link(cred, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(linked, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProtectFile(linked); err == nil {
+		t.Fatal("hard-linked file accepted by ProtectFile")
+	}
+}
+
+func TestWindowsEnsureDirSkipsRewriteWhenAlreadyPrivate(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private-dir")
+	if err := EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := CurrentSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Apply a valid owner-only protected DACL distinct from SecurityDescriptor()
+	// (adds BUILTIN\Administrators) and verify EnsureDir leaves it untouched.
+	custom, err := windows.SecurityDescriptorFromString("O:" + sid.String() + "D:P(A;OICI;FA;;;" + sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	customACL, _, err := custom.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, customACL, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDir(dir); err != nil {
+		t.Fatalf("EnsureDir fast-path: %v", err)
+	}
+	after, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.String() != after.String() {
+		t.Fatalf("EnsureDir rewrote an already-private directory DACL:\nbefore: %s\nafter:  %s", before.String(), after.String())
+	}
+
+	// Weakening the DACL must still trigger repair.
+	broad, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + sid.String() + ")(A;OICI;FA;;;SY)(A;OICI;FR;;;AU)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broadACL, _, err := broad.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, broadACL, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDir(dir); err != nil {
+		t.Fatalf("EnsureDir repair: %v", err)
+	}
+	if err := CheckPath(dir, "directory", true); err != nil {
+		t.Fatalf("CheckPath after EnsureDir repair: %v", err)
+	}
+}

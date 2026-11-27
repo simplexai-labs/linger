@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -176,6 +177,7 @@ func (r *antigravityRuntime) Start(ctx context.Context, prompt string, spec RunS
 	proc.res.bindEpoch(epoch)
 	proc.front = front
 	proc.hookEP = hookEP
+	proc.storeRoot = antigravityStoreRoot(r.profile.Env)
 	proc.releaseTemp = releaseTemp
 	var parkShape *antigravityShape
 	if parkEligible {
@@ -341,17 +343,18 @@ type antigravityTurn struct {
 	// sawActivity records whether the prompted turn observed any reasoning,
 	// tool call, or plan. Antigravity surfaces some upstream refusals as a
 	// plain agent_message_chunk followed by end_turn with no usage or activity.
-	sawActivity    bool
-	phase          string
-	ended          bool
-	wokenByUser    bool
-	steers         []*antigravitySteer
-	unregisterHook func()
-	sessionID      string
-	preTokens      *int64
-	textID         string
-	output         strings.Builder
-	tools          map[string]BackgroundTool
+	sawActivity     bool
+	stopHookBlocked bool
+	phase           string
+	ended           bool
+	wokenByUser     bool
+	steers          []*antigravitySteer
+	unregisterHook  func()
+	sessionID       string
+	preTokens       *int64
+	textID          string
+	output          strings.Builder
+	tools           map[string]BackgroundTool
 	// lastUpdate is when the prompted session last reported anything.
 	lastUpdate time.Time
 }
@@ -537,10 +540,13 @@ func (t *antigravityTurn) steer(ctx context.Context, request SteerRequest) (Stee
 	}
 }
 
-func (t *antigravityTurn) onHook(_ context.Context, req AntigravityHookRequest) AntigravityHookResponse {
+func (t *antigravityTurn) onHook(hookCtx context.Context, req AntigravityHookRequest) AntigravityHookResponse {
 	t.proc.noteTranscriptPath(req)
 	switch req.HookEventName {
 	case "PreInvocation":
+		if t.compaction {
+			return AntigravityHookResponse{}
+		}
 		t.mu.Lock()
 		if t.ended || t.runCtx.Err() != nil {
 			t.mu.Unlock()
@@ -583,40 +589,105 @@ func (t *antigravityTurn) onHook(_ context.Context, req AntigravityHookRequest) 
 		}
 		return AntigravityHookResponse{InjectSteps: steps}
 
+	case "PreToolUse":
+		if t.compaction {
+			return AntigravityHookResponse{Decision: "deny", Reason: "Tools are disabled during compaction."}
+		}
+		if t.spec.ShellTextHook != "" && runtime.GOOS != "windows" && req.ToolCall != nil {
+			toolName := strings.ToLower(strings.TrimSpace(req.ToolCall.Name))
+			if toolName == "" || toolName == "run_command" {
+				cmd, _ := req.ToolCall.Args["CommandLine"].(string)
+				if cmd == "" {
+					cmd, _ = req.ToolCall.Args["command"].(string)
+				}
+				if cmd != "" && permission.ShellTextRewritten(cmd) {
+					if t.profile.Logger != nil {
+						t.profile.Logger.Info("antigravity.hook.shell_text_denied", "session_id", req.ConversationID, "tool_name", req.ToolCall.Name)
+					}
+					return AntigravityHookResponse{Decision: "deny", Reason: permission.ShellTextMessage}
+				}
+			}
+		}
+		return AntigravityHookResponse{Decision: "allow"}
+
 	case "Stop":
-		if req.FullyIdle == nil || *req.FullyIdle {
+		if t.compaction {
+			return AntigravityHookResponse{}
+		}
+		if req.FullyIdle != nil && !*req.FullyIdle {
+			t.mu.Lock()
+			if t.ended || t.runCtx.Err() != nil {
+				t.mu.Unlock()
+				return AntigravityHookResponse{}
+			}
+			tools := t.snapshotToolsLocked()
+			hasSteers := len(t.steers) > 0
+			emitWaiting := false
+			if len(tools) > 0 {
+				if hasSteers {
+					// Wake immediately rather than advertising background idle wait when
+					// a steer is already waiting.
+				} else if t.phase != "waiting_background" {
+					t.phase = "waiting_background"
+					t.background = true
+					emitWaiting = true
+				}
+			}
+			t.mu.Unlock()
+			if len(tools) > 0 && hasSteers {
+				t.triggerWake()
+			} else if emitWaiting {
+				if t.profile.Logger != nil {
+					t.profile.Logger.Info("antigravity.hook.background_waiting", "session_id", req.ConversationID, "tool_count", len(tools))
+				}
+				t.emit(Event{
+					Kind:            EventBackgroundWaiting,
+					ObservedAt:      time.Now(),
+					BackgroundTools: tools,
+				})
+			}
 			return AntigravityHookResponse{}
 		}
 		t.mu.Lock()
-		if t.ended || t.runCtx.Err() != nil {
-			t.mu.Unlock()
+		eligible := t.spec.StopHook != nil && !t.ended && t.runCtx.Err() == nil && len(t.tools) == 0 && len(t.steers) == 0 &&
+			(req.TerminationReason == "" || req.TerminationReason == "NO_TOOL_CALL") &&
+			strings.TrimSpace(req.Error) == ""
+		// agy emits continuationActive: false even on re-entry, so guard
+		// against repeat blocking with executionNum and local turn state too.
+		stopHookActive := req.ContinuationActive || req.ExecutionNum > 0 || t.stopHookBlocked
+		stopHook := t.spec.StopHook
+		t.mu.Unlock()
+		if !eligible {
 			return AntigravityHookResponse{}
 		}
-		tools := t.snapshotToolsLocked()
-		hasSteers := len(t.steers) > 0
-		emitWaiting := false
-		if len(tools) > 0 {
-			if hasSteers {
-				// Wake immediately rather than advertising background idle wait when
-				// a steer is already waiting.
-			} else if t.phase != "waiting_background" {
-				t.phase = "waiting_background"
-				t.background = true
-				emitWaiting = true
+		stopCtx, stopCancel := context.WithCancel(hookCtx)
+		defer stopCancel()
+		stopWatcher := context.AfterFunc(t.runCtx, stopCancel)
+		defer stopWatcher()
+		decision := stopHook(stopCtx, StopHookRequest{
+			Runtime:        "antigravity",
+			StopHookActive: stopHookActive,
+		})
+		if decision.Action == "block" {
+			reason := strings.TrimSpace(decision.Reason)
+			if reason != "" {
+				t.mu.Lock()
+				if t.ended || t.runCtx.Err() != nil {
+					t.mu.Unlock()
+					return AntigravityHookResponse{}
+				}
+				t.stopHookBlocked = true
+				t.textID = ""
+				t.mu.Unlock()
+				if t.profile.Logger != nil {
+					t.profile.Logger.Info("antigravity.hook.stop_blocked",
+						"session_id", req.ConversationID,
+						"execution_num", req.ExecutionNum,
+						"stop_hook_active", stopHookActive,
+					)
+				}
+				return AntigravityHookResponse{Decision: "continue", Reason: reason}
 			}
-		}
-		t.mu.Unlock()
-		if len(tools) > 0 && hasSteers {
-			t.triggerWake()
-		} else if emitWaiting {
-			if t.profile.Logger != nil {
-				t.profile.Logger.Info("antigravity.hook.background_waiting", "session_id", req.ConversationID, "tool_count", len(tools))
-			}
-			t.emit(Event{
-				Kind:            EventBackgroundWaiting,
-				ObservedAt:      time.Now(),
-				BackgroundTools: tools,
-			})
 		}
 		return AntigravityHookResponse{}
 	}
@@ -698,8 +769,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 	}
 
 	var sessionID string
-	switch {
-	case !t.reused || t.adopted:
+	if !t.reused || t.adopted {
 		var caps acpCapabilities
 		if !t.reused {
 			var err error
@@ -804,8 +874,7 @@ func (t *antigravityTurn) exchange(prompt string, servers []any) Outcome {
 			t.proc.explicitEffortSet = true
 			t.proc.mu.Unlock()
 		}
-
-	default:
+	} else {
 		t.proc.mu.Lock()
 		sessionID = t.proc.sessionID
 		currentPromptHash := t.proc.systemPromptHash

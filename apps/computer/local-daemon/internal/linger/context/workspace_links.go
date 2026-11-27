@@ -15,6 +15,13 @@ import (
 // symlink. Dangling or cyclic links in writable trees are repository
 // content and are left in place.
 func validateWorkspaceLinks(workspace string, mappings []Mapping) error {
+	info, err := os.Lstat(workspace)
+	if err != nil {
+		return err
+	}
+	if !realDirectory(info) {
+		return errors.New("Context Workspace is not a real directory")
+	}
 	canonical, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		return err
@@ -32,8 +39,36 @@ func validateWorkspaceLinks(workspace string, mappings []Mapping) error {
 			continue
 		}
 		seen[root] = struct{}{}
+		if err := rejectReadOnlyParentLinks(canonical, filepath.Clean(mapping.TargetPath)); err != nil {
+			return err
+		}
 		if err := rejectReadOnlyProjectionLinks(root); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func rejectReadOnlyParentLinks(canonical, target string) error {
+	parent := filepath.Dir(target)
+	if parent == "." || parent == "" {
+		return nil
+	}
+	current := canonical
+	for _, component := range strings.Split(parent, string(filepath.Separator)) {
+		if component == "." || component == "" {
+			continue
+		}
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if directoryLink(info) {
+			return errors.New("Context read-only projection contains a symbolic link")
 		}
 	}
 	return nil

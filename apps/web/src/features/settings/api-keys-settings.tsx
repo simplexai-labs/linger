@@ -56,7 +56,7 @@ export function ApiKeysSettings() {
           {t(accountSettingsMessages.apiKeysDescription)}
         </p>
       </header>
-      <div className="divide-y divide-border rounded-2xl border border-border bg-background">
+      <div className="rounded-2xl border border-border bg-background">
         <ComposioKeyRow onOpen={open} />
         {voicePolicy?.voice_available ? (
           <>

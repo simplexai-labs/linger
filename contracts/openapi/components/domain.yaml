@@ -644,8 +644,9 @@ components:
       type: object
       additionalProperties: false
       description: >-
-        The Human's Another Me and its live direct Chat. Empty until the Another Me exists; room_id is
-        also absent while the Chat is being deleted.
+        The Human's Another Me and its live direct Chat. Empty until the Another Me exists or a
+        registered Local Computer reports a placement blocker; room_id is also absent while the
+        Chat is being deleted.
       properties:
         agent_actor_id:
           $ref: "./common.yaml#/components/schemas/Id"
@@ -653,6 +654,56 @@ components:
           $ref: "./common.yaml#/components/schemas/Id"
         background_failure:
           $ref: "#/components/schemas/AnotherMeBackgroundFailure"
+        placement_blocker:
+          $ref: "#/components/schemas/AnotherMePlacementBlocker"
+    AnotherMePlacementBlocker:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      description: >-
+        Present while the Human has no Another Me yet and TeamHub has a known reason it cannot
+        place or create one on the Human's Local Computers. Absent once the Another Me exists or
+        before any Local Computer is registered for the Human.
+      properties:
+        reason:
+          $ref: "#/components/schemas/AnotherMePlacementBlockerReason"
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        runtimes:
+          type: array
+          maxItems: 16
+          description: >-
+            Runtime diagnostics last reported by the candidate Computer when placement is blocked
+            because no Runtime is ready with models.
+          items:
+            $ref: "#/components/schemas/AnotherMePlacementRuntimeStatus"
+    AnotherMePlacementBlockerReason:
+      type: string
+      description: >-
+        Why TeamHub skipped or failed creating the Human's Another Me on their Local Computers.
+        Clients treat an unknown value as unknown.
+      enum:
+        - no_online_computer
+        - computer_upgrade_required
+        - no_writable_workspace_grant
+        - no_ready_runtime_with_models
+        - create_failed
+    AnotherMePlacementRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required: [type, status, model_count]
+      properties:
+        type:
+          $ref: "#/components/schemas/LocalRuntimeType"
+        status:
+          $ref: "#/components/schemas/LocalRuntimeDiagnosticStatus"
+        model_count:
+          type: integer
+          minimum: 0
+        message:
+          type: string
+          minLength: 1
+          maxLength: 512
     AnotherMeBackgroundFailure:
       type: object
       additionalProperties: false

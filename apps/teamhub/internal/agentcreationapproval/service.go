@@ -76,9 +76,13 @@ type AvailableAgentPage struct {
 	NextCursor string
 }
 
+// Result is a submitted Room creation: the created Room's response body, or,
+// for a submission replayed from before Rooms were created at once, its
+// pending approval card.
 type Result struct {
 	CreationApprovalRequestID string
 	MessageID                 string
+	Created                   json.RawMessage
 	Replay                    bool
 }
 
@@ -168,6 +172,8 @@ func (s *Service) ListAvailableAgents(
 	}, nil
 }
 
+// Submit creates the Agent's requested Room at once, owned by its Sponsor,
+// after authorizing the caller and freezing the Room it asked for.
 func (s *Service) Submit(
 	ctx context.Context,
 	token string,
@@ -189,7 +195,7 @@ func (s *Service) Submit(
 	if err != nil {
 		return Result{}, err
 	}
-	created, err := s.cards.CreateCreationApprovalRequestInTx(ctx, tx, typedcard.CreationApprovalInTxInput{
+	created, err := s.cards.CreateRoomInTx(ctx, tx, typedcard.CreationApprovalInTxInput{
 		RoomID: resolved.roomID, AgentManagementID: resolved.authorization.AgentID,
 		ExpectedAgentActorID: resolved.authorization.AgentActorID,
 		ExpectedTenantID:     resolved.authorization.TenantID,
@@ -225,10 +231,13 @@ func (s *Service) Submit(
 	if err := tx.Commit(ctx); err != nil {
 		return Result{}, err
 	}
-	return Result{
-		CreationApprovalRequestID: created.DecisionID,
-		MessageID:                 created.MessageID, Replay: created.Replay,
-	}, nil
+	if created.DecisionID != "" {
+		return Result{
+			CreationApprovalRequestID: created.DecisionID,
+			MessageID:                 created.MessageID, Replay: created.Replay,
+		}, nil
+	}
+	return Result{Created: created.Body, Replay: created.Replay}, nil
 }
 
 func (s *Service) authorizeSubmission(

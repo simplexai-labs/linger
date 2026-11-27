@@ -456,5 +456,10 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   `syncMobileRelays`, which hands the enabled nodes to `Gateway.SetRelays`;
   unchanged links stay up. `TEAMHUB_MOBILE_RELAY_URL` set empty keeps no
   Relay link. docs/mobile.md and docs/adr/0005 describe the protocol.
+- Permission cards store the owner selected from the Computer's status before
+  creation. Embedded Computer Use cards target Linger. Cards settle on grants
+  for their stored subject. The request response returns the permission groups
+  used to select that subject. CLI `--wait` checks the same Computer and
+  subject throughout polling.
 - Do not add write-only audit, event, or provenance tables. A new audit table
   needs a named product or compliance reader in the same pull request.

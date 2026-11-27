@@ -368,6 +368,24 @@ func (e AgentContextMemberKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentCreationApprovalResponseStatus.
+const (
+	Created         AgentCreationApprovalResponseStatus = "created"
+	PendingApproval AgentCreationApprovalResponseStatus = "pending_approval"
+)
+
+// Valid indicates whether the value is a known member of the AgentCreationApprovalResponseStatus enum.
+func (e AgentCreationApprovalResponseStatus) Valid() bool {
+	switch e {
+	case Created:
+		return true
+	case PendingApproval:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentDocumentCommentAuthorKind.
 const (
 	AgentDocumentCommentAuthorKindAgent AgentDocumentCommentAuthorKind = "agent"
@@ -2027,20 +2045,29 @@ type AgentCreateTeamMdResponse struct {
 // AgentCreationActorIds Duplicate-free TeamHub Actor identifiers in caller-supplied order.
 type AgentCreationActorIds = []Id
 
-// AgentCreationApprovalResponse Durable pending Room creation approval request.
+// AgentCreationApprovalResponse A submitted Room creation. TeamHub creates the Room at once, owned by the Agent's Sponsor; a submission replayed from an earlier pending approval card still reports that card.
 type AgentCreationApprovalResponse struct {
 	// Accepted Whether TeamHub accepted and durably persisted the Creation request.
 	Accepted bool `json:"accepted"`
 
 	// CreationApprovalRequestId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	CreationApprovalRequestId Id `json:"creation_approval_request_id"`
+	CreationApprovalRequestId *Id `json:"creation_approval_request_id,omitempty"`
 
 	// MessageId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
-	MessageId Id `json:"message_id"`
+	MessageId *Id `json:"message_id,omitempty"`
 
-	// Status Initial lifecycle state while awaiting a Human decision.
-	Status string `json:"status"`
+	// RoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RoomId *Id `json:"room_id,omitempty"`
+
+	// SkippedArtifacts Requested Documents not delivered to the created Room, each with the reason; present when status is created.
+	SkippedArtifacts *[]AgentRoomCreationSkippedArtifact `json:"skipped_artifacts,omitempty"`
+
+	// Status created when the Room exists; pending_approval for a replayed submission whose approval card still awaits a Human decision.
+	Status AgentCreationApprovalResponseStatus `json:"status"`
 }
+
+// AgentCreationApprovalResponseStatus created when the Room exists; pending_approval for a replayed submission whose approval card still awaits a Human decision.
+type AgentCreationApprovalResponseStatus string
 
 // AgentCreationMessageSegment One structured initial message segment accepted by a Creation request. Every segment must include its type discriminator. Document and file segments remain excluded because the destination Room does not exist yet; create_room delivers existing Documents through its separate artifacts field.
 type AgentCreationMessageSegment struct {
@@ -2699,6 +2726,15 @@ type AgentRoomCreationEffectivePayload struct {
 
 	// Name Normalized name of the proposed collaboration Room.
 	Name string `json:"name"`
+}
+
+// AgentRoomCreationSkippedArtifact A requested Document the created Room did not receive.
+type AgentRoomCreationSkippedArtifact struct {
+	// DocumentId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	DocumentId Id `json:"document_id"`
+
+	// Reason Why the Document was not delivered.
+	Reason string `json:"reason"`
 }
 
 // AgentRoomHandoffRequest The Room to hand the Human's request to and the instruction the AnotherMe's Context there carries out. The caller, its direct chat and its Human are derived by TeamHub, never accepted from the caller.

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 )
 
 // Authentication checks cannot make a newly arriving Operation fail its home claim.
@@ -113,18 +115,12 @@ func claimRuntimeHome(root string, identity RuntimeHomeIdentity) (*RuntimeHome, 
 		return nil, err
 	}
 	providerRoot := filepath.Join(root, identity.ProviderType)
-	if err := os.MkdirAll(providerRoot, 0o700); err != nil {
-		return nil, fmt.Errorf("create Runtime home root: %w", err)
-	}
-	if err := os.Chmod(providerRoot, 0o700); err != nil { //nolint:gosec // owner-only directory mode; gosec expects a file mode for Chmod
-		return nil, fmt.Errorf("protect Runtime home root: %w", err)
+	if err := privatefs.EnsureDir(providerRoot); err != nil {
+		return nil, fmt.Errorf("prepare Runtime home root: %w", err)
 	}
 	homePath := filepath.Join(providerRoot, digest)
-	if err := os.MkdirAll(homePath, 0o700); err != nil {
-		return nil, fmt.Errorf("create Runtime home: %w", err)
-	}
-	if err := os.Chmod(homePath, 0o700); err != nil { //nolint:gosec // owner-only directory mode; gosec expects a file mode for Chmod
-		return nil, fmt.Errorf("protect Runtime home: %w", err)
+	if err := privatefs.EnsureDir(homePath); err != nil {
+		return nil, fmt.Errorf("prepare Runtime home: %w", err)
 	}
 	return claimRuntimeHomePath(homePath)
 }
@@ -176,6 +172,44 @@ func CodexSourceHome(environment map[string]string) (string, error) {
 	absolute, err := filepath.Abs(value)
 	if err != nil {
 		return "", fmt.Errorf("resolve local Codex source home: %w", err)
+	}
+	return filepath.Clean(absolute), nil
+}
+
+// EnvLookup returns the trimmed value of key in environment, preferring an
+// exact key match before falling back to a case-insensitive match.
+func EnvLookup(environment map[string]string, key string) string {
+	if value, ok := environment[key]; ok {
+		return strings.TrimSpace(value)
+	}
+	for k, value := range environment {
+		if strings.EqualFold(k, key) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// AntigravitySourceHome resolves the Computer user's native Antigravity store
+// (`<home>/.gemini/antigravity-cli`) from environment or the current OS user.
+func AntigravitySourceHome(environment map[string]string) (string, error) {
+	home := EnvLookup(environment, "HOME")
+	if home == "" {
+		home = EnvLookup(environment, "USERPROFILE")
+	}
+	if home == "" {
+		resolved, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve local Antigravity source home: %w", err)
+		}
+		home = strings.TrimSpace(resolved)
+	}
+	if home == "" {
+		return "", errors.New("local Antigravity source home requires HOME or USERPROFILE")
+	}
+	absolute, err := filepath.Abs(filepath.Join(home, ".gemini", "antigravity-cli"))
+	if err != nil {
+		return "", fmt.Errorf("resolve local Antigravity source home: %w", err)
 	}
 	return filepath.Clean(absolute), nil
 }

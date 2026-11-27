@@ -73,6 +73,9 @@ type DiscoveryResult struct {
 
 type DiscoveryOptions struct {
 	RuntimeHomeRoot string
+	// TempBase holds per-probe temporary directories inside the Daemon's
+	// private state directory; empty falls back to the OS temporary directory.
+	TempBase        string
 	ConfiguredPaths map[string]string
 	// ManagedPaths holds installer- or harness-managed Runtime executables
 	// checked after user PATH and macOS app bundles, and before BundledPaths.
@@ -247,14 +250,17 @@ func diagnose(ctx context.Context, kind, executable, protocol string, options Di
 	if kind == "codex" {
 		// Discovery lists models, so its home reuses a Context's catalog
 		// instead of fetching it on every refresh.
-		prepared, release, err := localworkspace.CodexProbeEnvironment(probe, environment, version, codexProbeModelsCache(options.RuntimeHomeRoot))
+		prepared, release, err := localworkspace.CodexProbeEnvironment(probe, environment, version, codexProbeModelsCache(options.RuntimeHomeRoot), options.TempBase)
 		if err != nil {
 			return reject("error", "RUNTIME_DIAGNOSTIC_FAILED", "Codex diagnostic home could not be prepared")
 		}
 		defer release()
 		environment = prepared
 	}
-	outcome := probeRuntime(probe, kind, canonical, environment, budget, options.RuntimeHomeRoot)
+	outcome := probeRuntime(probe, kind, canonical, environment, budget, probeOptions{
+		runtimeHomeRoot: options.RuntimeHomeRoot,
+		tempBase:        options.TempBase,
+	})
 	observation.Status = outcome.Status
 	observation.authProbeFailed = outcome.protocolVerified && outcome.Status == "error" && outcome.Code == "RUNTIME_DIAGNOSTIC_FAILED"
 	if outcome.Status != "ready" {

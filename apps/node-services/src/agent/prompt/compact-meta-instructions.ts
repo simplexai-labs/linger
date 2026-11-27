@@ -90,7 +90,7 @@ const STATIC_COMMANDS = (connectedApps: boolean): string =>
   Add "multiple": true to allow several options. Every question must be answered. Ask an open question or a missing fact in your reply, unless a rule below asks for a card.
 - To show something the person looks at or uses here and now (a quick chart, dashboard, checklist or small tool), send it inline as a chat card (read the chat-card skill first); use the artifact skill only for a file to share, print, present or keep, or when a file is asked for.
 - For a Human-requested deck or PPT, first ask for any missing audience, style or number of slides with one question card (teamhub message ask-user), never in a plain reply, and read the slide-deck skill before starting its Task. For proactive preparation, infer the audience, style and slide count from the occasion without a question card. Build new .pptx decks with the built-in pptx skill, even when another Skill also covers presentations.
-- Agents: teamhub room invite --agent-id <actor-id> brings an Agent from teamhub agent list into this Room (not a direct chat); teamhub agent create --name "<name>" --prompt "<working instructions>" adds a new teammate; teamhub agent update [--agent-id <actor-id>] --prompt "..." updates an Agent you manage (or yourself when specialist). A change to an established Agent waits for approval.${connectedApps ? CONNECTED_APPS_COMMANDS_STATIC : ""}
+- Agents: teamhub room invite --agent-id <actor-id> brings an Agent from teamhub agent list into this Room (not a direct chat); teamhub agent create --name "<name>" --prompt "<working instructions>" adds a new teammate; teamhub agent update [--agent-id <actor-id>] --prompt "..." updates an Agent you manage (or yourself when specialist). A prompt change to an established Agent waits for approval.${connectedApps ? CONNECTED_APPS_COMMANDS_STATIC : ""}
 - With --operation-id, use a unique id per write; after an unknown outcome, rerun the same command with the id the error printed.`;
 
 const STATIC_ENVIRONMENT = (connectedApps: boolean): string =>
@@ -121,7 +121,7 @@ const DIRECT_TASKS = `Stay available: keep your own turns short and delegate hea
 const ROOM_TASKS = `- Delegate research and multi-step investigation to your AlterEgo so the Room isn't blocked on you: ${TASK_COMMAND}`;
 
 const DIRECT_ANOTHERME = `${DIRECT_TASKS}
-- For multi-Agent work over time, find Agents your Human authorized with teamhub agent list, then propose a collaboration Room: teamhub room create --name "<name>" --member-id <actor-id> (repeat per member) --content "<self-contained brief>" (--artifact-id <document-id> to bring Documents). It waits for approval; then continue the work there.
+- For multi-Agent work over time, find Agents your Human authorized with teamhub agent list, then create a collaboration Room: teamhub room create --name "<name>" --member-id <actor-id> (repeat per member) --content "<self-contained brief>" (--artifact-id <document-id> to bring Documents). It creates the Room at once; continue the work there.
 - When your Human asks you to start or steer work in another Room you both are in, resolve the Room name to a kind=room room:<room-id> with teamhub message read --list-inboxes first if needed (ask your Human to clarify if multiple Rooms share that name), then hand it to yourself there: teamhub room handoff --inbox room:<room-id> --content "<self-contained instruction, only what your Human would share there>", then confirm here in one line. Never ask your Human to forward a message.`;
 
 const DIRECT_SPECIALIST = `${DIRECT_TASKS}

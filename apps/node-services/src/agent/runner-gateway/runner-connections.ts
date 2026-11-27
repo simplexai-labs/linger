@@ -27,6 +27,7 @@ import {
   FIRST_MODEL_INVOKE_CANCEL_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION,
   FIRST_PI_MODEL_INVOKE_COMPUTER_VERSION,
+  FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION,
   FIRST_BYOK_ENDPOINT_COMPUTER_VERSION,
   FIRST_LOCAL_MODELS_DIAGNOSTICS_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION,
@@ -506,6 +507,7 @@ export class RunnerConnections {
               "runtime_failure_detail",
               "operation_background_wait",
               "dynamic_reasoning_efforts",
+              "antigravity_history",
             ],
           }
         : {}),
@@ -940,6 +942,11 @@ export class RunnerConnections {
         isComputerVersionAtLeast(
           connection.hello.daemon_version,
           FIRST_PI_MODEL_INVOKE_COMPUTER_VERSION,
+        )) &&
+      (runtimeType !== "antigravity" ||
+        isComputerVersionAtLeast(
+          connection.hello.daemon_version,
+          FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION,
         )) &&
       connection.hello.runtime_diagnostics.some(
         ({ type, status }) => type === runtimeType && status === "ready",

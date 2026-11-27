@@ -8,6 +8,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/collaboration"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/idempotency"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 	api "github.com/simplexai-labs/linger/contracts-go/teamhubagentapi"
@@ -54,9 +55,11 @@ func (s *Service) GetSponsorAgent(ctx context.Context, authorizer agentauth.Auth
 }
 
 // UpdateSponsorAgent changes the profile of the caller, or of another
-// General Agent of its Sponsor. The change runs at once only while the
-// target is still uninitialized and in the caller's Room; otherwise the
-// Sponsor must confirm it.
+// General Agent of its Sponsor. A change of only the name or description runs
+// at once, since it changes no behavior. A prompt change runs at once only
+// while the target is still uninitialized and in the caller's Room; otherwise
+// the Sponsor must confirm it, since a prompt is what an injected instruction
+// would rewrite to persist.
 func (s *Service) UpdateSponsorAgent(ctx context.Context, authorizer agentauth.Authorizer, token string, request api.AgentUpdateAgentRequest, change AgentProfileChange) (AgentChange, error) {
 	caller, err := authorizer.Authorize(ctx, token, "update_agent")
 	if err != nil {
@@ -113,7 +116,8 @@ func (s *Service) UpdateSponsorAgent(ctx context.Context, authorizer agentauth.A
 			return AgentChange{}, err
 		}
 	}
-	if !member || !collaboration.IsUninitializedAgentProfile(target.registration.Instructions) {
+	profileOnly := change.Instructions == nil
+	if auth.RoomID == "" || (!profileOnly && (!member || !collaboration.IsUninitializedAgentProfile(target.registration.Instructions))) {
 		if err := tx.Rollback(ctx); err != nil {
 			return AgentChange{}, err
 		}
@@ -146,8 +150,9 @@ func (s *Service) UpdateSponsorAgent(ctx context.Context, authorizer agentauth.A
 }
 
 // CreateSponsorGeneralAgent creates a General Agent of the caller's Sponsor
-// and adds it to the caller's Room when it can join; otherwise the Sponsor
-// must confirm the creation.
+// and adds it to the caller's Room when it can join. In the Sponsor's own
+// Direct Room, where only the Sponsor can have asked, it creates the Agent
+// without joining it; anywhere else the Sponsor must confirm the creation.
 func (s *Service) CreateSponsorGeneralAgent(ctx context.Context, authorizer agentauth.Authorizer, token string, request api.AgentCreateAgentRequest, change AgentProfileChange) (AgentChange, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -163,33 +168,34 @@ func (s *Service) CreateSponsorGeneralAgent(ctx context.Context, authorizer agen
 	if err != nil {
 		return AgentChange{}, err
 	}
-	count, err := queries.CountSponsorGeneralAgents(ctx, store.CountSponsorGeneralAgentsParams{
-		TenantID: auth.TenantID, SponsorActorID: auth.SponsorActorID,
-	})
-	if err == nil && count >= MaxSponsorGeneralAgents {
-		err = ErrAgentLimitReached
-	}
-	if err != nil {
-		return AgentChange{}, err
-	}
 	// The new Agent joins the caller's Room only when it can: a Direct Room has
 	// fixed members, and the Sponsor is the one who admits it.
-	joinable := false
+	direct, sponsorMember := false, false
 	if auth.RoomID != "" {
-		direct, err := queries.IsTenantDirectRoom(ctx, store.IsTenantDirectRoomParams{RoomID: auth.RoomID, TenantID: auth.TenantID})
+		direct, err = queries.IsTenantDirectRoom(ctx, store.IsTenantDirectRoomParams{RoomID: auth.RoomID, TenantID: auth.TenantID})
 		if err != nil {
 			return AgentChange{}, err
 		}
-		sponsorMember, err := queries.IsActiveRoomMember(ctx, store.IsActiveRoomMemberParams{RoomID: auth.RoomID, TenantID: auth.TenantID, ActorID: auth.SponsorActorID})
+		sponsorMember, err = queries.IsActiveRoomMember(ctx, store.IsActiveRoomMemberParams{RoomID: auth.RoomID, TenantID: auth.TenantID, ActorID: auth.SponsorActorID})
 		if err != nil {
 			return AgentChange{}, err
 		}
-		joinable = !direct && sponsorMember
+	}
+	if !sponsorMember {
+		count, err := queries.CountSponsorGeneralAgents(ctx, store.CountSponsorGeneralAgentsParams{
+			TenantID: auth.TenantID, SponsorActorID: auth.SponsorActorID,
+		})
+		if err != nil {
+			return AgentChange{}, err
+		}
+		if count >= MaxSponsorGeneralAgents {
+			return AgentChange{}, ErrAgentLimitReached
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return AgentChange{}, err
 	}
-	if !joinable {
+	if !sponsorMember {
 		return AgentChange{Auth: auth, Confirm: &typedcard.AgentChangeDecision{
 			Request: typedcard.AgentChangeRequest{Change: agentChangeRequestOf(change)},
 			View:    agentCreateCard(change),
@@ -199,12 +205,57 @@ func (s *Service) CreateSponsorGeneralAgent(ctx context.Context, authorizer agen
 	if err != nil {
 		return AgentChange{}, err
 	}
+	if direct {
+		if err := s.settleDirectRoomCreation(ctx, accountID, auth, actorID); err != nil {
+			return AgentChange{}, err
+		}
+		return AgentChange{Auth: auth, Status: http.StatusOK, Created: &api.AgentAgentChangeResponse{
+			Status: api.AgentChangeApplied, ActorId: &actorID,
+		}}, nil
+	}
 	if _, _, err := s.collaboration.PutRoomMember(ctx, accountID, auth.RoomID, actorID, httpapi.Member, collaboration.AddedByAgent{ActorID: auth.AgentActorID, Created: true}); err != nil {
 		return AgentChange{}, err
 	}
 	return AgentChange{Auth: auth, Status: http.StatusOK, Created: &api.AgentAgentChangeResponse{
 		Status: api.AgentChangeApplied, ActorId: &actorID, RoomId: &auth.RoomID,
 	}}, nil
+}
+
+// settleDirectRoomCreation finishes a creation in the Sponsor's Direct Room
+// as an approved creation card does: it opens the new Agent's own Direct Room,
+// which the sidebar lists it by, and announces the Agent where it was asked
+// for. Registration and opening the Direct Room can both outlive a failed notice.
+func (s *Service) settleDirectRoomCreation(ctx context.Context, accountID string, auth agentauth.Authorization, actorID string) error {
+	if _, err := s.collaboration.OpenDirectRoom(ctx, accountID, auth.TenantID, actorID); err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	queries := store.New(tx)
+	// The Room lock serializes concurrent retries. The published notice also
+	// identifies a completed creation whose registration key was written earlier.
+	if err := queries.LockTenantDeliveryRooms(ctx, store.LockTenantDeliveryRoomsParams{TenantID: auth.TenantID, RoomIds: []string{auth.RoomID}}); err != nil {
+		return err
+	}
+	published, err := queries.HasAgentCreationNotice(ctx, store.HasAgentCreationNoticeParams{RoomID: auth.RoomID, AuthorActorID: auth.AgentActorID, AgentActorID: actorID})
+	if err != nil || published {
+		return err
+	}
+	actors := make([]store.Actor, 0, 2)
+	for _, id := range []string{auth.AgentActorID, actorID} {
+		actor, err := queries.GetActor(ctx, store.GetActorParams{ID: id, TenantID: auth.TenantID})
+		if err != nil {
+			return err
+		}
+		actors = append(actors, actor)
+	}
+	if _, err := messagecreation.CreateNotice(ctx, queries, auth.TenantID, auth.RoomID, actors[0], messagecreation.AgentCreated(actors[1], nil)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // AddSponsorAgentToRoom adds an existing Agent to the caller's Room with its

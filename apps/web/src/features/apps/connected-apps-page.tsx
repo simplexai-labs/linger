@@ -286,11 +286,18 @@ function CatalogAppCard({
   const authorizing =
     createConnection.isPending || Boolean(createConnection.blockedConnectUrl);
   const unconfirmed = connections.some(externalConnectionUnconfirmed);
-  const summary =
-    connectFlow.configured && app.availability === "unavailable"
-      ? t(m.unavailable)
-      : authorizing
-        ? t(m.authorizing)
+  const unavailable =
+    connectFlow.configured && app.availability === "unavailable";
+  const showNeedsReconnecting =
+    !connectedLabel && !unavailable && !authorizing && needsReconnecting > 0;
+  const summary = unavailable
+    ? t(m.unavailable)
+    : authorizing
+      ? t(m.authorizing)
+      : needsReconnecting > 0
+        ? needsReconnecting === 1
+          ? t(m.needsReconnecting)
+          : t(m.needReconnectingCount, { count: needsReconnecting })
         : unconfirmed
           ? t(m.couldNotConfirm)
           : appSummary(app, t);
@@ -299,10 +306,8 @@ function CatalogAppCard({
     <article
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-4 py-3 transition-colors duration-150 motion-reduce:transition-none",
-        selected
-          ? "border-border-hover bg-muted"
-          : "border-border hover:bg-accent/40",
+        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl px-4 py-3 transition-colors duration-150 motion-reduce:transition-none",
+        selected ? "bg-muted" : "hover:bg-accent",
       )}
     >
       <button
@@ -311,7 +316,7 @@ function CatalogAppCard({
         onClick={onOpen}
         type="button"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-card text-foreground shadow-outline">
+        <span className="flex size-10 shrink-0 items-center justify-center text-foreground">
           <AppLogo name={app.display_name} url={app.logo_url} />
         </span>
         <span className="min-w-0 flex-1">
@@ -324,11 +329,19 @@ function CatalogAppCard({
                 aria-hidden
                 className="size-1.5 shrink-0 rounded-full bg-[var(--app-status-success-text)]"
               />
+            ) : showNeedsReconnecting ? (
+              <span
+                aria-hidden
+                className="size-1.5 shrink-0 rounded-full bg-[var(--app-status-warning-text)]"
+              />
             ) : null}
             <span
               className={cn(
                 "truncate",
-                !connectedLabel && authorizing && "town-shimmer-text",
+                !connectedLabel &&
+                  !unavailable &&
+                  authorizing &&
+                  "town-shimmer-text",
               )}
               title={connectedLabel ?? summary}
             >
@@ -337,7 +350,20 @@ function CatalogAppCard({
           </span>
         </span>
       </button>
-      {canStart && active.length === 0 ? (
+      {active.length === 0 && needsReconnecting > 0 ? (
+        <Button
+          aria-label={t(m.manageApp, { app: app.display_name })}
+          className="px-2.5"
+          onClick={(event) => {
+            stopCardClick(event);
+            onOpen();
+          }}
+          size="compact"
+          tone="secondary"
+        >
+          {t(m.manage)}
+        </Button>
+      ) : canStart && active.length === 0 ? (
         <Button
           aria-label={t(m.connectApp, { app: app.display_name })}
           className="px-2.5"

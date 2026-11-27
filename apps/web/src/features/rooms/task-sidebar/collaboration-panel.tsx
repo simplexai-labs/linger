@@ -391,7 +391,7 @@ export function CollaborationGraph({
           </div>
         </div>
         <div
-          className="flex items-center gap-1 border-t border-app-border bg-app-surface-soft/40 py-1.5 pl-3 pr-2 text-[12px] text-app-muted"
+          className="flex items-center gap-1 bg-app-surface-soft/40 py-1.5 pl-3 pr-2 text-[12px] text-app-muted"
           aria-label={t(m.legend)}
           role="group"
         >
@@ -442,7 +442,7 @@ export function CollaborationGraph({
           <p className="text-center text-app-subtle">{t(m.selectAgent)}</p>
         )}
       </div>
-      <details className="group mx-4 border-t border-app-border text-[12px]">
+      <details className="group mx-4 text-[12px]">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 py-3 text-app-subtle [&::-webkit-details-marker]:hidden">
           <Icon icon={File01Icon} size={12} />
           {t(m.sourceRevision, { revision: document.revision })}

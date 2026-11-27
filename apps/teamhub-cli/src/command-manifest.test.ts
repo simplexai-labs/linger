@@ -53,7 +53,7 @@ describe("command manifest", () => {
       Object.values(connectorWriteApproval).filter(
         (value) => value === "confirm",
       ),
-    ).toHaveLength(12);
+    ).toHaveLength(10);
   });
 
   // Hosts match command prefixes, so an allowed command must never cover a

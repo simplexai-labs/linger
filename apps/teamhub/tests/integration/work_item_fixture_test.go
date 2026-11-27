@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/idempotency"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/store"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
@@ -65,38 +68,105 @@ func createWorkRoomFixture(t *testing.T, env *testEnv, owner *http.Client, workI
 // request in originRoomID; key keeps its submission distinct.
 func roomCreationApprovalInput(t *testing.T, originRoomID, key string) typedcard.CreationApprovalInTxInput {
 	t.Helper()
-	proposal := typedcard.RoomCreationSnapshot{OriginRoomID: originRoomID, Name: "Acceptance file release",
+	return roomCreationApprovalInputFor(t, typedcard.RoomCreationSnapshot{OriginRoomID: originRoomID, Name: "Acceptance file release",
 		MemberIDs:              []string{"actor_acme_alice", "actor_acme_official"},
 		InitialMessageSegments: []messagecreation.Segment{{Type: "text", Content: "Review after generating the report"}},
-	}
+	}, key)
+}
+
+// roomCreationApprovalInputFor is the official Agent's request for the Room
+// that proposal freezes, as TeamHub froze it for an approval card.
+func roomCreationApprovalInputFor(t *testing.T, proposal typedcard.RoomCreationSnapshot, key string) typedcard.CreationApprovalInTxInput {
+	t.Helper()
 	encoded, err := json.Marshal(proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(encoded)
 	return typedcard.CreationApprovalInTxInput{
-		RoomID: originRoomID, AgentManagementID: acmeOfficialAgentManagementID, IdempotencyOperation: "test-room-creation:" + key, CallerInputHash: hash[:],
+		RoomID: proposal.OriginRoomID, AgentManagementID: acmeOfficialAgentManagementID, IdempotencyOperation: "test-room-creation:" + key, CallerInputHash: hash[:],
 		Submission: typedcard.CreationApprovalSubmission{SubmissionID: "room-creation-" + key, CallerInput: encoded, EffectivePayload: encoded, FulfillmentSnapshot: encoded},
 	}
 }
 
-// createPendingRoomCreationApproval submits the official Agent's create_room
-// request in originRoomID and returns its pending creation approval.
+// createPendingRoomCreationApproval posts a pending Room creation card for
+// the official Agent in originRoomID and returns its decision.
 func createPendingRoomCreationApproval(t *testing.T, env *testEnv, originRoomID, suffix string) string {
+	t.Helper()
+	return pendingRoomCreationCard(t, env, originRoomID, suffix).DecisionID
+}
+
+// pendingRoomCreationCard posts a pending Room creation card, as Agents did
+// before TeamHub created their Rooms at once; such cards can still be decided.
+func pendingRoomCreationCard(t *testing.T, env *testEnv, originRoomID, suffix string) typedcard.CreateResult {
+	t.Helper()
+	return postRoomCreationCard(t, env, roomCreationApprovalInput(t, originRoomID, suffix))
+}
+
+func postRoomCreationCard(t *testing.T, env *testEnv, input typedcard.CreationApprovalInTxInput) typedcard.CreateResult {
 	t.Helper()
 	tx, err := env.pool.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(t.Context())
-	created, err := typedcard.New(env.pool).CreateCreationApprovalRequestInTx(t.Context(), tx, roomCreationApprovalInput(t, originRoomID, suffix))
-	if err != nil {
-		t.Fatalf("request Room creation: %v", err)
-	}
+	created := seedLegacyRoomCreationCardInTx(t, tx, input)
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return created.DecisionID
+	return created
+}
+
+// seedLegacyRoomCreationCardInTx writes the decision, published card and replay
+// record that can still exist together after an upgrade to immediate Room creation.
+func seedLegacyRoomCreationCardInTx(t *testing.T, tx pgx.Tx, input typedcard.CreationApprovalInTxInput) typedcard.CreateResult {
+	t.Helper()
+	ctx := t.Context()
+	queries := store.New(tx)
+	agent, err := queries.GetActor(ctx, store.GetActorParams{TenantID: acmeTenant, ID: "actor_acme_official"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proposal typedcard.RoomCreationSnapshot
+	decode(t, input.Submission.FulfillmentSnapshot, &proposal)
+	// Only the decision request stored the artifacts.
+	proposal.Artifacts = nil
+	content, err := messagecreation.Normalize([]messagecreation.Segment{{Type: "text", Content: "Request to create a collaboration room: " + proposal.Name}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ownerID = "actor_acme_alice"
+	message, err := messagecreation.Persist(ctx, queries, messagecreation.Draft{
+		TenantID: acmeTenant, RoomID: input.RoomID, Author: agent, Content: content,
+		Card: &messagecreation.Card{DecisionOwnerActorID: ownerID, CardType: "personal_notice", Intent: "decision_requested"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionID := ids.New("decision")
+	if _, err := queries.InsertDecision(ctx, store.InsertDecisionParams{
+		ID: decisionID, TenantID: acmeTenant, RoomID: input.RoomID, MessageID: message.Message.ID,
+		Kind: typedcard.DecisionKindRoomCreation, RequestedByActorID: agent.ID, DeciderActorID: ownerID,
+		Request: mustJSON(t, input.Submission), View: mustJSON(t, proposal),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	card, found, err := typedcard.SnapshotCard(ctx, queries, message.Message.ID)
+	if err != nil || !found {
+		t.Fatalf("snapshot pending Room creation card: found=%t err=%v", found, err)
+	}
+	message.Card = card
+	published, err := messagecreation.Publish(ctx, queries, message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := idempotency.AgentKey(agent.ID, input.IdempotencyOperation, input.Submission.SubmissionID)
+	if err := idempotency.Save(ctx, tx, key, input.CallerInputHash, idempotency.Record{
+		ResourceID: message.Message.ID, Status: http.StatusCreated, Body: published.Payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return typedcard.CreateResult{Status: http.StatusCreated, Body: published.Payload, MessageID: message.Message.ID, DecisionID: decisionID}
 }
 
 // denyRoomCreationApproval denies a pending creation approval as decider.

@@ -217,6 +217,19 @@ func runnerWireDaemonEvents(t *testing.T) []protocol.Event {
 	debug.ViewDigest = strings.Repeat("a", 64)
 	debug.Payload = raw(map[string]any{"status": "unavailable", "provider_kind": "codex", "reason": "Fixture history", "instructions": map[string]any{"status": "unavailable", "source": "codex_rollout", "blocks": []any{}}, "records": []any{}})
 	events = append(events, debug)
+	coldDetachedDebug := base
+	coldDetachedDebug.Type = protocol.EventDebugInspected
+	coldDetachedDebug.RegistrationID = ""
+	coldDetachedDebug.AssignmentRevision = 0
+	coldDetachedDebug.RunnerRevision = 0
+	coldDetachedDebug.ViewDigest = ""
+	coldDetachedDebug.Payload = raw(map[string]any{
+		"status": "available", "provider_kind": "antigravity", "source": "antigravity_transcript",
+		"snapshot":     map[string]any{"id": "snap-1", "thread_id": "conv-1", "captured_at": "2026-10-28T00:00:00Z", "record_count": 1, "tail_state": "clean"},
+		"instructions": map[string]any{"status": "unavailable", "source": "antigravity_transcript", "reason": "none", "blocks": []any{}},
+		"records":      []any{map[string]any{"ordinal": 0, "turn_id": "step-0", "category": "message", "native_type": "USER_INPUT", "role": "user", "native_record": map[string]any{"type": "USER_INPUT", "content": "hi"}, "redacted_fields": []any{}}},
+	})
+	events = append(events, coldDetachedDebug)
 	capability := func(route, kind, outcome string, extra map[string]any) {
 		payload := map[string]any{"type": "executed", "kind": kind, "outcome": outcome, "protocol_version": "2", "command_id": "command-1", "runner_id": "computer-1", "tenant_id": "tenant-1", "owner_actor_id": "actor-1", "connection_epoch": 1, "expires_at": "2026-11-01T00:00:00Z"}
 		for key, value := range extra {
@@ -500,4 +513,153 @@ func TestOperationFailedEncodesModelGatewayUnavailable(t *testing.T) {
 	if wireFrame.Type != "operation.failed" || wireFrame.Error.Failure.Code != "model_gateway_unavailable" || wireFrame.Error.Failure.RuntimeType != "codex" {
 		t.Fatalf("encoded frame = %s", encoded)
 	}
+}
+
+func TestDebugInspectedColdDetachedOmitsZeroIdentityFields(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"status":        "available",
+		"provider_kind": "antigravity",
+		"source":        "antigravity_transcript",
+		"snapshot": map[string]any{
+			"id":           "snap-1",
+			"thread_id":    "conv-agy-1",
+			"captured_at":  "2026-11-26T12:00:00Z",
+			"record_count": 1,
+			"tail_state":   "clean",
+		},
+		"instructions": map[string]any{
+			"status": "unavailable",
+			"source": "antigravity_transcript",
+			"reason": "Native transcript does not contain an instruction snapshot",
+			"blocks": []any{},
+		},
+		"records": []any{
+			map[string]any{
+				"ordinal":         0,
+				"turn_id":         "step-0",
+				"category":        "message",
+				"native_type":     "USER_INPUT",
+				"role":            "user",
+				"native_record":   map[string]any{"type": "USER_INPUT", "content": "hello"},
+				"redacted_fields": []any{},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("cold_detached_omits_optional_identity", func(t *testing.T) {
+		frame, err := replyFrame(protocol.Event{
+			Type:                protocol.EventDebugInspected,
+			ProtocolVersion:     "2",
+			CommandID:           "command-cold",
+			TenantID:            "tenant-1",
+			RunnerID:            "computer-1",
+			AgentID:             "agent-1",
+			ConnectionEpoch:     1,
+			WorkspaceGrantID:    "grant-1",
+			ExecutionContextKey: "context-cold",
+			RuntimeInstanceID:   "context-cold",
+			Payload:             payload,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(encoded, &raw); err != nil {
+			t.Fatal(err)
+		}
+		for _, omitted := range []string{"runner_revision", "registration_id", "assignment_revision", "view_digest"} {
+			if _, present := raw[omitted]; present {
+				t.Fatalf("cold detached frame must omit %q: %s", omitted, encoded)
+			}
+		}
+		if raw["detached_history"] != true || raw["type"] != "executed" || raw["kind"] != "debug_history" || raw["protocol_version"] != "2" {
+			t.Fatalf("unexpected cold detached frame: %s", encoded)
+		}
+		for _, required := range frame.RequiredFields() {
+			if _, present := raw[required]; !present {
+				t.Fatalf("cold detached frame missing required field %q: %s", required, encoded)
+			}
+		}
+	})
+
+	t.Run("warm_detached_and_live_preserve_identity", func(t *testing.T) {
+		warmDetached, err := replyFrame(protocol.Event{
+			Type:                protocol.EventDebugInspected,
+			ProtocolVersion:     "2",
+			CommandID:           "command-warm",
+			TenantID:            "tenant-1",
+			RunnerID:            "computer-1",
+			AgentID:             "agent-1",
+			RegistrationID:      "reg-1",
+			AssignmentRevision:  2,
+			ConnectionEpoch:     1,
+			RunnerRevision:      3,
+			WorkspaceGrantID:    "grant-1",
+			ExecutionContextKey: "context-warm",
+			RuntimeInstanceID:   "runtime-1",
+			Payload:             payload,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodedWarm, err := json.Marshal(warmDetached)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var warmMap map[string]any
+		if err := json.Unmarshal(encodedWarm, &warmMap); err != nil {
+			t.Fatal(err)
+		}
+		if warmMap["runner_revision"] != float64(3) || warmMap["registration_id"] != "reg-1" ||
+			warmMap["assignment_revision"] != float64(2) || warmMap["detached_history"] != true {
+			t.Fatalf("unexpected warm detached frame: %s", encodedWarm)
+		}
+		if _, present := warmMap["view_digest"]; present {
+			t.Fatalf("warm detached frame must omit view_digest: %s", encodedWarm)
+		}
+
+		digest := strings.Repeat("b", 64)
+		live, err := replyFrame(protocol.Event{
+			Type:                protocol.EventDebugInspected,
+			ProtocolVersion:     "2",
+			CommandID:           "command-live",
+			TenantID:            "tenant-1",
+			RunnerID:            "computer-1",
+			AgentID:             "agent-1",
+			RegistrationID:      "reg-1",
+			AssignmentRevision:  2,
+			ConnectionEpoch:     1,
+			RunnerRevision:      3,
+			WorkspaceGrantID:    "grant-1",
+			ExecutionContextKey: "context-live",
+			RuntimeInstanceID:   "runtime-1",
+			ViewDigest:          digest,
+			Payload:             payload,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodedLive, err := json.Marshal(live)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var liveMap map[string]any
+		if err := json.Unmarshal(encodedLive, &liveMap); err != nil {
+			t.Fatal(err)
+		}
+		if liveMap["runner_revision"] != float64(3) || liveMap["registration_id"] != "reg-1" ||
+			liveMap["assignment_revision"] != float64(2) || liveMap["view_digest"] != digest {
+			t.Fatalf("unexpected live frame: %s", encodedLive)
+		}
+		if _, present := liveMap["detached_history"]; present {
+			t.Fatalf("live frame must omit detached_history: %s", encodedLive)
+		}
+	})
 }

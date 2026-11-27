@@ -340,13 +340,23 @@ export function renderBusinessResult(command: string, result: Json): string {
       result.duplicate_request ? "Task already stopped" : "Task stopped",
       `Task ID: ${String(result.task_id)}`,
     ].join("\n");
-  if (command === "room create")
+  if (command === "room create") {
+    if (result.status === "pending_approval")
+      return [
+        "Room creation approval requested",
+        `Status: ${String(result.status)}`,
+        `Approval request: ${String(result.creation_approval_request_id)}`,
+        `Message ID: ${String(result.message_id)}`,
+      ].join("\n");
+    const skipped = (result.skipped_artifacts as Json[] | undefined) ?? [];
     return [
-      "Room creation approval requested",
-      `Status: ${String(result.status)}`,
-      `Approval request: ${String(result.creation_approval_request_id)}`,
-      `Message ID: ${String(result.message_id)}`,
+      `Created Room ${singleLine(result.room_id)}. Continue the work there; its handoff wakes you in that Room.`,
+      ...skipped.map(
+        (item) =>
+          `Not delivered: ${singleLine(item.document_id)} (${singleLine(item.reason)})`,
+      ),
     ].join("\n");
+  }
   if (command === "room collaborate")
     return [
       `Published Room collaboration protocol`,

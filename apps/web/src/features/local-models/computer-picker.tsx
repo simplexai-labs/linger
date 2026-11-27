@@ -394,7 +394,7 @@ function ComputerPickerPopup({
   ];
 
   const header = searchable ? (
-    <div className="mb-1 flex flex-col gap-2 border-b border-border px-1 pt-1 pb-2">
+    <div className="mb-1 flex flex-col gap-2 px-1 pt-1 pb-2">
       <div className="relative flex items-center">
         <Icon
           className="pointer-events-none absolute left-2.5 text-muted-foreground"
@@ -513,7 +513,7 @@ function ComputerPickerPopup({
           </p>
           {onlineFiltered.map(renderOption)}
           <p
-            className="mt-1 border-t border-border px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground"
+            className="mt-1 px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground"
             role="presentation"
           >
             {t(m.computerGroupOffline)}

@@ -18,8 +18,11 @@ import (
 //go:embed local_linux.py
 var nativeLinuxProgram string
 
+// linuxHost reports whether this process runs on Linux; a test seam.
+var linuxHost = func() bool { return runtime.GOOS == "linux" }
+
 // localLinux reports the signed-in user's own X11 desktop.
-func (m *Manager) localLinux() bool { return runtime.GOOS == "linux" }
+func (m *Manager) localLinux() bool { return linuxHost() }
 
 func (op *operation) ensureLinux(ctx context.Context) (*mcpClient, error) {
 	op.cuaMu.Lock()
@@ -50,7 +53,7 @@ func (op *operation) ensureLinux(ctx context.Context) (*mcpClient, error) {
 
 func linuxAction(ctx context.Context, client *mcpClient, command string, args ...string) ([]byte, error) {
 	raw, err := client.request(ctx, "tools/call", map[string]any{"name": "action", "arguments": map[string]any{"command": command, "args": args}})
-	readOnly := command == "probe" || command == "screenshot" || command == "active-window" || command == "window-title" || command == "accessibility"
+	readOnly := command == "probe" || command == "screenshot" || command == "active-window" || command == "window-title" || command == "accessibility" || command == "launch-error"
 	if command == "semantic-ui" && len(args) == 1 {
 		var request struct {
 			Kind string `json:"kind"`

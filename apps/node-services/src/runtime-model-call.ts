@@ -794,8 +794,9 @@ async function resolvePlacement(
 }
 
 /** Pi stays on Pi, even when it is unavailable. Codex and Claude retain
- * their same-Computer fallback. Antigravity has no model.invoke, so it uses
- * Claude, falling back to Codex. Invocations follow the placed Agent's
+ * their same-Computer fallback. Antigravity prefers Antigravity when the
+ * Computer supports it, falling back to Claude and then Codex when ready (for
+ * example on older Computers). Invocations follow the placed Agent's
  * configured model on its own Runtime, falling back to the target Runtime's
  * catalog default on cross-Runtime fallback or when unconfigured. */
 function resolveTarget(
@@ -807,15 +808,27 @@ function resolveTarget(
   readonly model?: RuntimeModelInfo;
   readonly wireModel?: string;
 } {
-  const preferred =
-    placement.runtimeType === "antigravity" ? "claude" : placement.runtimeType;
-  const fallback = preferred === "claude" ? "codex" : "claude";
-  const runtimeType =
-    preferred !== "pi" &&
-    !gateway.supportsModelInvoke(placement.computerId, preferred) &&
-    gateway.supportsModelInvoke(placement.computerId, fallback)
-      ? fallback
-      : preferred;
+  let runtimeType: ModelInvoke["runtime_type"];
+  if (placement.runtimeType === "antigravity") {
+    if (gateway.supportsModelInvoke(placement.computerId, "antigravity")) {
+      runtimeType = "antigravity";
+    } else if (gateway.supportsModelInvoke(placement.computerId, "claude")) {
+      runtimeType = "claude";
+    } else if (gateway.supportsModelInvoke(placement.computerId, "codex")) {
+      runtimeType = "codex";
+    } else {
+      runtimeType = "antigravity";
+    }
+  } else {
+    const preferred = placement.runtimeType;
+    const fallback = preferred === "claude" ? "codex" : "claude";
+    runtimeType =
+      preferred !== "pi" &&
+      !gateway.supportsModelInvoke(placement.computerId, preferred) &&
+      gateway.supportsModelInvoke(placement.computerId, fallback)
+        ? fallback
+        : preferred;
+  }
   const models = gateway.runtimeModels(placement.computerId, runtimeType);
   const configured =
     runtimeType === placement.runtimeType && placement.model

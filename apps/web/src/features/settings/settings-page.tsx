@@ -24,7 +24,7 @@ export function SettingsLayout() {
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <aside
         aria-label={t(settingsMessages.navigation)}
-        className="flex shrink-0 flex-col border-b border-border px-3 py-4 md:w-[228px] md:border-r md:border-b-0"
+        className="flex shrink-0 flex-col border-border px-3 py-4 md:w-[228px] md:border-r"
       >
         <div className="flex items-center pt-0.5 pb-3.5">
           <h1 className="text-lg">{t(settingsMessages.title)}</h1>

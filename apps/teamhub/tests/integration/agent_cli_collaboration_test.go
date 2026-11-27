@@ -1,6 +1,8 @@
 package integration_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -120,28 +122,36 @@ func TestAgentCLICollaborationUsesCurrentBusinessRoleWithoutInvocation(t *testin
 			t.Fatal(err)
 		}
 	})
-	t.Run("Room approval is persisted before Human decision", func(t *testing.T) {
-		service := agentcreationapproval.New(env.pool, contexts, typedcard.New(env.pool))
-		segments := []messagecreation.Segment{{Type: "text", Content: "Independent Room approval"}}
-		input := agentcreationapproval.Input{RequestKind: "room_creation", InvocationID: "agent-invocation-sha256:" + strings.Repeat("c", 64),
-			RoomCaller:    &agentcreationapproval.RoomCallerInput{Name: "CLI pending room", MemberIDs: []string{"actor_acme_alice", "actor_acme_official"}, InitialMessageSegments: segments},
-			RoomEffective: &agentcreationapproval.RoomEffectivePayload{Name: "CLI pending room", MemberIDs: []string{"actor_acme_alice", "actor_acme_official"}, InitialMessageSegments: segments},
-		}
-		result, err := service.Submit(ctx, issued.AccessToken, input)
-		if err != nil || result.CreationApprovalRequestID == "" {
-			t.Fatalf("room approval: %+v %v", result, err)
-		}
-		replay, err := service.Submit(ctx, issued.AccessToken, input)
-		if err != nil || !replay.Replay || replay.CreationApprovalRequestID != result.CreationApprovalRequestID {
-			t.Fatalf("room replay: %+v %v", replay, err)
-		}
-		if n := countRows(t, env, `SELECT count(*) FROM rooms WHERE name='CLI pending room'`); n != 0 {
-			t.Fatalf("created %d rooms before approval", n)
-		}
-	})
+	// CLI writes start no Runs; the created Room's handoff below wakes the Agent there.
 	if n := countRows(t, env, `SELECT count(*) FROM agent_local_runs`); n != 0 {
 		t.Fatalf("created %d lifecycle records", n)
 	}
+	t.Run("Room is created at once and replays", func(t *testing.T) {
+		service := agentcreationapproval.New(env.pool, contexts, typedcard.New(env.pool))
+		segments := []messagecreation.Segment{{Type: "text", Content: "Independent Room creation"}}
+		input := agentcreationapproval.Input{RequestKind: "room_creation", InvocationID: "agent-invocation-sha256:" + strings.Repeat("c", 64),
+			RoomCaller:    &agentcreationapproval.RoomCallerInput{Name: "CLI created room", MemberIDs: []string{"actor_acme_alice", "actor_acme_official"}, InitialMessageSegments: segments},
+			RoomEffective: &agentcreationapproval.RoomEffectivePayload{Name: "CLI created room", MemberIDs: []string{"actor_acme_alice", "actor_acme_official"}, InitialMessageSegments: segments},
+		}
+		result, err := service.Submit(ctx, issued.AccessToken, input)
+		var created typedcard.RoomCreated
+		if err == nil && result.Created != nil {
+			err = json.Unmarshal(result.Created, &created)
+		}
+		if err != nil || created.Status != typedcard.RoomCreatedStatus || created.RoomID == "" || result.CreationApprovalRequestID != "" {
+			t.Fatalf("room creation: %+v %s %v", result, result.Created, err)
+		}
+		replay, err := service.Submit(ctx, issued.AccessToken, input)
+		if err != nil || !replay.Replay || !bytes.Equal(replay.Created, result.Created) {
+			t.Fatalf("room replay: %+v %v", replay, err)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM rooms WHERE name='CLI created room' AND id=$1`, created.RoomID); n != 1 {
+			t.Fatalf("created %d rooms", n)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM decisions WHERE kind='room_creation'`); n != 0 {
+			t.Fatalf("posted %d approval cards", n)
+		}
+	})
 }
 
 // The Room's Humans never see the Agent-only team.md announcement, so each

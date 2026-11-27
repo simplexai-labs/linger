@@ -130,7 +130,7 @@ export function MessageMeetingNotes({
           </p>
         </div>
       )}
-      <div className="border-t border-app-border">
+      <div>
         <FullNotesStatus captureId={segment.capture_id} tenantId={tenantId} />
       </div>
     </section>

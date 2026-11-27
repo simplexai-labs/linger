@@ -352,7 +352,7 @@ export function DetailBlock({
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border">
-      <h4 className="border-b border-border bg-muted/50 px-3 py-1.5 [overflow-wrap:anywhere] text-xs font-medium text-muted-foreground">
+      <h4 className="bg-muted/50 px-3 py-1.5 [overflow-wrap:anywhere] text-xs font-medium text-muted-foreground">
         {label}
       </h4>
       {children}

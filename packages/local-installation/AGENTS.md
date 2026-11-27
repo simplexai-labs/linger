@@ -283,11 +283,14 @@ plan as changed, and the upgraded app could not start.
 Setup sets the Computer's model source through `localmodels source apply`
 (`byok-source.ts`): BYOK after the Runtime is ready, a local model after the
 stack is, and a subscription after its Runtime installs, signed in or not.
-The local source is set only by a start whose request chose local models
-(`setupChoice` or a plan approval); a restart or version upgrade from the saved
-choice keeps a source the person switched to on the Models page (leaving the
+The model source is applied only on an explicit setup choice (`setupChoice`,
+`byok`, or a plan approval), which also clears any stale post-stop resume list
+(`<home>/runtime/localmodels/resume-models.json`); a restart or version upgrade
+from the saved choice keeps the saved source (`local`, `subscription`, or
+`byok`) without re-running `source apply --mode subscription` (which would
+unload active local library models during updates) and leaves the Quick Install
 local model stack stopped while `model-source.json` names `byok` or
-`subscription`, omitting `--main-plan` from `prepareFoundationServices`, and
+`subscription` (omitting `--main-plan` from `prepareFoundationServices`, and
 keeping the active BYOK or subscription runtime for `prepareModelGateway`).
 The installer reads `model-source.json` (`readByokEnvironment`) but never
 writes it. When a deployed local-model stack's binding reports a stopped
@@ -303,25 +306,30 @@ when `stack up` fails or the binding still needs repair (such as
 `localmodels.stack-up/v1` failures are translated to
 redacted human-readable messages with their `causeCode` in `details.causeCode`,
 and an unreviewable saved plan returns `LOCAL_MODELS_RECOVERY_REQUIRED` with
-`STACK_PLAN_INVALID`. `restoreLocalModels` (`local-models.ts`) brings back a
-local model source's stack and unloaded library model while its services keep
-running (and on cold resume when `model-source.json` says `local`), such as
-after the desktop's quit stopped them, whenever the active model source is
-`local` (or not saved yet on a `local-models` setup): when a saved
-`runtime_model` is recorded, a ready binding checks `library status` so a
-quit-time `library unload` or a `failed` server (`HEALTH_CHECK_FAILED` or other
-non-stopped-download failure, reset with `library unload` first) reloads that
-saved model and re-applies the local source under the same lock (never guessing
-an arbitrary idle model when no `runtime_model` is saved; stopped downloads
-return a degraded outcome without loading), while a stopped plan gets the same
-restore (`stack up`, falling back to `stack apply`), verifies whether a saved
-local model (`localmodels/` or `localmodels-library/`) is loaded, and sets the
-local source again. Quit-time `stopLocalmodels` (`localmodels-tool.ts`) unloads
-both `loaded` models and non-stopped-download `failed` models so a dead server
-resets to `idle` before `stack down`. Library-model reload failures return a
-failure outcome that warm
-and cold resume surface in `details.localModelsDegraded` so startup stays usable
-and the person can still reach the Models page. The first start after an app
+`STACK_PLAN_INVALID`. Quit-time and upgrade `stopLocalmodels`
+(`localmodels-tool.ts`) records all active library models (`loaded`, `loading`,
+and non-stopped-download `failed`) into private `<home>/runtime/localmodels/resume-models.json`
+(`linger.localmodels-resume/v1`) before cancelling loads and unloading models
+into `idle`, merging with any remaining pending list from an interrupted
+restore, preserving a pending non-empty list across chained stops (such as
+Windows setup `--stop` after quit), and recording an empty list when downloaded
+models are all intentionally idle. `restoreLocalModels` (`local-models.ts`)
+brings back previously loaded library models on warm resume, cold resume, and
+app updates across every model source mode (`local`, `subscription`, `byok`, or
+unset) from `resume-models.json` and any on-disk `state: "loaded"` library
+records under `<state>/library/models/*.json` (for crash/reboot recovery),
+without switching a `subscription` or `byok` `model-source.json` back to
+`local`, while respecting an explicit empty `resume-models.json` and falling
+back to a saved local `runtime_model` (`localmodels/` or `localmodels-library/`)
+only when no post-stop record exists (such as upgrading from an earlier release)
+without guessing an arbitrary idle model. Each model settles independently
+under the per-home lock (preserving remaining pending models on abort and
+continuing past partial failures), resets non-stopped-download `failed` records
+via `library unload` before loading, reports restored models through
+`onRestored` (surfaced as `details.localModelsRestored` and
+`details.restoredLocalModels`), and returns any failure outcome for resume
+callers to surface in `details.localModelsDegraded` so startup stays usable and
+the person can still reach the Models page. The first start after an app
 update onto a new checkout passes `degradeLocalModels` without `resume` (it
 installs newer runtimes in full) and degrades the same way, so a stack an
 earlier release left stopped, which the new kit cannot bring back as saved,
@@ -334,9 +342,13 @@ Deployments, that check and the quit-time stop share one lock per home
 `LOCAL_MODELS_BUSY` when restoring a library model without a stack plan).
 `restoreByokSource` (`local-models.ts`) brings back a saved BYOK source's
 Bifrost gateway on every resume (warm, or a restart from the saved choice,
-which then prepares the saved runtime and no other source). Under the same
-lock, waiting as the restore check does, it skips a loopback gateway whose
-`/health` answers, otherwise runs `source apply` from the kit's saved
+which then prepares the saved runtime and no other source) BEFORE restoring
+local library models, because `source apply --mode byok` unloads local models
+before mounting BYOK on Bifrost. Under the same
+lock, waiting as the restore check does, it first snapshots any on-disk
+`state: "loaded"` library records into `resume-models.json` (so crash/reboot
+recovery survives BYOK unloading them to `idle`), then skips a loopback gateway
+whose `/health` answers, otherwise runs `source apply` from the kit's saved
 configuration, so the key never passes through Node. Each re-mount sends
 the kit's one small probe request to the person's endpoint and adds a few
 seconds to a launch after a quit. A failure (`LOCAL_MODELS_BUSY` when the

@@ -518,6 +518,33 @@ func (e AnotherMeBackgroundFailureReason) Valid() bool {
 	}
 }
 
+// Defines values for AnotherMePlacementBlockerReason.
+const (
+	ComputerUpgradeRequired  AnotherMePlacementBlockerReason = "computer_upgrade_required"
+	CreateFailed             AnotherMePlacementBlockerReason = "create_failed"
+	NoOnlineComputer         AnotherMePlacementBlockerReason = "no_online_computer"
+	NoReadyRuntimeWithModels AnotherMePlacementBlockerReason = "no_ready_runtime_with_models"
+	NoWritableWorkspaceGrant AnotherMePlacementBlockerReason = "no_writable_workspace_grant"
+)
+
+// Valid indicates whether the value is a known member of the AnotherMePlacementBlockerReason enum.
+func (e AnotherMePlacementBlockerReason) Valid() bool {
+	switch e {
+	case ComputerUpgradeRequired:
+		return true
+	case CreateFailed:
+		return true
+	case NoOnlineComputer:
+		return true
+	case NoReadyRuntimeWithModels:
+		return true
+	case NoWritableWorkspaceGrant:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BrowserConnectionStatusBrowser.
 const (
 	BrowserConnectionBrowserChrome BrowserConnectionStatusBrowser = "chrome"
@@ -1803,6 +1830,7 @@ const (
 	ExternalConnectionReauthorizationErrorCodeDuplicateRemotePrincipal ExternalConnectionReauthorizationErrorCode = "duplicate_remote_principal"
 	ExternalConnectionReauthorizationErrorCodeIdentityMismatch         ExternalConnectionReauthorizationErrorCode = "identity_mismatch"
 	ExternalConnectionReauthorizationErrorCodeInternalError            ExternalConnectionReauthorizationErrorCode = "internal_error"
+	ExternalConnectionReauthorizationErrorCodeProviderAuthFailed       ExternalConnectionReauthorizationErrorCode = "provider_auth_failed"
 	ExternalConnectionReauthorizationErrorCodeStaleRevision            ExternalConnectionReauthorizationErrorCode = "stale_revision"
 )
 
@@ -1818,6 +1846,8 @@ func (e ExternalConnectionReauthorizationErrorCode) Valid() bool {
 	case ExternalConnectionReauthorizationErrorCodeIdentityMismatch:
 		return true
 	case ExternalConnectionReauthorizationErrorCodeInternalError:
+		return true
+	case ExternalConnectionReauthorizationErrorCodeProviderAuthFailed:
 		return true
 	case ExternalConnectionReauthorizationErrorCodeStaleRevision:
 		return true
@@ -5391,13 +5421,16 @@ type AgentType string
 // AgentVisibilityScope Tenant directory visibility only. Sponsor visibility does not hide the Agent from members of a Room where the Sponsor explicitly admitted it, and workspace visibility does not grant Agent management or ordinary Room admission rights.
 type AgentVisibilityScope string
 
-// AnotherMe The Human's Another Me and its live direct Chat. Empty until the Another Me exists; room_id is also absent while the Chat is being deleted.
+// AnotherMe The Human's Another Me and its live direct Chat. Empty until the Another Me exists or a registered Local Computer reports a placement blocker; room_id is also absent while the Chat is being deleted.
 type AnotherMe struct {
 	// AgentActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	AgentActorId *Id `json:"agent_actor_id,omitempty"`
 
 	// BackgroundFailure Present while the Another Me's background model calls (Wiki, Memory, daily reports) have failed at least three times in a row; absent again after the next one completes.
 	BackgroundFailure *AnotherMeBackgroundFailure `json:"background_failure,omitempty"`
+
+	// PlacementBlocker Present while the Human has no Another Me yet and TeamHub has a known reason it cannot place or create one on the Human's Local Computers. Absent once the Another Me exists or before any Local Computer is registered for the Human.
+	PlacementBlocker *AnotherMePlacementBlocker `json:"placement_blocker,omitempty"`
 
 	// RoomId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	RoomId *Id `json:"room_id,omitempty"`
@@ -5413,6 +5446,29 @@ type AnotherMeBackgroundFailure struct {
 
 // AnotherMeBackgroundFailureReason Why the latest background model call failed: the Runtime is incompatible or its model is not available to the account, the Runtime needs sign-in, the Runtime is unavailable, or a cause the Human cannot act on. Clients show an unknown value as unknown.
 type AnotherMeBackgroundFailureReason string
+
+// AnotherMePlacementBlocker Present while the Human has no Another Me yet and TeamHub has a known reason it cannot place or create one on the Human's Local Computers. Absent once the Another Me exists or before any Local Computer is registered for the Human.
+type AnotherMePlacementBlocker struct {
+	// ComputerId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	ComputerId *Id `json:"computer_id,omitempty"`
+
+	// Reason Why TeamHub skipped or failed creating the Human's Another Me on their Local Computers. Clients treat an unknown value as unknown.
+	Reason AnotherMePlacementBlockerReason `json:"reason"`
+
+	// Runtimes Runtime diagnostics last reported by the candidate Computer when placement is blocked because no Runtime is ready with models.
+	Runtimes *[]AnotherMePlacementRuntimeStatus `json:"runtimes,omitempty"`
+}
+
+// AnotherMePlacementBlockerReason Why TeamHub skipped or failed creating the Human's Another Me on their Local Computers. Clients treat an unknown value as unknown.
+type AnotherMePlacementBlockerReason string
+
+// AnotherMePlacementRuntimeStatus defines model for AnotherMePlacementRuntimeStatus.
+type AnotherMePlacementRuntimeStatus struct {
+	Message    *string                      `json:"message,omitempty"`
+	ModelCount int                          `json:"model_count"`
+	Status     LocalRuntimeDiagnosticStatus `json:"status"`
+	Type       LocalRuntimeType             `json:"type"`
+}
 
 // ArtifactTreeSegment defines model for ArtifactTreeSegment.
 type ArtifactTreeSegment struct {

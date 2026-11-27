@@ -58,7 +58,7 @@ var (
 	openAIKeyRE   = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}\b`)
 	inlineSecret  = regexp.MustCompile(`(?i)\b(authorization|cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*[^\s,;]+`)
 	unixPathRE    = regexp.MustCompile(`(?:/Users/[^/\s"'` + "`" + `]+|/home/[^/\s"'` + "`" + `]+|/(?:private/)?tmp|/private/var|/var/(?:lib|folders))(?:/[^\s"'` + "`" + `<>]*)?`)
-	windowsPathRE = regexp.MustCompile(`[A-Za-z]:\\Users\\[^\s"'` + "`" + `<>]*`)
+	windowsPathRE = regexp.MustCompile(`[A-Za-z]:\\{1,2}Users\\{1,2}[^\s"'` + "`" + `<>]*`)
 )
 
 type Request struct {
@@ -493,7 +493,7 @@ func sanitize(value any, home, pointer string, inReasoning, displayReasoning boo
 				}
 				continue
 			}
-			if normalized == "thinking" && (stringValue(typed, "type", 64) == "thinking" || stringValue(typed, "type", 64) == "redacted_thinking") {
+			if normalized == "thinking" && (stringValue(typed, "type", 64) == "thinking" || stringValue(typed, "type", 64) == "redacted_thinking" || stringValue(typed, "type", 64) == "PLANNER_RESPONSE") {
 				*redactions = append(*redactions, RedactedField{Path: manifestPath(child), Reason: "reasoning_content"})
 				continue
 			}
@@ -527,7 +527,13 @@ func sanitize(value any, home, pointer string, inReasoning, displayReasoning boo
 
 func sanitizeString(value, home, pointer string, redactions *[]RedactedField) string {
 	result := value
-	roots := []string{home, filepath.Dir(home)}
+	roots := make([]string, 0, 4)
+	for _, root := range []string{home, filepath.Dir(home)} {
+		roots = append(roots, root)
+		if strings.Contains(root, `\`) {
+			roots = append(roots, strings.ReplaceAll(root, `\`, `\\`))
+		}
+	}
 	sort.Slice(roots, func(i, j int) bool { return len(roots[i]) > len(roots[j]) })
 	for _, root := range roots {
 		if len(root) > 1 {

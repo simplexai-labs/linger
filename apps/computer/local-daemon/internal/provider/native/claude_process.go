@@ -55,6 +55,7 @@ type claudeProcess struct {
 	shape         *claudeShape
 	front         *mcpFront
 	mcpPath       string
+	mcpCleanup    func()
 	release       func() error
 	conv          *claudeConversation
 
@@ -437,7 +438,11 @@ func (p *claudeProcess) releaseResources() {
 			p.group.release()
 		}
 		front.Close()
-		claudeRemoveMCPConfig(p.mcpPath)
+		if p.mcpCleanup != nil {
+			p.mcpCleanup()
+		} else {
+			claudeRemoveMCPConfig(p.mcpPath)
+		}
 		if p.release != nil {
 			if err := p.release(); err != nil && logger != nil {
 				logger.Warn("release Claude process temp failed", "error", err)

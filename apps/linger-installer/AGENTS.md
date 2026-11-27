@@ -75,25 +75,21 @@ person approved is ever applied, and a stack still not ready ends
 `LOCAL_MODELS_RECOVERY_REQUIRED` with the binding's reason codes in
 `details.reasons` (exposed on jobs as `errorReasons`) and any upstream stack
 guard or plan error code in `details.causeCode` (exposed on jobs as
-`errorCauseCode`). When the services already run, a setup whose
-Computer uses the local model source (`model-source.json` says `local`, or does
-not exist yet on a `local-models` setup) has its stack and saved library model
-checked (`restoreLocalModels`), since a quit stops the models but not the
-services: a stack that is not ready gets the same restore, an unloaded saved
-local model (`localmodels/` or `localmodels-library/`) is reloaded, and the local source is applied again;
-if that restore fails or throws (or a cold resume, including the first start after an app update onto a
-new checkout, cannot prepare the local model stack or reload its saved library
-model), the failure is logged
-and reported in the ready outcome's `details.localModelsDegraded` without
-failing the resume, so the person can still reach the workspace and the Models
-page. Resource-choice mismatches omit stale binding reason codes so Quick
-Install still triggers a replan. Both same-version resume (`restoreLocalModels`)
-and version upgrades from the saved setup choice leave the stack stopped when
-`model-source.json` was switched to `subscription` or `byok`; a saved BYOK
-source gets its Bifrost gateway mounted again from the saved configuration
-unless it already answers (`restoreByokSource`), and a failure is logged and
-reported in the ready outcome's `details.byokGateway` without failing the
-resume; the Computer mounts it again before the next Run on it.
+`errorCauseCode`). When the services already run, resume mounts a saved BYOK
+gateway first (`restoreByokSource`, since `source apply --mode byok` unloads
+local models before mounting BYOK) and then restores any local stack and
+previously loaded library models (`restoreLocalModels`), reporting any BYOK
+failure in `details.byokGateway`, any local-model failure in
+`details.localModelsDegraded`, and any reloaded models or revived stack in
+`details.localModelsRestored` / `details.restoredLocalModels` without failing
+the resume or letting a failure in one block restoring the other, so the person
+can still reach the workspace and the Models page. Resource-choice mismatches
+omit stale binding reason codes so Quick Install still triggers a replan. Both
+same-version resume and version upgrades from the saved setup choice leave the
+Quick Install stack stopped when `model-source.json` was switched to
+`subscription` or `byok` while still restoring any library models that were
+loaded before quit, crash, reboot, or upgrade stop (without switching
+`model-source.json`).
 A failed installation records the stage that caused it, even when native
 checkout preparation and runtime setup ran in parallel. A BYOK mount failure
 belongs to runtime and keeps the redacted provider error in the job.

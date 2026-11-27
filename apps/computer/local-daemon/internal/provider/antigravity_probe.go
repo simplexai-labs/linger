@@ -11,7 +11,7 @@ import (
 // probeAntigravityAuthentication opens an empty ACP session: Antigravity
 // answers session/new with ACP's authentication-required error when neither
 // a Google sign-in nor a Gemini API key is available.
-func probeAntigravityAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration) runtimeProbeOutcome {
+func probeAntigravityAuthentication(ctx context.Context, executable string, environment map[string]string, timeout time.Duration, _ string) runtimeProbeOutcome {
 	ctx, cancel := context.WithTimeout(ctx, boundedAuthTimeout(timeout))
 	defer cancel()
 	probe, err := native.ProbeAntigravity(ctx, native.NewInvocation(executable, nil).WithEnvironment(environment))

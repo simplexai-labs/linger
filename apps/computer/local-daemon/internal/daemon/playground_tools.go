@@ -14,6 +14,8 @@ import (
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/clicredential"
 	lingercontext "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/context"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 // maxCardFiles is how many files one card carries.
@@ -188,6 +190,40 @@ func (d *Daemon) placePlaygroundImage(ctx context.Context, tenantID, agentID str
 // agentCLIUnknown is told when a CLI run may have changed something.
 const agentCLIUnknown = "It may have been done; check before trying again."
 
+func (d *Daemon) operationTempBase() string {
+	if d.stateDirectory == "" {
+		return ""
+	}
+	return filepath.Join(d.stateDirectory, "operation-tmp")
+}
+
+// prepareAgentCLIConfig creates a private temporary directory containing a
+// TeamHub CLI config.json scoped to roomID. When baseDir is non-empty, it
+// allocates a lock-tracked directory inside baseDir via PrepareOperationTemp
+// so the path stays inside the Daemon's private state directory rather than
+// system TEMP.
+func prepareAgentCLIConfig(baseDir string, installation clicredential.Installation, roomID string) (home, configPath string, cleanup func(), err error) {
+	config, err := json.Marshal(map[string]any{"version": 1, "default_profile": "live", "profiles": map[string]any{"live": map[string]any{
+		"url": installation.Profile.URL, "token_file": installation.CredentialPath,
+		"tenant_id": installation.Profile.TenantID, "agent_id": installation.Profile.AgentID,
+		"scope": map[string]string{"kind": "room", "id": roomID},
+	}}})
+	if err != nil {
+		return "", "", nil, err
+	}
+	home, removeRoot, err := localworkspace.PrivateTempRoot(baseDir, "linger-live-card-")
+	if err != nil {
+		return "", "", nil, err
+	}
+	cleanup = func() { _ = removeRoot() }
+	configPath = filepath.Join(home, "config.json")
+	if err := privatefs.WriteFile(configPath, config, true); err != nil {
+		cleanup()
+		return "", "", nil, err
+	}
+	return home, configPath, cleanup, nil
+}
+
 // runAgentCLI runs the bundled CLI as the Agent with a profile of its own
 // that targets roomID, and returns what it printed. The credential stays in
 // its file; the CLI reads it.
@@ -196,23 +232,11 @@ func (d *Daemon) runAgentCLI(ctx context.Context, installation clicredential.Ins
 	if !ok {
 		return nil, &playgroundFailure{"cli_unavailable", "This Computer has no TeamHub CLI; update the Computer."}
 	}
-	home, err := os.MkdirTemp("", "linger-live-card-")
+	home, configPath, cleanup, err := prepareAgentCLIConfig(d.operationTempBase(), installation, roomID)
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(home)
-	config, err := json.Marshal(map[string]any{"version": 1, "default_profile": "live", "profiles": map[string]any{"live": map[string]any{
-		"url": installation.Profile.URL, "token_file": installation.CredentialPath,
-		"tenant_id": installation.Profile.TenantID, "agent_id": installation.Profile.AgentID,
-		"scope": map[string]string{"kind": "room", "id": roomID},
-	}}})
-	if err != nil {
-		return nil, err
-	}
-	configPath := filepath.Join(home, "config.json")
-	if err := os.WriteFile(configPath, config, 0o600); err != nil {
-		return nil, err
-	}
+	defer cleanup()
 	command := exec.CommandContext(ctx, program, arguments...)
 	command.Dir = home
 	command.Env = append(cardCLIEnvironment(os.Environ()), "TEAMHUB_CONFIG="+configPath, "TEAMHUB_PROFILE=live")

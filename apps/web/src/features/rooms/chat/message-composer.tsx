@@ -1280,7 +1280,7 @@ function ReplyContextPreview({
   return (
     <div
       aria-label={t(composerMessages.replyContext)}
-      className="mb-2 max-h-36 space-y-1 overflow-y-auto border-b border-app-border pb-2 pr-1"
+      className="mb-2 max-h-36 space-y-1 overflow-y-auto pb-2 pr-1"
     >
       {messages.map((message) => (
         <div
@@ -1663,7 +1663,7 @@ function ImageAttachmentDialog({
       onClose={onClose}
       size="xl"
     >
-      <div className="flex items-center justify-between border-b border-app-border px-3 py-2">
+      <div className="flex items-center justify-between px-3 py-2">
         <p className="truncate text-sm font-semibold text-app-ink">
           {file.name}
         </p>
@@ -1856,7 +1856,7 @@ function MentionMenu({
       ref={menuRef}
     >
       <div
-        className="sticky top-0 z-10 flex shrink-0 gap-1 border-b border-app-border bg-app-surface px-2 pt-2"
+        className="sticky top-0 z-10 flex shrink-0 gap-1 bg-app-surface px-2 pt-2"
         role="tablist"
       >
         {tabs.map((value) => (
@@ -2050,7 +2050,7 @@ function SkillMenu({
   const selectedSkill = items[activeIndex];
   return (
     <div className="app-floating-enter absolute bottom-[calc(100%+8px)] left-0 z-30 flex max-h-[min(24rem,calc(100dvh-7rem))] w-[min(42rem,calc(100vw-1.5rem))] flex-col overflow-hidden bg-popover shadow-md [border-radius:var(--app-panel-radius)]">
-      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-app-border px-3">
+      <div className="flex min-h-11 shrink-0 items-center gap-2 px-3">
         <ActorAvatar
           actorId={agent.id}
           kind="agent"

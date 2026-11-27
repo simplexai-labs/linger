@@ -28,19 +28,24 @@ import { REGION_SCHEMA, regionFile } from "./region.js";
 import { requestUrlText } from "@linger/service-kit";
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  clearResumeLocalModels,
   ensureLocalmodelsTool,
   localmodelsBifrostAddrFile,
   localmodelsBifrostDirectory,
   localmodelsLegacyToolsMarkerFile,
+  localmodelsResumeModelsFile,
   localmodelsStateDirectory,
   localmodelsToolsDirectory,
   prefetchLocalmodelsBifrost,
+  readOnDiskLoadedLibraryModels,
   readPublishedTool,
+  readResumeLocalModels,
   resolveLocalmodelsBifrostAddr,
   runLocalmodels,
   stopLocalmodels,
   validateToolSource,
   withLocalmodelsToolCache,
+  writeResumeLocalModels,
 } from "./localmodels-tool.js";
 const roots: string[] = [];
 async function reopenDirectories(directory: string): Promise<void> {
@@ -1848,6 +1853,8 @@ test("logs phase breakdowns for harness apply and source apply alongside the com
 });
 
 test("logs per-step durations when stopping localmodels", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "linger-stop-log-"));
+  roots.push(home);
   const logs: string[] = [];
   const run = vi.fn<typeof runLocalmodels>(async (_home, args) =>
     args[1] === "status"
@@ -1855,7 +1862,7 @@ test("logs per-step durations when stopping localmodels", async () => {
       : { code: 0, stdout: "{}", stderr: "" },
   );
   await stopLocalmodels(
-    "/home",
+    home,
     {
       signal: AbortSignal.timeout(5000),
       log: (message) => logs.push(message),
@@ -2864,3 +2871,140 @@ print(json.dumps({"ok": True}))
   },
   120_000,
 );
+
+test("stopLocalmodels records active models before unloading, preserves pending list across chained stops, and marks explicit empty stops", async () => {
+  const f = await fixture();
+  vi.stubEnv("LINGER_LOCALMODELS_TOOL_JSON", JSON.stringify(f.source));
+  let statusCalls = 0;
+  const runProc = vi.fn<typeof import("./process.js").runProcess>(
+    async (_file, args) => {
+      if (args.includes("status")) {
+        statusCalls += 1;
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            schema: "localmodels.library-status/v1",
+            models:
+              statusCalls === 1
+                ? [
+                    { id: "spark-x2.6-4b:Q4_K_M", state: "loaded" },
+                    { id: "qwen3.8-27b:UD-Q4_K_M", state: "loading" },
+                    {
+                      id: "crashed-model:Q4_K_M",
+                      state: "failed",
+                      error: { code: "HEALTH_CHECK_FAILED" },
+                    },
+                    {
+                      id: "stopped-dl:Q4_K_M",
+                      state: "failed",
+                      error: { code: "NETWORK_UNAVAILABLE" },
+                    },
+                    { id: "idle-model:Q4_K_M", state: "idle" },
+                  ]
+                : [
+                    { id: "spark-x2.6-4b:Q4_K_M", state: "idle" },
+                    { id: "qwen3.8-27b:UD-Q4_K_M", state: "idle" },
+                    { id: "crashed-model:Q4_K_M", state: "idle" },
+                    { id: "idle-model:Q4_K_M", state: "idle" },
+                  ],
+          }),
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: "{}", stderr: "" };
+    },
+  );
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { runProcess: runProc, cancelPollMs: 1, cancelWaitMs: 50 },
+  );
+  expect(await readResumeLocalModels(f.home)).toEqual([
+    "spark-x2.6-4b:Q4_K_M",
+    "qwen3.8-27b:UD-Q4_K_M",
+    "crashed-model:Q4_K_M",
+  ]);
+  if (process.platform !== "win32") {
+    expect((await stat(localmodelsResumeModelsFile(f.home))).mode & 0o777).toBe(
+      0o600,
+    );
+  }
+
+  // A follow-up stop (e.g. Windows setup `--stop` after the app already quit)
+  // sees all models idle and preserves the pending list rather than wiping it.
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000) },
+    { runProcess: runProc },
+  );
+  expect(await readResumeLocalModels(f.home)).toEqual([
+    "spark-x2.6-4b:Q4_K_M",
+    "qwen3.8-27b:UD-Q4_K_M",
+    "crashed-model:Q4_K_M",
+  ]);
+
+  // If a previous restore finished one model and left another pending before a
+  // second quit, newly loaded models merge with the remaining pending list.
+  await writeResumeLocalModels(f.home, ["still-pending:Q4_K_M"]);
+  statusCalls = 0;
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { runProcess: runProc, cancelPollMs: 1, cancelWaitMs: 50 },
+  );
+  expect(await readResumeLocalModels(f.home)).toEqual([
+    "spark-x2.6-4b:Q4_K_M",
+    "qwen3.8-27b:UD-Q4_K_M",
+    "crashed-model:Q4_K_M",
+    "still-pending:Q4_K_M",
+  ]);
+
+  // After resume clears the record, a quit with downloaded models all idle
+  // records an explicit empty list so intentional unloads stay unloaded.
+  await clearResumeLocalModels(f.home);
+  statusCalls = 2;
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000), keepController: true },
+    { runProcess: runProc },
+  );
+  expect(await readResumeLocalModels(f.home)).toEqual([]);
+});
+
+test("readOnDiskLoadedLibraryModels returns regular owned loaded model records and ignores idle or invalid files", async () => {
+  const f = await fixture();
+  const modelsDir = path.join(
+    localmodelsStateDirectory(f.home),
+    "library",
+    "models",
+  );
+  await mkdir(modelsDir, { recursive: true, mode: 0o700 });
+  // localmodels writes model records under default umask (0644), not 0600.
+  await writeFile(
+    path.join(modelsDir, "a.json"),
+    JSON.stringify({ id: "alpha:Q4_K_M", state: "loaded" }),
+    { mode: 0o644 },
+  );
+  await writeFile(
+    path.join(modelsDir, "b.json"),
+    JSON.stringify({ id: "beta:Q8_0", state: "idle" }),
+    { mode: 0o644 },
+  );
+  await writeFile(
+    path.join(modelsDir, "c.json"),
+    JSON.stringify({ id: "gamma:UD-Q4_K_XL", state: "loaded" }),
+    { mode: 0o644 },
+  );
+  await writeFile(
+    path.join(modelsDir, "bad.json"),
+    JSON.stringify({ id: "../evil", state: "loaded" }),
+    { mode: 0o644 },
+  );
+  await writeFile(path.join(modelsDir, "corrupt.json"), "{not json", {
+    mode: 0o644,
+  });
+  expect(await readOnDiskLoadedLibraryModels(f.home)).toEqual([
+    "alpha:Q4_K_M",
+    "gamma:UD-Q4_K_XL",
+  ]);
+});

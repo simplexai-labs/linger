@@ -295,9 +295,7 @@ export function ActionMenu({
                 style={position}
               >
                 {header ? (
-                  <div className="-mx-1 mb-1 border-b border-border px-3 py-2">
-                    {header}
-                  </div>
+                  <div className="-mx-1 mb-1 px-3 py-2">{header}</div>
                 ) : null}
                 {items.map((item, index) => (
                   <ActionMenuItemButton
@@ -420,9 +418,7 @@ function ActionMenuItemButton({
 }) {
   return (
     <div>
-      {item.separatorBefore ? (
-        <div className="-mx-1 my-1 border-t border-border" />
-      ) : null}
+      {item.separatorBefore ? <div className="-mx-1 my-1" /> : null}
       <button
         aria-expanded={item.children ? submenuOpen : undefined}
         aria-haspopup={item.children ? "menu" : undefined}

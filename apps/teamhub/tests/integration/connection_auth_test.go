@@ -3,10 +3,15 @@ package integration_test
 import (
 	"crypto/sha256"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/app"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 )
 
@@ -565,4 +570,231 @@ func TestConnectionAuthorizationCardJobsPostgreSQL(t *testing.T) {
 	if got := countRows(t, env, `SELECT count(*) FROM external_connection_agent_grants WHERE connection_id='auth-settle' AND agent_actor_id='actor_acme_official' AND status='active'`); got != 1 {
 		t.Fatalf("grants=%d want 1", got)
 	}
+}
+
+func TestConnectionAuthorizationSettlesSupersededDuplicateRecoveryPostgreSQL(t *testing.T) {
+	allowParallelIntegrationTest(t)
+
+	t.Run("immediate settlement via duplicate recovery job", func(t *testing.T) {
+		databaseURL := newIntegrationDatabase(t)
+		pool, err := pgxpool.New(t.Context(), databaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		releaseCandidate := make(chan struct{})
+		provider := &fakeGmailProvider{
+			identityEmail: "alice@example.test",
+			identityWait: map[string]chan struct{}{
+				"ca_link_2": releaseCandidate,
+			},
+		}
+		composioFake := newFakeComposio(t)
+		cfg := config.ForTest(func(c *config.Config) {
+			c.DatabaseURL = databaseURL
+			c.SessionTTL = time.Hour
+			c.CookieName = "teamhub_session"
+			c.ArtifactStorageRoot = t.TempDir()
+			c.ArtifactMaxBytes = 2 << 20
+		})
+		composioFake.configure(&cfg)
+		application, err := newTestApp(t.Context(), cfg, skipping(app.SkillInstall), skipping(app.SkillPackageProbe),
+			withComposio(provider), starting(app.JobQueue))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(application.Close)
+		server := httptest.NewServer(application.Handler())
+		registerIntegrationServerCleanup(t, server)
+		env := &testEnv{t: t, databaseURL: databaseURL, pool: pool, server: server}
+		alice := env.login("alice", alicePassword)
+
+		// Create canonical Gmail connection connOld (ca_link_1), then mark it failed.
+		status, _, body := env.request(alice, http.MethodPost, "/v0/external-connections", map[string]any{"app_key": "gmail"}, "dup-settle-old")
+		if status != http.StatusCreated {
+			t.Fatalf("create old connection status=%d body=%s", status, body)
+		}
+		var connOld struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		}
+		decode(t, body, &connOld)
+		completeAuthorizations(t, env, alice)
+		if !waitForExternalSource(func() bool {
+			status, _, body = env.request(alice, http.MethodGet, "/v0/external-connections/"+connOld.ID, nil, "")
+			if status == http.StatusOK {
+				decode(t, body, &connOld)
+			}
+			return status == http.StatusOK && connOld.Status == "active"
+		}) {
+			t.Fatalf("connOld not active: %s", body)
+		}
+		if _, err := pool.Exec(t.Context(), `UPDATE external_connections SET status='failed',status_error_code='provider_auth_failed',next_status_check_at=now()+interval '1 hour' WHERE id=$1`, connOld.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		// Create Room and connection_auth card for gmail.
+		roomID := createPrivateRoom(t, env, alice, "Duplicate recovery settle", "dup-recovery-room")
+		if code, body := putRoomMember(t, env, alice, roomID, "actor_acme_official", "member"); code != http.StatusOK {
+			t.Fatalf("member: %d %s", code, body)
+		}
+		cards := typedcard.New(pool)
+		cards.SetConnectionAuthorizer(composioFake.externalSources(t, pool, provider))
+		hash := sha256.Sum256([]byte("dup-recovery-card"))
+		created, err := cards.CreateDecision(t.Context(), roomID, acmeOfficialAgentManagementID, "dup-recovery-card", hash[:], typedcard.DecisionCommand{
+			DeciderActorID: "actor_acme_alice",
+			ConnectionAuth: &typedcard.ConnectionAuthDecision{Prompt: "Connect Gmail for the Room Agent", AppKey: "gmail"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cardMsg decisionMessageResponse
+		decode(t, created.Body, &cardMsg)
+
+		// Create a fresh pending candidate connNew (ca_link_2) and approve the card against connNew.
+		status, _, body = env.request(alice, http.MethodPost, "/v0/external-connections", map[string]any{"app_key": "gmail"}, "dup-settle-new")
+		if status != http.StatusCreated {
+			t.Fatalf("create new connection status=%d body=%s", status, body)
+		}
+		var connNew struct {
+			ID string `json:"id"`
+		}
+		decode(t, body, &connNew)
+		status, _, body = env.request(alice, http.MethodPost, "/v0/decisions/"+cardMsg.Card.DecisionID,
+			map[string]any{"expected_version": 1, "decision": "approve", "connection_id": connNew.ID}, "dup-settle-approve")
+		if status != http.StatusOK {
+			t.Fatalf("approve card status=%d body=%s", status, body)
+		}
+
+		// Complete OAuth for connNew with the same principal so reconcileDuplicateConnection recovers connOld.
+		close(releaseCandidate)
+		completeAuthorizations(t, env, alice)
+
+		var decisionStatus, boundConnectionID string
+		if !waitForExternalSource(func() bool {
+			err := pool.QueryRow(t.Context(), `SELECT status, coalesce(answer->>'connection_id','') FROM decisions WHERE id=$1`, cardMsg.Card.DecisionID).Scan(&decisionStatus, &boundConnectionID)
+			return err == nil && decisionStatus == "succeeded"
+		}) {
+			t.Fatalf("decision did not settle as succeeded: status=%q bound=%q", decisionStatus, boundConnectionID)
+		}
+		if boundConnectionID != connOld.ID {
+			t.Fatalf("answer.connection_id=%q want canonical %q", boundConnectionID, connOld.ID)
+		}
+		var candidateStatus, candidateError, candidatePrincipal string
+		if err := pool.QueryRow(t.Context(), `SELECT status, coalesce(status_error_code,''), coalesce(remote_principal_key,'') FROM external_connections WHERE id=$1`, connNew.ID).Scan(&candidateStatus, &candidateError, &candidatePrincipal); err != nil {
+			t.Fatal(err)
+		}
+		if candidateStatus != "revoked" || candidateError != "duplicate_remote_principal" || candidatePrincipal != "gmail:alice@example.test" {
+			t.Fatalf("candidate=(%q,%q,%q) want revoked/duplicate_remote_principal/gmail:alice@example.test", candidateStatus, candidateError, candidatePrincipal)
+		}
+		if got := countRows(t, env, `SELECT count(*) FROM external_connection_agent_grants WHERE connection_id=$1 AND agent_actor_id='actor_acme_official' AND status='active'`, connOld.ID); got != 1 {
+			t.Fatalf("canonical grants=%d want 1", got)
+		}
+		if got := countRows(t, env, `SELECT count(*) FROM external_connection_agent_grants WHERE connection_id=$1 AND agent_actor_id='actor_acme_official' AND status='active'`, connNew.ID); got != 0 {
+			t.Fatalf("candidate grants=%d want 0", got)
+		}
+		var handoffText string
+		if err := pool.QueryRow(t.Context(), `SELECT body FROM messages WHERE card_context_message_id=$1 AND message_kind='agent_runtime'`, cardMsg.ID).Scan(&handoffText); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(handoffText, `"connection_id":"`+connOld.ID+`"`) || strings.Contains(handoffText, connNew.ID) {
+			t.Fatalf("handoff=%q want canonical %q and not candidate %q", handoffText, connOld.ID, connNew.ID)
+		}
+	})
+
+	t.Run("sweep settlement and revoked canonical handling", func(t *testing.T) {
+		composioFake := newFakeComposio(t)
+		env, alice := newAgentRunEnvWithConfig(t, "http://127.0.0.1:1", composioFake.configure)
+		roomID := createPrivateRoom(t, env, alice, "Duplicate recovery sweep", "dup-recovery-sweep-room")
+		if code, body := putRoomMember(t, env, alice, roomID, "actor_acme_official", "member"); code != http.StatusOK {
+			t.Fatalf("member: %d %s", code, body)
+		}
+		cards := typedcard.New(env.pool)
+		cards.SetConnectionAuthorizer(composioFake.externalSources(t, env.pool, nil))
+		createCard := func(key string) decisionMessageResponse {
+			t.Helper()
+			hash := sha256.Sum256([]byte(key))
+			result, err := cards.CreateDecision(t.Context(), roomID, acmeOfficialAgentManagementID, key, hash[:], typedcard.DecisionCommand{
+				DeciderActorID: "actor_acme_alice",
+				ConnectionAuth: &typedcard.ConnectionAuthDecision{Prompt: "Allow the Room Agent to use Gmail", AppKey: "gmail"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var message decisionMessageResponse
+			decode(t, result.Body, &message)
+			return message
+		}
+
+		// Case 1: periodic sweep settles authorizing card bound to a superseded candidate as succeeded.
+		if _, err := env.pool.Exec(t.Context(), `INSERT INTO external_connections(id,account_id,provider,upstream_connection_id,status,toolkit_slug,remote_principal_key) VALUES('conn_old_sweep','account_alice','gmail','up_old_sweep','failed','gmail','gmail:sweep@example.test')`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(t.Context(), `INSERT INTO external_connections(id,account_id,provider,upstream_connection_id,status,toolkit_slug) VALUES('conn_new_sweep','account_alice','gmail','up_new_sweep','pending','gmail')`); err != nil {
+			t.Fatal(err)
+		}
+		sweepCard := createCard("sweep-recovery")
+		if code, _, body := env.request(alice, http.MethodPost, "/v0/decisions/"+sweepCard.Card.DecisionID,
+			map[string]any{"expected_version": 1, "decision": "approve", "connection_id": "conn_new_sweep"}, "sweep-approve"); code != http.StatusOK {
+			t.Fatalf("approve: %d %s", code, body)
+		}
+		if _, err := env.pool.Exec(t.Context(), `UPDATE external_connections SET status='revoked',status_error_code='duplicate_remote_principal',remote_principal_key='gmail:sweep@example.test' WHERE id='conn_new_sweep'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(t.Context(), `UPDATE external_connections SET status='active' WHERE id='conn_old_sweep'`); err != nil {
+			t.Fatal(err)
+		}
+		if err := cards.ReconcileConnectionAuthorizations(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var sweepStatus, sweepBound string
+		if err := env.pool.QueryRow(t.Context(), `SELECT status, coalesce(answer->>'connection_id','') FROM decisions WHERE id=$1`, sweepCard.Card.DecisionID).Scan(&sweepStatus, &sweepBound); err != nil {
+			t.Fatal(err)
+		}
+		if sweepStatus != "succeeded" || sweepBound != "conn_old_sweep" {
+			t.Fatalf("sweep decision=(%q,%q) want succeeded/conn_old_sweep", sweepStatus, sweepBound)
+		}
+		if got := countRows(t, env, `SELECT count(*) FROM external_connection_agent_grants WHERE connection_id='conn_old_sweep' AND agent_actor_id='actor_acme_official' AND status='active'`); got != 1 {
+			t.Fatalf("sweep canonical grants=%d want 1", got)
+		}
+		var sweepHandoff string
+		if err := env.pool.QueryRow(t.Context(), `SELECT body FROM messages WHERE card_context_message_id=$1 AND message_kind='agent_runtime'`, sweepCard.ID).Scan(&sweepHandoff); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(sweepHandoff, `"connection_id":"conn_old_sweep"`) {
+			t.Fatalf("sweep handoff=%q want conn_old_sweep", sweepHandoff)
+		}
+
+		// Case 2: if canonical conn_old was subsequently disconnected (revoked), a card waiting on conn_new settles as failed.
+		if _, err := env.pool.Exec(t.Context(), `INSERT INTO external_connections(id,account_id,provider,upstream_connection_id,status,toolkit_slug,remote_principal_key) VALUES('conn_old_revoked','account_alice','gmail','up_old_revoked','failed','gmail','gmail:revoked@example.test')`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(t.Context(), `INSERT INTO external_connections(id,account_id,provider,upstream_connection_id,status,toolkit_slug) VALUES('conn_new_revoked','account_alice','gmail','up_new_revoked','pending','gmail')`); err != nil {
+			t.Fatal(err)
+		}
+		revokedCard := createCard("revoked-canonical")
+		if code, _, body := env.request(alice, http.MethodPost, "/v0/decisions/"+revokedCard.Card.DecisionID,
+			map[string]any{"expected_version": 1, "decision": "approve", "connection_id": "conn_new_revoked"}, "revoked-approve"); code != http.StatusOK {
+			t.Fatalf("approve: %d %s", code, body)
+		}
+		if _, err := env.pool.Exec(t.Context(), `UPDATE external_connections SET status='revoked',status_error_code='duplicate_remote_principal',remote_principal_key='gmail:revoked@example.test' WHERE id='conn_new_revoked'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(t.Context(), `UPDATE external_connections SET status='revoked' WHERE id='conn_old_revoked'`); err != nil {
+			t.Fatal(err)
+		}
+		if err := cards.SettleConnectionAuthorizations(t.Context(), "conn_new_revoked"); err != nil {
+			t.Fatal(err)
+		}
+		var revokedStatus, revokedBound string
+		if err := env.pool.QueryRow(t.Context(), `SELECT status, coalesce(answer->>'connection_id','') FROM decisions WHERE id=$1`, revokedCard.Card.DecisionID).Scan(&revokedStatus, &revokedBound); err != nil {
+			t.Fatal(err)
+		}
+		if revokedStatus != "failed" || revokedBound != "conn_new_revoked" {
+			t.Fatalf("revoked canonical decision=(%q,%q) want failed/conn_new_revoked", revokedStatus, revokedBound)
+		}
+		if got := countRows(t, env, `SELECT count(*) FROM external_connection_agent_grants WHERE connection_id IN ('conn_old_revoked','conn_new_revoked') AND status='active'`); got != 0 {
+			t.Fatalf("revoked canonical grants=%d want 0", got)
+		}
+	})
 }

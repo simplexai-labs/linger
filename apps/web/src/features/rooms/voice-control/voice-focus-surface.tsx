@@ -448,7 +448,7 @@ export function VoiceFocusSurface({
       {panels ? (
         <div
           aria-label={t(m.views)}
-          className="flex shrink-0 items-center gap-1 border-b border-app-border px-4 py-2"
+          className="flex shrink-0 items-center gap-1 px-4 py-2"
           role="tablist"
         >
           {tabs.map((tab) => (

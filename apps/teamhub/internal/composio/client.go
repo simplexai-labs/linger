@@ -65,6 +65,48 @@ const (
 	ConnectionFailed  ConnectionStatus = "failed"
 )
 
+// ConnectionStatusReason classifies why Composio reported a connection status.
+type ConnectionStatusReason string
+
+const (
+	// ConnectionStatusReasonActive means Composio reported an active connection.
+	ConnectionStatusReasonActive ConnectionStatusReason = "active"
+	// ConnectionStatusReasonPending means Composio reported an in-progress authorization.
+	ConnectionStatusReasonPending ConnectionStatusReason = "pending"
+	// ConnectionStatusReasonExpired means Composio reported an expired connection.
+	ConnectionStatusReasonExpired ConnectionStatusReason = "expired"
+	// ConnectionStatusReasonDisabled means Composio marked the connected account disabled.
+	ConnectionStatusReasonDisabled ConnectionStatusReason = "disabled"
+	// ConnectionStatusReasonToolkitMismatch means the connected account's toolkit did not match the expected toolkit.
+	ConnectionStatusReasonToolkitMismatch ConnectionStatusReason = "toolkit_mismatch"
+	// ConnectionStatusReasonFailed means Composio reported a failed connection.
+	ConnectionStatusReasonFailed ConnectionStatusReason = "failed"
+	// ConnectionStatusReasonRevoked means Composio reported a revoked connection.
+	ConnectionStatusReasonRevoked ConnectionStatusReason = "revoked"
+	// ConnectionStatusReasonInactive means Composio reported an inactive connection.
+	ConnectionStatusReasonInactive ConnectionStatusReason = "inactive"
+	// ConnectionStatusReasonUnknown means Composio reported an unrecognized status value.
+	ConnectionStatusReasonUnknown ConnectionStatusReason = "unknown"
+)
+
+// ConnectionStatusReport pairs a normalized ConnectionStatus with its closed diagnostic reason.
+type ConnectionStatusReport struct {
+	Status ConnectionStatus
+	Reason ConnectionStatusReason
+}
+
+// ErrorSource identifies whether a remote HTTP failure originated from Composio's
+// own API or from an upstream provider behind Composio's proxy endpoint.
+type ErrorSource string
+
+const (
+	// ErrorSourceComposio marks an HTTP error returned directly by Composio's API.
+	ErrorSourceComposio ErrorSource = "composio"
+	// ErrorSourceProvider marks an HTTP error returned by an upstream provider
+	// inside Composio's proxy response envelope.
+	ErrorSourceProvider ErrorSource = "provider"
+)
+
 type Link struct {
 	AuthConfigID       string
 	ConnectedAccountID string
@@ -72,9 +114,11 @@ type Link struct {
 	ExpiresAt          time.Time
 }
 
+// RateLimitError reports an HTTP 429 response from Composio or a proxied upstream provider.
 type RateLimitError struct {
 	Operation  string
 	RetryAfter time.Duration
+	Source     ErrorSource
 }
 
 func (e *RateLimitError) Error() string { return "Composio " + e.Operation + " was rate limited" }
@@ -204,6 +248,26 @@ type proxyResponse struct {
 type remoteError struct {
 	operation string
 	status    int
+	source    ErrorSource
+}
+
+type connectionScopeError struct {
+	field string
+}
+
+func (e connectionScopeError) Error() string { return ErrConnectionScope.Error() }
+
+func (e connectionScopeError) Unwrap() error { return ErrConnectionScope }
+
+// ConnectionScopeMismatchField returns the closed field name that failed the
+// upstream receipt check ("user_id", "toolkit_slug", or "auth_config_id"), or
+// an empty string when err does not identify a specific field.
+func ConnectionScopeMismatchField(err error) string {
+	var mismatch connectionScopeError
+	if errors.As(err, &mismatch) {
+		return mismatch.field
+	}
+	return ""
 }
 
 func (e *remoteError) Error() string {
@@ -286,10 +350,13 @@ func (c *Client) WithAPIKey(key string) *Client {
 	return clone
 }
 
-// IsUnauthorized reports whether Composio rejected the API key.
+// IsUnauthorized reports whether Composio rejected the API key. Proxied
+// upstream provider 401/403 responses are excluded.
 func IsUnauthorized(err error) bool {
 	var remote *remoteError
-	return errors.As(err, &remote) && (remote.status == http.StatusUnauthorized || remote.status == http.StatusForbidden)
+	return errors.As(err, &remote) &&
+		remote.source != ErrorSourceProvider &&
+		(remote.status == http.StatusUnauthorized || remote.status == http.StatusForbidden)
 }
 
 const OAuthCallbackPath = "/oauth/composio-complete"
@@ -329,10 +396,18 @@ func (c *Client) GetConnectionStatus(ctx context.Context, connectedAccountID str
 	return c.GetConnectionStatusForToolkit(ctx, connectedAccountID, "")
 }
 
+// GetConnectionStatusForToolkit checks a connection's normalized status against toolkitSlug.
 func (c *Client) GetConnectionStatusForToolkit(ctx context.Context, connectedAccountID, toolkitSlug string) (ConnectionStatus, error) {
+	report, err := c.InspectConnectionStatusForToolkit(ctx, connectedAccountID, toolkitSlug)
+	return report.Status, err
+}
+
+// InspectConnectionStatusForToolkit checks a connection's normalized status and
+// closed diagnostic reason against toolkitSlug.
+func (c *Client) InspectConnectionStatusForToolkit(ctx context.Context, connectedAccountID, toolkitSlug string) (ConnectionStatusReport, error) {
 	binding, err := c.authorizeConnection(ctx, connectedAccountID)
 	if err != nil {
-		return "", err
+		return ConnectionStatusReport{}, err
 	}
 	var response struct {
 		UserID     string `json:"user_id"`
@@ -347,18 +422,25 @@ func (c *Client) GetConnectionStatusForToolkit(ctx context.Context, connectedAcc
 	}
 	endpoint := "/api/v3.1/connected_accounts/" + url.PathEscape(connectedAccountID)
 	if err := c.requestJSON(ctx, http.MethodGet, endpoint, nil, &response, "get connection status"); err != nil {
-		return "", err
+		return ConnectionStatusReport{}, err
 	}
-	if binding.UserID != "" && (response.UserID != binding.UserID || response.Toolkit.Slug != binding.ToolkitSlug || response.AuthConfig.ID != binding.AuthConfigID) {
-		return "", ErrConnectionScope
+	if binding.UserID != "" {
+		switch {
+		case response.UserID != binding.UserID:
+			return ConnectionStatusReport{}, connectionScopeError{field: "user_id"}
+		case response.Toolkit.Slug != binding.ToolkitSlug:
+			return ConnectionStatusReport{}, connectionScopeError{field: "toolkit_slug"}
+		case response.AuthConfig.ID != binding.AuthConfigID:
+			return ConnectionStatusReport{}, connectionScopeError{field: "auth_config_id"}
+		}
 	}
 	if toolkitSlug != "" && response.Toolkit.Slug != toolkitSlug {
-		return ConnectionFailed, nil
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonToolkitMismatch}, nil
 	}
 	if toolkitSlug == "" && response.Toolkit.Slug != "gmail" && response.Toolkit.Slug != "slack" {
-		return ConnectionFailed, nil
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonToolkitMismatch}, nil
 	}
-	return mapConnectionStatus(response.Status, response.IsDisabled), nil
+	return classifyConnectionStatus(response.Status, response.IsDisabled), nil
 }
 
 func (c *Client) RevokeConnection(ctx context.Context, connectedAccountID string) error {
@@ -416,6 +498,20 @@ func ErrorStatus(err error) (int, bool) {
 	return remote.status, true
 }
 
+// ErrorSourceOf reports whether err originated from Composio's API or from an
+// upstream provider behind Composio's proxy.
+func ErrorSourceOf(err error) (ErrorSource, bool) {
+	var remote *remoteError
+	if errors.As(err, &remote) && remote.source != "" {
+		return remote.source, true
+	}
+	var limited *RateLimitError
+	if errors.As(err, &limited) && limited.Source != "" {
+		return limited.Source, true
+	}
+	return "", false
+}
+
 func RemoteStatusError(operation string, status int) error {
 	return &remoteError{operation: operation, status: status}
 }
@@ -433,19 +529,25 @@ func IsAuthFailure(err error) bool {
 	}
 }
 
-func mapConnectionStatus(status string, disabled bool) ConnectionStatus {
+func classifyConnectionStatus(status string, disabled bool) ConnectionStatusReport {
 	if disabled {
-		return ConnectionFailed
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonDisabled}
 	}
-	switch strings.ToUpper(status) {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
 	case "ACTIVE":
-		return ConnectionActive
+		return ConnectionStatusReport{Status: ConnectionActive, Reason: ConnectionStatusReasonActive}
 	case "EXPIRED":
-		return ConnectionExpired
+		return ConnectionStatusReport{Status: ConnectionExpired, Reason: ConnectionStatusReasonExpired}
 	case "INITIALIZING", "INITIATED", "PENDING":
-		return ConnectionPending
+		return ConnectionStatusReport{Status: ConnectionPending, Reason: ConnectionStatusReasonPending}
+	case "FAILED":
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonFailed}
+	case "REVOKED":
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonRevoked}
+	case "INACTIVE":
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonInactive}
 	default:
-		return ConnectionFailed
+		return ConnectionStatusReport{Status: ConnectionFailed, Reason: ConnectionStatusReasonUnknown}
 	}
 }
 
@@ -474,10 +576,10 @@ func (c *Client) proxy(ctx context.Context, request proxyRequest, target any, op
 			continue
 		}
 		if response.Status == http.StatusTooManyRequests {
-			return &RateLimitError{Operation: operation, RetryAfter: parseRetryAfter(time.Now(), headerValue(response.Headers, "retry-after"), 0)}
+			return &RateLimitError{Operation: operation, RetryAfter: parseRetryAfter(time.Now(), headerValue(response.Headers, "retry-after"), 0), Source: ErrorSourceProvider}
 		}
 		if response.Status < 200 || response.Status >= 300 {
-			return &remoteError{operation: operation, status: response.Status}
+			return &remoteError{operation: operation, status: response.Status, source: ErrorSourceProvider}
 		}
 		payload := response.Data
 		if text, ok := target.(*string); ok {
@@ -538,11 +640,11 @@ func (c *Client) requestJSON(ctx context.Context, method, endpoint string, input
 		}
 		if response.StatusCode == http.StatusTooManyRequests {
 			_ = response.Body.Close()
-			return &RateLimitError{Operation: operation, RetryAfter: parseRetryAfter(time.Now(), response.Header.Get("Retry-After"), 0)}
+			return &RateLimitError{Operation: operation, RetryAfter: parseRetryAfter(time.Now(), response.Header.Get("Retry-After"), 0), Source: ErrorSourceComposio}
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			_ = response.Body.Close()
-			return &remoteError{operation: operation, status: response.StatusCode}
+			return &remoteError{operation: operation, status: response.StatusCode, source: ErrorSourceComposio}
 		}
 		if response.StatusCode == http.StatusNoContent {
 			_ = response.Body.Close()
@@ -599,10 +701,10 @@ func (c *Client) requestJSONOnce(ctx context.Context, method, endpoint string, i
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusTooManyRequests {
-		return &RateLimitError{Operation: operation, RetryAfter: parseRetryAfter(time.Now(), response.Header.Get("Retry-After"), 0)}
+		return &RateLimitError{Operation: operation, RetryAfter: parseRetryAfter(time.Now(), response.Header.Get("Retry-After"), 0), Source: ErrorSourceComposio}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &remoteError{operation: operation, status: response.StatusCode}
+		return &remoteError{operation: operation, status: response.StatusCode, source: ErrorSourceComposio}
 	}
 	if err := decodeResponseJSON(response.Body, output, int64(c.maxThreadBytes+c.maxBodyBytes+1<<20)); err != nil {
 		if errors.Is(err, ErrResponseTooLarge) {

@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const finishSettledConnectionAuthDecision = `-- name: FinishSettledConnectionAuthDecision :exec
+UPDATE decisions
+SET status=$1::text,
+    answer=CASE
+      WHEN $2::text<>''
+        THEN jsonb_set(coalesce(answer, '{}'::jsonb), '{connection_id}', to_jsonb($2::text))
+      ELSE answer
+    END,
+    finished_at=clock_timestamp()
+WHERE id=$3::text
+`
+
+type FinishSettledConnectionAuthDecisionParams struct {
+	Status              string `json:"status"`
+	ReboundConnectionID string `json:"rebound_connection_id"`
+	ID                  string `json:"id"`
+}
+
+// Finalizes a settled connection_auth decision, optionally rebinding
+// answer.connection_id to the canonical Connection when a duplicate candidate
+// recovered an existing account.
+func (q *Queries) FinishSettledConnectionAuthDecision(ctx context.Context, arg FinishSettledConnectionAuthDecisionParams) error {
+	_, err := q.db.Exec(ctx, finishSettledConnectionAuthDecision, arg.Status, arg.ReboundConnectionID, arg.ID)
+	return err
+}
+
 const getDecisionAuthority = `-- name: GetDecisionAuthority :one
 SELECT decision.message_id,decision.decider_actor_id,caller.id AS caller_actor_id,card.version AS card_version,
        decision.kind,decision.tenant_id,decision.room_id,decision.requested_by_actor_id,
@@ -431,6 +457,77 @@ func (q *Queries) LocateDecision(ctx context.Context, id string) (LocateDecision
 	row := q.db.QueryRow(ctx, locateDecision, id)
 	var i LocateDecisionRow
 	err := row.Scan(&i.TenantID, &i.RoomID)
+	return i, err
+}
+
+const lockCanonicalExternalConnectionForPrincipal = `-- name: LockCanonicalExternalConnectionForPrincipal :one
+SELECT id,
+       status,
+       (reauthorization_upstream_id IS NOT NULL)::boolean AS reauthorizing
+FROM external_connections
+WHERE account_id=$1::text
+  AND provider=$2::text
+  AND remote_principal_key=$3::text
+  AND status<>'revoked'
+FOR SHARE
+`
+
+type LockCanonicalExternalConnectionForPrincipalParams struct {
+	AccountID          string `json:"account_id"`
+	Provider           string `json:"provider"`
+	RemotePrincipalKey string `json:"remote_principal_key"`
+}
+
+type LockCanonicalExternalConnectionForPrincipalRow struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	Reauthorizing bool   `json:"reauthorizing"`
+}
+
+// Resolves the non-revoked canonical Connection that superseded a duplicate
+// pending candidate during recovery.
+func (q *Queries) LockCanonicalExternalConnectionForPrincipal(ctx context.Context, arg LockCanonicalExternalConnectionForPrincipalParams) (LockCanonicalExternalConnectionForPrincipalRow, error) {
+	row := q.db.QueryRow(ctx, lockCanonicalExternalConnectionForPrincipal, arg.AccountID, arg.Provider, arg.RemotePrincipalKey)
+	var i LockCanonicalExternalConnectionForPrincipalRow
+	err := row.Scan(&i.ID, &i.Status, &i.Reauthorizing)
+	return i, err
+}
+
+const lockExternalConnectionForAuthorizationSettlement = `-- name: LockExternalConnectionForAuthorizationSettlement :one
+SELECT status,
+       (reauthorization_upstream_id IS NOT NULL)::boolean AS reauthorizing,
+       coalesce(status_error_code, '')::text AS status_error_code,
+       coalesce(remote_principal_key, '')::text AS remote_principal_key
+FROM external_connections
+WHERE id=$1::text
+  AND account_id=$2::text
+  AND provider=$3::text
+FOR SHARE
+`
+
+type LockExternalConnectionForAuthorizationSettlementParams struct {
+	ID        string `json:"id"`
+	AccountID string `json:"account_id"`
+	Provider  string `json:"provider"`
+}
+
+type LockExternalConnectionForAuthorizationSettlementRow struct {
+	Status             string `json:"status"`
+	Reauthorizing      bool   `json:"reauthorizing"`
+	StatusErrorCode    string `json:"status_error_code"`
+	RemotePrincipalKey string `json:"remote_principal_key"`
+}
+
+// Locks a Connection row while settling an authorizing connection_auth card.
+func (q *Queries) LockExternalConnectionForAuthorizationSettlement(ctx context.Context, arg LockExternalConnectionForAuthorizationSettlementParams) (LockExternalConnectionForAuthorizationSettlementRow, error) {
+	row := q.db.QueryRow(ctx, lockExternalConnectionForAuthorizationSettlement, arg.ID, arg.AccountID, arg.Provider)
+	var i LockExternalConnectionForAuthorizationSettlementRow
+	err := row.Scan(
+		&i.Status,
+		&i.Reauthorizing,
+		&i.StatusErrorCode,
+		&i.RemotePrincipalKey,
+	)
 	return i, err
 }
 

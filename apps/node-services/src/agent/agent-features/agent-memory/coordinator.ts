@@ -501,7 +501,7 @@ export class AgentMemoryCoordinator {
        */
       canReadHistory?: (
         computerId: string,
-        runtimeType: "codex" | "claude" | "pi",
+        runtimeType: "codex" | "claude" | "pi" | "antigravity",
       ) => boolean;
       now?: () => number;
     },
@@ -648,7 +648,12 @@ export class AgentMemoryCoordinator {
       return true;
     }
     const runtime = ghost.runtime.placement.runtimeType;
-    if (runtime !== "codex" && runtime !== "claude" && runtime !== "pi")
+    if (
+      runtime !== "codex" &&
+      runtime !== "claude" &&
+      runtime !== "pi" &&
+      runtime !== "antigravity"
+    )
       return true;
     const computerId = ghost.runtime.placement.computerId;
     // Both stages run on the Agent's own Computer and Runtime.

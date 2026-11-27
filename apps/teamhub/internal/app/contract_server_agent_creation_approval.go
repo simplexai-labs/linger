@@ -92,10 +92,14 @@ func (a *App) submitAgentCreationApprovalRequest(c *gin.Context) {
 	if a.writeAgentCreationApprovalError(c, err) {
 		return
 	}
+	if result.Created != nil {
+		c.Data(http.StatusOK, "application/json", result.Created)
+		return
+	}
 	c.JSON(http.StatusOK, teamhubagentapi.AgentCreationApprovalResponse{
-		Accepted: true, Status: "pending_approval",
-		CreationApprovalRequestId: result.CreationApprovalRequestID,
-		MessageId:                 result.MessageID,
+		Accepted: true, Status: teamhubagentapi.PendingApproval,
+		CreationApprovalRequestId: &result.CreationApprovalRequestID,
+		MessageId:                 &result.MessageID,
 	})
 }
 func agentCreationApprovalRequestToDomain(

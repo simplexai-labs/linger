@@ -454,8 +454,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Submit one Room creation request for Human approval
-     * @description Resolves the Agent and Tenant exclusively from the Agent credential, re-authorizes create_room in the caller's Room Context, and atomically stores the exact caller input separately from the canonical effective payload. TeamHub revalidates every derived value before freezing the immutable approval snapshot; caller identity is intentionally absent from the request body.
+     * Create one Room the Agent requested
+     * @description Resolves the Agent and Tenant exclusively from the Agent credential, re-authorizes create_room in the caller's Room Context, revalidates every derived value, and creates the Room at once, owned by the Agent's Sponsor, with its initial message and the Agent's handoff. Each Agent added to the new Room must have the same Sponsor as the caller. Caller identity is intentionally absent from the request body.
      */
     post: operations["submitAgentCreationApprovalRequest"];
     delete?: never;
@@ -2285,7 +2285,13 @@ export interface components {
       /** @description Canonical Room payload frozen independently from caller input. */
       effective_payload: components["schemas"]["AgentRoomCreationEffectivePayload"];
     };
-    /** @description Durable pending Room creation approval request. */
+    /** @description A requested Document the created Room did not receive. */
+    AgentRoomCreationSkippedArtifact: {
+      document_id: components["schemas"]["Id"];
+      /** @description Why the Document was not delivered. */
+      reason: string;
+    };
+    /** @description A submitted Room creation. TeamHub creates the Room at once, owned by the Agent's Sponsor; a submission replayed from an earlier pending approval card still reports that card. */
     AgentCreationApprovalResponse: {
       /**
        * @description Whether TeamHub accepted and durably persisted the Creation request.
@@ -2293,14 +2299,18 @@ export interface components {
        */
       accepted: true;
       /**
-       * @description Initial lifecycle state while awaiting a Human decision.
-       * @constant
+       * @description created when the Room exists; pending_approval for a replayed submission whose approval card still awaits a Human decision.
+       * @enum {string}
        */
-      status: "pending_approval";
-      /** @description Stable identifier of the Creation approval request fact. */
-      creation_approval_request_id: components["schemas"]["Id"];
-      /** @description Stable identifier of the Human approval card message. */
-      message_id: components["schemas"]["Id"];
+      status: "created" | "pending_approval";
+      /** @description The created Room, present when status is created. */
+      room_id?: components["schemas"]["Id"];
+      /** @description Requested Documents not delivered to the created Room, each with the reason; present when status is created. */
+      skipped_artifacts?: components["schemas"]["AgentRoomCreationSkippedArtifact"][];
+      /** @description Stable identifier of the Creation approval request; present when status is pending_approval. */
+      creation_approval_request_id?: components["schemas"]["Id"];
+      /** @description Stable identifier of the Human approval card message; present when status is pending_approval. */
+      message_id?: components["schemas"]["Id"];
     };
     /** @description One delegated Task created and started immediately for the calling Agent's own AlterEgo. The origin Room is the caller's Room Context; no Human approval is requested. */
     AgentCreateTaskRequest: {
@@ -3973,7 +3983,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description The durable pending Creation approval request and active Manifest attestation. */
+      /** @description The created Room, or the pending approval card of a replayed earlier submission. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -4876,6 +4886,7 @@ export interface operations {
           "application/json": {
             /** @enum {string} */
             status: "ready" | "permission_requested";
+            subject?: components["schemas"]["ComputerPermissionSubject"];
             computer_id: string;
             permissions: components["schemas"]["ComputerPermissionStatus"];
             room_id?: string;

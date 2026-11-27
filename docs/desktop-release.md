@@ -474,8 +474,18 @@ finished `.tar.gz`, `.zip` or update archive for them; a package without them
 fails.
 On macOS the tools' Node.js is signed with `node-entitlements.plist`, and Cua's
 driver (`CuaDriver.app` and the standalone `cua-driver`) keeps Cua's own
-Developer ID signature, which macOS grants Accessibility and Screen Recording
-to. Compressed, they add about 66 MB to the Linux archive, 73 MB to the
+Developer ID signature. Standalone installations grant permissions to CuaDriver.
+Packaged Linger runs the embedded driver with Linger's permissions.
+Deploy TeamHub before distributing this Desktop build, including on self-hosted
+installations. If an older TeamHub issued a CuaDriver card for this Desktop,
+request a fresh card after upgrading TeamHub.
+
+When enabling Linger in System Settings under Screen Recording, choose
+**Quit & Reopen** if macOS offers it. If you chose **Later** and the card
+still asks you to open Settings, quit Linger completely and reopen it.
+This restarts the embedded driver with the new grant.
+
+Compressed, they add about 66 MB to the Linux archive, 73 MB to the
 Windows zip, 46 MB to the Windows setup program and 115 MB to the macOS disk
 image, most of it Node.js and the universal Cua driver.
 

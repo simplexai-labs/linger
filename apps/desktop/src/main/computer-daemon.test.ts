@@ -87,6 +87,7 @@ class FakeChild implements DaemonChild {
 
 const setup = (
   options: {
+    createEmbeddedDriver?: ComputerDaemonOptions["createEmbeddedDriver"];
     enrolled?: boolean;
     credential?: boolean;
     env?: Promise<Record<string, string>>;
@@ -138,6 +139,7 @@ const setup = (
   });
   const daemon = new ComputerDaemonModule({
     spawn,
+    createEmbeddedDriver: options.createEmbeddedDriver,
     credentials,
     directory: path.join(directory, "computer"),
     teamhubCliDirectory: "/Applications/Linger.app/teamhub-cli",
@@ -154,6 +156,78 @@ afterEach(() => {
 });
 
 describe("ComputerDaemonModule", () => {
+  const hostDriver = (socket = "/tmp/host/driver.sock") => ({
+    socket,
+    start: vi.fn(async () => {}),
+    stop: vi.fn(async () => {}),
+  });
+
+  it.each([
+    { enrolled: false, credential: true },
+    { enrolled: true, credential: false },
+  ])("does not create an idle driver for %o", async (options) => {
+    const create = vi.fn(() => hostDriver());
+    const { daemon, ctx, children } = setup({
+      ...options,
+      createEmbeddedDriver: create,
+    });
+    await daemon.start(ctx);
+    expect(create).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    await daemon.stop();
+  });
+
+  it("selects embedded from the first daemon and retires its driver on exit and unenrollment", async () => {
+    const first = hostDriver(),
+      second = hostDriver("/tmp/new/driver.sock");
+    const create = vi
+      .fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const { daemon, ctx, bus, config, children } = setup({
+      createEmbeddedDriver: create,
+    });
+    await daemon.start(ctx);
+    await vi.waitFor(() => expect(children).toHaveLength(1));
+    const desktop = () =>
+      JSON.parse(readFileSync(children.at(-1)!.configFile, "utf8")).desktop;
+    expect(desktop()).toMatchObject({ cua_socket: first.socket });
+    children[0]!.exit(1);
+    expect(first.stop).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(children).toHaveLength(2), { timeout: 3000 });
+    expect(desktop()).toMatchObject({ cua_socket: second.socket });
+    children[1]!.status("connected", 1);
+    bus.emit("grants.changed");
+    config.update({ computerId: undefined });
+    bus.emit("computer.changed", undefined);
+    await vi.waitFor(() => expect(second.stop).toHaveBeenCalledOnce());
+    expect(create).toHaveBeenCalledTimes(2);
+    await daemon.stop();
+  });
+
+  it("drops an in-flight driver startup when enrollment is cleared", async () => {
+    let ready!: () => void;
+    const driver = hostDriver();
+    driver.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve;
+        }),
+    );
+    const { daemon, ctx, children, bus, config } = setup({
+      createEmbeddedDriver: () => driver,
+    });
+    await daemon.start(ctx);
+    expect(driver.start).toHaveBeenCalledOnce();
+    config.update({ computerId: undefined });
+    bus.emit("computer.changed", undefined);
+    await vi.waitFor(() => expect(driver.stop).toHaveBeenCalledOnce());
+    ready();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(children).toHaveLength(0);
+    await daemon.stop();
+  });
+
   it("starts the daemon with its config and the credential in the environment", async () => {
     const { daemon, ctx, children } = setup();
     await daemon.start(ctx);

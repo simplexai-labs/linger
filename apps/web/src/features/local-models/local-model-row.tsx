@@ -683,7 +683,7 @@ export function ModelRow({
         ) : null}
         <div
           className={cn(
-            "col-span-2 mt-0.5 flex flex-wrap items-center justify-end gap-1.5 border-t border-border/60 pt-2.5 @md:col-span-1 @md:col-start-2 @md:row-start-1 @md:mt-0 @md:flex-nowrap @md:border-t-0 @md:pt-0",
+            "col-span-2 mt-0.5 flex flex-wrap items-center justify-end gap-1.5 pt-2.5 @md:col-span-1 @md:col-start-2 @md:row-start-1 @md:mt-0 @md:flex-nowrap @md:pt-0",
             hasMeta ? "row-start-3 @2xl:col-start-3" : "row-start-2",
           )}
         >
@@ -837,7 +837,7 @@ export function ModelRow({
         <AutoHeight appear>
           <div
             aria-label={t(m.detailsOf, { name: model.name })}
-            className="border-t border-border bg-app-canvas/60 px-4 pt-3 pb-3.5"
+            className="bg-app-canvas/60 px-4 pt-3 pb-3.5"
             id={panelId}
             role="region"
           >
@@ -860,7 +860,7 @@ export function ModelRow({
               view={view}
             />
             {removable || stopped ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+              <div className="mt-3 flex flex-wrap items-center gap-2 pt-3">
                 {removable ? (
                   <Button
                     data-voice-risk="never"

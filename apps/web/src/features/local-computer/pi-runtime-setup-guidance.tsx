@@ -242,7 +242,7 @@ export function PiRuntimeSetupGuidance({
             </p>
           </>
         )}
-        <details className="mt-2.5 border-t border-[var(--app-status-warning-border)]/70 pt-2 text-xs text-muted-foreground">
+        <details className="mt-2.5 pt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none font-medium text-foreground/80 hover:text-foreground">
             {t(m.piStandaloneCliToggle)}
           </summary>

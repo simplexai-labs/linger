@@ -203,16 +203,17 @@ Agent Service before finishing a turn:
    `kind: "runtime_hook"` and `hook: "stop"`, and waits for an
    `operation.input` `runtime_response` (`{ action: "allow" | "block", reason? }`).
    On `block`, the Runtime continues the turn with that reason (Claude Code and
-   Codex via their native `Stop` hooks; Pi via a follow-up `prompt` RPC on the
-   bound process). Timeout, disconnect, or an invalid decision fails open to
-   `allow`.
+   Codex via their native `Stop` hooks; Antigravity via its managed `Stop` hook
+   returning `{"decision":"continue","reason":...}`; Pi via a follow-up `prompt`
+   RPC on the bound process). Timeout, disconnect, or an invalid decision fails
+   open to `allow`.
 
 ## Model invocation outcomes
 
 `executed` `model_invoke` reports `context_too_long` (prompt exceeded the
 model's context window) and `unsupported` (the target Runtime does not support
-the requested mode, such as Pi workspace calls) only after `runner.welcome`'s
-`service_features` names `model_invoke_outcomes`
+the requested mode, such as Pi or Antigravity workspace calls) only after
+`runner.welcome`'s `service_features` names `model_invoke_outcomes`
 (`FIRST_MODEL_INVOKE_OUTCOMES_COMPUTER_VERSION`, `0.60.0`); otherwise the
 Daemon downgrades them to `failed` and `runtime_unavailable` for older Agent
 Services.
@@ -230,3 +231,13 @@ or later (`FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION`) and
 (`FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION`), because older
 Computers reject those `SessionCompact.runtime_type` values and close the
 connection.
+
+## Antigravity capability gates (`0.67.0`)
+
+Agent Service sends `execute` `model_invoke` for Antigravity only to Computer
+`0.67.0` or later (`FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION`), and
+treats detached Antigravity native history as readable only on Computer `0.67.0`
+or later (`FIRST_ANTIGRAVITY_HISTORY_COMPUTER_VERSION`). `runner.welcome`'s
+`service_features` advertises `antigravity_history` so a `0.67.0`+ Daemon emits
+`antigravity_transcript` history results only to an Agent Service that accepts
+that source enum value.

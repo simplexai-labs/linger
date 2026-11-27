@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/app"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/config"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 )
 
 func TestExternalSourceStatusCheckAndReauthorization(t *testing.T) {
@@ -255,5 +257,180 @@ func TestMailConnectionResolvesAccountTenant(t *testing.T) {
 	}
 	if count, tenants := mailJobs(); count != 2 {
 		t.Fatalf("mail jobs after notion connect = %v", tenants)
+	}
+}
+
+func TestExternalSourceReauthorizationTerminatesOnProviderAuthFailure(t *testing.T) {
+	allowParallelIntegrationTest(t)
+	databaseURL := newIntegrationDatabase(t)
+	pool, err := pgxpool.New(t.Context(), databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	releaseIdentity := make(chan struct{})
+	provider := &fakeGmailProvider{
+		identityEmail: "alice@example.test",
+		identityErrs: map[string]error{
+			"ca_link_2": composio.RemoteStatusError("identify Gmail account", http.StatusForbidden),
+		},
+		identityWait: map[string]chan struct{}{
+			"ca_link_2": releaseIdentity,
+		},
+	}
+	composioFake := newFakeComposio(t)
+	cfg := config.ForTest(func(c *config.Config) {
+		c.DatabaseURL = databaseURL
+		c.SessionTTL = time.Hour
+		c.CookieName = "teamhub_session"
+		c.ArtifactStorageRoot = t.TempDir()
+		c.ArtifactMaxBytes = 2 << 20
+	})
+	composioFake.configure(&cfg)
+	application, err := newTestApp(t.Context(), cfg, skipping(app.SkillInstall), skipping(app.SkillPackageProbe),
+		withComposio(provider), starting(app.JobQueue))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(application.Close)
+	server := httptest.NewServer(application.Handler())
+	registerIntegrationServerCleanup(t, server)
+	env := &testEnv{t: t, databaseURL: databaseURL, pool: pool, server: server}
+	alice := env.login("alice", alicePassword)
+
+	// Create and activate the canonical Gmail connection (ca_link_1).
+	status, _, body := env.request(alice, http.MethodPost, "/v0/external-connections", map[string]any{"app_key": "gmail"}, "reauth-term-connect")
+	if status != http.StatusCreated {
+		t.Fatalf("create connection status=%d body=%s", status, body)
+	}
+	var connection struct {
+		ID       string `json:"id"`
+		Status   string `json:"status"`
+		Revision int64  `json:"revision"`
+	}
+	decode(t, body, &connection)
+	completeAuthorizations(t, env, alice)
+	if !waitForExternalSource(func() bool {
+		status, _, body = env.request(alice, http.MethodGet, "/v0/external-connections/"+connection.ID, nil, "")
+		if status == http.StatusOK {
+			decode(t, body, &connection)
+		}
+		return status == http.StatusOK && connection.Status == "active"
+	}) {
+		t.Fatalf("connection not active: %s", body)
+	}
+	var originalUpstream string
+	if err := pool.QueryRow(t.Context(), `SELECT upstream_connection_id FROM external_connections WHERE id=$1`, connection.ID).Scan(&originalUpstream); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expire the canonical connection via an explicit status check.
+	composioFake.setStatus(originalUpstream, composio.ConnectionExpired)
+	status, _, body = env.request(alice, http.MethodPost,
+		"/v0/external-connections/"+connection.ID+"/status-checks",
+		map[string]any{"expected_revision": connection.Revision}, "reauth-term-status-check")
+	if status != http.StatusAccepted {
+		t.Fatalf("status check status=%d body=%s", status, body)
+	}
+	if !waitForExternalSource(func() bool {
+		var currentStatus string
+		var requested bool
+		err := pool.QueryRow(t.Context(), `SELECT status, status_check_requested_at IS NOT NULL FROM external_connections WHERE id=$1`, connection.ID).Scan(&currentStatus, &requested)
+		return err == nil && currentStatus == "expired" && !requested
+	}) {
+		t.Fatal("connection did not transition to expired")
+	}
+
+	// Prepare a Room and a connection_auth card waiting on this Gmail connection.
+	roomID := createPrivateRoom(t, env, alice, "Reauth terminal failure", "reauth-term-room")
+	if code, body := putRoomMember(t, env, alice, roomID, "actor_acme_official", "member"); code != http.StatusOK {
+		t.Fatalf("member: %d %s", code, body)
+	}
+	cards := typedcard.New(pool)
+	cards.SetConnectionAuthorizer(composioFake.externalSources(t, pool, provider))
+	hash := sha256.Sum256([]byte("reauth-term-card"))
+	createdCard, err := cards.CreateDecision(t.Context(), roomID, acmeOfficialAgentManagementID, "reauth-term-card", hash[:], typedcard.DecisionCommand{
+		DeciderActorID: "actor_acme_alice",
+		ConnectionAuth: &typedcard.ConnectionAuthDecision{Prompt: "Reconnect Gmail for the Room Agent", AppKey: "gmail"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start reauthorization (creates ca_link_2) and approve the card while ca_link_2 identity is held.
+	status, _, body = env.request(alice, http.MethodPost,
+		"/v0/external-connections/"+connection.ID+"/reauthorizations",
+		map[string]any{"expected_revision": connection.Revision}, "reauth-term-start")
+	if status != http.StatusAccepted {
+		t.Fatalf("reauthorization status=%d body=%s", status, body)
+	}
+	var candidateUpstream string
+	if err := pool.QueryRow(t.Context(), `SELECT reauthorization_upstream_id FROM external_connections WHERE id=$1`, connection.ID).Scan(&candidateUpstream); err != nil {
+		t.Fatal(err)
+	}
+	if candidateUpstream != "ca_link_2" {
+		t.Fatalf("candidateUpstream=%q want ca_link_2", candidateUpstream)
+	}
+
+	status, _, body = env.request(alice, http.MethodPost, "/v0/decisions/"+createdCard.DecisionID,
+		map[string]any{"expected_version": 1, "decision": "approve", "connection_id": connection.ID}, "reauth-term-approve")
+	if status != http.StatusOK {
+		t.Fatalf("approve card status=%d body=%s", status, body)
+	}
+	var cardStatus string
+	if err := pool.QueryRow(t.Context(), `SELECT status FROM decisions WHERE id=$1`, createdCard.DecisionID).Scan(&cardStatus); err != nil || cardStatus != "authorizing" {
+		t.Fatalf("card status=%q err=%v want authorizing", cardStatus, err)
+	}
+
+	// Release IdentifyGmail (returns provider 403) and wake the reauthorization job.
+	close(releaseIdentity)
+	completeAuthorizations(t, env, alice)
+
+	type connectionView struct {
+		Status                   string `json:"status"`
+		Revision                 int64  `json:"revision"`
+		Reauthorizing            bool   `json:"reauthorizing"`
+		ReauthorizationErrorCode string `json:"reauthorization_error_code"`
+	}
+	var settled connectionView
+	if !waitForExternalSource(func() bool {
+		status, _, body := env.request(alice, http.MethodGet, "/v0/external-connections/"+connection.ID, nil, "")
+		if status != http.StatusOK {
+			return false
+		}
+		var current connectionView
+		decode(t, body, &current)
+		settled = current
+		return !settled.Reauthorizing
+	}) {
+		t.Fatalf("reauthorization did not settle: %+v", settled)
+	}
+	if settled.Status != "expired" || settled.Revision != connection.Revision || settled.ReauthorizationErrorCode != "provider_auth_failed" {
+		t.Fatalf("settled=%+v want expired, revision %d, provider_auth_failed", settled, connection.Revision)
+	}
+	var currentUpstream string
+	if err := pool.QueryRow(t.Context(), `SELECT upstream_connection_id FROM external_connections WHERE id=$1`, connection.ID).Scan(&currentUpstream); err != nil || currentUpstream != originalUpstream {
+		t.Fatalf("currentUpstream=%q want %q err=%v", currentUpstream, originalUpstream, err)
+	}
+	var candidateRevokeRequested bool
+	if err := pool.QueryRow(t.Context(), `SELECT revoke_requested_at IS NOT NULL FROM external_connection_upstreams WHERE upstream_id=$1`, candidateUpstream).Scan(&candidateRevokeRequested); err != nil || !candidateRevokeRequested {
+		t.Fatalf("candidate %q revoke_requested=%t err=%v", candidateUpstream, candidateRevokeRequested, err)
+	}
+	var jobState string
+	var jobAttempt int
+	if !waitForExternalSource(func() bool {
+		err := pool.QueryRow(t.Context(), `SELECT state::text, attempt FROM river_job WHERE kind='external.reauthorization' AND args->>'connection_id'=$1 ORDER BY id DESC LIMIT 1`, connection.ID).Scan(&jobState, &jobAttempt)
+		return err == nil && jobState == "completed"
+	}) {
+		t.Fatalf("reauthorization job state=%q attempt=%d want completed on attempt 1", jobState, jobAttempt)
+	}
+	if jobAttempt != 1 {
+		t.Fatalf("reauthorization job attempt=%d want 1 (must not retry terminal provider auth failure)", jobAttempt)
+	}
+	if !waitForExternalSource(func() bool {
+		err := pool.QueryRow(t.Context(), `SELECT status FROM decisions WHERE id=$1`, createdCard.DecisionID).Scan(&cardStatus)
+		return err == nil && cardStatus == "failed"
+	}) {
+		t.Fatalf("waiting connection_auth card status=%q want failed", cardStatus)
 	}
 }

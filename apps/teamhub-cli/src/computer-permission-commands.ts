@@ -115,8 +115,10 @@ const forBySubject: Readonly<Record<Subject, string>> = {
 // The status alone leaves a small model guessing what a missing permission
 // blocks and how to ask for it, so the output names both.
 function permissionNextSteps(value: unknown): string[] {
-  const subjects = asRecord(value).subjects;
+  const status = asRecord(value);
+  const subjects = status.subjects;
   if (!Array.isArray(subjects) || !subjects.length) return [];
+  const embedded = hostOwnsComputerUse(status.platform, status.host, subjects);
   const lines = subjects.flatMap((item) => {
     const subject = asRecord(item);
     const id = subject.subject as Subject;
@@ -132,14 +134,30 @@ function permissionNextSteps(value: unknown): string[] {
       )
       .map((entry) => entry.id as PermissionId);
     if (!missing.length) return [];
+    const uses = embedded
+      ? `${subjectUses.linger} and ${subjectUses.computer_use}`
+      : subjectUses[id];
     return [
-      `${subjectLabels[id]} permissions are needed only for ${subjectUses[id]}. If the task needs them, run: teamhub computer permissions request --for ${forBySubject[id]} --permissions ${missing.join(",")}`,
+      `${subjectLabels[id]} permissions are needed only for ${uses}. If the task needs them, run: teamhub computer permissions request --for ${forBySubject[id]} --permissions ${missing.join(",")}`,
     ];
   });
   return [
     ...lines,
     "The managed browser (ui.page and ui.browser) needs none of these permissions.",
   ];
+}
+
+function hostOwnsComputerUse(
+  platform: unknown,
+  host: unknown,
+  subjects: readonly unknown[],
+): boolean {
+  return (
+    platform === "darwin" &&
+    host === "desktop" &&
+    subjects.length === 1 &&
+    asRecord(subjects[0]).subject === "linger"
+  );
 }
 
 function allGranted(
@@ -156,9 +174,14 @@ function allGranted(
 
 async function readStatus(
   client: Parameters<NonNullable<CommandDefinition["execute"]>>[1]["client"],
-): Promise<{ computer_id: string; permissions: PermissionStatus }> {
+): Promise<{
+  computer_id: string;
+  permissions: PermissionStatus;
+}> {
   return teamHubData(
-    client.api.POST("/api/agent/v1/computer/permissions/status", { body: {} }),
+    client.api.POST("/api/agent/v1/computer/permissions/status", {
+      body: {},
+    }),
   );
 }
 
@@ -172,7 +195,7 @@ const computerPermissionsStatus: CommandDefinition = {
   usage: ["teamhub computer permissions status"],
   options: {},
   notes: [
-    "Linger owns shell commands such as screencapture and osascript; Computer use (CuaDriver) owns the computer-use tools.",
+    "Linger owns shell permissions. For computer use, the Computer reports Linger or CuaDriver as its permission owner.",
     "When a permission is missing, run teamhub computer permissions request. Never operate System Settings or privacy prompts yourself.",
   ],
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -238,7 +261,7 @@ const computerPermissionsRequest: CommandDefinition = {
     },
     "--for": {
       description:
-        "shell (default) for Linger, which owns shell commands such as screencapture; computer-use for CuaDriver.",
+        "shell (default) for shell commands; computer-use for the permission owner of the computer-use tools.",
     },
     "--reason": {
       description: `Optional plain text shown on the card; at most ${maxReasonLength} characters.`,
@@ -272,6 +295,7 @@ const computerPermissionsRequest: CommandDefinition = {
     type: "object",
     properties: {
       status: { enum: ["ready", "permission_requested", "granted"] },
+      subject: { enum: ["linger", "computer_use"] },
       computer_id: { type: "string" },
       permissions: permissionStatusSchema,
       room_id: { type: "string" },
@@ -324,13 +348,17 @@ const computerPermissionsRequest: CommandDefinition = {
       typeof waitSeconds !== "number"
     )
       return result;
+    const owner = result.subject ?? subject;
     const deadline = Date.now() + waitSeconds * 1_000;
     for (;;) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) return result;
       await sleep(Math.min(pollIntervalMs, remaining));
       const current = await readStatus(context.client);
-      if (allGranted(current.permissions, subject, permissions))
+      if (
+        current.computer_id === result.computer_id &&
+        allGranted(current.permissions, owner, permissions)
+      )
         return { ...result, ...current, status: "granted" };
     }
   },

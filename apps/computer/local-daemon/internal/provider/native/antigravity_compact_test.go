@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -569,5 +570,51 @@ func TestAntigravityCompactionPreCanceledContextRetiresWithoutPrompt(t *testing.
 				t.Fatalf("expected no compaction session/prompt to be sent, got %d prompts", len(prompts))
 			}
 		})
+	}
+}
+
+func TestScanAntigravityTranscriptRejectsSymlinks(t *testing.T) {
+	storeRoot := t.TempDir()
+	sessionID := "agy-sym-compact"
+	logsDir := filepath.Join(storeRoot, "brain", sessionID, ".system_generated", "logs")
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(logsDir, "transcript.jsonl")
+	if err := os.WriteFile(canonical, []byte(`{"step_index":2,"type":"CHECKPOINT"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if count, _, ok := inspectAntigravityCheckpointsInStore(canonical, storeRoot, sessionID, nil); !ok || count != 1 {
+		t.Fatalf("canonical transcript = (%d, %v), want (1, true)", count, ok)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// Reject a symlinked intermediate directory when matching the canonical store layout.
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "transcript.jsonl")
+	if err := os.WriteFile(outsideFile, []byte(`{"step_index":1,"type":"CHECKPOINT"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(symRoot, "brain", sessionID, ".system_generated"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(symRoot, "brain", sessionID, ".system_generated", "logs")); err != nil {
+		t.Fatal(err)
+	}
+	symCanonical := filepath.Join(symRoot, "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")
+	if count, _, ok := inspectAntigravityCheckpointsInStore(symCanonical, symRoot, sessionID, nil); ok || count != 0 {
+		t.Fatalf("symlinked store dir = (%d, %v), want (0, false)", count, ok)
+	}
+
+	// Reject a symlinked transcript file on direct path scans too.
+	directLink := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.Symlink(outsideFile, directLink); err != nil {
+		t.Fatal(err)
+	}
+	if count, _, ok := inspectAntigravityCheckpointsInStore(directLink, "", "", nil); ok || count != 0 {
+		t.Fatalf("symlinked direct path = (%d, %v), want (0, false)", count, ok)
 	}
 }

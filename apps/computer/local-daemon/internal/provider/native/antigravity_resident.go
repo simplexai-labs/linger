@@ -59,11 +59,10 @@ func antigravityShapeEnv(env []string) []string {
 // antigravityAuthFingerprint hashes the presence and content of Antigravity's
 // credential and settings files without logging file contents.
 func antigravityAuthFingerprint(env map[string]string) string {
-	home := antigravityProbeHome(env)
-	if home == "" {
+	sourceDir := antigravityStoreRoot(env)
+	if sourceDir == "" {
 		return ""
 	}
-	sourceDir := filepath.Join(home, ".gemini", "antigravity-cli")
 	sum := sha256.New()
 	for _, name := range antigravityProbeSeedFiles {
 		path := filepath.Join(sourceDir, name)

@@ -68,7 +68,7 @@ export function PermissionScreenshot({
         src={screenshot.url}
         width={screenshot.width}
       />
-      <figcaption className="border-t border-app-border bg-app-surface-soft px-3 py-1.5 text-xs text-app-muted">
+      <figcaption className="bg-app-surface-soft px-3 py-1.5 text-xs text-app-muted">
         {t(cardsMessages.screenshotCaption)}
       </figcaption>
     </figure>

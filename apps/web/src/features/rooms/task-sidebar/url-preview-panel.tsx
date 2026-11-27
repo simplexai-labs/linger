@@ -167,7 +167,7 @@ function PreviewToolbar({
   const t = useT();
   return (
     <>
-      <div className="flex h-11 shrink-0 items-center gap-0.5 border-b border-border bg-card px-2">
+      <div className="flex h-11 shrink-0 items-center gap-0.5 bg-card px-2">
         <button
           aria-label={t(commonMessages.back)}
           className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
@@ -232,7 +232,7 @@ function PreviewToolbar({
       </div>
       {invalidAddress ? (
         <p
-          className="border-b border-(--app-status-danger-border) bg-(--app-status-danger-surface) px-3 py-2 text-xs text-destructive"
+          className="bg-(--app-status-danger-surface) px-3 py-2 text-xs text-destructive"
           role="alert"
         >
           {t(m.invalidUrl)}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -951,6 +952,175 @@ func TestAntigravityEmptyWakeDoesNotWedgeTurn(t *testing.T) {
 		_, outcome := drainAgy(t, run)
 		if outcome.Status != statusAborted {
 			t.Fatalf("outcome=%+v, want aborted", outcome)
+		}
+	})
+}
+
+func TestAntigravityStopHookBlocksOnceAndGuardsReentry(t *testing.T) {
+	t.Run("blocks_once_even_when_continuation_active_is_false", func(t *testing.T) {
+		h := newAgyHarness(t, "stop-hook", nil)
+		var calls []StopHookRequest
+		run, err := h.runtime.Start(t.Context(), "say hi", RunSpec{
+			Dir: h.dir,
+			StopHook: func(_ context.Context, req StopHookRequest) StopHookDecision {
+				calls = append(calls, req)
+				if !req.StopHookActive {
+					return StopHookDecision{Action: "block", Reason: "Send the Room message first."}
+				}
+				return StopHookDecision{Action: "allow"}
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted {
+			t.Fatalf("outcome=%+v", outcome)
+		}
+		if len(calls) != 2 {
+			t.Fatalf("stop hook calls=%+v, want 2", calls)
+		}
+		if calls[0].Runtime != "antigravity" || calls[0].StopHookActive {
+			t.Fatalf("call[0]=%+v, want antigravity StopHookActive=false", calls[0])
+		}
+		if calls[1].Runtime != "antigravity" || !calls[1].StopHookActive {
+			t.Fatalf("call[1]=%+v, want antigravity StopHookActive=true", calls[1])
+		}
+		if outcome.Output != "Continued:Send the Room message first." {
+			t.Fatalf("output=%q, want continuation text only", outcome.Output)
+		}
+	})
+
+	t.Run("skips_on_error_termination", func(t *testing.T) {
+		h := newAgyHarness(t, "stop-hook-error", nil)
+		called := false
+		run, err := h.runtime.Start(t.Context(), "say hi", RunSpec{
+			Dir: h.dir,
+			StopHook: func(_ context.Context, _ StopHookRequest) StopHookDecision {
+				called = true
+				return StopHookDecision{Action: "block", Reason: "should not fire"}
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted || called {
+			t.Fatalf("outcome=%+v called=%v, want completed with stop hook skipped", outcome, called)
+		}
+	})
+
+	t.Run("cancellation_unblocks_stop_hook", func(t *testing.T) {
+		h := newAgyHarness(t, "stop-hook", nil)
+		runCtx, cancelRun := context.WithCancel(t.Context())
+		defer cancelRun()
+		inHook := make(chan struct{})
+		hookExited := make(chan struct{})
+		run, err := h.runtime.Start(runCtx, "say hi", RunSpec{
+			Dir: h.dir,
+			StopHook: func(ctx context.Context, _ StopHookRequest) StopHookDecision {
+				close(inHook)
+				<-ctx.Done()
+				close(hookExited)
+				return StopHookDecision{Action: "allow"}
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-inHook:
+		case <-time.After(10 * time.Second):
+			t.Fatal("stop hook was not invoked")
+		}
+		cancelRun()
+		select {
+		case <-hookExited:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stop hook context was not cancelled on turn cancellation")
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusAborted {
+			t.Fatalf("outcome=%+v, want aborted", outcome)
+		}
+	})
+}
+
+func TestAntigravityPreToolUseShellTextHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell text check is disabled on Windows PowerShell")
+	}
+
+	t.Run("denies_rewritten_teamhub_command_before_permission_review", func(t *testing.T) {
+		h := newAgyHarness(t, "pretooluse-shell", map[string]string{
+			agyFakeCommandEnv: `teamhub message send --content "$180"`,
+		})
+		requester := agyDenyingRequester{asked: make(chan string, 1)}
+		reviewer := &permission.Reviewer{Requester: requester, Timeout: time.Minute}
+		run, err := h.runtime.Start(t.Context(), "send", RunSpec{
+			Dir:                h.dir,
+			ShellTextHook:      "/opt/linger/linger-computer-daemon",
+			PermissionReviewer: reviewer,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted {
+			t.Fatalf("outcome=%+v", outcome)
+		}
+		select {
+		case id := <-requester.asked:
+			t.Fatalf("permission reviewer should not be called when PreToolUse denies shell text (got %q)", id)
+		default:
+		}
+		if outcome.Output != "DENIED:"+permission.ShellTextMessage {
+			t.Fatalf("output=%q, want DENIED with ShellTextMessage", outcome.Output)
+		}
+	})
+
+	t.Run("allows_safe_teamhub_command_and_still_runs_permission_reviewer", func(t *testing.T) {
+		h := newAgyHarness(t, "pretooluse-shell", map[string]string{
+			agyFakeCommandEnv: `teamhub message send --content 'hello $180'`,
+		})
+		requester := agyDenyingRequester{asked: make(chan string, 1)}
+		reviewer := &permission.Reviewer{Requester: requester, Timeout: time.Minute}
+		run, err := h.runtime.Start(t.Context(), "send", RunSpec{
+			Dir:                h.dir,
+			ShellTextHook:      "/opt/linger/linger-computer-daemon",
+			PermissionReviewer: reviewer,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted {
+			t.Fatalf("outcome=%+v", outcome)
+		}
+		select {
+		case <-requester.asked:
+		default:
+			t.Fatal("expected permission reviewer to run after PreToolUse allow")
+		}
+		if outcome.Output != "ALLOWED:deny" {
+			t.Fatalf("output=%q, want ALLOWED:deny", outcome.Output)
+		}
+	})
+
+	t.Run("skips_check_when_shell_text_hook_disabled", func(t *testing.T) {
+		h := newAgyHarness(t, "pretooluse-shell", map[string]string{
+			agyFakeCommandEnv: `teamhub message send --content "$180"`,
+		})
+		run, err := h.runtime.Start(t.Context(), "send", RunSpec{
+			Dir:           h.dir,
+			ShellTextHook: "",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, outcome := drainAgy(t, run)
+		if outcome.Status != statusCompleted || outcome.Output != "ALLOWED:allow" {
+			t.Fatalf("outcome=%+v, want ALLOWED:allow when ShellTextHook is empty", outcome)
 		}
 	})
 }

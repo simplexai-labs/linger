@@ -130,7 +130,7 @@ export function RoomAddMembersDialog({
           <section
             aria-label={t(m.skipAdding)}
             aria-live="polite"
-            className="mt-4 border-t border-border pt-4"
+            className="mt-4 pt-4"
           >
             <p className="text-sm leading-6 text-app-body">
               <RichMessage

@@ -12,19 +12,20 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentauth"
-	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentcreationapproval"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/document"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/messagecreation"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/typedcard"
 )
 
-// These subcases reuse the real MCP proposal and approval chain's private DB.
-// The approver is the Space's only Human, who reads and shares every active
-// Document, so an artifact is skipped only when its Document or frozen content
-// is gone; approval holds the Document and the Human steady until it commits.
+// These subcases decide pending Room creation cards, which Agents posted
+// before TeamHub created their Rooms at once, in the vertical slice's private
+// DB. The approver is the Space's only Human, who reads and shares every
+// active Document, so an artifact is skipped only when its Document or frozen
+// content is gone; approval holds the Document and the Human steady until it
+// commits.
 func assertRoomCreationApprovalAccessTransactions(t *testing.T, env *testEnv, alice *http.Client,
-	service *agentcreationapproval.Service, token string,
-	roomInput agentcreationapproval.Input, documentID, otherDocumentID string,
+	sourceRoomID string, artifacts []typedcard.RoomCreationArtifactSnapshot, segments []messagecreation.Segment,
+	documentID, otherDocumentID string,
 ) {
 	decisions := typedcard.New(env.pool)
 	exec := func(t *testing.T, query string, args ...any) {
@@ -33,37 +34,35 @@ func assertRoomCreationApprovalAccessTransactions(t *testing.T, env *testEnv, al
 			t.Fatal(err)
 		}
 	}
-	sourceRoomID := strings.TrimPrefix(roomInput.SourceInboxIDs[0], "room:")
-	submit := func(t *testing.T, artifacts ...string) agentcreationapproval.Result {
+	// submit posts a card for the default artifacts, or for one file artifact
+	// and the filename its card segment shows.
+	submit := func(t *testing.T, file ...string) typedcard.CreateResult {
 		t.Helper()
-		input := roomInput
-		caller, effective := *input.RoomCaller, *input.RoomEffective
-		caller.Name = "Access transaction " + mcpCreationInvocationID(t.Name())[24:56]
-		effective.Name = caller.Name
-		if len(artifacts) > 0 {
-			caller.Artifacts, effective.Artifacts = artifacts, artifacts
+		frozen, frozenSegments := artifacts, segments
+		if len(file) == 3 {
+			frozen = []typedcard.RoomCreationArtifactSnapshot{{DocumentID: file[0], DocumentVersionID: file[1]}}
+			frozenSegments = []messagecreation.Segment{
+				{Type: "text", Content: "Start the approved Room."}, {Type: "text", Content: "\n"},
+				{Type: "document", Content: file[2], DocumentID: file[0], Presentation: "card"},
+			}
 		}
-		input.RoomCaller, input.RoomEffective = &caller, &effective
-		input.InvocationID = mcpCreationInvocationID(t.Name())
-		// The requesting Meta sends its source Room Context.
-		roomCtx := agentauth.WithTarget(t.Context(), "room", sourceRoomID)
-		pending, err := service.Submit(roomCtx, token, input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return pending
+		key := mcpCreationInvocationID(t.Name())[24:56]
+		return postRoomCreationCard(t, env, roomCreationApprovalInputFor(t, typedcard.RoomCreationSnapshot{
+			OriginRoomID: sourceRoomID, Name: "Access transaction " + key, MemberIDs: []string{"actor_acme_official"},
+			Artifacts: frozen, InitialMessageSegments: frozenSegments,
+		}, key))
 	}
-	decide := func(ctx context.Context, pending agentcreationapproval.Result) (typedcard.CreateResult, error) {
-		return decisions.DecideDecision(ctx, "account_alice", pending.CreationApprovalRequestID,
+	decide := func(ctx context.Context, pending typedcard.CreateResult) (typedcard.CreateResult, error) {
+		return decisions.DecideDecision(ctx, "account_alice", pending.DecisionID,
 			typedcard.DecisionAnswerCommand{Decision: "approve", ExpectedVersion: 1})
 	}
-	assertDelivered := func(t *testing.T, pending agentcreationapproval.Result, artifactIDs ...string) string {
+	assertDelivered := func(t *testing.T, pending typedcard.CreateResult, artifactIDs ...string) string {
 		t.Helper()
 		var roomID, runtimeBody string
 		if err := env.pool.QueryRow(t.Context(), `SELECT request.result->'data'->>'created_room_id',message.body
    FROM decisions request JOIN messages message ON message.card_context_message_id=request.message_id
    AND message.message_kind='agent_runtime' AND message.human_waiting WHERE request.id=$1 AND request.status='succeeded'`,
-			pending.CreationApprovalRequestID).Scan(&roomID, &runtimeBody); err != nil {
+			pending.DecisionID).Scan(&roomID, &runtimeBody); err != nil {
 			t.Fatal(err)
 		}
 		if len(artifactIDs) == 0 {
@@ -127,7 +126,7 @@ func assertRoomCreationApprovalAccessTransactions(t *testing.T, env *testEnv, al
 		}
 		return pid
 	}
-	asyncDecision := func(t *testing.T, pending agentcreationapproval.Result) <-chan error {
+	asyncDecision := func(t *testing.T, pending typedcard.CreateResult) <-chan error {
 		results := make(chan error, 1)
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		t.Cleanup(cancel)
@@ -146,7 +145,7 @@ func assertRoomCreationApprovalAccessTransactions(t *testing.T, env *testEnv, al
 		}
 		var artifact uploadedDocumentRef
 		decode(t, body, &artifact)
-		pending := submit(t, artifact.ID)
+		pending := submit(t, artifact.ID, artifact.CurrentVersion.ID, "trash-wait.txt")
 		roomBarrier := barrier(t)
 		result := asyncDecision(t, pending)
 		// The approval has reviewed and locked every artifact before the Room insert.
@@ -239,13 +238,13 @@ func assertRoomCreationApprovalAccessTransactions(t *testing.T, env *testEnv, al
 			for i, table := range facts {
 				before[i] = countRows(t, env, "SELECT count(*) FROM "+table)
 			}
-			triggerTable, condition := "document_context_bindings", "NEW.document_id='"+otherDocumentID+"' AND NEW.room_id<>'"+roomInput.SourceInboxIDs[0][5:]+"'"
+			triggerTable, condition := "document_context_bindings", "NEW.document_id='"+otherDocumentID+"' AND NEW.room_id<>'"+sourceRoomID+"'"
 			if failure == "notification" {
 				triggerTable = "messages"
 				condition = "NEW.message_kind='agent_runtime' AND NEW.card_context_message_id='" + pending.MessageID + "'"
 			}
 			if failure == "handoff" {
-				handoffDigest := sha256.Sum256([]byte("room-creation-handoff:" + pending.CreationApprovalRequestID))
+				handoffDigest := sha256.Sum256([]byte("room-creation-handoff:" + pending.DecisionID))
 				triggerTable = "messages"
 				condition = fmt.Sprintf("NEW.id='message_%x'", handoffDigest[:16])
 			}
@@ -277,7 +276,7 @@ func assertRoomCreationApprovalAccessTransactions(t *testing.T, env *testEnv, al
 				}
 			}
 			if got := countRows(t, env, `SELECT count(*) FROM decisions request JOIN message_cards card ON card.message_id=request.message_id
-    WHERE request.id=$1 AND request.status='pending' AND request.result IS NULL AND card.version=1`, pending.CreationApprovalRequestID); got != 1 {
+    WHERE request.id=$1 AND request.status='pending' AND request.result IS NULL AND card.version=1`, pending.DecisionID); got != 1 {
 				t.Fatal("approval/card state did not roll back")
 			}
 		})

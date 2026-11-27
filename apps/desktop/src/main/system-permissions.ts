@@ -41,7 +41,7 @@ export interface SystemPermissionApi {
   isTrustedAccessibilityClient(prompt: boolean): boolean;
   // desktopCapturer.getSources for screens; the first call shows the system
   // prompt and lists Linger under Screen Recording.
-  captureScreens(): Promise<unknown>;
+  captureScreens(): Promise<readonly unknown[]>;
   openExternal(url: string): Promise<void>;
 }
 
@@ -89,8 +89,12 @@ export class SystemPermissions {
 
   async prompt(id: SystemPermissionId): Promise<SystemPermission[]> {
     if (id === "screen_recording") {
-      this.#screenAsked = true;
-      await this.#api.captureScreens();
+      try {
+        if ((await this.#api.captureScreens()).length > 0)
+          this.#screenAsked = true;
+      } catch {
+        await this.#api.openExternal(SYSTEM_SETTINGS_URL[id]);
+      }
     } else {
       this.#api.isTrustedAccessibilityClient(true);
     }
@@ -98,7 +102,17 @@ export class SystemPermissions {
   }
 
   async openSettings(id: SystemPermissionId): Promise<SystemPermission[]> {
-    if (id === "screen_recording") this.#screenAsked = true;
+    if (
+      id === "screen_recording" &&
+      this.#api.screenAccessStatus() !== "granted"
+    ) {
+      // Ask the host to register with macOS before showing the settings list.
+      try {
+        await this.#api.captureScreens();
+      } catch {
+        // A denied capture still allows the owner to use System Settings.
+      }
+    }
     await this.#api.openExternal(SYSTEM_SETTINGS_URL[id]);
     return this.status();
   }

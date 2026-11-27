@@ -306,14 +306,11 @@ export function GlobalSearchFooter({
   return (
     <>
       {openError ? (
-        <p
-          className="border-t border-border/60 px-5 py-2 text-xs text-app-danger"
-          role="alert"
-        >
+        <p className="px-5 py-2 text-xs text-app-danger" role="alert">
           {openError}
         </p>
       ) : null}
-      <div className="flex h-10 shrink-0 items-center gap-4 border-t border-border/60 px-5 text-xs text-app-subtle">
+      <div className="flex h-10 shrink-0 items-center gap-4 px-5 text-xs text-app-subtle">
         <span className="flex items-center gap-2">
           <span className="flex gap-0.5">
             <ShortcutKey>↑</ShortcutKey>

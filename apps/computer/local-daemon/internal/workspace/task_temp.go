@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
@@ -77,8 +78,15 @@ func RemoveTaskTempDir(dir string) error {
 			continue
 		}
 		// RemoveAll removes a symlink itself and never descends into its target.
-		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
-			return err
+		child := filepath.Join(dir, entry.Name())
+		if err := os.RemoveAll(child); err != nil {
+			if runtime.GOOS == "windows" {
+				return err
+			}
+			makeOwnerWritable(child)
+			if retryErr := os.RemoveAll(child); retryErr != nil {
+				return retryErr
+			}
 		}
 	}
 	marker := filepath.Join(dir, envRootLockFile)
@@ -92,6 +100,28 @@ func RemoveTaskTempDir(dir string) error {
 		return err
 	}
 	return nil
+}
+
+// makeOwnerWritable restores owner write permission on sealed directories and
+// files (without following symlinks) so crash-abandoned read-only subtrees can
+// be removed on Unix.
+func makeOwnerWritable(root string) {
+	info, err := os.Lstat(root)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return
+	}
+	if !info.IsDir() {
+		_ = os.Chmod(root, 0o600)
+		return
+	}
+	_ = os.Chmod(root, 0o700) //nolint:gosec // owner-only directory mode before removal
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		makeOwnerWritable(filepath.Join(root, entry.Name()))
+	}
 }
 
 // PruneTaskTempDirs removes Operation temp directories under base whose

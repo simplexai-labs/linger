@@ -133,7 +133,7 @@ export function PanelEmptyState({
             />
           </button>
         </div>
-        <p className="mt-6 border-t border-border/60 pt-4 text-xs text-muted-foreground">
+        <p className="mt-6 pt-4 text-xs text-muted-foreground">
           {t(m.launcherFooter)}
         </p>
       </div>

@@ -337,16 +337,21 @@ function AgentInfoIdentity({
         <Hint placement="bottom" text={t(agentInfoMessages.editAvatar)}>
           <button
             aria-label={t(agentInfoMessages.editAvatar)}
-            className="relative rounded-[20%] outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-app-focus"
+            className="group relative rounded-[20%] outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
             onClick={onEdit}
             type="button"
           >
-            {avatar}
+            {/* Pointed at or focused, the avatar dims and a pencil shows at
+                its centre; otherwise the face stays unmarked. */}
+            <span className="block transition-[filter] duration-150 group-hover:brightness-[.55] group-focus-visible:brightness-[.55]">
+              {avatar}
+            </span>
             <span
-              className="absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full bg-card text-muted-foreground shadow-outline"
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 flex items-center justify-center text-primary-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
               data-avatar-edit-badge
             >
-              <Icon icon={PencilEdit02Icon} size={12} />
+              <Icon icon={PencilEdit02Icon} size={18} />
             </span>
           </button>
         </Hint>

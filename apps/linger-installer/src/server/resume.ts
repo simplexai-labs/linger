@@ -122,15 +122,38 @@ export async function resumeSourceInstance(
       const onEvent = (event: { message?: string }) => {
         if (event.message) options.log(event.message);
       };
-      // A local model stack that did not come back is reported, not a failed
-      // resume: the person can still reach the workspace and the Models page
-      // to manage local models or choose another AI runtime.
+      // Mount a saved BYOK gateway first because `source apply --mode byok`
+      // unloads local models before registering BYOK on Bifrost; restoring any
+      // previously loaded library models afterwards keeps both active, and a
+      // failure in one never blocks restoring the other.
+      let byokGateway: Awaited<ReturnType<typeof restoreByok>> | undefined;
+      const byokStartedAt = performance.now();
+      try {
+        byokGateway = await restoreByok(path.resolve(instance.root, "../.."), {
+          signal: options.signal,
+          onEvent,
+        });
+      } finally {
+        timings.restoreByokGatewayMs = Math.max(
+          0,
+          Math.round(performance.now() - byokStartedAt),
+        );
+      }
+      // A local model stack or library model that did not come back is reported,
+      // not a failed resume: the person can still reach the workspace and the
+      // Models page to manage local models or choose another AI runtime.
       let localModelsDegraded: LocalModelsDegraded | undefined;
+      let localModelsRestored = false;
+      const restoredLocalModels = new Set<string>();
       const restoreStartedAt = performance.now();
       try {
         const restored = await restore(instance, {
           signal: options.signal,
           onEvent,
+          onRestored: (models) => {
+            localModelsRestored = true;
+            for (const id of models) restoredLocalModels.add(id);
+          },
         });
         if (restored)
           localModelsDegraded = localModelsDegradedFromOutcome(restored);
@@ -147,26 +170,6 @@ export async function resumeSourceInstance(
         options.log(
           `${localModelsDegraded.message} (${localModelsDegraded.code}) Linger is opening without local models; open the Models page to manage local models or switch to another AI runtime.\n`,
         );
-      // A gateway that did not come back is reported, not a failed resume:
-      // the person can still reach the Models page.
-      let byokGateway: Awaited<ReturnType<typeof restoreByok>> | undefined;
-      if (!localModelsDegraded) {
-        const byokStartedAt = performance.now();
-        try {
-          byokGateway = await restoreByok(
-            path.resolve(instance.root, "../.."),
-            {
-              signal: options.signal,
-              onEvent,
-            },
-          );
-        } finally {
-          timings.restoreByokGatewayMs = Math.max(
-            0,
-            Math.round(performance.now() - byokStartedAt),
-          );
-        }
-      }
       return {
         code: 0,
         state: "ready",
@@ -176,6 +179,10 @@ export async function resumeSourceInstance(
           source: instance.source.repo,
           ...(byokGateway ? { byokGateway } : {}),
           ...(localModelsDegraded ? { localModelsDegraded } : {}),
+          ...(localModelsRestored ? { localModelsRestored: true } : {}),
+          ...(restoredLocalModels.size
+            ? { restoredLocalModels: [...restoredLocalModels] }
+            : {}),
         },
       };
     }

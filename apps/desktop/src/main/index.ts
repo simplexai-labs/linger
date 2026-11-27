@@ -34,6 +34,7 @@ import {
   runWindowsDriverInstaller,
   verifyWindowsAuthenticode,
 } from "./windows-driver-platform.js";
+import { EmbeddedComputerUse } from "./embedded-computer-use.js";
 import { EnrollmentModule } from "./enrollment.js";
 import { LanguageModule } from "./language.js";
 import {
@@ -360,6 +361,11 @@ async function main(): Promise<void> {
       defaultDirectory: path.join(app.getPath("home"), "Linger"),
     }),
     new ComputerDaemonModule({
+      createEmbeddedDriver:
+        process.platform === "darwin" && app.isPackaged
+          ? (selected) =>
+              new EmbeddedComputerUse(process.resourcesPath, selected)
+          : undefined,
       spawn: spawnDaemon(
         daemonPath,
         path.join(userData, "logs", "computer-daemon.log"),

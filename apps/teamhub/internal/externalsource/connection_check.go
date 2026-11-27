@@ -119,13 +119,41 @@ func (check *connectionCheck) finish(result *error) {
 		return
 	}
 	code, _, _ := connectionIdentityFailurePolicy(check.connection.Provider, check.failure)
-	check.service.logger.Warn("external connection check failed",
-		"connection_id", check.connection.ID, "provider", check.connection.Provider, "phase", check.phase,
-		"error_code", code, "error_class", connectionCheckErrorClass(check.failure),
-		"attempt", check.attempt, "next_attempt_at", check.retryAt)
+	args := []any{
+		"connection_id", check.connection.ID,
+		"provider", check.connection.Provider,
+		"phase", check.phase,
+		"error_code", code,
+		"error_class", connectionCheckErrorClass(check.failure),
+		"attempt", check.attempt,
+		"next_attempt_at", check.retryAt,
+	}
+	if source := connectionCheckErrorSource(check.failure); source != "" {
+		args = append(args, "error_source", source)
+	}
+	check.service.logger.Warn("external connection check failed", args...)
 	*result = connectionCheckResult(*result, &connectionCheckFailure{
 		connectionID: check.connection.ID, phase: check.phase, code: code, retryDelay: check.retryDelay, cause: check.failure,
 	})
+}
+
+// logTerminalFailure records a terminal provider failure that completed the
+// check without scheduling a retry. It leaves check.failure unset so finish
+// preserves a nil job result.
+func (check *connectionCheck) logTerminalFailure(phase, code string, cause error) {
+	args := []any{
+		"connection_id", check.connection.ID,
+		"provider", check.connection.Provider,
+		"phase", phase,
+		"error_code", code,
+		"error_class", connectionCheckErrorClass(cause),
+		"attempt", check.attempt,
+		"terminal", true,
+	}
+	if source := connectionCheckErrorSource(cause); source != "" {
+		args = append(args, "error_source", source)
+	}
+	check.service.logger.Warn("external connection check failed", args...)
 }
 
 // connectionCheckResult keeps a write/lock error as the job error so HandleError
@@ -176,6 +204,13 @@ func (e *connectionCheckFailure) RetryableJobFailure() bool {
 	}
 }
 
+func connectionCheckErrorSource(err error) string {
+	if source, ok := composio.ErrorSourceOf(err); ok {
+		return string(source)
+	}
+	return ""
+}
+
 // connectionCheckErrorClass is a closed set of labels for the check WARN log.
 // It never interpolates provider payloads or Error() text.
 func connectionCheckErrorClass(err error) string {
@@ -206,6 +241,40 @@ func connectionCheckErrorClass(err error) string {
 			return "timeout"
 		}
 		return "network"
+	}
+	if errors.Is(err, composio.ErrConnectionScope) {
+		if field := composio.ConnectionScopeMismatchField(err); field != "" {
+			return "connection_scope_" + field
+		}
+		return "connection_scope"
+	}
+	if errors.Is(err, composio.ErrNotConfigured) {
+		return "provider_not_configured"
+	}
+	if errors.Is(err, composio.ErrResponseTooLarge) {
+		return "response_too_large"
+	}
+	if errors.Is(err, composio.ErrProviderCallBudgetExhausted) {
+		return "call_budget_exhausted"
+	}
+	if errors.Is(err, composio.ErrDiscordGuildRequired) {
+		return "discord_guild_required"
+	}
+	if errors.Is(err, composio.ErrDiscordGuildNotAccessible) {
+		return "discord_guild_not_accessible"
+	}
+	if errors.Is(err, composio.ErrDiscordToolRefused) {
+		return "discord_tool_refused"
+	}
+	var slackAccess *composio.SlackAccessError
+	if errors.As(err, &slackAccess) {
+		return "slack_access"
+	}
+	if errors.Is(err, ErrInvalid) {
+		return "invalid_identity"
+	}
+	if errors.Is(err, ErrUnavailable) {
+		return "provider_unavailable"
 	}
 	return connectionCheckErrorTypeName(err)
 }

@@ -130,7 +130,7 @@ export function ConnectComputerPage({
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-5 py-10 text-foreground">
       <section className="w-full max-w-[480px] overflow-hidden rounded-2xl border border-border bg-card shadow-md">
-        <header className="flex items-center gap-3 border-b border-border px-6 py-5">
+        <header className="flex items-center gap-3 px-6 py-5">
           <span className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Icon icon={LaptopIcon} size={20} />
           </span>
@@ -261,7 +261,7 @@ export function ConnectComputerPage({
           ) : null}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/40 px-6 py-4">
+        <footer className="flex flex-wrap items-center justify-between gap-2 bg-muted/40 px-6 py-4">
           <Button
             disabled={
               !session.data || switchAccount.isPending || enrollment.isPending

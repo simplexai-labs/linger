@@ -92,6 +92,9 @@ type Profile struct {
 	// RetainProcessTemp is called once per provider process before spawn. The
 	// returned release runs only after the process tree is confirmed gone.
 	RetainProcessTemp func() (release func() error, err error)
+	// TempBase holds private temporary directories inside the Daemon's state
+	// directory; empty falls back to the OS temporary directory.
+	TempBase string
 }
 
 type RunSpec struct {

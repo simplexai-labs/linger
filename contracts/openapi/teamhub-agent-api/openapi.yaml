@@ -316,13 +316,13 @@ paths:
     post:
       tags: [Agent Business API]
       operationId: submitAgentCreationApprovalRequest
-      summary: Submit one Room creation request for Human approval
+      summary: Create one Room the Agent requested
       description: >-
         Resolves the Agent and Tenant exclusively from the Agent credential, re-authorizes
-        create_room in the caller's Room Context, and atomically stores the exact caller input
-        separately from the canonical effective payload. TeamHub revalidates every derived value before freezing
-        the immutable approval snapshot; caller identity is intentionally absent from the
-        request body.
+        create_room in the caller's Room Context, revalidates every derived value, and
+        creates the Room at once, owned by the Agent's Sponsor, with its initial message and
+        the Agent's handoff. Each Agent added to the new Room must have the same Sponsor as the caller.
+        Caller identity is intentionally absent from the request body.
       security:
         - agentBearer: []
       x-deadline-ms: 5000
@@ -334,7 +334,7 @@ paths:
               $ref: "../components/agent-collaboration.yaml#/components/schemas/AgentRoomCreationApprovalRequest"
       responses:
         "200":
-          description: The durable pending Creation approval request and active Manifest attestation.
+          description: The created Room, or the pending approval card of a replayed earlier submission.
           content:
             application/json:
               schema:

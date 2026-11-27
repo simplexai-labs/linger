@@ -133,32 +133,32 @@ const roomCreationArtifactsSchema = z
   )
   .meta({
     description:
-      "Existing Documents from the authorized source Room to share after approval.",
+      "Existing Documents from the authorized source Room to share with the new Room.",
     uniqueItems: true,
   });
 
 export const createRoomInputSchema = z
   .object({
     name: codePointString({
-      description: "Name of the proposed collaboration Room.",
+      description: "Name of the new collaboration Room.",
       max: MAX_CREATION_TITLE_CODE_POINTS,
       nonBlank: true,
     }),
     description: codePointString({
-      description: "Optional description of the proposed collaboration Room.",
+      description: "Optional description of the new collaboration Room.",
       max: MAX_CREATION_DESCRIPTION_CODE_POINTS,
       optionalEmpty: true,
     }).optional(),
     member_ids: creationMemberIdsSchema.describe(
-      "TeamHub Actors who will join the Room after approval.",
+      "TeamHub Actors who join the new Room.",
     ),
     artifacts: roomCreationArtifactsSchema
       .optional()
       .describe(
-        "Optional existing Documents delivered with the initial message after approval.",
+        "Optional existing Documents delivered with the initial message.",
       ),
     initial_message_segments: creationMessageSegmentsSchema.describe(
-      "Ordered structured segments of the initial message created after approval.",
+      "Ordered structured segments of the new Room's initial message.",
     ),
   })
   .strict()
@@ -183,23 +183,40 @@ export const createTaskInputSchema = z
     "Arguments accepted by create_task. The Task starts at once for your own AlterEgo; no approval is requested.",
   );
 
-const creationApprovalOutputShape = {
+const createRoomOutputShape = {
   accepted: z
     .literal(true)
     .describe("Whether TeamHub accepted the Creation request."),
   status: z
-    .literal("pending_approval")
-    .describe("Current state of the Creation request."),
-  creation_approval_request_id: teamHubIdSchema.describe(
-    "Stable identifier of the Creation approval request.",
-  ),
-  message_id: teamHubIdSchema.describe(
-    "Stable identifier of the Human approval card message.",
-  ),
+    .enum(["created", "pending_approval"])
+    .describe(
+      "created when the Room exists; pending_approval only when an earlier submission's approval card still waits.",
+    ),
+  room_id: teamHubIdSchema
+    .optional()
+    .describe("The created Room, when status is created."),
+  skipped_artifacts: z
+    .array(
+      z
+        .object({
+          document_id: teamHubIdSchema.describe("Document not delivered."),
+          reason: z.string().describe("Why it was not delivered."),
+        })
+        .strict()
+        .describe("A requested Document the new Room did not receive."),
+    )
+    .optional()
+    .describe("Requested Documents the new Room did not receive."),
+  creation_approval_request_id: teamHubIdSchema
+    .optional()
+    .describe("The pending approval request, when status is pending_approval."),
+  message_id: teamHubIdSchema
+    .optional()
+    .describe("The pending approval card, when status is pending_approval."),
 };
 
 export const createRoomOutputSchema = z
-  .object(creationApprovalOutputShape)
+  .object(createRoomOutputShape)
   .strict()
   .describe("Successful result returned by the create_room tool.");
 export type CreateRoomInput = z.output<typeof createRoomInputSchema>;
