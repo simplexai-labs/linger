@@ -92,9 +92,9 @@ runs:
         fi
     - shell: bash
       run: pnpm install --frozen-lockfile --ignore-scripts
-    # Pinned binary downloads reused across releases: Electron, Cua driver,
-    # native PostgreSQL + voice tools, rcodesign, and the pinned Node.js
-    # distribution.
+    # Pinned binary downloads reused across releases: Electron, PowerShell 7,
+    # Cua driver, native PostgreSQL + voice tools, rcodesign, and the pinned
+    # Node.js distribution.
     - uses: actions/cache@v6
       with:
         path: |
@@ -102,7 +102,7 @@ runs:
           ~/.cache/linger-computer-tools
           ${{ env.LINGER_NATIVE_POSTGRES_DIR }}
           .linger-runtime/node-distributions
-        key: desktop-downloads-${{ inputs.target }}-${{ env.APPLE_CODESIGN_VERSION }}-${{ hashFiles('apps/desktop/package.json', 'apps/desktop/distribution/*.json', 'scripts/local-computer-node-distributions.mjs', 'apps/computer/scripts/bundle-computer-tools.mjs') }}
+        key: desktop-downloads-${{ inputs.target }}-${{ env.APPLE_CODESIGN_VERSION }}-${{ hashFiles('apps/desktop/package.json', 'apps/desktop/distribution/*.json', 'apps/desktop/packaging/win/package.py', 'scripts/local-computer-node-distributions.mjs', 'apps/computer/scripts/bundle-computer-tools.mjs') }}
         restore-keys: |
           desktop-downloads-${{ inputs.target }}-${{ env.APPLE_CODESIGN_VERSION }}-
           desktop-downloads-${{ inputs.target }}-

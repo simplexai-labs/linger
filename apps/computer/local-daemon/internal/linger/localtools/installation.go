@@ -19,6 +19,9 @@ var quickJSAssets = []string{
 
 type Installation struct {
 	NodePath, PlaywrightEntry, PiExtension, PiEntry, PiVersion, CuaPath string
+	// PowerShellPath holds the bundled PowerShell 7 executable on Windows when
+	// present under resources/runtime/pwsh/pwsh.exe.
+	PowerShellPath string
 }
 
 func cuaEntry(executable string) string {
@@ -142,6 +145,12 @@ func Installed(executable string) (*Installation, error) {
 		PiExtension:     filepath.Join(tools, filepath.FromSlash(manifest.Pi)),
 		PiEntry:         filepath.Join(tools, filepath.FromSlash(manifest.PiEntry)),
 		PiVersion:       manifest.Versions.Pi,
+	}
+	if strings.HasSuffix(strings.ToLower(executable), ".exe") {
+		pwsh := filepath.Join(root, "runtime", "pwsh", "pwsh.exe")
+		if info, e := os.Stat(pwsh); e == nil && info.Mode().IsRegular() {
+			installed.PowerShellPath = pwsh
+		}
 	}
 	if manifest.Cua != "" {
 		// macOS drives the desktop through the signed application.
