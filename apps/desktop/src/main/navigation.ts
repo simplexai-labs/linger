@@ -41,6 +41,7 @@ export type WindowLoadReason =
   | "boot"
   | "local_ready"
   | "resume_ready"
+  | "resume_revived"
   | "server_changed"
   | "port_moved"
   | "retry"
@@ -93,6 +94,7 @@ export function windowLoadDecision(
 
   if (
     reason !== "retry" &&
+    reason !== "resume_revived" &&
     !state.loadFailed &&
     state.showingShellPage === "none" &&
     ((state.currentUrl !== undefined &&

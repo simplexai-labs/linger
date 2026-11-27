@@ -14,10 +14,13 @@ const reservedPathPrefixes = [
   "/healthz",
   "/internal",
   "/install",
+  "/readyz",
   "/v0",
 ];
 const supportedContentEncodings = ["br", "gzip", "identity"];
-export function createStaticHost({ root } = {}) {
+const readyProbeTimeoutMs = 2_000;
+
+export function createStaticHost({ root, teamHubBaseUrl } = {}) {
   const staticRoot = root ?? fileURLToPath(new URL("./dist", import.meta.url));
   const serveFiles = sirv(staticRoot, {
     brotli: true,
@@ -67,6 +70,20 @@ export function createStaticHost({ root } = {}) {
       return;
     }
 
+    if (pathname === "/readyz") {
+      const result = teamHubBaseUrl
+        ? await probeTeamHubHealth(teamHubBaseUrl, response)
+        : { statusCode: 200, body: { ok: true, service: "linger-web" } };
+      if (response.destroyed || response.writableEnded) return;
+      response.statusCode = result.statusCode;
+      response.setHeader("cache-control", "no-store");
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(
+        request.method === "HEAD" ? undefined : JSON.stringify(result.body),
+      );
+      return;
+    }
+
     serveNegotiatedFile(serveFiles, request, response, () => {
       const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
       if (!isBrowserNavigation(request, pathname)) {
@@ -82,6 +99,52 @@ export function createStaticHost({ root } = {}) {
       request.url = requestUrl;
     });
   };
+}
+
+export async function probeTeamHubHealth(
+  teamHubBaseUrl,
+  response,
+  { service = "linger-web" } = {},
+) {
+  let targetUrl;
+  try {
+    targetUrl = new URL("/healthz", teamHubBaseUrl);
+  } catch {
+    return {
+      statusCode: 502,
+      body: { ok: false, service, upstream: "teamhub" },
+    };
+  }
+  const controller = new AbortController();
+  const onClose = () => {
+    if (!response?.writableEnded) controller.abort();
+  };
+  if (typeof response?.once === "function") response.once("close", onClose);
+  try {
+    const upstream = await fetch(targetUrl, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(readyProbeTimeoutMs),
+      ]),
+    });
+    await upstream.body?.cancel();
+    if (upstream.status >= 200 && upstream.status < 300) {
+      return { statusCode: 200, body: { ok: true, service } };
+    }
+    return {
+      statusCode: 503,
+      body: { ok: false, service, upstream: "teamhub" },
+    };
+  } catch {
+    return {
+      statusCode: 502,
+      body: { ok: false, service, upstream: "teamhub" },
+    };
+  } finally {
+    if (typeof response?.off === "function") response.off("close", onClose);
+  }
 }
 
 // A release ships only its own fingerprinted assets, so a page from another
@@ -260,7 +323,9 @@ export function createServiceProxy(routes) {
 
 if (isMainModule()) {
   const port = Number(process.env.PORT ?? 3000);
-  const staticHost = createStaticHost();
+  const staticHost = createStaticHost({
+    teamHubBaseUrl: process.env.TEAMHUB_BASE_URL,
+  });
   // The production bundle calls TeamHub and the Document Runtime on the page
   // origin, so a host with these upstreams forwards them like the Vite proxy.
   const proxy = createServiceProxy(serviceProxyRoutes(process.env));

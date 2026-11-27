@@ -121,6 +121,103 @@ describe("Web static host routing", () => {
     });
   });
 
+  it("answers /readyz with 200 in pure static mode without an upstream", async () => {
+    const getResponse = await fetch(`${baseUrl}/readyz`, {
+      headers: { connection: "close" },
+    });
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.headers.get("content-type")).toContain(
+      "application/json",
+    );
+    expect(getResponse.headers.get("cache-control")).toBe("no-store");
+    await expect(getResponse.json()).resolves.toEqual({
+      ok: true,
+      service: "linger-web",
+    });
+
+    const headResponse = await fetch(`${baseUrl}/readyz`, {
+      headers: { connection: "close" },
+      method: "HEAD",
+    });
+    expect(headResponse.status).toBe(200);
+    expect(headResponse.headers.get("content-type")).toContain(
+      "application/json",
+    );
+    expect(headResponse.headers.get("cache-control")).toBe("no-store");
+    await expect(headResponse.text()).resolves.toBe("");
+  });
+
+  it("probes TeamHub /healthz for /readyz when teamHubBaseUrl is configured", async () => {
+    let upstreamStatus = 200;
+    const upstream = createServer((request, response) => {
+      if (request.url === "/healthz") {
+        response.statusCode = upstreamStatus;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ ok: upstreamStatus === 200 }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end();
+    });
+    const upstreamPort = await listen(upstream);
+    const host = serveHost(
+      createStaticHost({
+        root: fixtureRoot,
+        teamHubBaseUrl: `http://127.0.0.1:${upstreamPort}`,
+      }),
+    );
+    const hostPort = await listen(host);
+    try {
+      const healthyGet = await fetch(`http://127.0.0.1:${hostPort}/readyz`, {
+        headers: { connection: "close" },
+      });
+      expect(healthyGet.status).toBe(200);
+      expect(healthyGet.headers.get("cache-control")).toBe("no-store");
+      await expect(healthyGet.json()).resolves.toEqual({
+        ok: true,
+        service: "linger-web",
+      });
+
+      const healthyHead = await fetch(`http://127.0.0.1:${hostPort}/readyz`, {
+        headers: { connection: "close" },
+        method: "HEAD",
+      });
+      expect(healthyHead.status).toBe(200);
+      await expect(healthyHead.text()).resolves.toBe("");
+
+      upstreamStatus = 503;
+      const degraded = await fetch(`http://127.0.0.1:${hostPort}/readyz`, {
+        headers: { connection: "close" },
+      });
+      expect(degraded.status).toBe(503);
+      expect(degraded.headers.get("cache-control")).toBe("no-store");
+      await expect(degraded.json()).resolves.toEqual({
+        ok: false,
+        service: "linger-web",
+        upstream: "teamhub",
+      });
+
+      upstream.closeAllConnections();
+      await close(upstream);
+
+      const unreachable = await fetch(`http://127.0.0.1:${hostPort}/readyz`, {
+        headers: { connection: "close" },
+      });
+      expect(unreachable.status).toBe(502);
+      expect(unreachable.headers.get("cache-control")).toBe("no-store");
+      await expect(unreachable.json()).resolves.toEqual({
+        ok: false,
+        service: "linger-web",
+        upstream: "teamhub",
+      });
+    } finally {
+      host.closeAllConnections();
+      upstream.closeAllConnections();
+      await close(host);
+      if (upstream.listening) await close(upstream);
+    }
+  });
+
   it.each([
     "/assets",
     "/assets/missing.js",
@@ -132,6 +229,7 @@ describe("Web static host routing", () => {
     "/v0",
     "/v0/session",
     "/healthz/missing",
+    "/readyz/missing",
   ])("does not rewrite non-SPA resource path %s", async (path) => {
     const response = await fetch(`${baseUrl}${path}`, {
       headers: { accept: "text/html", connection: "close" },

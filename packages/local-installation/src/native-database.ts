@@ -10,6 +10,7 @@ import {
 import { removeRetrying, renameRetrying } from "./fs-retry.js";
 import {
   inspectNativeProcess,
+  SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
 } from "./native-process.js";
@@ -200,6 +201,7 @@ export async function prepareNativeDatabase(options: {
       signal,
       redactions: [password],
       withoutAdministrators,
+      restartOnExit: SERVICE_RESTART_POLICY,
       // A release that repins the PostgreSQL archive unpacks it into a new
       // component folder, so the server an earlier release left running
       // differs only in its executable path. The new server opens the same

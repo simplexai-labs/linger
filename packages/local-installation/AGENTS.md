@@ -455,8 +455,9 @@ leave PostgreSQL holding `postmaster.pid` against every retry.
 
 The supervisor writes one `[linger-supervisor] <name>` line to the service's
 log when it starts the service and for every exit (code, signal, uptime and
-whether it restarts). A start with `restartOnExit` (TeamHub, node-services and
-web, at `SERVICE_RESTART_POLICY`) makes the supervisor itself start the service
+whether it restarts). A start with `restartOnExit` (all native services—
+PostgreSQL, LiveKit, TeamHub, node-services and web—at `SERVICE_RESTART_POLICY`)
+makes the supervisor itself start the service
 again when it exits unasked, after 1, 2 and then 5 seconds, ending first what
 the exited service left under the lease. The supervisor owns the service and
 outlives the app, so this also covers a headless install and a closed window.
@@ -471,8 +472,8 @@ restarting, and on Windows skips its post-exit PowerShell lease check and exits
 immediately once `.stop` is present (since child parent links are already
 severed and the installer stops the tree leaves-first), while the POSIX stop
 also kills what holds the lease after the supervisor, so a restart racing the
-stop cannot outlive it. PostgreSQL and LiveKit are not
-restarted; their exits are logged with `reason=not_supervised`.
+stop cannot outlive it. A start without `restartOnExit` logs exits with
+`reason=not_supervised`.
 
 Native runtime and localmodels kit verification (`native-runtime.ts` and
 `localmodels-tool.ts`) stop assigning files on the first mismatch and wait

@@ -2,7 +2,7 @@ import { createSocket } from "node:dgram";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os, { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
   liveKitConfig,
   liveKitEnvironment,
@@ -10,10 +10,24 @@ import {
   readLiveKitSettings,
   startNativeLiveKit,
 } from "./native-livekit.js";
-import { inspectNativeProcess, stopNativeProcess } from "./native-process.js";
+import {
+  inspectNativeProcess,
+  SERVICE_RESTART_POLICY,
+  startNativeProcess,
+  stopNativeProcess,
+} from "./native-process.js";
+
+vi.mock("./native-process.js", async (original) => {
+  const actual = await original<typeof import("./native-process.js")>();
+  return {
+    ...actual,
+    startNativeProcess: vi.fn(actual.startNativeProcess),
+  };
+});
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.mocked(startNativeProcess).mockClear();
   for (const root of roots.splice(0)) {
     await stopNativeProcess(root, "livekit").catch(() => {});
     await rm(root, { recursive: true, force: true });
@@ -175,6 +189,29 @@ test("prepareLiveKitSettings moves a saved rtcPort taken on a non-loopback inter
   }
 });
 
+test("startNativeLiveKit supervises exits with SERVICE_RESTART_POLICY", async () => {
+  const root = await temp();
+  const settings = await prepareLiveKitSettings(root, new Set());
+  vi.mocked(startNativeProcess).mockRejectedValueOnce(
+    new Error("stop-after-start"),
+  );
+  await expect(
+    startNativeLiveKit({
+      root,
+      executable: path.join(root, "livekit-server"),
+      settings,
+      signal: new AbortController().signal,
+    }),
+  ).rejects.toThrow("stop-after-start");
+  expect(startNativeProcess).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: "livekit",
+      restartOnExit: SERVICE_RESTART_POLICY,
+      restartOnConfigurationChange: true,
+    }),
+  );
+});
+
 test.skipIf(process.platform === "win32")(
   "starts LiveKit, waits for its health check and never logs the secret",
   async () => {
@@ -195,6 +232,12 @@ test.skipIf(process.platform === "win32")(
       settings,
       signal: new AbortController().signal,
     });
+    expect(startNativeProcess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "livekit",
+        restartOnExit: SERVICE_RESTART_POLICY,
+      }),
+    );
     expect((await inspectNativeProcess(root, "livekit")).running).toBe(true);
     const log = await readFile(
       path.join(root, "native/logs/livekit.log"),
@@ -205,4 +248,5 @@ test.skipIf(process.platform === "win32")(
     await stopNativeProcess(root, "livekit");
     expect((await inspectNativeProcess(root, "livekit")).running).toBe(false);
   },
+  15_000,
 );

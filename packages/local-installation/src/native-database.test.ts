@@ -2,10 +2,12 @@ import { runProcess } from "./process.js";
 vi.mock("./process.js", () => ({ runProcess: vi.fn() }));
 import {
   inspectNativeProcess,
+  SERVICE_RESTART_POLICY,
   startNativeProcess,
   stopNativeProcess,
 } from "./native-process.js";
-vi.mock("./native-process.js", () => ({
+vi.mock("./native-process.js", async (original) => ({
+  ...(await original<typeof import("./native-process.js")>()),
   inspectNativeProcess: vi.fn(async () => ({ running: true })),
   startNativeProcess: vi.fn(async () => {}),
   stopNativeProcess: vi.fn(async () => {}),
@@ -109,11 +111,12 @@ describe("windowsElevated", () => {
 });
 
 describe("prepareNativeDatabase start", () => {
-  it("restarts a server an earlier release left running from another archive", async () => {
+  it("restarts a server an earlier release left running from another archive and supervises exits", async () => {
     run.mockImplementation(async () => ok("1"));
     await prepareNativeDatabase(options);
     expect(vi.mocked(startNativeProcess).mock.calls[0]![0]).toMatchObject({
       name: "postgres",
+      restartOnExit: SERVICE_RESTART_POLICY,
       restartOnConfigurationChange: true,
     });
   });
