@@ -6358,6 +6358,7 @@ export class InstallerApi {
 }
 
 const isTransientRuntimeLoginPollError = (error: unknown): boolean => {
+  if (transientCode(error)) return true;
   let current: unknown = error;
   for (
     let depth = 0;

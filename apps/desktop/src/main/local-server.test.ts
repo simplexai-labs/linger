@@ -1252,6 +1252,11 @@ describe("LocalServerModule", () => {
               "TimeoutError",
             );
           }
+          if (pollCount === 3) {
+            throw Object.assign(new Error("headers timeout"), {
+              code: "UND_ERR_HEADERS_TIMEOUT",
+            });
+          }
           api.runtime.login = { state: "ready" };
         }
         return baseHandle(url, init);
@@ -1266,7 +1271,7 @@ describe("LocalServerModule", () => {
     const warn = vi.spyOn(f.host.ctx.log, "warn");
     await f.host.start();
     await f.module.begin();
-    expect(pollCount).toBeGreaterThanOrEqual(3);
+    expect(pollCount).toBeGreaterThanOrEqual(4);
     expect(f.module.status().phase).toBe("ready");
     expect(warn).toHaveBeenCalledWith(
       "local_server.runtime_login_poll_failed",
