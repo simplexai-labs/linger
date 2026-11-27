@@ -361,3 +361,27 @@ test("accepts complete compatible-model input and rejects partial or mixed field
       (await api("/api/runtime-login", "POST", { ...input, ...change })).status,
     ).toBe(400);
 });
+
+test("the install request counts a Computer name in characters", async () => {
+  const { api, calls } = await setup();
+  // 120 astral characters are 240 UTF-16 units; the installer contract states
+  // maxLength: 120, the same unit the instance guard and TeamHub use.
+  const name = "\u{1F600}".repeat(120);
+  expect(
+    (
+      await api("/api/jobs", "POST", {
+        instance: "default",
+        computerName: name,
+      })
+    ).status,
+  ).toBe(202);
+  expect(
+    (
+      await api("/api/jobs", "POST", {
+        instance: "default",
+        computerName: name + "\u{1F600}",
+      })
+    ).status,
+  ).toBe(400);
+  expect(calls()).toBeGreaterThan(0);
+});

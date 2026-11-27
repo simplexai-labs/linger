@@ -156,7 +156,7 @@ export function validateInput(value: unknown): Input {
     input.computerName !== undefined &&
     (typeof input.computerName !== "string" ||
       !input.computerName.trim() ||
-      input.computerName.length > 120 ||
+      [...input.computerName].length > 120 ||
       /[\r\n\0]/.test(input.computerName))
   )
     throw new Error("Invalid computer name");

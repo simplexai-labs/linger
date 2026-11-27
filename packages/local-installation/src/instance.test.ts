@@ -224,3 +224,24 @@ it("persists the initial Computer display name across retries", async () => {
   });
   expect(second.computerName).toBe("My work computer");
 });
+
+it("counts a Computer name in characters, the unit its contract states", async () => {
+  const root = await home();
+  // 120 astral characters are 240 UTF-16 units; the installer contract says
+  // maxLength: 120, and TeamHub's own Computer name bound counts characters.
+  const emoji = "\u{1F600}".repeat(120);
+  const instance = await initializeInstance({
+    name: "named",
+    home: root,
+    computerName: emoji,
+  });
+  expect(instance.computerName).toBe(emoji);
+  const other = await home();
+  await expect(
+    initializeInstance({
+      name: "named",
+      home: other,
+      computerName: emoji + "\u{1F600}",
+    }),
+  ).rejects.toThrow("Invalid Computer name");
+});

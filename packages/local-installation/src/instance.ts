@@ -167,7 +167,10 @@ export async function initializeInstance(
   if (
     options.computerName !== undefined &&
     (!options.computerName.trim() ||
-      options.computerName.length > 120 ||
+      // The contract's maxLength counts characters, as TeamHub's Computer name
+      // bound does, so a name of 120 astral characters is 120 rather than 240
+      // UTF-16 units.
+      [...options.computerName].length > 120 ||
       /\p{Cc}/u.test(options.computerName))
   )
     throw new Error("Invalid Computer name");
