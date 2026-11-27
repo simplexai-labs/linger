@@ -31,8 +31,9 @@ func TestLocalmodelsVersionAtLeast(t *testing.T) {
 	}{
 		{"0.1.0.dev38", firstLocalmodelsSpeechVersion, false, true},
 		{"0.1.0.dev59", firstLocalmodelsSpeechVersion, false, true},
-		{"0.1.0.dev60", firstLocalmodelsSpeechVersion, true, true},
+		{"0.1.0.dev60", firstLocalmodelsSpeechVersion, false, true},
 		{"0.1.0.dev61", firstLocalmodelsSpeechVersion, true, true},
+		{"0.1.0.dev62", firstLocalmodelsSpeechVersion, true, true},
 		{"0.1.0.dev100", firstLocalmodelsSpeechVersion, true, true},
 		{"0.1.0a1.dev1", firstLocalmodelsSpeechVersion, true, true},
 		{"0.1.0a1", firstLocalmodelsSpeechVersion, true, true},
@@ -44,8 +45,8 @@ func TestLocalmodelsVersionAtLeast(t *testing.T) {
 		{"0.9.0", firstLocalmodelsSpeechVersion, true, true},
 		{"1.0.0", firstLocalmodelsSpeechVersion, true, true},
 		{"0.0.9", firstLocalmodelsSpeechVersion, false, true},
-		{"0.1.0.dev60+local1", firstLocalmodelsSpeechVersion, true, true},
-		{"v0.1.0.dev59", firstLocalmodelsSpeechVersion, false, true},
+		{"0.1.0.dev61+local1", firstLocalmodelsSpeechVersion, true, true},
+		{"v0.1.0.dev60", firstLocalmodelsSpeechVersion, false, true},
 		{"not-a-version", firstLocalmodelsSpeechVersion, false, false},
 		{"", firstLocalmodelsSpeechVersion, false, false},
 	}
@@ -60,11 +61,11 @@ func TestLocalmodelsVersionAtLeast(t *testing.T) {
 
 func TestSpeechLibraryGracefulUnsupportedByVersion(t *testing.T) {
 	fake := newFakeTool(t)
-	// Older kit (0.1.0.dev59) fails `speech` with arbitrary opaque stderr (not
+	// Older kit (0.1.0.dev60) fails `speech` with arbitrary opaque stderr (not
 	// Python argparse prose), while `library status --json` structurally reports
-	// tool_version 0.1.0.dev59.
+	// tool_version 0.1.0.dev60.
 	oldStatus := status()
-	oldStatus["tool_version"] = "0.1.0.dev59"
+	oldStatus["tool_version"] = "0.1.0.dev60"
 	fake.write("status.json", oldStatus)
 	if err := os.WriteFile(filepath.Join(fake.state, "speech-exit"), []byte("2\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func TestSpeechLibraryGracefulUnsupportedByVersion(t *testing.T) {
 	if snap.Reason == nil || snap.Reason.Code != CodeSpeechUnsupported {
 		t.Fatalf("expected SPEECH_UNSUPPORTED, got %+v", snap.Reason)
 	}
-	if !strings.Contains(snap.Reason.Detail, "0.1.0.dev59") {
+	if !strings.Contains(snap.Reason.Detail, "0.1.0.dev60") {
 		t.Fatalf("expected version detail, got %q", snap.Reason.Detail)
 	}
 	if len(published) != 1 {
@@ -114,10 +115,10 @@ func TestSpeechLibraryGracefulUnsupportedByVersion(t *testing.T) {
 
 func TestSpeechLibraryNewerKitFailureReportsToolFailed(t *testing.T) {
 	fake := newFakeTool(t)
-	// Newer kit (0.1.0.dev60) reports speech support structurally, so a crash
+	// Newer kit (0.1.0.dev61) reports speech support structurally, so a crash
 	// during `speech status` must surface TOOL_FAILED rather than SPEECH_UNSUPPORTED.
 	newStatus := status()
-	newStatus["tool_version"] = "0.1.0.dev60"
+	newStatus["tool_version"] = "0.1.0.dev61"
 	fake.write("status.json", newStatus)
 	if err := os.WriteFile(filepath.Join(fake.state, "speech-exit"), []byte("1\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -135,7 +136,7 @@ func TestSpeechLibraryNewerKitFailureReportsToolFailed(t *testing.T) {
 
 	snap := lib.Refresh(context.Background())
 	if snap.Available || snap.Reason == nil || snap.Reason.Code != CodeToolFailed {
-		t.Fatalf("expected TOOL_FAILED for 0.1.0.dev60 failure, got %+v", snap.Reason)
+		t.Fatalf("expected TOOL_FAILED for 0.1.0.dev61 failure, got %+v", snap.Reason)
 	}
 
 	refusal, answered := lib.Act(context.Background(), SpeechAction{Name: SpeechActionUnload}, time.Now().Add(5*time.Second))
@@ -198,7 +199,7 @@ func TestSpeechLibraryStatusActionsAndTranscribe(t *testing.T) {
 	fake := newFakeTool(t)
 	fake.write("speech-status.json", map[string]any{
 		"schema":       "localmodels.speech-status/v1",
-		"tool_version": "0.1.0.dev60",
+		"tool_version": "0.1.0.dev61",
 		"observed_at":  "2026-11-26T13:20:00Z",
 		"config": map[string]any{
 			"model_id":            "sensevoice-small",
@@ -281,6 +282,15 @@ func TestSpeechLibraryStatusActionsAndTranscribe(t *testing.T) {
 	if !answered || refusal == nil || refusal.Code != "MODEL_UNKNOWN" {
 		t.Fatalf("expected MODEL_UNKNOWN refusal, got answered=%v refusal=%+v", answered, refusal)
 	}
+	if refusal.Detail != "unknown" {
+		t.Fatalf("expected refusal detail from the event message, got %q", refusal.Detail)
+	}
+
+	// A JSON verb's pretty-printed error document is still a structured refusal.
+	refusal, answered = lib.Act(context.Background(), SpeechAction{Name: SpeechActionRemove, Model: "bad-model"}, time.Now().Add(5*time.Second))
+	if !answered || refusal == nil || refusal.Code != "MODEL_UNKNOWN" || refusal.Detail != "unknown speech model" {
+		t.Fatalf("expected MODEL_UNKNOWN refusal from indented JSON, got answered=%v refusal=%+v", answered, refusal)
+	}
 
 	// Accepted download returns nil refusal.
 	refusal, answered = lib.Act(context.Background(), SpeechAction{Name: SpeechActionDownload, Model: "sensevoice-small"}, time.Now().Add(5*time.Second))
@@ -317,5 +327,50 @@ func TestSpeechLibraryStatusActionsAndTranscribe(t *testing.T) {
 	defer mu.Unlock()
 	if lastAuth != "Bearer secret-loopback-token" || lastModel != "sensevoice-small" || lastLang != "en" || lastUseGPU != "true" || lastKeep != "300" || lastAudioLen != len(wav) {
 		t.Fatalf("unexpected sidecar request: auth=%q model=%q lang=%q gpu=%q keep=%q bytes=%d", lastAuth, lastModel, lastLang, lastUseGPU, lastKeep, lastAudioLen)
+	}
+}
+
+func TestParseSpeechRefusalMatchesKitErrorEvents(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		code   string
+		detail string
+	}{
+		{
+			name:   "compact JSONL error after progress",
+			stdout: `{"schema":"localmodels.speech-event/v1","event":"progress","model":"m","step":"download","done_bytes":1,"total_bytes":2}` + "\n" + `{"schema":"localmodels.speech-event/v1","event":"error","ok":false,"code":"DISK_INSUFFICIENT","message":"need 1 GiB","model":"m"}` + "\n",
+			code:   "DISK_INSUFFICIENT",
+			detail: "need 1 GiB",
+		},
+		{
+			name:   "indented JSON error",
+			stdout: "{\n \"schema\": \"localmodels.speech-event/v1\",\n \"event\": \"error\",\n \"ok\": false,\n \"code\": \"INVALID_STATE\",\n \"message\": \"not downloading\"\n}\n",
+			code:   "INVALID_STATE",
+			detail: "not downloading",
+		},
+		{
+			name:   "kit-only code falls back to UNKNOWN_ERROR",
+			stdout: `{"schema":"localmodels.speech-event/v1","event":"error","ok":false,"code":"RUNTIME_ERROR","message":"boom"}`,
+			code:   "UNKNOWN_ERROR",
+			detail: "boom",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			refusal := parseSpeechRefusal(tc.stdout, "")
+			if refusal == nil || refusal.Code != tc.code || refusal.Detail != tc.detail {
+				t.Fatalf("got %+v, want code %s detail %q", refusal, tc.code, tc.detail)
+			}
+		})
+	}
+	for _, stdout := range []string{
+		`{"schema":"localmodels.speech-event/v1","event":"result","ok":true}`,
+		`{"schema":"localmodels.speech-runtime/v1","ok":true,"runtime":{}}`,
+		"not json",
+	} {
+		if refusal := parseSpeechRefusal(stdout, ""); refusal != nil {
+			t.Fatalf("expected no refusal for %q, got %+v", stdout, refusal)
+		}
 	}
 }

@@ -268,7 +268,12 @@ func runFakeSpeechTool(state string, args []string) int {
 		return exit
 	}
 	if verb == "download" && len(args) >= 2 && args[1] == "bad-model" {
-		fmt.Println(`{"schema":"localmodels.speech-event/v1","event":"error","error":{"code":"MODEL_UNKNOWN","message":"unknown"}}`)
+		fmt.Println(`{"schema":"localmodels.speech-event/v1","event":"error","ok":false,"code":"MODEL_UNKNOWN","message":"unknown","model":"bad-model"}`)
+		return 2
+	}
+	if verb == "remove" && len(args) >= 2 && args[1] == "bad-model" {
+		// JSON verbs pretty-print their terminal document across lines.
+		fmt.Print("{\n \"schema\": \"localmodels.speech-event/v1\",\n \"event\": \"error\",\n \"ok\": false,\n \"code\": \"MODEL_UNKNOWN\",\n \"message\": \"unknown speech model\",\n \"model\": \"bad-model\"\n}\n")
 		return 2
 	}
 	if data, err := os.ReadFile(filepath.Join(state, "speech-"+verb+".json")); err == nil {

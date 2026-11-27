@@ -36,7 +36,7 @@ const (
 
 	// firstLocalmodelsSpeechVersion is the first localmodels kit release that
 	// ships the `localmodels speech` subcommand.
-	firstLocalmodelsSpeechVersion = "0.1.0.dev60"
+	firstLocalmodelsSpeechVersion = "0.1.0.dev61"
 
 	// CodeSpeechUnsupported reports that the installed localmodels kit does
 	// not yet implement the `localmodels speech` subcommand.
@@ -476,14 +476,12 @@ waitFirst:
 		var ev speechEventLine
 		if err := json.Unmarshal([]byte(firstLine), &ev); err == nil && ev.Schema == speechEventSchema {
 			s.setSpeechSupport(speechSupportYes, "")
-			if ev.Event == "error" || ev.Error != nil {
+			if ev.Event == "error" {
 				code := CodeToolFailed
-				detail := ""
-				if ev.Error != nil {
-					code = sanitizeSpeechRefusalCode(ev.Error.Code)
-					detail = clip(ev.Error.Message, 4000)
+				if ev.Code != "" {
+					code = sanitizeSpeechRefusalCode(ev.Code)
 				}
-				return &wire.LocalSpeechActionRefusal{Code: code, Detail: detail}, true
+				return &wire.LocalSpeechActionRefusal{Code: code, Detail: clip(ev.Message, 4000)}, true
 			}
 		}
 	} else if exited && exitErr != nil {
@@ -1013,13 +1011,13 @@ func mapSpeechStatus(raw string, now time.Time) (snap wire.LocalSpeechSnapshot, 
 	return snap, baseURL, keyFile, nil
 }
 
+// speechEventLine is one localmodels.speech-event/v1 document. An error event
+// carries its closed code and message at the top level.
 type speechEventLine struct {
-	Schema string `json:"schema"`
-	Event  string `json:"event"`
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
+	Schema  string `json:"schema"`
+	Event   string `json:"event"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func parseSpeechRuntimeStart(raw string) (baseURL, keyFile string, err error) {
@@ -1290,23 +1288,35 @@ func localmodelsVersionAtLeast(actual, minimum string) (atLeast bool, ok bool) {
 	return true, true
 }
 
+// parseSpeechRefusal finds a localmodels.speech-event/v1 error event in tool
+// output. JSON verbs print one indented document; JSONL verbs print one compact
+// event per line.
 func parseSpeechRefusal(stdout, stderr string) *wire.LocalSpeechActionRefusal {
 	for _, text := range []string{stdout, stderr} {
-		for _, line := range strings.Split(text, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
-				continue
-			}
-			var ev speechEventLine
-			if err := json.Unmarshal([]byte(trimmed), &ev); err == nil && ev.Error != nil && ev.Error.Code != "" {
-				return &wire.LocalSpeechActionRefusal{
-					Code:   sanitizeSpeechRefusalCode(ev.Error.Code),
-					Detail: clip(ev.Error.Message, 4000),
-				}
+		candidates := append([]string{text}, strings.Split(text, "\n")...)
+		for _, candidate := range candidates {
+			if refusal := speechRefusalFromEvent(candidate); refusal != nil {
+				return refusal
 			}
 		}
 	}
 	return nil
+}
+
+func speechRefusalFromEvent(raw string) *wire.LocalSpeechActionRefusal {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil
+	}
+	var ev speechEventLine
+	if err := json.Unmarshal([]byte(trimmed), &ev); err != nil ||
+		ev.Schema != speechEventSchema || ev.Event != "error" || ev.Code == "" {
+		return nil
+	}
+	return &wire.LocalSpeechActionRefusal{
+		Code:   sanitizeSpeechRefusalCode(ev.Code),
+		Detail: clip(ev.Message, 4000),
+	}
 }
 
 func sanitizeSpeechRefusalCode(code string) string {
