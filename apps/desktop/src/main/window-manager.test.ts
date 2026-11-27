@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +30,7 @@ const state = vi.hoisted(() => {
     readonly reload = vi.fn();
     readonly focus = vi.fn();
     readonly send = vi.fn();
+    readonly executeJavaScript = vi.fn(async (_script: string) => undefined);
     readonly close = vi.fn(() => {
       this.destroyed = true;
     });
@@ -714,6 +716,64 @@ describe("WindowManagerModule", () => {
     } finally {
       Object.defineProperty(process, "platform", platform);
     }
+  });
+
+  it("loads minimal updating page once and pushes subsequent stage progress without reloading", async () => {
+    const { host, manager } = setup({ serverUrl: "http://localhost:3000" });
+    await host.start();
+    const content = state.views.at(-1)!.webContents;
+    content.loadURL.mockClear();
+
+    manager.showUpdatingProgress({
+      title: "Updating services",
+      detail: "Preparing service update…",
+      percent: 10,
+      tone: "normal",
+    });
+    expect(content.loadURL).toHaveBeenCalledTimes(1);
+    const firstUrl = new URL(content.loadURL.mock.calls[0]![0] as string);
+    expect(`${firstUrl.protocol}//${firstUrl.host}`).toBe("app://offline");
+    expect(firstUrl.searchParams.get("updating")).toBe("1");
+    expect(firstUrl.searchParams.get("percent")).toBe("10");
+    expect(firstUrl.searchParams.get("title")).toBe("Updating services");
+
+    // Once the app://offline updating page finishes loading, subsequent updates
+    // push directly via executeJavaScript without reloading the view.
+    content.emit("did-finish-load");
+    expect(content.executeJavaScript).toHaveBeenCalledTimes(1);
+
+    manager.showUpdatingProgress({
+      title: "Updating services",
+      detail: "Starting services and verifying health…",
+      percent: 75,
+      tone: "normal",
+    });
+    manager.showUpdatingProgress({
+      title: "Updating services",
+      detail: "Health check failed, rolling back automatically…",
+      percent: 55,
+      tone: "rollback",
+    });
+    expect(content.loadURL).toHaveBeenCalledTimes(1);
+    expect(content.executeJavaScript).toHaveBeenCalledTimes(3);
+    expect(content.executeJavaScript.mock.calls[1]![0]).toContain(
+      '"percent":75',
+    );
+    expect(content.executeJavaScript.mock.calls[2]![0]).toContain(
+      '"tone":"rollback"',
+    );
+
+    // Verify the real offline.html ships the minimal centered updating design.
+    const realOfflineHtml = readFileSync(
+      path.join(import.meta.dirname, "../shell/offline.html"),
+      "utf8",
+    );
+    expect(realOfflineHtml).toContain('body[data-mode="updating"]');
+    expect(realOfflineHtml).toContain("radial-gradient(");
+    expect(realOfflineHtml).toContain("window.__lingerSetUpdateProgress");
+    expect(realOfflineHtml).toContain("#b5320a");
+
+    await host.stop("quit");
   });
 
   it("hide() cancels a pending startup reveal so a subsequent offline load stays hidden", async () => {

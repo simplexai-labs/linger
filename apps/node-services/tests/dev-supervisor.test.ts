@@ -1,8 +1,13 @@
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  isDirectEntrypoint,
   superviseNodeServicesDevelopment,
   waitForTeamHubHealth,
 } from "../scripts/dev-supervisor.js";
@@ -70,4 +75,36 @@ describe("Node Services development supervisor", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "recognizes a symlinked argv[1] entrypoint against realpath import.meta.url (P0-D)",
+    async () => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), "linger-supervisor-entry-"),
+      );
+      try {
+        const realDir = path.join(root, "private", "tmp", "dist");
+        const linkDir = path.join(root, "tmp-link");
+        await mkdir(realDir, { recursive: true });
+        const realEntry = path.join(realDir, "supervisor.js");
+        const otherFile = path.join(realDir, "other.js");
+        await writeFile(realEntry, "// supervisor\n", "utf8");
+        await writeFile(otherFile, "// other\n", "utf8");
+        await symlink(realDir, linkDir);
+
+        const symlinkEntry = path.join(linkDir, "supervisor.js");
+        expect(
+          isDirectEntrypoint(symlinkEntry, pathToFileURL(realEntry).href),
+        ).toBe(true);
+        expect(
+          isDirectEntrypoint(otherFile, pathToFileURL(realEntry).href),
+        ).toBe(false);
+        expect(
+          isDirectEntrypoint(undefined, pathToFileURL(realEntry).href),
+        ).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

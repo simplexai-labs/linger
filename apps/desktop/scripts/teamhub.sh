@@ -1,7 +1,11 @@
 #!/bin/sh
 # Runs the bundled teamhub CLI with the Node built into Linger.
 dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-app="$dir/../../../../MacOS/Linger"
+app=""
+if [ -n "${LINGER_CLI_NODE_PATH:-}" ] && [ -x "$LINGER_CLI_NODE_PATH" ]; then
+  app="$LINGER_CLI_NODE_PATH"
+fi
+[ -n "$app" ] || app="$dir/../../../../MacOS/Linger"
 [ -x "$app" ] || app="$dir/../../../../Linger.exe"
 [ -x "$app" ] || app="$dir/../../../../linger"
 [ -x "$app" ] || app="${LINGER_NODE:-node}"

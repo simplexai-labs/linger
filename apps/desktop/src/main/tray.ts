@@ -12,6 +12,7 @@ import mark16 from "../../resources/tray/mark-16.png";
 import mark32 from "../../resources/tray/mark-32.png";
 import tile16 from "../../resources/tray/tile-16.png";
 import tile32 from "../../resources/tray/tile-32.png";
+import type { BundleUpdaterModule } from "./bundle-updater.js";
 import type { DiagnosticsModule } from "./diagnostics.js";
 import { diagnosticsDialogs } from "./diagnostics-dialogs.js";
 import { sendWithPrompts } from "./diagnostics-upload.js";
@@ -19,10 +20,16 @@ import { EnrollmentError, type EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
 import type { Module, ModuleContext } from "./modules.js";
 import type { PowerGuardModule } from "./power-guard.js";
+import type { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import type { SetupWindowModule } from "./setup-window.js";
 import type { StatusModule, StatusTone } from "./status.js";
 import { renderTrayIcon, type TrayArtwork } from "./tray-icon.js";
-import { trayMenu, type TrayAction, type TrayMenuItem } from "./tray-menu.js";
+import {
+  trayMenu,
+  type TrayAction,
+  type TrayMenuItem,
+  type TrayUpdateState,
+} from "./tray-menu.js";
 import { trayMessages } from "./tray.messages.js";
 import type { UpdaterModule } from "./updater.js";
 import type { WindowManagerModule } from "./window-manager.js";
@@ -104,6 +111,7 @@ export class TrayModule implements Module {
       ctx.bus.on("status.changed", () => this.#refresh()),
       ctx.bus.on("power.changed", () => this.#refresh()),
       ctx.bus.on("update.changed", () => this.#refresh()),
+      ctx.bus.on("bundle.update_changed", () => this.#refresh()),
       ctx.bus.on("language.changed", () => this.#refresh()),
     );
     this.#refresh();
@@ -158,10 +166,77 @@ export class TrayModule implements Module {
     return image;
   }
 
+  #optional<T extends Module>(name: string): T | undefined {
+    try {
+      return this.#ctx!.get<T>(name);
+    } catch {
+      return undefined;
+    }
+  }
+
+  #mergedUpdateState(): TrayUpdateState {
+    const shellUpdate = this.#ctx!.get<UpdaterModule>("Updater").state();
+    if (
+      shellUpdate.kind === "available" ||
+      shellUpdate.kind === "downloading" ||
+      shellUpdate.kind === "ready" ||
+      shellUpdate.kind === "waiting" ||
+      shellUpdate.kind === "installing"
+    ) {
+      return { ...shellUpdate, scope: "shell" };
+    }
+    const orch = this.#optional<ReleaseOrchestratorModule>(
+      "ReleaseOrchestrator",
+    )?.state();
+    if (orch?.kind === "ready") {
+      return { kind: "ready", version: orch.version, scope: orch.diff.scope };
+    }
+    if (orch?.kind === "waiting") {
+      return { kind: "waiting", version: orch.version, scope: orch.diff.scope };
+    }
+    if (orch?.kind === "applying") {
+      return {
+        kind: "installing",
+        version: orch.version,
+        scope: orch.diff.scope,
+      };
+    }
+    const bundleUpdater = this.#optional<BundleUpdaterModule>("BundleUpdater");
+    const bundle = bundleUpdater?.state();
+    if (bundle?.kind === "downloading") {
+      const onlyWeb =
+        bundle.changedModules.length > 0 &&
+        bundle.changedModules.every((m) => m === "web");
+      return {
+        kind: "downloading",
+        version: bundle.version,
+        scope: onlyWeb ? "web" : "backend",
+      };
+    }
+    if (bundle?.kind === "checking" || shellUpdate.kind === "checking") {
+      return { kind: "checking" };
+    }
+    const hasCustomV2Feed = Boolean(
+      process.env.LINGER_UPDATE_FEED_URL?.trim() ||
+      this.#ctx!.config.get().updateFeedUrl,
+    );
+    if (shellUpdate.kind === "failed") {
+      if (hasCustomV2Feed) {
+        if (bundle?.kind === "failed")
+          return { kind: "failed", error: bundle.error };
+        if (bundleUpdater?.lastCheckSucceeded()) return { kind: "idle" };
+      }
+      return shellUpdate;
+    }
+    if (bundle?.kind === "failed")
+      return { kind: "failed", error: bundle.error };
+    return { kind: "idle" };
+  }
+
   #menu(): Menu {
     const power = this.#ctx!.get<PowerGuardModule>("PowerGuard");
     const status = this.#status();
-    const update = this.#ctx!.get<UpdaterModule>("Updater").state();
+    const update = this.#mergedUpdateState();
     const items = trayMenu(
       {
         status,
@@ -204,11 +279,31 @@ export class TrayModule implements Module {
         power.setAlwaysOn(!power.alwaysOn());
         break;
       }
-      case "install-update":
-        void ctx.get<UpdaterModule>("Updater").install();
+      case "install-update": {
+        const updater = ctx.get<UpdaterModule>("Updater");
+        const orchestrator = this.#optional<ReleaseOrchestratorModule>(
+          "ReleaseOrchestrator",
+        );
+        const orchState = orchestrator?.state();
+        const shellKind = updater.state().kind;
+        const shellOwnsInstall =
+          shellKind === "available" ||
+          shellKind === "ready" ||
+          shellKind === "waiting" ||
+          shellKind === "installing";
+        if (
+          !shellOwnsInstall &&
+          (orchState?.kind === "ready" || orchState?.kind === "waiting")
+        ) {
+          void orchestrator!.applyStaged();
+        } else {
+          void updater.install();
+        }
         break;
+      }
       case "check-update":
         void ctx.get<UpdaterModule>("Updater").check();
+        void this.#optional<BundleUpdaterModule>("BundleUpdater")?.check();
         break;
       case "show-logs":
       case "save-diagnostics": {

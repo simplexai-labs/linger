@@ -470,6 +470,45 @@ func TestResolveTeamHubTargetPriorityAndValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("externalized V2 store uses LINGER_CLI_NODE_PATH when relative runtimes are absent", func(t *testing.T) {
+		root := evalPath(t, t.TempDir())
+		cliDir := filepath.Join(root, "store", "backend", "backend-abc123", "computer-daemon", "teamhub-cli")
+		launcher := filepath.Join(cliDir, teamHubBinaryName())
+		entry := filepath.Join(cliDir, "teamhub.js")
+		shellExe := filepath.Join(root, "app", electronBinaryName())
+		standaloneNode := filepath.Join(root, "runtime", "bin", nodeBinaryName())
+		writeFixtureFile(t, launcher, []byte("launcher"), 0o700)
+		writeFixtureFile(t, entry, []byte("ok"), 0o600)
+		writeFixtureFile(t, shellExe, []byte("electron"), 0o700)
+		writeFixtureFile(t, standaloneNode, []byte("node"), 0o700)
+
+		unsetEnvForTest(t, "LINGER_NODE")
+		t.Setenv("PATH", "")
+		t.Setenv("LINGER_CLI_NODE_PATH", "  "+shellExe+"  ")
+		target, err := resolveTeamHubTarget(launcher)
+		if err != nil {
+			t.Fatalf("resolveTeamHubTarget (electron LINGER_CLI_NODE_PATH) failed: %v", err)
+		}
+		if target.program != shellExe || target.entry != entry || !target.runAsNode {
+			t.Fatalf("got %+v, want program=%q entry=%q runAsNode=true", target, shellExe, entry)
+		}
+
+		t.Setenv("LINGER_CLI_NODE_PATH", standaloneNode)
+		target, err = resolveTeamHubTarget(launcher)
+		if err != nil {
+			t.Fatalf("resolveTeamHubTarget (node LINGER_CLI_NODE_PATH) failed: %v", err)
+		}
+		if target.program != standaloneNode || target.entry != entry || target.runAsNode {
+			t.Fatalf("got %+v, want program=%q entry=%q runAsNode=false", target, standaloneNode, entry)
+		}
+
+		// Relative or missing LINGER_CLI_NODE_PATH is ignored and falls through.
+		t.Setenv("LINGER_CLI_NODE_PATH", "relative/Linger")
+		if _, err := resolveTeamHubTarget(launcher); err == nil {
+			t.Fatal("expected error when LINGER_CLI_NODE_PATH is relative and PATH is empty")
+		}
+	})
+
 	t.Run("symlinked launcher resolves through EvalSymlinks", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("symlinks require developer mode or elevated privileges on Windows")

@@ -16,6 +16,7 @@ export const undeclaredTeamHubCodes = [
   "too_large",
   "asset_unavailable",
   "unavailable",
+  "service_upgrading",
 ] as const;
 
 /**

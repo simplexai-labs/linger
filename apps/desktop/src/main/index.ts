@@ -1,4 +1,4 @@
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,8 @@ import {
 import { lingerHome } from "@linger/local-installation/home";
 
 import { quitRequested } from "./app-window.js";
+import { BundleStoreModule } from "./bundle-store.js";
+import { BundleUpdaterModule } from "./bundle-updater.js";
 import { CredentialStore } from "./computer-credential.js";
 import {
   ComputerDaemonModule,
@@ -37,7 +39,16 @@ import {
 } from "./windows-driver-platform.js";
 import { EmbeddedComputerUse } from "./embedded-computer-use.js";
 import { EnrollmentModule } from "./enrollment.js";
+import { HealthWatchdogModule } from "./health-watchdog.js";
 import { LanguageModule } from "./language.js";
+import { offlineMessages } from "../shell/offline.messages.js";
+import {
+  buildV2HealthProbes,
+  resolveColdStartDaemonLaunch,
+  resolveToolsNodePath,
+} from "./v2-runtime-helpers.js";
+import { createV2DatabaseBackupHooks } from "./v2-db-backup.js";
+import { createFailedServiceLogReader } from "./v2-service-logs.js";
 import {
   LocalServerModule,
   signInWithPassword,
@@ -55,6 +66,7 @@ import { EventBus, ModuleHost, type Module } from "./modules.js";
 import { parseServerUrl } from "./navigation.js";
 import { openWithXdg } from "./open-url.js";
 import { PowerGuardModule, type PowerApi } from "./power-guard.js";
+import { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import { SetupWindowModule } from "./setup-window.js";
 import { loginShellEnvironment, withLoginShell } from "./shell-env.js";
 import { markStartMenuShortcut } from "./start-menu-shortcut.js";
@@ -110,6 +122,9 @@ if (!app.requestSingleInstanceLock() || quitRequested(process.argv)) {
 }
 
 async function main(): Promise<void> {
+  if (process.platform === "darwin" && process.env.LINGER_NO_FOCUS === "1") {
+    app.dock?.hide();
+  }
   const readyAt = Math.round(process.uptime() * 1000);
   const userData = app.getPath("userData");
   const log = fileLogger(path.join(userData, "logs"), {
@@ -146,6 +161,7 @@ async function main(): Promise<void> {
     path.join(userData, "config.json"),
     envServer ? { serverUrl: envServer } : {},
   );
+  config.ensureInstallId();
   const defaultDisplayName = os.hostname();
   const daemonDirectory = path.join(userData, "computer");
   const credentials = new CredentialStore(
@@ -196,12 +212,20 @@ async function main(): Promise<void> {
       : undefined;
   };
   const loginShell = resolveLoginShell(log);
-  const daemonPath = daemonExecutable();
+  const shellDaemonPath = daemonExecutable();
   const nodeBinaryName = process.platform === "win32" ? "node.exe" : "node";
+  const bundleStoreRef: { current?: BundleStoreModule } = {};
+  const activeDaemonExecutable = async (): Promise<string> => {
+    if (process.env.LINGER_COMPUTER_DAEMON) {
+      return path.resolve(process.env.LINGER_COMPUTER_DAEMON);
+    }
+    const bundled = await bundleStoreRef.current?.currentDaemonExecutable();
+    return bundled ?? shellDaemonPath;
+  };
   const localServer = new LocalServerModule({
     home,
     daemonDirectory,
-    daemonExecutable: daemonPath,
+    daemonExecutable: activeDaemonExecutable,
     version: VERSION,
     inspectEnv: inspectEnv(loginShell),
     macosVersion: () => process.getSystemVersion(),
@@ -352,6 +376,331 @@ async function main(): Promise<void> {
           },
         }
       : undefined;
+  const activeLocalHome = await localServer.activeHome();
+  const initialDaemon = await resolveColdStartDaemonLaunch({
+    home: activeLocalHome,
+    shellDaemonPath,
+    shellTeamhubCliDirectory: path.join(here, "../teamhub-cli"),
+    resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    isPackaged: app.isPackaged,
+  });
+  if (initialDaemon.source === "store") {
+    log.info("computer_daemon.cold_start_store", {
+      appVersion: initialDaemon.appVersion,
+      daemonPath: initialDaemon.daemonPath,
+      teamhubCliDirectory: initialDaemon.teamhubCliDirectory,
+      hasToolsNodePath: Boolean(initialDaemon.toolsNodePath),
+    });
+  }
+  const computerDaemon = new ComputerDaemonModule({
+    createEmbeddedDriver:
+      process.platform === "darwin" && app.isPackaged
+        ? (selected) => new EmbeddedComputerUse(process.resourcesPath, selected)
+        : undefined,
+    spawn: spawnDaemon(
+      initialDaemon.daemonPath,
+      path.join(userData, "logs", "computer-daemon.log"),
+    ),
+    credentials,
+    directory: daemonDirectory,
+    // The bundled teamhub CLI (or committed V2 store copy), run by the app's
+    // own Node, so runtimes reply with a matching version and the computer needs no Node.
+    teamhubCliDirectory: initialDaemon.teamhubCliDirectory,
+    defaultDisplayName,
+    env: daemonEnv(loginShell, initialDaemon.toolsNodePath),
+    ...(devLocalmodels ? { devLocalmodels } : {}),
+    ...(process.platform === "win32"
+      ? { protect: protectWithDaemon(initialDaemon.daemonPath) }
+      : {}),
+    ...desktopPermissions,
+  });
+  const shellVersion =
+    (!app.isPackaged && process.env.LINGER_SHELL_VERSION) || VERSION;
+  const bundleTarget =
+    (!app.isPackaged && process.env.LINGER_BUNDLE_TARGET) ||
+    `${process.platform}-${process.arch}`;
+  const seedDirectory =
+    !app.isPackaged && process.env.LINGER_SEED_DIR
+      ? path.resolve(process.env.LINGER_SEED_DIR)
+      : path.join(here, "../seed");
+  const bundlePublicKey =
+    !app.isPackaged && process.env.LINGER_UPDATE_PUBLIC_KEY_FILE
+      ? readFileSync(process.env.LINGER_UPDATE_PUBLIC_KEY_FILE, "utf8")
+      : undefined;
+  const hasCustomUpdateFeed = Boolean(
+    process.env.LINGER_UPDATE_FEED_URL?.trim() || config.get().updateFeedUrl,
+  );
+  const rawCheckDelay = process.env.LINGER_BUNDLE_CHECK_DELAY_MS
+    ? Number(process.env.LINGER_BUNDLE_CHECK_DELAY_MS)
+    : undefined;
+  const bundleCheckDelayMs =
+    rawCheckDelay !== undefined &&
+    Number.isFinite(rawCheckDelay) &&
+    (!app.isPackaged || (hasCustomUpdateFeed && rawCheckDelay >= 1_000))
+      ? rawCheckDelay
+      : undefined;
+  const rawCheckInterval = process.env.LINGER_BUNDLE_CHECK_INTERVAL_MS
+    ? Number(process.env.LINGER_BUNDLE_CHECK_INTERVAL_MS)
+    : undefined;
+  const bundleCheckIntervalMs =
+    rawCheckInterval !== undefined &&
+    Number.isFinite(rawCheckInterval) &&
+    (!app.isPackaged || (hasCustomUpdateFeed && rawCheckInterval >= 5_000))
+      ? rawCheckInterval
+      : undefined;
+
+  const isLocalServerMode = async (): Promise<boolean> =>
+    (await localServer.hasLocalInstance()) ||
+    (!app.isPackaged && process.env.LINGER_ENABLE_BUNDLE_UPDATER === "1");
+
+  const bundleStore = new BundleStoreModule({
+    home: () => localServer.home,
+    seedDirectory,
+    target: bundleTarget,
+    shouldImportSeed: isLocalServerMode,
+  });
+  bundleStoreRef.current = bundleStore;
+  const bundleUpdater = new BundleUpdaterModule({
+    shellVersion,
+    target: bundleTarget,
+    enabled: app.isPackaged || process.env.LINGER_ENABLE_BUNDLE_UPDATER === "1",
+    isLocalMode: isLocalServerMode,
+    ...(bundlePublicKey ? { publicKey: bundlePublicKey } : {}),
+    ...(bundleCheckDelayMs !== undefined
+      ? { checkDelayMs: bundleCheckDelayMs }
+      : {}),
+    ...(bundleCheckIntervalMs !== undefined
+      ? { checkIntervalMs: bundleCheckIntervalMs }
+      : {}),
+  });
+  const dbBackupHooks = createV2DatabaseBackupHooks({
+    getHome: () => bundleStore.home,
+    installerDirectory: path.join(here, "../installer"),
+    resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+    log,
+  });
+
+  const healthWatchdog = new HealthWatchdogModule();
+  const healthGateTimeoutMs =
+    !app.isPackaged && process.env.LINGER_HEALTH_GATE_TIMEOUT_MS
+      ? Number(process.env.LINGER_HEALTH_GATE_TIMEOUT_MS)
+      : undefined;
+  const healthGateIntervalMs =
+    !app.isPackaged && process.env.LINGER_HEALTH_GATE_INTERVAL_MS
+      ? Number(process.env.LINGER_HEALTH_GATE_INTERVAL_MS)
+      : undefined;
+  const releaseOrchestrator = new ReleaseOrchestratorModule({
+    activeOperations: () =>
+      computerDaemon.running() +
+      (!app.isPackaged &&
+      process.env.LINGER_TEST_BUSY_FILE &&
+      existsSync(process.env.LINGER_TEST_BUSY_FILE)
+        ? 1
+        : 0),
+    ...(healthGateTimeoutMs !== undefined &&
+    Number.isFinite(healthGateTimeoutMs)
+      ? { healthGateTimeoutMs }
+      : {}),
+    ...(healthGateIntervalMs !== undefined &&
+    Number.isFinite(healthGateIntervalMs)
+      ? { healthGateIntervalMs }
+      : {}),
+    stopServicesBeforeBackup: async (services) => {
+      if (await localServer.hasLocalInstance()) {
+        await localServer.stopServices(services);
+      }
+    },
+    backupDatabase: dbBackupHooks.backupDatabase,
+    restoreDatabase: dbBackupHooks.restoreDatabase,
+    readFailedServiceLogs: createFailedServiceLogReader({
+      getHome: () => bundleStore.home,
+    }),
+    onProgress: (progress) => {
+      const detailByStage = {
+        preparing: offlineMessages.updatingPrepare,
+        stopping: offlineMessages.updatingStopping,
+        switching: offlineMessages.updatingSwitching,
+        verifying: offlineMessages.updatingVerifying,
+        complete: offlineMessages.updatingComplete,
+        rolling_back: offlineMessages.updatingRollback,
+        rolled_back: offlineMessages.updatingRolledBack,
+      } as const;
+      windows.showUpdatingProgress({
+        title: language.t(offlineMessages.updatingServicesTitle),
+        detail: language.t(detailByStage[progress.stage]),
+        percent: progress.percent,
+        tone: progress.tone,
+      });
+    },
+    onComplete: () => {
+      windows.loadServer("retry");
+    },
+    onRollbackComplete: () => {
+      windows.loadServer("retry");
+    },
+    onAbort: () => {
+      windows.loadServer("retry");
+    },
+    restartServices: async (release, changed) => {
+      const storeServices: ("teamhub" | "node-services" | "web")[] = [];
+      const baselineServices: ("teamhub" | "node-services" | "web")[] = [];
+      if (changed.includes("backend")) {
+        if (release.modules.backend.source === "shell") {
+          baselineServices.push("teamhub", "node-services");
+        } else {
+          storeServices.push("teamhub", "node-services");
+        }
+      }
+      if (changed.includes("web")) {
+        if (release.modules.web.source === "shell") {
+          baselineServices.push("web");
+        } else {
+          storeServices.push("web");
+        }
+      }
+      if (
+        (storeServices.length > 0 || baselineServices.length > 0) &&
+        (await localServer.hasLocalInstance())
+      ) {
+        if (storeServices.length > 0) {
+          // Delegate service release switching (`teamhub`, `node-services`,
+          // and/or `web`) exclusively through installer.js so PID tracking &
+          // uninstall --stop stay under a single lifecycle owner while PostgreSQL
+          // and LiveKit remain running.
+          await localServer.switchRelease(release.appVersion, {
+            services: storeServices,
+          });
+        }
+        if (baselineServices.length > 0) {
+          await localServer.restoreBaselineRelease({
+            services: baselineServices,
+          });
+        }
+      }
+      if (changed.includes("backend")) {
+        const currentStoreHome = bundleStore.home;
+        const toolsDir = computerToolsDirectory();
+        if (release.modules.backend.source === "shell") {
+          const toolsNode = resolveToolsNodePath({
+            home: currentStoreHome,
+            resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+            isPackaged: app.isPackaged,
+          });
+          computerDaemon.reloadBinary({
+            spawn: spawnDaemon(
+              shellDaemonPath,
+              path.join(userData, "logs", "computer-daemon.log"),
+            ),
+            teamhubCliDirectory: path.join(here, "../teamhub-cli"),
+            extraEnv: {
+              ...(toolsNode ? { LINGER_TOOLS_NODE_PATH: toolsNode } : {}),
+              LINGER_CLI_NODE_PATH: process.execPath,
+              ...(existsSync(toolsDir)
+                ? { LINGER_COMPUTER_TOOLS_DIR: toolsDir }
+                : {}),
+            },
+            whenIdle: false,
+          });
+        } else {
+          const daemonDir = path.join(
+            currentStoreHome,
+            release.modules.backend.path,
+            "computer-daemon",
+          );
+          const daemonExe = path.join(
+            daemonDir,
+            process.platform === "win32"
+              ? "linger-computer-daemon.exe"
+              : "linger-computer-daemon",
+          );
+          if (existsSync(daemonExe)) {
+            const toolsNode = resolveToolsNodePath({
+              home: currentStoreHome,
+              releaseInfraNode: release.infra.node,
+              resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+              isPackaged: app.isPackaged,
+            });
+            computerDaemon.reloadBinary({
+              spawn: spawnDaemon(
+                daemonExe,
+                path.join(userData, "logs", "computer-daemon.log"),
+              ),
+              teamhubCliDirectory: path.join(daemonDir, "teamhub-cli"),
+              extraEnv: {
+                ...(toolsNode ? { LINGER_TOOLS_NODE_PATH: toolsNode } : {}),
+                // Allow externalized teamhub-cli wrappers to locate the Electron shell binary.
+                LINGER_CLI_NODE_PATH: process.execPath,
+                // Keep Shell-bundled computer-tools (Playwright, CuaDriver.app, QuickJS)
+                // reachable after daemon binary moves into `<home>/store/backend/<id>/`.
+                ...(existsSync(toolsDir)
+                  ? { LINGER_COMPUTER_TOOLS_DIR: toolsDir }
+                  : {}),
+              },
+              whenIdle: false,
+            });
+          }
+        }
+      }
+      log.info("release_orchestrator.services_restarted", {
+        appVersion: release.appVersion,
+        changed,
+      });
+    },
+    restoreBaselineServices: async (changed) => {
+      const servicesToRestore: ("teamhub" | "node-services" | "web")[] = [];
+      if (changed.includes("backend")) {
+        servicesToRestore.push("teamhub", "node-services");
+      }
+      if (changed.includes("web")) {
+        servicesToRestore.push("web");
+      }
+      if (
+        servicesToRestore.length > 0 &&
+        (await localServer.hasLocalInstance())
+      ) {
+        await localServer.restoreBaselineRelease({
+          services: servicesToRestore,
+        });
+      }
+      if (changed.includes("backend")) {
+        const toolsNode = resolveToolsNodePath({
+          home: bundleStore.home,
+          resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+          isPackaged: app.isPackaged,
+        });
+        const toolsDir = computerToolsDirectory();
+        computerDaemon.reloadBinary({
+          spawn: spawnDaemon(
+            shellDaemonPath,
+            path.join(userData, "logs", "computer-daemon.log"),
+          ),
+          teamhubCliDirectory: path.join(here, "../teamhub-cli"),
+          extraEnv: {
+            ...(toolsNode ? { LINGER_TOOLS_NODE_PATH: toolsNode } : {}),
+            LINGER_CLI_NODE_PATH: process.execPath,
+            ...(existsSync(toolsDir)
+              ? { LINGER_COMPUTER_TOOLS_DIR: toolsDir }
+              : {}),
+          },
+          whenIdle: false,
+        });
+      }
+      log.info("release_orchestrator.baseline_services_restored", {
+        changed,
+      });
+    },
+    buildHealthProbes: (_release, changed) => {
+      const origin = config.get().serverUrl;
+      const localOrigin =
+        origin && isLoopbackOrigin(origin) ? origin : undefined;
+      return buildV2HealthProbes({
+        changed,
+        localOrigin,
+        isPackaged: app.isPackaged,
+        loadLocalPorts: () => localServer.localPorts(),
+      });
+    },
+  });
   const modules: Module[] = [
     {
       name: "Config",
@@ -359,6 +708,8 @@ async function main(): Promise<void> {
       start: async () => {},
       stop: async () => {},
     },
+    bundleStore,
+    healthWatchdog,
     language,
     new EnrollmentModule({
       defaultDisplayName,
@@ -379,33 +730,13 @@ async function main(): Promise<void> {
       },
       defaultDirectory: path.join(app.getPath("home"), "Linger"),
     }),
-    new ComputerDaemonModule({
-      createEmbeddedDriver:
-        process.platform === "darwin" && app.isPackaged
-          ? (selected) =>
-              new EmbeddedComputerUse(process.resourcesPath, selected)
-          : undefined,
-      spawn: spawnDaemon(
-        daemonPath,
-        path.join(userData, "logs", "computer-daemon.log"),
-      ),
-      credentials,
-      directory: daemonDirectory,
-      // The bundled teamhub CLI, run by the app's own Node, so runtimes reply
-      // with a matching version and the computer needs no Node.
-      teamhubCliDirectory: path.join(here, "../teamhub-cli"),
-      defaultDisplayName,
-      env: daemonEnv(loginShell),
-      ...(devLocalmodels ? { devLocalmodels } : {}),
-      ...(process.platform === "win32"
-        ? { protect: protectWithDaemon(daemonPath) }
-        : {}),
-      ...desktopPermissions,
-    }),
+    computerDaemon,
     status,
     new PowerGuardModule(electronPower()),
     windows,
     localServer,
+    bundleUpdater,
+    releaseOrchestrator,
     new DiagnosticsModule({
       userData,
       logs: path.join(userData, "logs"),
@@ -421,6 +752,7 @@ async function main(): Promise<void> {
     new TrayModule({ quit: () => void quit() }),
     new DesktopIpcModule({
       defaultDisplayName,
+      shellVersion,
       ...(desktopPermissions ? { permissions: desktopPermissions } : {}),
       driverUpdater,
     }),
@@ -515,6 +847,35 @@ function daemonExecutable(): string {
       );
 }
 
+// Shell-bundled computer tools (CuaDriver.app, Playwright, QuickJS). Kept in
+// the signed Shell bundle and passed explicitly via LINGER_COMPUTER_TOOLS_DIR
+// when the daemon binary is hot-reloaded from `<LINGER_HOME>/store/backend/`.
+function computerToolsDirectory(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "cli", "computer-tools")
+    : path.join(
+        here,
+        "../computer-tools",
+        `${process.platform}-${process.arch}`,
+        "cli",
+        "computer-tools",
+      );
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === "127.0.0.1" ||
+      hostname === "localhost" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function electronPower(): PowerApi {
   return {
     block: () => powerSaveBlocker.start("prevent-app-suspension"),
@@ -567,6 +928,7 @@ async function inspectEnv(
 // daemon keeps LINGER_* from runtimes.
 async function daemonEnv(
   loginShell: Promise<Record<string, string> | undefined>,
+  toolsNodePath?: string,
 ): Promise<Record<string, string>> {
   const login = await loginShell;
   const env: Record<string, string> = {};
@@ -584,6 +946,10 @@ async function daemonEnv(
     const value = process.env[name];
     if (value) env[name] = value;
   }
+  env.LINGER_CLI_NODE_PATH = process.execPath;
+  if (toolsNodePath) env.LINGER_TOOLS_NODE_PATH = toolsNodePath;
+  const toolsDir = computerToolsDirectory();
+  if (existsSync(toolsDir)) env.LINGER_COMPUTER_TOOLS_DIR = toolsDir;
   return env;
 }
 

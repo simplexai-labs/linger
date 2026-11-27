@@ -30,6 +30,9 @@ export function parseInstallerArguments(args: string[]) {
     migrate?: boolean;
     stop?: boolean;
     stopLocalModels?: boolean;
+    stopServices?: ("teamhub" | "node-services" | "web")[];
+    switchRelease?: string;
+    switchServices?: ("teamhub" | "node-services" | "web")[];
     prepareVoiceTools?: boolean;
   } = {
     home: lingerHome(),
@@ -91,6 +94,9 @@ export function parseInstallerArguments(args: string[]) {
         "--source-repo",
         "--instance",
         "--inspect-target",
+        "--switch-release",
+        "--services",
+        "--stop-services",
       ].includes(flag ?? "")
     )
       throw new Error("Invalid installer option.");
@@ -101,7 +107,36 @@ export function parseInstallerArguments(args: string[]) {
     else if (flag === "--inspect-target")
       options.inspectTarget = path.resolve(value);
     else if (flag === "--source-repo") options.sourceRepo = path.resolve(value);
-    else if (flag === "--instance") {
+    else if (flag === "--switch-release") {
+      if (!/^[A-Za-z0-9._+-]{1,64}$/.test(value))
+        throw new Error("Invalid release version.");
+      options.switchRelease = value;
+    } else if (flag === "--services" || flag === "--stop-services") {
+      const valid = new Set(["teamhub", "node-services", "web"]);
+      const parsed = value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (parsed.length === 0 || parsed.some((item) => !valid.has(item)))
+        throw new Error(
+          flag === "--stop-services"
+            ? "Invalid stop-services list."
+            : "Invalid switch-release services.",
+        );
+      if (flag === "--stop-services") {
+        options.stopServices = parsed as (
+          | "teamhub"
+          | "node-services"
+          | "web"
+        )[];
+      } else {
+        options.switchServices = parsed as (
+          | "teamhub"
+          | "node-services"
+          | "web"
+        )[];
+      }
+    } else if (flag === "--instance") {
       if (!/^[a-z][a-z0-9-]{0,39}$/.test(value))
         throw new Error("Invalid instance name.");
       options.instanceName = value;
@@ -121,6 +156,8 @@ export function parseInstallerArguments(args: string[]) {
     !options.migrate &&
     !options.stop &&
     !options.stopLocalModels &&
+    !options.stopServices &&
+    !options.switchRelease &&
     !options.prepareVoiceTools
   )
     throw new Error("The installer needs a source checkout (--source-repo).");
@@ -134,6 +171,12 @@ export function parseInstallerArguments(args: string[]) {
     throw new Error("Keys need an instance.");
   if (options.stop && !options.instanceName)
     throw new Error("Stop needs an instance.");
+  if (options.stopServices && !options.instanceName)
+    throw new Error("Stop services needs an instance.");
+  if (options.switchRelease && !options.instanceName)
+    throw new Error("Switch release needs an instance.");
+  if (options.switchServices && !options.switchRelease)
+    throw new Error("Services option requires --switch-release.");
   if (options.prepareVoiceTools && !options.instanceName)
     throw new Error("Voice tools preparation needs an instance.");
   return options;
@@ -489,6 +532,115 @@ async function stopLocalModels(
     process.exit(outcome.failed.length ? 1 : 0),
   );
 }
+// Headless selective service stop for V2 upgrades: stops only the requested
+// switchable services (`teamhub`, `node-services`, `web`) while keeping
+// PostgreSQL and LiveKit running.
+async function stopServicesCommand(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const [{ loadInstance }, { stopNativeReleaseServices }] = await Promise.all([
+    import("@linger/local-installation/instance"),
+    import("@linger/local-installation/native-source"),
+  ]);
+  const controller = new AbortController();
+  process.once("SIGTERM", () => controller.abort());
+  try {
+    const instance = await loadInstance({
+      name: options.instanceName!,
+      home: options.home,
+    });
+    if (!instance) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          message: `No source instance named ${options.instanceName}.`,
+        })}\n`,
+        () => process.exit(1),
+      );
+      return;
+    }
+    const result = await stopNativeReleaseServices(instance, {
+      services: options.stopServices!,
+      signal: controller.signal,
+      log: (message) => process.stderr.write(message.replace(/\n?$/, "\n")),
+    });
+    process.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`, () =>
+      process.exit(0),
+    );
+  } catch (error: unknown) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      })}\n`,
+      () => process.exit(1),
+    );
+  }
+}
+// Headless backend release switch for V2 incremental updates: switches only
+// `teamhub` and `node-services` under the instance lock and native/state PID
+// tracking while keeping PostgreSQL, LiveKit, and Web alive.
+async function switchReleaseCommand(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const [
+    { loadInstance },
+    { restoreBaselineNativeRelease, switchNativeRelease },
+  ] = await Promise.all([
+    import("@linger/local-installation/instance"),
+    import("@linger/local-installation/native-source"),
+  ]);
+  const controller = new AbortController();
+  process.once("SIGTERM", () => controller.abort());
+  try {
+    const instance = await loadInstance({
+      name: options.instanceName!,
+      home: options.home,
+    });
+    if (!instance) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          message: `No source instance named ${options.instanceName}.`,
+        })}\n`,
+        () => process.exit(1),
+      );
+      return;
+    }
+    const result =
+      options.switchRelease === "baseline"
+        ? await restoreBaselineNativeRelease(instance, {
+            home: options.home,
+            ...(options.switchServices
+              ? { services: options.switchServices }
+              : {}),
+            signal: controller.signal,
+            log: (message) =>
+              process.stderr.write(message.replace(/\n?$/, "\n")),
+          })
+        : await switchNativeRelease(instance, {
+            home: options.home,
+            appVersion: options.switchRelease!,
+            ...(options.switchServices
+              ? { services: options.switchServices }
+              : {}),
+            signal: controller.signal,
+            log: (message) =>
+              process.stderr.write(message.replace(/\n?$/, "\n")),
+          });
+    process.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`, () =>
+      process.exit(0),
+    );
+  } catch (error: unknown) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      })}\n`,
+      () => process.exit(1),
+    );
+  }
+}
 // Detached background worker for cold first installs: extracts and verifies
 // voice tools while the main install proceeds, then waits for "go\n" on stdin
 // before starting native LiveKit.
@@ -596,6 +748,8 @@ if (
     !options.prefetchBifrost &&
     !options.stop &&
     !options.stopLocalModels &&
+    !options.stopServices &&
+    !options.switchRelease &&
     !options.prepareVoiceTools
   )
     await import("@linger/local-installation/legacy-migration")
@@ -611,6 +765,8 @@ if (
       });
   if (options?.stop) await stopInstallation(options);
   else if (options?.stopLocalModels) await stopLocalModels(options);
+  else if (options?.stopServices) await stopServicesCommand(options);
+  else if (options?.switchRelease) await switchReleaseCommand(options);
   else if (options?.prepareVoiceTools) await prepareVoiceTools(options);
   else if (options?.migrate)
     process.stdout.write(`${JSON.stringify({ skipped })}\n`, () =>

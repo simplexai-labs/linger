@@ -16,7 +16,52 @@ DESKTOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NATIVE = os.path.join(DESKTOP, "dist", "installer", "native")
 COMPUTER_TOOLS = os.path.join(DESKTOP, "dist", "computer-tools")
 SOURCE = os.path.join(DESKTOP, "dist", "installer", "source")
+SEED = os.path.join(DESKTOP, "dist", "seed")
 TEAMHUB_COMMANDS = ("teamhub", "migrate", "account")
+V2_SEED_MODULES = ("web", "backend", "node-native-deps")
+
+
+def check_seed_manifest(target, seed_dir=SEED):
+    """Validates a V2 seed folder (`dist/seed/seed-manifest.json`).
+
+    Supports both lightweight `mode: "shell-baseline"` manifests (~1 KB JSON
+    with no duplicate archives) and legacy offline archive seeds whose
+    referenced `.tar.zst` files are verified directly by size and sha256.
+    """
+    manifest_path = os.path.join(seed_dir, "seed-manifest.json")
+    if not os.path.exists(manifest_path):
+        return None
+    with open(manifest_path) as file:
+        manifest = json.load(file)
+    if manifest.get("schema") != 1:
+        sys.exit(f"{manifest_path}: unsupported seed manifest schema {manifest.get('schema')}")
+    bundles = manifest.get("bundles")
+    if not isinstance(bundles, dict):
+        sys.exit(f"{manifest_path}: missing bundles map")
+    if manifest.get("mode") == "shell-baseline":
+        if not manifest.get("appVersion"):
+            sys.exit(f"{manifest_path}: shell-baseline seed missing appVersion")
+        compat = manifest.get("compat")
+        if not isinstance(compat, dict) or not compat.get("minNativeDepsHash"):
+            sys.exit(f"{manifest_path}: shell-baseline seed missing compat.minNativeDepsHash")
+        for name in V2_SEED_MODULES:
+            item = bundles.get(name)
+            if not isinstance(item, dict) or not item.get("artifactId") or not item.get("inputHash"):
+                sys.exit(f"{manifest_path}: missing required shell-baseline bundle '{name}'")
+        return manifest
+    if manifest.get("target") != target:
+        sys.exit(f"{manifest_path}: seed target is {manifest.get('target')}, expected {target}")
+    for name in V2_SEED_MODULES:
+        item = bundles.get(name)
+        if not isinstance(item, dict) or not item.get("file"):
+            sys.exit(f"{manifest_path}: missing required seed bundle '{name}'")
+        rel = item["file"]
+        if rel.startswith("/") or ".." in rel.split("/"):
+            sys.exit(f"{manifest_path}: unsafe bundle path '{rel}'")
+        full = os.path.join(seed_dir, rel)
+        if not matches(full, item):
+            sys.exit(f"{full} does not match {manifest_path} for '{name}'")
+    return manifest
 MACHO_MAGIC = {b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"}
 
 

@@ -14,6 +14,11 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 
 import { redact } from "@linger/local-installation/redaction";
+import {
+  parseDenylistState,
+  parseReleasePointer,
+  readJsonIfExists,
+} from "@linger/local-installation/release-descriptor";
 import { ZipFile } from "yazl";
 
 import {
@@ -26,6 +31,11 @@ import type { LocalServerModule } from "./local-server.js";
 import { LOCAL_INSTANCE } from "./local-server.js";
 import type { Module, ModuleContext } from "./modules.js";
 import { savedSecretValues } from "./provider-keys.js";
+import {
+  ROLLBACK_HISTORY_FILENAME,
+  readRollbackHistory,
+} from "./v2-rollback-history.js";
+import { redactServiceLogText } from "./v2-service-logs.js";
 
 // A file put into the bundle: where it is read from and its name inside.
 export interface DiagnosticsFile {
@@ -62,7 +72,7 @@ export const excludedFromDiagnostics = (file: string): boolean => {
     name.endsWith(".env") ||
     // Installer job inputs carry model API keys.
     name.endsWith(".input.json") ||
-    /\.(key|pem|p12|sqlite|sqlite-wal|sqlite-shm|db)$/.test(name) ||
+    /\.(key|pem|p12|sqlite|sqlite-wal|sqlite-shm|db|dump)$/.test(name) ||
     name.includes("credential") ||
     name.includes("secret")
   );
@@ -122,6 +132,7 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024;
 // the bundle.
 export const MAX_LOCALMODELS_FILES = 5;
 export const MAX_LOCALMODELS_BYTES = 256 * 1024;
+export const MAX_V2_ROLLBACK_HISTORY_BYTES = 256 * 1024;
 
 const readTail = async (
   file: string,
@@ -268,6 +279,35 @@ export const installationFiles = async (
     /\.(json|log)$/.test(file),
   ))
     add(file);
+  // V2 incremental update state and release descriptors (never walk store/,
+  // downloads/, or database backups).
+  for (const name of [
+    "current.json",
+    "previous.json",
+    "pending.json",
+    "denylist.json",
+  ]) {
+    const file = path.join(home, "state", name);
+    if (await isFile(file)) add(file);
+  }
+  const rollbackHistoryFile = path.join(
+    home,
+    "state",
+    ROLLBACK_HISTORY_FILENAME,
+  );
+  if (await isFile(rollbackHistoryFile)) {
+    files.push({
+      file: rollbackHistoryFile,
+      entry: diagnosticsEntry(prefix, home, rollbackHistoryFile),
+      maxBytes: MAX_V2_ROLLBACK_HISTORY_BYTES,
+    });
+  }
+  for (const file of await listFiles(
+    path.join(home, "releases"),
+    1,
+    (file) => path.basename(file) === "release.json",
+  ))
+    add(file);
   files.push(...(await localmodelsFiles(home, prefix)));
   const instances = path.join(home, "instances");
   for (const name of await readdir(instances).catch(() => [] as string[]))
@@ -275,7 +315,13 @@ export const installationFiles = async (
       path.join(instances, name),
       3,
       (file) => /\.(json|log)$/.test(file),
-      new Set(["data", "postgres-data", "node_modules", "processes"]),
+      new Set([
+        "backups",
+        "data",
+        "postgres-data",
+        "node_modules",
+        "processes",
+      ]),
     ))
       add(file);
   return files.filter((item) => !excludedFromDiagnostics(item.file));
@@ -339,20 +385,61 @@ export const collectDiagnostics = async (
     added.add(entry);
     for (const key of keys) text = text.replaceAll(key, "[REDACTED]");
     zip.addBuffer(
-      Buffer.from(withoutHome(redactDiagnostics(text)), "utf8"),
+      Buffer.from(
+        withoutHome(redactServiceLogText(redactDiagnostics(text))),
+        "utf8",
+      ),
       entry,
     );
   };
   const files = [...(await desktopFiles(options.userData))];
+  let v2UpdateSummary: Record<string, unknown> | undefined;
   for (const [index, home] of homes.entries()) {
     const prefix = index === 0 ? "linger-home" : `linger-home-${index + 1}`;
     files.push(...(await installationFiles(home, prefix)));
+    if (!v2UpdateSummary) {
+      const [current, denylist, rollbacks] = await Promise.all([
+        readJsonIfExists(
+          path.join(home, "state", "current.json"),
+          parseReleasePointer,
+        ).catch(() => undefined),
+        readJsonIfExists(
+          path.join(home, "state", "denylist.json"),
+          parseDenylistState,
+        ).catch(() => undefined),
+        readRollbackHistory(home, 5).catch(() => []),
+      ]);
+      if (
+        current ||
+        (denylist && denylist.entries.length > 0) ||
+        rollbacks.length > 0
+      ) {
+        v2UpdateSummary = {
+          ...(current ? { currentVersion: current.appVersion } : {}),
+          denylistedVersions:
+            denylist?.entries.map((entry) => entry.appVersion) ?? [],
+          recentRollbacks: rollbacks.map((record) => ({
+            timestamp: record.timestamp,
+            failedVersion: record.failedVersion,
+            restoredVersion: record.restoredVersion,
+            stage: record.stage,
+            failedServices: record.failedServices,
+            reason: redactServiceLogText(record.reason),
+            dbRestored: record.dbRestored,
+            ...(record.manualRecoveryRequired
+              ? { manualRecoveryRequired: true }
+              : {}),
+          })),
+        };
+      }
+    }
   }
   addText(
     "summary.json",
     JSON.stringify(
       {
         ...options.summary,
+        ...(v2UpdateSummary ? { v2Update: v2UpdateSummary } : {}),
         os: `${os.type()} ${os.release()} ${os.arch()}`,
         homes,
         files: files.map((item) => item.entry),

@@ -66,7 +66,17 @@ func resolveTeamHubTarget(executable string) (teamHubTarget, error) {
 		return teamHubTarget{program: electronApp, entry: entry, runAsNode: true}, nil
 	}
 
-	// Priority 3: Unpackaged development fallback via explicit LINGER_NODE or PATH.
+	// Priority 3: Externalized V2 store fallback via LINGER_CLI_NODE_PATH,
+	// injected by the Desktop shell and forwarded by the daemon when the CLI
+	// lives outside the Electron app bundle.
+	if rawCliNode, ok := os.LookupEnv("LINGER_CLI_NODE_PATH"); ok {
+		if cliNode := strings.TrimSpace(rawCliNode); cliNode != "" && filepath.IsAbs(cliNode) && isRegularFile(cliNode) {
+			runAsNode := !strings.EqualFold(filepath.Base(cliNode), nodeBinaryName())
+			return teamHubTarget{program: filepath.Clean(cliNode), entry: entry, runAsNode: runAsNode}, nil
+		}
+	}
+
+	// Priority 4: Unpackaged development fallback via explicit LINGER_NODE or PATH.
 	if rawOverride, ok := os.LookupEnv("LINGER_NODE"); ok {
 		if override := strings.TrimSpace(rawOverride); override != "" {
 			if strings.ContainsAny(override, `/\`) || filepath.VolumeName(override) != "" {

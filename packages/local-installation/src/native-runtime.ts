@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // The services Native runs, built by a desktop release from the source package
 // it ships (apps/desktop/scripts/build-native-runtime.mjs): Web's production
@@ -27,10 +28,16 @@ export interface NativeRuntimeFile {
 export interface NativeRuntime {
   schema: number;
   target: string;
-  sourceCommit: string;
-  sourceArchiveSha256: string;
+  sourceCommit?: string;
+  sourceArchiveSha256?: string;
+  /** V2 modular bundle identifiers (decoupled from the 45 MB source archive). */
+  artifactId?: string;
+  nativeDepsHash?: string;
   files: Record<string, NativeRuntimeFile>;
 }
+
+/** V2 runtime schema for decoupled web / node-services / node-native-deps bundles. */
+export const BUNDLE_RUNTIME_SCHEMA = 2;
 
 // Entries the services start from; a runtime without them is not one.
 const ENTRIES = [
@@ -50,13 +57,19 @@ const safePath = (file: string) =>
 
 export function parseNativeRuntime(value: unknown): NativeRuntime {
   const manifest = value as NativeRuntime;
+  const isV1 =
+    manifest?.schema === NATIVE_RUNTIME_SCHEMA &&
+    /^[0-9a-f]{40}$/.test(manifest.sourceCommit ?? "") &&
+    /^[0-9a-f]{64}$/.test(manifest.sourceArchiveSha256 ?? "");
+  const isV2 =
+    manifest?.schema === BUNDLE_RUNTIME_SCHEMA &&
+    typeof manifest.artifactId === "string" &&
+    manifest.artifactId.length > 0;
   const valid =
     !!manifest &&
     typeof manifest === "object" &&
-    manifest.schema === NATIVE_RUNTIME_SCHEMA &&
+    (isV1 || isV2) &&
     typeof manifest.target === "string" &&
-    /^[0-9a-f]{40}$/.test(manifest.sourceCommit ?? "") &&
-    /^[0-9a-f]{64}$/.test(manifest.sourceArchiveSha256 ?? "") &&
     !!manifest.files &&
     typeof manifest.files === "object" &&
     Object.entries(manifest.files).every(
@@ -69,13 +82,19 @@ export function parseNativeRuntime(value: unknown): NativeRuntime {
         Number.isSafeInteger(item.bytes) &&
         item.bytes >= 0,
     ) &&
-    ENTRIES.every((entry) => entry in manifest.files);
+    (!isV1 || ENTRIES.every((entry) => entry in manifest.files));
   if (!valid) throw new Error("Invalid Native runtime manifest.");
   return {
     schema: manifest.schema,
     target: manifest.target,
-    sourceCommit: manifest.sourceCommit,
-    sourceArchiveSha256: manifest.sourceArchiveSha256,
+    ...(manifest.sourceCommit ? { sourceCommit: manifest.sourceCommit } : {}),
+    ...(manifest.sourceArchiveSha256
+      ? { sourceArchiveSha256: manifest.sourceArchiveSha256 }
+      : {}),
+    ...(manifest.artifactId ? { artifactId: manifest.artifactId } : {}),
+    ...(manifest.nativeDepsHash
+      ? { nativeDepsHash: manifest.nativeDepsHash }
+      : {}),
     files: Object.fromEntries(
       Object.entries(manifest.files).map(([file, { bytes, sha256 }]) => [
         file,
@@ -83,6 +102,91 @@ export function parseNativeRuntime(value: unknown): NativeRuntime {
       ]),
     ),
   };
+}
+
+export const V2_ESM_RESOLVE_FILENAME = "v2-esm-resolve.mjs";
+
+/**
+ * Resolves the absolute path to the V2 Node 26 `module.registerHooks()` ESM
+ * loader script. Prefers the script packaged inside `<nodeServicesDir>/dist/`,
+ * falling back to the co-located script next to `@linger/local-installation` /
+ * `installer.js`.
+ */
+export function resolveV2EsmResolveHookPath(nodeServicesDir?: string): string {
+  if (nodeServicesDir) {
+    const bundled = path.join(nodeServicesDir, "dist", V2_ESM_RESOLVE_FILENAME);
+    if (existsSync(bundled)) return bundled;
+  }
+  return fileURLToPath(
+    new URL(`./${V2_ESM_RESOLVE_FILENAME}`, import.meta.url),
+  );
+}
+
+function mergeNodeImportOption(
+  existing: string | undefined,
+  hookPath: string,
+): string {
+  const flag = `--import=${pathToFileURL(path.resolve(hookPath)).href}`;
+  if (!existing?.trim()) return flag;
+  if (existing.includes(flag)) return existing;
+  return `${flag} ${existing.trim()}`;
+}
+
+/**
+ * Builds the process environment that wires a decoupled V2 node-services JS
+ * bundle directory (`store/backend/<id>/node-services`) to its shared native
+ * dependency cache (`infra/node-deps/<hash>/node_modules`), sibling
+ * `@linger/voice-runtime` bundle, and optional hot-loaded prompts.
+ *
+ * Uses `NODE_PATH` for CommonJS `require()` / `createRequire()` AND
+ * `LINGER_NODE_DEPS_DIR` + `NODE_OPTIONS=--import=<fileURL>` so Node 26 ESM
+ * `import` statements work in both the supervisor and every spawned worker
+ * process without symlinks or Windows NTFS junctions.
+ */
+export function resolveBundleRuntimeEnv(options: {
+  readonly nodeDepsDir: string;
+  readonly fallbackNodeDepsDir?: string;
+  readonly voiceRuntimeDir?: string;
+  readonly esmResolveHookPath?: string;
+  readonly promptsDir?: string;
+  readonly baseEnv?: Readonly<Record<string, string | undefined>>;
+}): Record<string, string> {
+  const resolvedDepsDir = path.resolve(options.nodeDepsDir);
+  const depsNodeModules = path.join(resolvedDepsDir, "node_modules");
+  const resolvedFallbackDir = options.fallbackNodeDepsDir
+    ? path.resolve(options.fallbackNodeDepsDir)
+    : undefined;
+  const fallbackNodeModules =
+    resolvedFallbackDir && resolvedFallbackDir !== resolvedDepsDir
+      ? path.join(resolvedFallbackDir, "node_modules")
+      : undefined;
+  const existingNodePath = options.baseEnv?.NODE_PATH;
+  const nodePathEntries = [
+    depsNodeModules,
+    ...(fallbackNodeModules ? [fallbackNodeModules] : []),
+    ...(existingNodePath ? [existingNodePath] : []),
+  ];
+  const nodePath = nodePathEntries.join(path.delimiter);
+  const env: Record<string, string> = {
+    NODE_PATH: nodePath,
+    LINGER_NODE_DEPS_DIR: resolvedDepsDir,
+  };
+  if (resolvedFallbackDir && resolvedFallbackDir !== resolvedDepsDir) {
+    env.LINGER_FALLBACK_NODE_DEPS_DIR = resolvedFallbackDir;
+  }
+  if (options.voiceRuntimeDir) {
+    env.LINGER_VOICE_RUNTIME_DIR = path.resolve(options.voiceRuntimeDir);
+  }
+  if (options.esmResolveHookPath) {
+    env.NODE_OPTIONS = mergeNodeImportOption(
+      options.baseEnv?.NODE_OPTIONS,
+      options.esmResolveHookPath,
+    );
+  }
+  if (options.promptsDir) {
+    env.LINGER_PROMPTS_DIR = options.promptsDir;
+  }
+  return env;
 }
 
 async function readManifest(

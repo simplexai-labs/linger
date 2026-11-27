@@ -65,6 +65,7 @@ import {
   SignInRejectedError,
   signInFailure,
   signInWithPassword,
+  unpackArchive,
   type LocalServerIdentity,
   type LocalServerOptions,
 } from "./local-server.js";
@@ -2673,6 +2674,39 @@ describe("LocalServerModule", () => {
       "https://shell-profile.example",
     );
     await resumeFixture.host.stop("quit");
+  });
+
+  it("re-resolves dynamic V2 daemonExecutable on every setup inspection", async () => {
+    let activeDaemon = "/app/resources/computer/linger-computer-daemon";
+    const f = fixture({
+      checkout: "/src",
+      daemonExecutable: async () => activeDaemon,
+    });
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        eligible: true,
+      }),
+    );
+    const first = JSON.parse(
+      readFileSync(path.join(f.home, "runtime", "inspect-env.json"), "utf8"),
+    ) as { LINGER_COMPUTER_DAEMON?: string };
+    expect(first.LINGER_COMPUTER_DAEMON).toBe(
+      "/app/resources/computer/linger-computer-daemon",
+    );
+
+    // Simulate a V2 backend hot-reload promoting a newer daemon binary.
+    activeDaemon =
+      "/home/user/.linger/store/backend/backend-abc123/computer-daemon/linger-computer-daemon";
+    f.module.recheck();
+    await waitForInstaller(() => {
+      const updated = JSON.parse(
+        readFileSync(path.join(f.home, "runtime", "inspect-env.json"), "utf8"),
+      ) as { LINGER_COMPUTER_DAEMON?: string };
+      expect(updated.LINGER_COMPUTER_DAEMON).toBe(activeDaemon);
+    });
   });
 
   it("marks checked Inkling 2 Mini models with featuredInkling using the shared matcher", async () => {
@@ -8902,6 +8936,36 @@ describe("InstallerApi polling", () => {
     ).rejects.toThrow();
     expect(fake.reads()).toBe(1);
   });
+});
+
+describe("unpackArchive", () => {
+  it.skipIf(process.platform === "win32")(
+    "unpacks a tar.gz archive when the target path traverses a depth-changing symlink",
+    async () => {
+      const root = tempDirectory();
+      const archiveRoot = path.join(root, "app-bundle");
+      mkdirSync(archiveRoot, { recursive: true });
+      const { bytes } = sourceArchive(archiveRoot);
+      const archiveFile = path.join(archiveRoot, "linger.tar.gz");
+      writeFileSync(archiveFile, bytes);
+
+      // Reproduces macOS /tmp -> /private/tmp where the symlink path is
+      // shallower than its realpath, breaking naive path.relative(unpacked, file).
+      const realHome = path.join(root, "private", "tmp", "home");
+      mkdirSync(realHome, { recursive: true });
+      const symlinkHome = path.join(root, "tmp-link");
+      symlinkSync(realHome, symlinkHome);
+
+      const unpacked = path.join(symlinkHome, "unpacked");
+      await unpackArchive(archiveFile, unpacked, new AbortController().signal);
+      expect(
+        existsSync(path.join(unpacked, "scripts", "source-native.mjs")),
+      ).toBe(true);
+      expect(
+        JSON.parse(readFileSync(path.join(unpacked, "package.json"), "utf8")),
+      ).toEqual({ name: "linger" });
+    },
+  );
 });
 
 describe("pollDelayMs", () => {

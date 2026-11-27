@@ -392,14 +392,18 @@ export interface LocalServerOptions {
   // The resolved user terminal environment passed ONLY to read-only setup
   // inspection (--inspect) so daemon runtime probing can read profile
   // variables (e.g. ANTHROPIC_BASE_URL, OPENAI_API_KEY, CODEX_HOME). Never
-  // forwarded to --resume, BYOK checks, or the serving installer that starts
-  // local services.
+  // forwarded to --resume, BYOK checks, --switch-release, or the serving
+  // installer that starts local services.
   readonly inspectEnv?:
     | Readonly<Record<string, string>>
     | Promise<Readonly<Record<string, string>>>;
-  // Bundled linger-computer-daemon executable used as the single source of
-  // truth for AI Runtime discovery and authentication probing during setup.
-  readonly daemonExecutable?: string;
+  // Bundled or active V2 backend linger-computer-daemon executable used as the
+  // single source of truth for AI Runtime discovery and authentication probing
+  // during setup. Accepts a resolver so V2 backend hot-reloads take effect
+  // without restarting the Electron shell.
+  readonly daemonExecutable?:
+    | string
+    | (() => string | undefined | Promise<string | undefined>);
   // The bundled installer (installer.js, web/, native-process-worker.mjs).
   readonly installerDirectory: string;
   // Shared bundled Node.js executable shipped with Computer tools
@@ -1384,22 +1388,31 @@ export class LocalServerModule implements Module {
           };
   }
 
-  #daemonEnv(): NodeJS.ProcessEnv {
-    return this.#options.daemonExecutable
+  async #resolveDaemonExecutable(): Promise<string | undefined> {
+    const configured = this.#options.daemonExecutable;
+    return typeof configured === "function" ? await configured() : configured;
+  }
+
+  async #daemonEnv(): Promise<NodeJS.ProcessEnv> {
+    const daemon = await this.#resolveDaemonExecutable();
+    return daemon
       ? {
           ...process.env,
-          LINGER_COMPUTER_DAEMON: this.#options.daemonExecutable,
+          LINGER_COMPUTER_DAEMON: daemon,
         }
       : { ...process.env };
   }
 
   async #inspectEnv(): Promise<NodeJS.ProcessEnv> {
-    const resolved = await this.#options.inspectEnv;
+    const [resolved, daemon] = await Promise.all([
+      this.#options.inspectEnv,
+      this.#resolveDaemonExecutable(),
+    ]);
     const base: NodeJS.ProcessEnv = resolved
       ? { ...resolved }
       : { ...process.env };
-    if (this.#options.daemonExecutable) {
-      base.LINGER_COMPUTER_DAEMON = this.#options.daemonExecutable;
+    if (daemon) {
+      base.LINGER_COMPUTER_DAEMON = daemon;
     }
     return base;
   }
@@ -1414,6 +1427,7 @@ export class LocalServerModule implements Module {
   ): Promise<Record<string, unknown>> {
     const home = this.#location ?? this.#home;
     try {
+      const daemonEnv = await this.#daemonEnv();
       const output = await new Promise<string>((resolve, reject) => {
         const child = spawn(
           process.execPath,
@@ -1428,7 +1442,7 @@ export class LocalServerModule implements Module {
             stdio: ["pipe", "pipe", "pipe"],
             windowsHide: true,
             env: {
-              ...this.#daemonEnv(),
+              ...daemonEnv,
               ELECTRON_RUN_AS_NODE: "1",
               LINGER_HOME: home,
             },
@@ -2568,6 +2582,290 @@ export class LocalServerModule implements Module {
     if (!this.#serverCheck || now - this.#serverCheck.at >= SERVER_CHECK_TTL_MS)
       this.#serverCheck = { at: now, ok: this.#checkServer(record) };
     return this.#serverCheck.ok;
+  }
+
+  /**
+   * Returns true when this computer has a local Linger installation record
+   * (`desktop/local-server.json`). Thin Client installations pointing at a
+   * remote server return false so V2 local bundle seeds/updates are skipped.
+   */
+  async hasLocalInstance(): Promise<boolean> {
+    return (await this.#readRecord()) !== undefined;
+  }
+
+  /**
+   * Returns the active local installation home directory (reflecting a custom
+   * setup install location when configured).
+   */
+  get home(): string {
+    return this.#home;
+  }
+
+  /**
+   * Resolves the active local installation home from `desktop/local-server.json`
+   * before module startup so V2 store and cold-start daemon resolution match a
+   * custom install location.
+   */
+  async activeHome(): Promise<string> {
+    const record = await this.#readRecord();
+    if (record) this.#home = record.home;
+    return this.#home;
+  }
+
+  /**
+   * Returns the bound local service ports from `instance.json` for the active
+   * local installation, or `undefined` when no native instance exists yet.
+   */
+  async localPorts(): Promise<
+    | Readonly<
+        Record<
+          "web" | "teamhub" | "nodeServices" | "document" | "postgres",
+          number
+        >
+      >
+    | undefined
+  > {
+    const record = await this.#readRecord();
+    const home = record?.home ?? this.#home;
+    const instance = await loadInstance({ name: LOCAL_INSTANCE, home }).catch(
+      () => undefined,
+    );
+    return instance?.source?.ports;
+  }
+
+  /**
+   * Delegates a V2 service release switch (`teamhub`, `node-services`, and/or
+   * `web`) to the bundled `installer.js --instance desktop --switch-release <appVersion>`
+   * so `installer.js` remains the single lifecycle & PID owner while keeping
+   * PostgreSQL and LiveKit running.
+   */
+  async switchRelease(
+    appVersion: string,
+    optionsOrSignal:
+      | AbortSignal
+      | {
+          readonly services?: readonly ("teamhub" | "node-services" | "web")[];
+          readonly signal?: AbortSignal;
+        } = this.#abort.signal,
+  ): Promise<void> {
+    const signal =
+      optionsOrSignal instanceof AbortSignal
+        ? optionsOrSignal
+        : (optionsOrSignal.signal ?? this.#abort.signal);
+    const services =
+      optionsOrSignal instanceof AbortSignal
+        ? undefined
+        : optionsOrSignal.services;
+    const record = await this.#readRecord();
+    if (!record) {
+      throw new Error("Cannot switch release: no local Linger installation.");
+    }
+    if (!existsSync(this.#installerScript())) {
+      throw new Error(
+        "Cannot switch release: bundled installer.js is missing.",
+      );
+    }
+    const [daemonEnv, proxyEnv, node] = await Promise.all([
+      this.#daemonEnv(),
+      this.#systemProxyEnv(),
+      this.#ensureNode(signal),
+    ]);
+    const env = {
+      ...daemonEnv,
+      ...proxyEnv,
+      LINGER_HOME: record.home,
+    };
+    const outcome = await new Promise<{ ok?: boolean; message?: string }>(
+      (resolve, reject) => {
+        const child = spawn(
+          node,
+          [
+            ...linuxNodeFdHygieneArgs(this.#options.platform),
+            this.#installerScript(),
+            "--home",
+            record.home,
+            "--instance",
+            LOCAL_INSTANCE,
+            "--switch-release",
+            appVersion,
+            ...(services && services.length > 0
+              ? ["--services", services.join(",")]
+              : []),
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+            env,
+            signal,
+          },
+        );
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const finish = (code: number | null) => {
+          if (settled) return;
+          settled = true;
+          const lastLine = stdout.trim().split("\n").at(-1) ?? "";
+          try {
+            const parsed = JSON.parse(lastLine) as {
+              ok?: boolean;
+              message?: string;
+            };
+            if (code === 0 && parsed.ok) {
+              resolve(parsed);
+            } else {
+              reject(
+                new Error(
+                  parsed.message ||
+                    stderr.trim().slice(-500) ||
+                    `installer --switch-release exited with code ${code}`,
+                ),
+              );
+            }
+          } catch {
+            reject(
+              new Error(
+                stderr.trim().slice(-500) ||
+                  `installer --switch-release exited with code ${code}`,
+              ),
+            );
+          }
+        };
+        child.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf8");
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr = (stderr + chunk.toString("utf8")).slice(-8_192);
+        });
+        child.once("error", (error) => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        });
+        child.once("close", (code) => finish(code));
+      },
+    );
+    this.#ctx?.log.info("local_server.release_switched", {
+      appVersion,
+      ok: Boolean(outcome.ok),
+    });
+  }
+
+  /**
+   * Restores selected local services (`teamhub`, `node-services`, and/or `web`)
+   * back to the Shell's baseline runtime (`--switch-release baseline`) when the
+   * first V2 upgrade fails before any previous V2 release existed.
+   */
+  async restoreBaselineRelease(
+    optionsOrSignal:
+      | AbortSignal
+      | {
+          readonly services?: readonly ("teamhub" | "node-services" | "web")[];
+          readonly signal?: AbortSignal;
+        } = this.#abort.signal,
+  ): Promise<void> {
+    return this.switchRelease("baseline", optionsOrSignal);
+  }
+
+  /**
+   * Stops selected local application services (`teamhub`, `node-services`,
+   * and/or `web`) via `installer.js --stop-services` while keeping PostgreSQL
+   * and LiveKit running. Used before `pg_dump` and `pg_restore` during
+   * non-rollbackSafe V2 backend upgrades.
+   */
+  async stopServices(
+    services: readonly ("teamhub" | "node-services" | "web")[],
+    signal: AbortSignal = this.#abort.signal,
+  ): Promise<void> {
+    if (services.length === 0) return;
+    const record = await this.#readRecord();
+    if (!record) {
+      throw new Error("Cannot stop services: no local Linger installation.");
+    }
+    if (!existsSync(this.#installerScript())) {
+      throw new Error("Cannot stop services: bundled installer.js is missing.");
+    }
+    const [daemonEnv, proxyEnv, node] = await Promise.all([
+      this.#daemonEnv(),
+      this.#systemProxyEnv(),
+      this.#ensureNode(signal),
+    ]);
+    const env = {
+      ...daemonEnv,
+      ...proxyEnv,
+      LINGER_HOME: record.home,
+    };
+    const outcome = await new Promise<{ ok?: boolean; message?: string }>(
+      (resolve, reject) => {
+        const child = spawn(
+          node,
+          [
+            ...linuxNodeFdHygieneArgs(this.#options.platform),
+            this.#installerScript(),
+            "--home",
+            record.home,
+            "--instance",
+            LOCAL_INSTANCE,
+            "--stop-services",
+            services.join(","),
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+            env,
+            signal,
+          },
+        );
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+        const finish = (code: number | null) => {
+          if (settled) return;
+          settled = true;
+          const lastLine = stdout.trim().split("\n").at(-1) ?? "";
+          try {
+            const parsed = JSON.parse(lastLine) as {
+              ok?: boolean;
+              message?: string;
+            };
+            if (code === 0 && parsed.ok) {
+              resolve(parsed);
+            } else {
+              reject(
+                new Error(
+                  parsed.message ||
+                    stderr.trim().slice(-500) ||
+                    `installer --stop-services exited with code ${code}`,
+                ),
+              );
+            }
+          } catch {
+            reject(
+              new Error(
+                stderr.trim().slice(-500) ||
+                  `installer --stop-services exited with code ${code}`,
+              ),
+            );
+          }
+        };
+        child.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf8");
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr = (stderr + chunk.toString("utf8")).slice(-8_192);
+        });
+        child.once("error", (error) => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        });
+        child.once("close", (code) => finish(code));
+      },
+    );
+    this.#ctx?.log.info("local_server.services_stopped", {
+      services,
+      ok: Boolean(outcome.ok),
+    });
   }
 
   // The owner account the installer created, read from its private file on
@@ -3939,7 +4237,10 @@ export class LocalServerModule implements Module {
     repo: string,
     signal: AbortSignal,
   ): Promise<InstallerApi> {
-    const proxyEnv = await this.#systemProxyEnv();
+    const [daemonEnv, proxyEnv] = await Promise.all([
+      this.#daemonEnv(),
+      this.#systemProxyEnv(),
+    ]);
     const child = spawn(
       node,
       [
@@ -3959,7 +4260,7 @@ export class LocalServerModule implements Module {
         // A detached Windows process otherwise opens its own console window.
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...this.#daemonEnv(), ...proxyEnv, LINGER_HOME: home },
+        env: { ...daemonEnv, ...proxyEnv, LINGER_HOME: home },
       },
     );
     const log = this.#ctx?.log;
@@ -4525,7 +4826,7 @@ export class LocalServerModule implements Module {
       ms: Date.now() - nodeStartedAt,
     });
     const env = {
-      ...this.#daemonEnv(),
+      ...(await this.#daemonEnv()),
       ...(await proxyEnv),
       LINGER_HOME: record.home,
     };
@@ -6316,15 +6617,17 @@ export async function unpackArchive(
   const fallback = options.fallback ?? extractArchiveFallback;
   await removeRetrying(unpacked);
   await mkdir(unpacked, { recursive: true, mode: 0o700 });
+  const realUnpacked = await realpath(unpacked).catch(() => unpacked);
+  const realFile = await realpath(file).catch(() => file);
   try {
     // Windows' tar may not read zstd; Node's zlib does, and tar reads stdin.
     if (file.endsWith(".zst")) {
       await runCommand(
         command,
         ["-xf", "-", "--strip-components=1"],
-        unpacked,
+        realUnpacked,
         signal,
-        createReadStream(file, { signal }).pipe(createZstdDecompress()),
+        createReadStream(realFile, { signal }).pipe(createZstdDecompress()),
       );
       return;
     }

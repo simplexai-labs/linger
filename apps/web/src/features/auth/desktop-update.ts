@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 // The desktop app's updater (`window.lingerDesktop.update`), in the states
 // its tray shows.
+export type DesktopUpdateScope = "web" | "backend" | "shell";
+
 export type DesktopUpdateState =
   | { readonly kind: "idle" }
   | { readonly kind: "checking" }
@@ -13,11 +15,13 @@ export type DesktopUpdateState =
         | "installing"
         | "available";
       readonly version: string;
+      readonly scope?: DesktopUpdateScope;
     }
   | { readonly kind: "failed"; readonly error: string };
 
 interface DesktopUpdateApi {
   getState(): Promise<DesktopUpdateState>;
+  getInfo?(): Promise<{ readonly appVersion?: string }>;
   onState(callback: (state: DesktopUpdateState) => void): () => void;
   install(): Promise<void>;
   check(): Promise<void>;
@@ -54,18 +58,31 @@ function desktopShellApi(): DesktopShellApi | undefined {
 export function useDesktopUpdate(): DesktopUpdate | undefined {
   const [shell] = useState(desktopShellApi);
   const [state, setState] = useState<DesktopUpdateState>();
+  const [appVersion, setAppVersion] = useState<string>();
   const api = shell?.update;
 
   useEffect(() => {
     if (!api) return;
     let active = true;
+    const refreshVersion = () => {
+      void api
+        .getInfo?.()
+        .then((info) => {
+          if (active && info?.appVersion) setAppVersion(info.appVersion);
+        })
+        .catch(() => undefined);
+    };
     void api
       .getState()
       .then((next) => {
         if (active) setState(next);
       })
       .catch(() => undefined);
-    const off = api.onState((next) => setState(next));
+    refreshVersion();
+    const off = api.onState((next) => {
+      setState(next);
+      if (next.kind === "idle") refreshVersion();
+    });
     return () => {
       active = false;
       off();
@@ -74,7 +91,7 @@ export function useDesktopUpdate(): DesktopUpdate | undefined {
 
   if (!shell?.version) return undefined;
   return {
-    version: shell.version,
+    version: appVersion ?? shell.version,
     state,
     // A failure arrives as the next state, which the menu shows.
     install: () => void api?.install().catch(() => undefined),

@@ -34,8 +34,16 @@
     },
     "web": {
       "owner": "code-default",
-      "description": "Port and allowed hosts read by the Vite dev server, and the comma-separated addresses and port of the static host that serves the production build to Native. Code defaults apply, so it is not listed in .env.example.",
-      "names": ["HOST", "PORT", "WEB_ALLOWED_DEV_HOSTS"]
+      "description": "Port and allowed hosts read by the Vite dev server, and the comma-separated addresses, port, static root, and internal reload token of the static host that serves the production build to Native. Code defaults apply, so it is not listed in .env.example.",
+      "names": [
+        "HOST",
+        "LINGER_ALLOWED_WEB_ROOT",
+        "LINGER_WEB_ARTIFACT_ID",
+        "LINGER_WEB_CONTROL_TOKEN",
+        "LINGER_WEB_ROOT",
+        "PORT",
+        "WEB_ALLOWED_DEV_HOSTS"
+      ]
     },
     "teamhub-tools": {
       "owner": "out-of-env",
@@ -66,6 +74,7 @@
         "CODEX_HOME",
         "DISPLAY",
         "PI_CODING_AGENT_DIR",
+        "LINGER_CLI_NODE_PATH",
         "LINGER_CLI_RELEASE_ID",
         "LINGER_CLAUDE_PATH",
         "LINGER_CLAUDE_SESSION_ROOT",
@@ -76,10 +85,12 @@
         "LINGER_COMPUTER_DATA_DIR",
         "LINGER_COMPUTER_LAUNCHER",
         "LINGER_COMPUTER_SERVICE_COMMAND",
+        "LINGER_COMPUTER_TOOLS_DIR",
         "LINGER_DAEMON_LAUNCH_NONCE",
         "LINGER_GO_LOCAL_DAEMON_PATH",
         "LINGER_PI_PATH",
         "LINGER_PI_SESSION_ROOT",
+        "LINGER_TOOLS_NODE_PATH",
         "LINGER_WEB_URL",
         "TEAMHUB_AGENT_ID",
         "TEAMHUB_CONFIG",
@@ -98,21 +109,38 @@
     },
     "desktop": {
       "owner": "out-of-env",
-      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and update overrides, the source checkout for \"Run on This Computer\", the TeamHub CLI launcher Node override, and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
+      "description": "Read by the desktop client on user machines: the bridge state directory it migrates from, the daemon and V2 incremental bundle update overrides, the source checkout for \"Run on This Computer\", the TeamHub CLI launcher Node override, and whether a parent agent session that opened the app manages its model provider. Not part of .env.",
       "names": [
         "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+        "LINGER_ALLOW_LOOPBACK_TEST_FEED",
         "LINGER_BRIDGE_STATE_DIR",
+        "LINGER_BUNDLE_CHECK_DELAY_MS",
+        "LINGER_BUNDLE_CHECK_INTERVAL_MS",
+        "LINGER_BUNDLE_TARGET",
+        "LINGER_CHECKOUT",
         "LINGER_COMPUTER_DAEMON",
         "LINGER_DESKTOP_USER_DATA",
-        "LINGER_CHECKOUT",
+        "LINGER_ENABLE_BUNDLE_UPDATER",
+        "LINGER_HEALTH_GATE_INTERVAL_MS",
+        "LINGER_HEALTH_GATE_TIMEOUT_MS",
+        "LINGER_NO_FOCUS",
         "LINGER_NODE",
+        "LINGER_PG_DUMP_BIN",
+        "LINGER_PG_RESTORE_BIN",
+        "LINGER_SEED_DIR",
         "LINGER_SERVER_URL",
+        "LINGER_SHELL_VERSION",
+        "LINGER_TEAMHUB_HEALTH_URL",
+        "LINGER_TEST_BUSY_FILE",
+        "LINGER_UPDATE_CHANNEL",
+        "LINGER_UPDATE_FEED_URL",
+        "LINGER_UPDATE_PUBLIC_KEY_FILE",
         "XDG_STATE_HOME"
       ]
     },
     "installer": {
       "owner": "out-of-env",
-      "description": "Read by the local installer and @linger/local-installation on user machines: the installer home, the local models tool and its optional pre-bundled kit archive, the app model gateway passed to natively started services, a package registry and Go module proxy the person configured for native source, the download region (SIMPLEX_REGION: cn, global or auto; the installer passes the resolved one to node-services and localmodels, see scripts/installs/README.md), the system proxy the desktop resolved (LINGER_SYSTEM_HTTPS_PROXY), which the installer passes as HTTPS_PROXY to TeamHub and node-services only, the pre-reserved voice tools bin directory (TEAMHUB_VOICE_TOOLS_BIN) passed to TeamHub while voice tools extract asynchronously, and Python variables cleared before running it. Not part of .env.",
+      "description": "Read by the local installer and @linger/local-installation on user machines: the installer home, the local models tool and its optional pre-bundled kit archive, the app model gateway passed to natively started services, a package registry and Go module proxy the person configured for native source, the download region (SIMPLEX_REGION: cn, global or auto; the installer passes the resolved one to node-services and localmodels, see scripts/installs/README.md), the system proxy the desktop resolved (LINGER_SYSTEM_HTTPS_PROXY), which the installer passes as HTTPS_PROXY to TeamHub and node-services only, the pre-reserved voice tools bin directory (TEAMHUB_VOICE_TOOLS_BIN) passed to TeamHub while voice tools extract asynchronously, V2 decoupled bundle runtime directories, and Python variables cleared before running it. Not part of .env.",
       "names": [
         "GOPROXY",
         "LOCAL_ENV_FILE",
@@ -122,6 +150,7 @@
         "PYTHONINSPECT",
         "PYTHONSTARTUP",
         "LINGER_COMPUTER_BIN",
+        "LINGER_FALLBACK_NODE_DEPS_DIR",
         "LINGER_HOME",
         "LINGER_LOCALMODELS_DEV_MODULE_DIR",
         "LINGER_LOCALMODELS_DEV_PYTHON",
@@ -129,9 +158,12 @@
         "LINGER_LOCALMODELS_TOOL_JSON",
         "LINGER_NATIVE_DEPENDENCIES_JSON",
         "LINGER_NATIVE_VOICE_TOOLS_JSON",
+        "LINGER_PROMPTS_DIR",
         "LINGER_SYSTEM_HTTPS_PROXY",
+        "LINGER_VOICE_RUNTIME_DIR",
         "SIMPLEX_REGION",
-        "TEAMHUB_VOICE_TOOLS_BIN"
+        "TEAMHUB_VOICE_TOOLS_BIN",
+        "TEAMHUB_WRITE_FENCE_FILE"
       ]
     },
     "voice-workers": {

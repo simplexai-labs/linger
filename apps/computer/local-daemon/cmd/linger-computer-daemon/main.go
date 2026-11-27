@@ -286,9 +286,14 @@ func run(args []string) (resultErr error) {
 	if managedToolsBin != "" {
 		teamhubBin = managedToolsBin
 	}
+	teamhubCLINodePath := strings.TrimSpace(environment["LINGER_CLI_NODE_PATH"])
+	if !filepath.IsAbs(teamhubCLINodePath) {
+		teamhubCLINodePath = ""
+	}
 	resolver := lingercontext.ExecutionResolver{
 		ServiceCommand:       serviceCommand,
 		TeamHubCLIBin:        teamhubBin,
+		TeamHubCLINodePath:   teamhubCLINodePath,
 		HostEnvironmentGuide: hostEnvironmentGuide(runtime.GOOS),
 		ProviderLookup:       providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
 		CLICredentials: cliCredentials,

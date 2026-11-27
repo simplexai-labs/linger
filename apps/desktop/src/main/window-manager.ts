@@ -69,6 +69,13 @@ export interface WindowManagerOptions {
   readonly localServerResumable?: (serverUrl: string) => Promise<boolean>;
 }
 
+export interface UpdatingProgressState {
+  readonly title: string;
+  readonly detail: string;
+  readonly percent: number;
+  readonly tone?: "normal" | "rollback";
+}
+
 const TITLEBAR_HEIGHT = 40;
 const REVEAL_FALLBACK_MS = 1_500;
 const CANVAS = "#f6f6f6";
@@ -163,6 +170,8 @@ export class WindowManagerModule implements Module {
   #lastLoadReason: WindowLoadReason | undefined;
   #pendingShow = false;
   #revealTimer: NodeJS.Timeout | undefined;
+  #updatingProgress: UpdatingProgressState | undefined;
+  #updatingPageLoaded = false;
   // Closes the floating voice window, when there is one.
   #closeVoiceWindow: (() => void) | undefined;
   readonly #previews = new PreviewViews({
@@ -250,15 +259,21 @@ export class WindowManagerModule implements Module {
       this.#pendingShow = false;
       this.#clearRevealTimer();
       if (this.#window.isMinimized()) this.#window.restore();
-      this.#window.show();
-      this.#window.focus();
+      if (process.env.LINGER_NO_FOCUS === "1") {
+        this.#window.showInactive();
+      } else {
+        this.#window.show();
+        this.#window.focus();
+      }
       return;
     }
     this.#pendingShow = true;
     this.#ensureWindow();
     this.#scheduleRevealFallback();
     this.#loadConfiguredServer("boot");
-    this.#content?.webContents.focus();
+    if (process.env.LINGER_NO_FOCUS !== "1") {
+      this.#content?.webContents.focus();
+    }
   }
 
   hide(): void {
@@ -426,8 +441,12 @@ export class WindowManagerModule implements Module {
       return;
     this.#pendingShow = false;
     if (this.#window.isMinimized()) this.#window.restore();
-    this.#window.show();
-    this.#window.focus();
+    if (process.env.LINGER_NO_FOCUS === "1") {
+      this.#window.showInactive();
+    } else {
+      this.#window.show();
+      this.#window.focus();
+    }
   }
 
   // Points the app at another server; false when the address is invalid.
@@ -521,6 +540,8 @@ export class WindowManagerModule implements Module {
     this.#loadFailureSeq += 1;
     this.#pendingTargetOrigin = new URL(decision.targetUrl).origin;
     this.#showingShellPage = "none";
+    this.#updatingProgress = undefined;
+    this.#updatingPageLoaded = false;
     this.#loadFailed = false;
     this.#loadStartedAt = Date.now();
     this.#lastLoadReason = decision.reason;
@@ -530,17 +551,66 @@ export class WindowManagerModule implements Module {
   // While the services on this computer restart on a new version; the
   // server's own pages would fail until they are back.
   showUpdating(): void {
+    this.#updatingProgress = undefined;
+    this.#updatingPageLoaded = false;
     this.#loadLocal("updating", "1");
+  }
+
+  // Shows the minimal centered updating view on `app://offline/?updating=1`
+  // and pushes subsequent stage updates in-place without reloading the page.
+  showUpdatingProgress(progress: UpdatingProgressState): void {
+    const normalized: UpdatingProgressState = {
+      title: progress.title,
+      detail: progress.detail,
+      percent: Math.max(0, Math.min(100, Math.round(progress.percent))),
+      tone: progress.tone === "rollback" ? "rollback" : "normal",
+    };
+    this.#updatingProgress = normalized;
+    const contents = this.#content?.webContents;
+    if (!contents || contents.isDestroyed()) return;
+    if (
+      this.#updatingPageLoaded &&
+      this.#showingShellPage === "starting" &&
+      contents.getURL().startsWith(OFFLINE_ORIGIN)
+    ) {
+      this.#pushUpdatingProgress(contents, normalized);
+      return;
+    }
+    this.#updatingPageLoaded = false;
+    this.#loadFailureSeq += 1;
+    this.#pendingTargetOrigin = undefined;
+    this.#showingShellPage = "starting";
+    this.#loadFailed = false;
+    const url = new URL(`${OFFLINE_ORIGIN}/`);
+    url.searchParams.set("updating", "1");
+    url.searchParams.set("title", normalized.title);
+    url.searchParams.set("detail", normalized.detail);
+    url.searchParams.set("percent", String(normalized.percent));
+    url.searchParams.set("tone", normalized.tone ?? "normal");
+    void contents.loadURL(url.toString()).catch(() => undefined);
+  }
+
+  #pushUpdatingProgress(
+    contents: WebContents,
+    progress: UpdatingProgressState,
+  ): void {
+    if (contents.isDestroyed()) return;
+    const script = `window.__lingerSetUpdateProgress?.(${JSON.stringify(progress)})`;
+    void contents.executeJavaScript(script).catch(() => undefined);
   }
 
   // While the services on this computer start again after the app or the
   // computer restarted.
   showStarting(): void {
+    this.#updatingProgress = undefined;
+    this.#updatingPageLoaded = false;
     this.#loadLocal("starting", "1");
   }
 
   // The services on this computer did not start; Try Again starts them again.
   showStartFailed(reason: string): void {
+    this.#updatingProgress = undefined;
+    this.#updatingPageLoaded = false;
     this.#loadLocal("failed", reason);
   }
 
@@ -739,6 +809,10 @@ export class WindowManagerModule implements Module {
       this.#revealIfPending();
       const loadedUrl = contents.getURL();
       const isOffline = loadedUrl.startsWith(OFFLINE_ORIGIN);
+      if (isOffline && this.#updatingProgress) {
+        this.#updatingPageLoaded = true;
+        this.#pushUpdatingProgress(contents, this.#updatingProgress);
+      }
       if (!isOffline) {
         this.#pendingTargetOrigin = undefined;
         this.#showingShellPage = "none";

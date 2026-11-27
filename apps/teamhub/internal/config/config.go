@@ -72,6 +72,12 @@ type Config struct {
 	// LocalIdentityKey proves to the desktop app that this server is the
 	// Linger installed on this computer; set only on local installations.
 	LocalIdentityKey string
+	// WriteFenceFile is TEAMHUB_WRITE_FENCE_FILE: an optional path created by
+	// Desktop before switching to a non-rollbackSafe release and deleted once
+	// the switch commits or rolls back. While the file exists on disk, TeamHub
+	// rejects non-probe HTTP requests with 503 + Retry-After and defers
+	// background DB writers until the file is removed.
+	WriteFenceFile string
 	// The optional features: each is assembled from its own group, and one
 	// whose configuration is missing is not built.
 	ExternalApps     ExternalAppsConfig
@@ -320,6 +326,7 @@ func applyEnvironment(cfg *Config) {
 	setNonemptyEnvironment(&cfg.ExternalApps.ComposioAPIKey, "COMPOSIO_API_KEY")
 	setNonemptyEnvironment(&cfg.ExternalApps.SecretEncryptionKey, "TEAMHUB_SECRET_ENCRYPTION_KEY")
 	setNonemptyEnvironment(&cfg.LocalIdentityKey, "TEAMHUB_LOCAL_IDENTITY_KEY")
+	setNonemptyEnvironment(&cfg.WriteFenceFile, "TEAMHUB_WRITE_FENCE_FILE")
 	setNonemptyEnvironment(&cfg.Voice.SonioxAPIKey, "SONIOX_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.XaiAPIKey, "XAI_API_KEY")
 	setNonemptyEnvironment(&cfg.Voice.LiveKitURL, "LIVEKIT_URL")

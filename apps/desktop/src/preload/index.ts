@@ -65,6 +65,10 @@ const api: LingerDesktopApi = {
     },
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
+    getInfo: () => ipcRenderer.invoke(IPC.updateInfo),
+    setChannel: (channel) => ipcRenderer.invoke(IPC.updateSetChannel, channel),
+    reloadPage: () => ipcRenderer.invoke(IPC.updateReloadPage),
+    dismissRollbackNotice: () => ipcRenderer.invoke(IPC.updateDismissRollback),
   },
   connectorOAuth: {
     prepare: () => ipcRenderer.invoke(IPC.connectorOAuthPrepare),

@@ -226,7 +226,12 @@ async function bundle(repo, output, entry, outputFile, plugins, define = {}) {
   return result.metafile;
 }
 
-async function bundleVoiceRuntime(repo, output, plugins) {
+async function bundleVoiceRuntime(
+  repo,
+  output,
+  plugins,
+  voiceRuntimeDir = "node_modules/@linger/voice-runtime",
+) {
   const agentsDir = resolvePackageDir(
     path.join(repo, "apps/voice-runtime/package.json"),
     "@livekit/agents",
@@ -243,7 +248,7 @@ async function bundleVoiceRuntime(repo, output, plugins) {
   const result = await build({
     ...baseBuildOptions(repo, plugins),
     entryPoints,
-    outdir: path.join(output, "node_modules/@linger/voice-runtime/dist"),
+    outdir: path.join(output, voiceRuntimeDir, "dist"),
     splitting: true,
     // Keep shared chunks directly in dist/ so relative URLs such as
     // `new URL("./job_proc_lazy_main.js", import.meta.url)` and
@@ -254,7 +259,9 @@ async function bundleVoiceRuntime(repo, output, plugins) {
   return result.metafile;
 }
 
-export async function bundleNodeServices(repo, output) {
+export async function bundleNodeServices(repo, output, options = {}) {
+  const voiceRuntimeDir =
+    options.voiceRuntimeDir ?? "node_modules/@linger/voice-runtime";
   const files = [];
   const inputs = new Set();
   // Bare imports the bundles left for node_modules.
@@ -278,7 +285,7 @@ export async function bundleNodeServices(repo, output) {
     ...NODE_SERVICES_ENTRIES.map((entry) =>
       nodeServices(`apps/node-services/src/${entry}.ts`, `dist/${entry}.js`),
     ),
-    bundleVoiceRuntime(repo, output, plugins),
+    bundleVoiceRuntime(repo, output, plugins, voiceRuntimeDir),
     // Waits for TeamHub and restarts the service after a crash, as in
     // development (scripts/dev-supervisor.ts --compiled).
     nodeServices(
@@ -306,29 +313,81 @@ export async function bundleNodeServices(repo, output) {
     path.join(repo, "apps/node-services", worker),
     path.join(output, "dist/agent/observability/agent-log-file-worker.mjs"),
   );
+  // Copy the Node 26 V2 ESM resolution hook beside dist/supervisor.js so
+  // decoupled V2 bundles resolve external packages from LINGER_NODE_DEPS_DIR
+  // without symlinks or node_modules/@linger/voice-runtime conflicts.
+  const hookSource = path.join(
+    repo,
+    "packages/local-installation/src/v2-esm-resolve.mjs",
+  );
+  await copyFile(
+    hookSource,
+    path.join(output, "dist/v2-esm-resolve.mjs"),
+  ).catch(() => undefined);
   // The worker's package exports and module type.
+  await mkdir(path.join(output, voiceRuntimeDir), { recursive: true });
   await writeFile(
-    path.join(output, "node_modules/@linger/voice-runtime/package.json"),
+    path.join(output, voiceRuntimeDir, "package.json"),
     JSON.stringify(
       {
         name: "@linger/voice-runtime",
         private: true,
         type: "module",
-        exports: { "./worker": { default: "./dist/main.js" } },
+        exports: {
+          ".": { default: "./dist/main.js" },
+          "./worker": { default: "./dist/main.js" },
+        },
       },
       null,
       2,
     ),
   );
+  if (options.writePackageJson) {
+    await writeFile(
+      path.join(output, "package.json"),
+      `${JSON.stringify(
+        { name: "@linger/node-services", private: true, type: "module" },
+        null,
+        2,
+      )}\n`,
+    );
+  }
   return { files, inputs: [...inputs], imports };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [repo, output] = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const v2Layout = rawArgs.includes("--v2");
+  const importsJsonIdx = rawArgs.indexOf("--imports-json");
+  const importsJsonPath =
+    importsJsonIdx >= 0 ? rawArgs[importsJsonIdx + 1] : undefined;
+  const positional = [];
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const arg = rawArgs[i];
+    if (arg === "--imports-json") {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
+    positional.push(arg);
+  }
+  const [repo, output] = positional;
   const result = await bundleNodeServices(
     path.resolve(repo),
     path.resolve(output),
+    v2Layout
+      ? { voiceRuntimeDir: "voice-runtime", writePackageJson: true }
+      : {},
   );
+  if (importsJsonPath) {
+    const resolvedImportsPath = path.resolve(importsJsonPath);
+    await mkdir(path.dirname(resolvedImportsPath), { recursive: true });
+    await writeFile(
+      resolvedImportsPath,
+      `${JSON.stringify([...result.imports].sort(), null, 2)}\n`,
+      "utf8",
+    );
+  }
   for (const { file, bytes } of result.files)
     console.log(`${(bytes / 1e6).toFixed(2).padStart(7)} MB ${file}`);
   console.log([...result.imports].sort().join("\n"));

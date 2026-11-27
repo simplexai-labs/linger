@@ -1,0 +1,593 @@
+name: V2 Signed Test Pack (2+1 Non-Release Artifacts)
+
+# Builds signed 3-platform baseline installers (macOS arm64, Windows x64,
+# Linux x64) PLUS the 2+1 V2 signed incremental upgrade kit
+# (step-00-baseline through step-04-fence-node-faulty: web + unified backend +
+# cached node-native-deps) and zero-dependency `serve-test-feed.mjs`.
+#
+# SAFETY GUARANTEE:
+#   - Triggered ONLY by manual `workflow_dispatch` or `workflow_call` from
+#     desktop-release.yml's non-release `-v2test` bridge (never on tag/push/PR).
+#   - `contents: read` ONLY — NEVER creates/updates any GitHub Release, NEVER
+#     pushes any Git tag, and NEVER touches production CDN or update channels.
+#   - All outputs are uploaded solely as GitHub Actions Artifacts for manual
+#     download from the workflow Run page.
+#   - 100% reuses existing repository signing Secrets (ZERO new secrets).
+on:
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: Baseline test version (e.g. 0.1.11-v2test.0; steps 01-04 derive 0.1.11-v2test.1..0.1.11-v2test.4)
+        type: string
+        required: true
+        default: "0.1.11-v2test.0"
+      feed_base_url:
+        description: Optional fixed HTTPS feed URL; leave empty (recommended) for portable feed-relative signed manifests that work on any localhost/LAN/tunnel URL
+        type: string
+        required: false
+        default: ""
+      require_macos_signing:
+        description: Fail fast if macOS Developer ID / Notary secrets are missing (disable only for unsigned fork dry-runs)
+        type: boolean
+        default: true
+      run_windows_smoke:
+        description: Run Windows Setup smoke test on windows-2022 after building the signed installer
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      base_version:
+        description: Baseline test version (e.g. 0.1.11-v2test.0)
+        type: string
+        required: false
+        default: "0.1.11-v2test.0"
+      feed_base_url:
+        description: Optional fixed HTTPS feed URL; leave empty for portable feed-relative signed manifests
+        type: string
+        required: false
+        default: ""
+      require_macos_signing:
+        description: Fail fast if macOS Developer ID / Notary secrets are missing
+        type: boolean
+        required: false
+        default: true
+      run_windows_smoke:
+        description: Run Windows Setup smoke test on windows-2022 after building the signed installer
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v2-signed-test-pack-${{ github.ref }}-${{ inputs.base_version }}
+  cancel-in-progress: false
+
+env:
+  LINGER_NATIVE_DEPS_URL: ${{ secrets.LINGER_NATIVE_DEPS_URL || vars.LINGER_NATIVE_DEPS_URL || 'https://github.com/simplexai-labs/linger/releases/download/native-deps' }}
+  # Same pinned rcodesign release used by desktop-release.yml & desktop-build action.
+  APPLE_CODESIGN_VERSION: 0.29.0
+  APPLE_CODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      base_url: ${{ steps.check.outputs.base_url }}
+      has_macos_signing: ${{ steps.check.outputs.has_macos_signing }}
+      has_windows_signing: ${{ steps.check.outputs.has_windows_signing }}
+      has_update_key: ${{ steps.check.outputs.has_update_key }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: check
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.base_version }}
+          INPUT_FEED_URL: ${{ inputs.feed_base_url }}
+          REQUIRE_MACOS: ${{ inputs.require_macos_signing }}
+          HAS_MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 != '' && secrets.MACOS_DEVELOPER_ID_PASSWORD != '' }}
+          HAS_MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY_JSON != '' }}
+          HAS_WINDOWS_SIGNING: ${{ secrets.WINDOWS_SIGNING_P12_BASE64 != '' && secrets.WINDOWS_SIGNING_PASSWORD != '' }}
+          HAS_UPDATE_KEY: ${{ secrets.DESKTOP_UPDATE_KEY_PEM != '' }}
+        run: |
+          set -euo pipefail
+          scripts/ci/desktop-release.sh version "$INPUT_VERSION" | tee -a "$GITHUB_OUTPUT"
+
+          if [ -n "$INPUT_FEED_URL" ]; then
+            if [[ "$INPUT_FEED_URL" != https://* ]]; then
+              echo "::error::feed_base_url must start with https:// or be left empty for portable relative URLs"
+              exit 1
+            fi
+            echo "base_url=$INPUT_FEED_URL" >>"$GITHUB_OUTPUT"
+          else
+            echo "base_url=relative" >>"$GITHUB_OUTPUT"
+          fi
+
+          echo "has_macos_signing=$HAS_MACOS_DEVELOPER_ID" >>"$GITHUB_OUTPUT"
+          echo "has_windows_signing=$HAS_WINDOWS_SIGNING" >>"$GITHUB_OUTPUT"
+          echo "has_update_key=$HAS_UPDATE_KEY" >>"$GITHUB_OUTPUT"
+
+          if [ "$REQUIRE_MACOS" = true ]; then
+            missing=()
+            [ "$HAS_MACOS_DEVELOPER_ID" = true ] || missing+=(MACOS_DEVELOPER_ID_P12_BASE64/MACOS_DEVELOPER_ID_PASSWORD)
+            [ "$HAS_MACOS_NOTARY_KEY" = true ] || missing+=(MACOS_NOTARY_KEY_JSON)
+            [ "$HAS_UPDATE_KEY" = true ] || missing+=(DESKTOP_UPDATE_KEY_PEM)
+            if [ "${#missing[@]}" -gt 0 ]; then
+              echo "::error::Signed V2 test pack requires existing repository secrets: ${missing[*]}"
+              exit 1
+            fi
+          else
+            [ "$HAS_MACOS_DEVELOPER_ID" = true ] || echo "::warning::MACOS_DEVELOPER_ID_P12_BASE64 not set; macOS artifacts will be ad-hoc signed."
+            [ "$HAS_UPDATE_KEY" = true ] || echo "::warning::DESKTOP_UPDATE_KEY_PEM not set; upgrade manifests will use an ephemeral Ed25519 test key."
+          fi
+          [ "$HAS_WINDOWS_SIGNING" = true ] || echo "::warning::WINDOWS_SIGNING_P12_BASE64 not set; Windows binaries will be unsigned."
+
+  # -------------------------------------------------------------------------
+  # Output 1A & 1C: Signed + Notarized macOS arm64 & Linux x64 Baseline Installers
+  # 100% reuses ./.github/actions/desktop-build and existing signing secrets.
+  # -------------------------------------------------------------------------
+  build-installer-unix:
+    name: installer (${{ matrix.target }})
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            docker_image: dmgtool
+            artifact_name: v2-test-installer-macos-arm64
+          - target: linux-x64
+            docker_image: ""
+            artifact_name: v2-test-installer-linux-x64
+    env:
+      DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_OUT: ${{ github.workspace }}/.linger-runtime/desktop-release
+      LINGER_NATIVE_POSTGRES_DIR: ${{ github.workspace }}/.linger-runtime/native-deps
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/desktop-build
+        with:
+          target: ${{ matrix.target }}
+          docker-image: ${{ matrix.docker_image }}
+          require-macos-signing: ${{ inputs.require_macos_signing }}
+          ghcr-token: ${{ github.token }}
+          diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
+          macos-developer-id-p12-base64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          macos-developer-id-password: ${{ secrets.MACOS_DEVELOPER_ID_PASSWORD }}
+          macos-notary-key-json: ${{ secrets.MACOS_NOTARY_KEY_JSON }}
+          upload-artifacts: "false"
+      - name: Write platform SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RELEASE_OUT/assets"
+          sha256sum Linger-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Upload macOS arm64 DMG artifact
+        if: matrix.target == 'darwin-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: v2-test-installer-macos-arm64-dmg
+          path: |
+            ${{ env.RELEASE_OUT }}/assets/Linger-*.dmg
+            ${{ env.RELEASE_OUT }}/assets/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload macOS arm64 tarball artifact
+        if: matrix.target == 'darwin-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: v2-test-installer-macos-arm64-tarball
+          path: |
+            ${{ env.RELEASE_OUT }}/assets/Linger-*.app.tar.gz
+            ${{ env.RELEASE_OUT }}/assets/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Linux x64 installer artifact
+        if: matrix.target != 'darwin-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ env.RELEASE_OUT }}/assets
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # Output 1B: Signed Windows x64 Baseline Installer
+  # 100% reuses ./.github/actions/desktop-build + wintool + osslsigncode.
+  # -------------------------------------------------------------------------
+  build-installer-win32:
+    name: installer (win32-x64)
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_OUT: ${{ github.workspace }}/.linger-runtime/desktop-release
+      LINGER_NATIVE_POSTGRES_DIR: ${{ github.workspace }}/.linger-runtime/native-deps
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/desktop-build
+        with:
+          target: win32-x64
+          docker-image: wintool
+          ghcr-token: ${{ github.token }}
+          diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
+          windows-signing-p12-base64: ${{ secrets.WINDOWS_SIGNING_P12_BASE64 }}
+          windows-signing-password: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+          upload-artifacts: "false"
+      - name: Write platform SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RELEASE_OUT/assets"
+          sha256sum Linger-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: v2-test-installer-windows-x64
+          path: ${{ env.RELEASE_OUT }}/assets
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-smoke:
+    needs: [prepare, build-installer-win32]
+    if: inputs.run_windows_smoke == true
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: v2-test-installer-windows-x64
+          path: candidate
+      - name: Smoke the signed Windows test installer
+        shell: powershell
+        env:
+          DESKTOP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $setup = "candidate\Linger-$env:DESKTOP_VERSION-windows-x64-setup.exe"
+          $digest = (Get-Content -LiteralPath 'candidate\windows-setup.sha256' -Raw).Split(' ')[0]
+          scripts/ci/windows-desktop-smoke.ps1 -Setup $setup -ExpectedSha256 $digest
+
+  # -------------------------------------------------------------------------
+  # Output 2: 2+1 Signed Upgrade Kit (step-00..step-04) + Local Test Feed Server
+  # Compiles real web/installer/node-services/teamhub/computer-daemon/faulty-go
+  # payloads for all 3 targets, signs macOS Mach-O binaries with rcodesign and
+  # Windows .exe binaries with osslsigncode, packs unified atomic `backend`
+  # bundles, and Ed25519-signs every Schema 3 app-manifest.json with
+  # DESKTOP_UPDATE_KEY_PEM (matching built-in UPDATE_PUBLIC_KEY).
+  # -------------------------------------------------------------------------
+  build-service-upgrade-packs:
+    name: 2+1 signed upgrade packs (step-00..step-04)
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/teamhub/go.sum', 'apps/computer/local-daemon/go.sum', 'contracts/generated/go/go.sum') }}
+          restore-keys: gomod-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install rcodesign for macOS binary signing
+        if: needs.prepare.outputs.has_macos_signing == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="apple-codesign-$APPLE_CODESIGN_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/rcodesign.tar.gz" \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F$APPLE_CODESIGN_VERSION/$name.tar.gz"
+          echo "$APPLE_CODESIGN_SHA256  $RUNNER_TEMP/rcodesign.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/rcodesign.tar.gz" -C "$RUNNER_TEMP"
+          echo "RCODESIGN=$RUNNER_TEMP/$name/rcodesign" >>"$GITHUB_ENV"
+
+      - name: Install osslsigncode for Windows binary signing
+        if: needs.prepare.outputs.has_windows_signing == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 update -q &&
+            sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 install -y -q osslsigncode
+
+      - name: Build real 2+1 payloads for step-00..step-04
+        shell: bash
+        env:
+          BASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/v2-stage"
+          rm -rf "$stage"
+          mkdir -p "$stage"/{teamhub-v0,teamhub-v2,teamhub-faulty,daemon-v0,daemon-v2,teamhub-cli,node-services}
+
+          echo "==> 1/4 Building @linger/web assets"
+          pnpm --filter @linger/web run build:assets --skip-precompress
+
+          echo "==> 2/4 Building @linger/linger-installer & @linger/teamhub-cli"
+          node apps/linger-installer/scripts/build.mjs
+          node apps/teamhub-cli/scripts/build-cli.mjs --outdir "$stage/teamhub-cli"
+          cp apps/desktop/scripts/teamhub.sh "$stage/teamhub-cli/teamhub"
+          chmod +x "$stage/teamhub-cli/teamhub"
+          (
+            cd apps/computer/local-daemon
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64 GOFLAGS="-buildvcs=false" \
+              go build -trimpath -ldflags "-s -w" \
+              -o "$stage/teamhub-cli/teamhub.exe" ./cmd/linger-teamhub-launcher
+          )
+
+          echo "==> 3/4 Building node-services & staging real per-target node-native-deps (when present in checkout)"
+          if [ -d apps/node-services/src ] && [ -d apps/voice-runtime/src ]; then
+            node apps/desktop/scripts/bundle-node-services.mjs "$PWD" "$stage/node-services" --v2 --imports-json "$stage/node-services-imports.json"
+            if [ -d apps/node-services/prompts ]; then
+              cp -r apps/node-services/prompts "$stage/node-services/prompts"
+            fi
+            node apps/desktop/scripts/stage-v2-node-native-deps.mjs \
+              --repo "$PWD" \
+              --out "$stage/node-native-deps" \
+              --targets darwin-arm64,win32-x64,linux-x64 \
+              --node-services-dir "$stage/node-services" \
+              --imports-json "$stage/node-services-imports.json"
+          else
+            echo "apps/node-services not present in this checkout; pack script will emit runnable test service stub."
+            rm -rf "$stage/node-services" "$stage/node-native-deps"
+          fi
+
+          echo "==> 4/4 Cross-compiling TeamHub & Computer Daemon for darwin-arm64, win32-x64, linux-x64"
+          COMPUTER_VERSION=$(node -p 'require("./apps/computer/package.json").version')
+          ver_backend=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-02-backend"])' "$BASE_VERSION")
+          ver_faulty=$(node --input-type=module -e 'import {deriveStepVersions} from "./apps/desktop/scripts/build-v2-test-upgrade-packs.mjs"; console.log(deriveStepVersions(process.argv[1])["step-03-rollback-faulty"])' "$BASE_VERSION")
+
+          # Native Go crashing binary for step-03-rollback-faulty (exit 42 on all 3 OSes)
+          faulty_src="$RUNNER_TEMP/faulty-teamhub"
+          mkdir -p "$faulty_src"
+          cat >"$faulty_src/go.mod" <<'GOMOD'
+          module linger-v2-faulty-probe
+          go 1.22
+          GOMOD
+          cat >"$faulty_src/main.go" <<EOF
+          package main
+
+          import (
+          	"fmt"
+          	"os"
+          )
+
+          func main() {
+          	fmt.Fprintf(os.Stderr, "[V2-TEST-FAULTY-${ver_faulty}] intentional startup crash to verify pg_dump/pg_restore + atomic rollback + denylist\\n")
+          	os.Exit(42)
+          }
+          EOF
+
+          declare -A GOOS_MAP=( [darwin-arm64]=darwin [win32-x64]=windows [linux-x64]=linux )
+          declare -A GOARCH_MAP=( [darwin-arm64]=arm64 [win32-x64]=amd64 [linux-x64]=amd64 )
+
+          for target in darwin-arm64 win32-x64 linux-x64; do
+            goos="${GOOS_MAP[$target]}"
+            goarch="${GOARCH_MAP[$target]}"
+            ext=""
+            [ "$goos" = "windows" ] && ext=".exe"
+
+            mkdir -p "$stage/teamhub-v0/$target" "$stage/teamhub-v2/$target" "$stage/teamhub-faulty/$target"
+            mkdir -p "$stage/daemon-v0/$target" "$stage/daemon-v2/$target"
+
+            (
+              cd apps/teamhub
+              for cmd in teamhub migrate account; do
+                CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
+                  go build -trimpath -ldflags "-s -w" \
+                  -o "$stage/teamhub-v0/$target/${cmd}${ext}" "./cmd/${cmd}"
+              done
+              for cmd in teamhub migrate account; do
+                CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
+                  go build -trimpath -ldflags "-s -w -buildid=linger-v2-${ver_backend}/${target}/${cmd}" \
+                  -o "$stage/teamhub-v2/$target/${cmd}${ext}" "./cmd/${cmd}"
+              done
+            )
+
+            cp "$stage/teamhub-v2/$target/migrate${ext}" "$stage/teamhub-faulty/$target/migrate${ext}"
+            cp "$stage/teamhub-v2/$target/account${ext}" "$stage/teamhub-faulty/$target/account${ext}"
+            (
+              cd "$faulty_src"
+              CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
+                go build -trimpath -ldflags "-s -w" \
+                -o "$stage/teamhub-faulty/$target/teamhub${ext}" .
+            )
+
+            (
+              cd apps/computer/local-daemon
+              CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
+                go build -trimpath \
+                -ldflags "-s -w -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${COMPUTER_VERSION}" \
+                -o "$stage/daemon-v0/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
+              CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" GOFLAGS="-buildvcs=false" \
+                go build -trimpath \
+                -ldflags "-s -w -buildid=linger-v2-${ver_backend}/${target}/linger-computer-daemon -X github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/linger/transport.ReleaseVersion=${COMPUTER_VERSION}" \
+                -o "$stage/daemon-v2/$target/linger-computer-daemon${ext}" ./cmd/linger-computer-daemon
+            )
+          done
+
+      - name: Sign macOS (rcodesign) and Windows (osslsigncode) binaries in unified backend packs
+        shell: bash
+        env:
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MACOS_DEVELOPER_ID_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_PASSWORD }}
+          WINDOWS_SIGNING_P12_BASE64: ${{ secrets.WINDOWS_SIGNING_P12_BASE64 }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          stage="$RUNNER_TEMP/v2-stage"
+          keys="$RUNNER_TEMP/v2-signing"
+          mkdir -p "$keys"
+
+          if [ -n "$MACOS_DEVELOPER_ID_P12_BASE64" ] && [ -n "${RCODESIGN:-}" ]; then
+            base64 -d <<<"$MACOS_DEVELOPER_ID_P12_BASE64" >"$keys/developer-id.p12"
+            printf '%s' "$MACOS_DEVELOPER_ID_PASSWORD" >"$keys/developer-id.password"
+            for bin in \
+              "$stage/teamhub-v0/darwin-arm64/teamhub" \
+              "$stage/teamhub-v0/darwin-arm64/migrate" \
+              "$stage/teamhub-v0/darwin-arm64/account" \
+              "$stage/teamhub-v2/darwin-arm64/teamhub" \
+              "$stage/teamhub-v2/darwin-arm64/migrate" \
+              "$stage/teamhub-v2/darwin-arm64/account" \
+              "$stage/teamhub-faulty/darwin-arm64/teamhub" \
+              "$stage/teamhub-faulty/darwin-arm64/migrate" \
+              "$stage/teamhub-faulty/darwin-arm64/account" \
+              "$stage/daemon-v0/darwin-arm64/linger-computer-daemon" \
+              "$stage/daemon-v2/darwin-arm64/linger-computer-daemon"; do
+              echo "rcodesign: signing $(basename "$bin") ($(dirname "$bin"))"
+              "$RCODESIGN" sign \
+                --p12-file "$keys/developer-id.p12" \
+                --p12-password-file "$keys/developer-id.password" \
+                --for-notarization \
+                --code-signature-flags runtime \
+                "$bin"
+            done
+            if [ -d "$stage/node-native-deps/darwin-arm64/node_modules" ]; then
+              while IFS= read -r -d '' macho; do
+                if [ -s "$macho" ] && file -b "$macho" | grep -q "Mach-O"; then
+                  echo "rcodesign: signing native addon ${macho#$stage/node-native-deps/darwin-arm64/}"
+                  "$RCODESIGN" sign \
+                    --p12-file "$keys/developer-id.p12" \
+                    --p12-password-file "$keys/developer-id.password" \
+                    --for-notarization \
+                    --code-signature-flags runtime \
+                    "$macho"
+                fi
+              done < <(find "$stage/node-native-deps/darwin-arm64/node_modules" -type f \( -name '*.node' -o -name '*.dylib' \) -print0)
+            fi
+          fi
+
+          if [ -n "$WINDOWS_SIGNING_P12_BASE64" ]; then
+            base64 -d <<<"$WINDOWS_SIGNING_P12_BASE64" >"$keys/authenticode.p12"
+            printf '%s' "$WINDOWS_SIGNING_PASSWORD" >"$keys/authenticode.password"
+            for exe in \
+              "$stage/teamhub-v0/win32-x64/teamhub.exe" \
+              "$stage/teamhub-v0/win32-x64/migrate.exe" \
+              "$stage/teamhub-v0/win32-x64/account.exe" \
+              "$stage/teamhub-v2/win32-x64/teamhub.exe" \
+              "$stage/teamhub-v2/win32-x64/migrate.exe" \
+              "$stage/teamhub-v2/win32-x64/account.exe" \
+              "$stage/teamhub-faulty/win32-x64/teamhub.exe" \
+              "$stage/teamhub-faulty/win32-x64/migrate.exe" \
+              "$stage/teamhub-faulty/win32-x64/account.exe" \
+              "$stage/daemon-v0/win32-x64/linger-computer-daemon.exe" \
+              "$stage/daemon-v2/win32-x64/linger-computer-daemon.exe" \
+              "$stage/teamhub-cli/teamhub.exe"; do
+              echo "osslsigncode: signing $(basename "$exe") ($(dirname "$exe"))"
+              osslsigncode sign \
+                -pkcs12 "$keys/authenticode.p12" \
+                -readpass "$keys/authenticode.password" \
+                -n Linger -h sha256 -ts http://timestamp.digicert.com \
+                -in "$exe" -out "${exe}.signed"
+              mv "${exe}.signed" "$exe"
+            done
+          fi
+
+      - name: Assemble, Ed25519-sign, and verify all 5 steps (step-00..step-04)
+        shell: bash
+        env:
+          BASE_VERSION: ${{ needs.prepare.outputs.version }}
+          BASE_URL: ${{ needs.prepare.outputs.base_url }}
+          MACOS_SIGNED: ${{ needs.prepare.outputs.has_macos_signing }}
+          WINDOWS_SIGNED: ${{ needs.prepare.outputs.has_windows_signing }}
+          DESKTOP_UPDATE_KEY_PEM: ${{ secrets.DESKTOP_UPDATE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          stage="$RUNNER_TEMP/v2-stage"
+          out="$PWD/.linger-runtime/v2-test-service-upgrade-packs"
+
+          extra_args=()
+          if [ -d "$stage/node-services" ]; then
+            extra_args+=(--node-services-dir "$stage/node-services")
+          fi
+          if [ -d "$stage/node-native-deps" ]; then
+            extra_args+=(--node-native-deps-dir "$stage/node-native-deps")
+          fi
+          if [ -n "$DESKTOP_UPDATE_KEY_PEM" ]; then
+            key="$RUNNER_TEMP/v2-signing/update.pem"
+            mkdir -p "$(dirname "$key")"
+            printf '%s\n' "$DESKTOP_UPDATE_KEY_PEM" >"$key"
+            extra_args+=(--sign-key "$key")
+          else
+            extra_args+=(--ephemeral-test-key)
+          fi
+
+          node apps/desktop/scripts/build-v2-test-upgrade-packs.mjs \
+            --out "$out" \
+            --base-version "$BASE_VERSION" \
+            --base-url "$BASE_URL" \
+            --web-dist apps/web/dist \
+            --installer-dist apps/linger-installer/dist \
+            --teamhub-dir "$stage/teamhub-v0" \
+            --teamhub-v2-dir "$stage/teamhub-v2" \
+            --teamhub-faulty-dir "$stage/teamhub-faulty" \
+            --daemon-dir "$stage/daemon-v0" \
+            --daemon-v2-dir "$stage/daemon-v2" \
+            --teamhub-cli-dir "$stage/teamhub-cli" \
+            --macos-signed "$MACOS_SIGNED" \
+            --windows-signed "$WINDOWS_SIGNED" \
+            "${extra_args[@]}"
+
+      - name: Remove temporary signing keys
+        if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/v2-signing"
+
+      - name: Write workflow run summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const idx = JSON.parse(fs.readFileSync(".linger-runtime/v2-test-service-upgrade-packs/manifest-index.json", "utf8"));
+            const lines = [
+              "## Linger V2 (2+1) Signed Test Pack — Non-Release Artifacts Only",
+              "",
+              `- **Architecture**: \`2+1\` (\`web\` + unified \`backend\` + cached \`node-native-deps\`)`,
+              `- **Baseline Version**: \`${idx.baseVersion}\``,
+              `- **Ed25519 Signing**: \`${idx.signedWith}\``,
+              `- **macOS Binary Signing**: \`${idx.macosSigned}\``,
+              `- **Windows Binary Signing**: \`${idx.windowsSigned}\``,
+              `- **Manifest URL Mode**: \`${idx.baseUrl}\``,
+              "",
+              "### Artifacts to Download",
+              "1. \`v2-test-installer-macos-arm64-dmg\` (signed + notarized DMG only + \`SHA256SUMS.txt\`, recommended for macOS real-device testing)",
+              "2. \`v2-test-installer-macos-arm64-tarball\` (signed + notarized \`.app.tar.gz\` + \`SHA256SUMS.txt\`, optional)",
+              "3. \`v2-test-installer-windows-x64\` (Authenticode signed Setup EXE & portable ZIP)",
+              "4. \`v2-test-installer-linux-x64\` (Linux x64 tar.gz)",
+              "5. \`v2-test-service-upgrade-packs\` (5-step 2+1 upgrade kit + \`serve-test-feed.mjs\` + \`REAL-DEVICE-TEST-GUIDE.md\`)",
+              "",
+              "### 5-Step 2+1 Upgrade Matrix",
+              "| Step | Version | Changed Module(s) | Inherited | Rollback Safe | Signed |",
+              "|---|---|---|---|---|---|",
+              ...idx.steps.map(s => `| \`${s.id}\` | \`${s.appVersion}\` | \`${s.changedModules.join(", ")}\` | ${s.inheritedModules.length}/3 | ${s.rollbackSafe} | ${s.signed} |`),
+            ];
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: v2-test-service-upgrade-packs
+          path: .linger-runtime/v2-test-service-upgrade-packs
+          if-no-files-found: error
+          retention-days: 14

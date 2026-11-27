@@ -14,6 +14,8 @@ import {
   checkNativeSourceEnvironment,
   nativeSourceInstanceName,
   prepareNativeConfiguration,
+  stopNativeReleaseServices,
+  upgradeWriteFencePath,
 } from "./native-source.js";
 
 const roots: string[] = [];
@@ -428,4 +430,25 @@ test("the desktop's web origin moves off a taken port after the account exists",
   expect(stored?.source?.ports).toEqual(after);
   expect(stored?.releaseDir).toBe(f.repo);
   expect(stored?.source?.repo).toBe(f.repo);
+});
+
+test("stopNativeReleaseServices stops only requested switchable services in safe order and upgradeWriteFencePath is deterministic", async () => {
+  const f = await fixture();
+  const native = await prepareNativeConfiguration(f.repo, {
+    home: f.home,
+    name: "stop-services-test",
+  });
+  expect(upgradeWriteFencePath(f.home)).toBe(
+    path.join(path.resolve(f.home), "state", "upgrade-write-fence"),
+  );
+  const logs: string[] = [];
+  const result = await stopNativeReleaseServices(native.instance, {
+    services: ["teamhub", "node-services"],
+    log: (msg) => logs.push(msg),
+  });
+  expect(result.stopped).toEqual(["node-services", "teamhub"]);
+  expect(logs).toEqual([
+    "Stopping native node-services for release transition.",
+    "Stopping native teamhub for release transition.",
+  ]);
 });

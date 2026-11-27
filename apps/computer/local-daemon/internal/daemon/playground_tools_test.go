@@ -152,6 +152,14 @@ func TestPlaygroundCardFindsTheCLIOnEveryLayout(t *testing.T) {
 	if _, ok := cardCLIProgram(t.TempDir(), "darwin"); ok {
 		t.Fatal("found a CLI in an empty directory")
 	}
+	// Externalized V2 store directory with native teamhub.exe resolves cleanly
+	// without needing a cmd.exe wrapper or a relative Linger.exe layout.
+	externalCLI := filepath.Join(t.TempDir(), "store", "backend", "backend-abc", "computer-daemon", "teamhub-cli")
+	touch(filepath.Join(externalCLI, "teamhub.exe"))
+	touch(filepath.Join(externalCLI, "teamhub.js"))
+	if extProgram, extOk := cardCLIProgram(externalCLI, "windows"); !extOk || extProgram != filepath.Join(externalCLI, "teamhub.exe") {
+		t.Fatalf("externalized Desktop CLI: %s %v", extProgram, extOk)
+	}
 }
 
 func TestPlaygroundImageRefusesAnIncompletePlacement(t *testing.T) {

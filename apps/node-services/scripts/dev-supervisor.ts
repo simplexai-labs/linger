@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -210,7 +211,23 @@ async function main(): Promise<void> {
   });
 }
 
-if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+export function isDirectEntrypoint(
+  argvEntry: string | undefined,
+  moduleUrl: string,
+): boolean {
+  if (!argvEntry) return false;
+  const canonical = (target: string): string => {
+    const resolved = path.resolve(target);
+    try {
+      return realpathSync(resolved);
+    } catch {
+      return resolved;
+    }
+  };
+  return canonical(argvEntry) === canonical(fileURLToPath(moduleUrl));
+}
+
+if (isDirectEntrypoint(process.argv[1], import.meta.url)) {
   main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

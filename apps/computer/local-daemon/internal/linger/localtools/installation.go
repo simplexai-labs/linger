@@ -44,11 +44,29 @@ func osMetadataFile(name string) bool {
 	return (strings.HasPrefix(name, "._") && len(name) > 2) || strings.EqualFold(name, ".DS_Store") || strings.EqualFold(name, "Thumbs.db") || strings.EqualFold(name, "desktop.ini")
 }
 
-// ToolsDirectory is where Installed looks for the tools: cli/computer-tools
-// two folders above the executable. The Desktop app's daemon runs from
-// resources/computer/, so its tools are resources/cli/computer-tools.
+// ToolsDirectory is where Installed looks for the tools: LINGER_COMPUTER_TOOLS_DIR
+// when explicitly provided by the V2 Desktop release orchestrator, otherwise
+// cli/computer-tools two folders above the executable. The Desktop app's daemon
+// runs from resources/computer/, so its tools are resources/cli/computer-tools.
 func ToolsDirectory(executable string) string {
+	if override := strings.TrimSpace(os.Getenv("LINGER_COMPUTER_TOOLS_DIR")); override != "" {
+		return override
+	}
 	return filepath.Join(filepath.Dir(filepath.Dir(executable)), "cli", "computer-tools")
+}
+
+// resolveNodeRuntime returns the Node.js binary for Computer tools.
+// V2 sets LINGER_TOOLS_NODE_PATH so Desktop shares a single Node.js 26 runtime
+// across local services and Computer tools instead of bundling Node twice.
+func resolveNodeRuntime(root, executable string) string {
+	if override := strings.TrimSpace(os.Getenv("LINGER_TOOLS_NODE_PATH")); override != "" {
+		return override
+	}
+	node := filepath.Join(root, "runtime", "bin", "node")
+	if strings.HasSuffix(executable, ".exe") {
+		node += ".exe"
+	}
+	return node
 }
 
 // Installed resolves only sibling release assets and verifies their frozen
@@ -132,10 +150,7 @@ func Installed(executable string) (*Installation, error) {
 	}); err != nil {
 		return nil, err
 	}
-	node := filepath.Join(root, "runtime", "bin", "node")
-	if strings.HasSuffix(executable, ".exe") {
-		node += ".exe"
-	}
+	node := resolveNodeRuntime(root, executable)
 	if info, e := os.Stat(node); e != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("managed Computer tools require the bundled Node runtime")
 	}
@@ -147,9 +162,18 @@ func Installed(executable string) (*Installation, error) {
 		PiVersion:       manifest.Versions.Pi,
 	}
 	if strings.HasSuffix(strings.ToLower(executable), ".exe") {
-		pwsh := filepath.Join(root, "runtime", "pwsh", "pwsh.exe")
-		if info, e := os.Stat(pwsh); e == nil && info.Mode().IsRegular() {
-			installed.PowerShellPath = pwsh
+		candidates := []string{filepath.Join(root, "runtime", "pwsh", "pwsh.exe")}
+		// When the daemon runs from an externalized V2 store directory and
+		// LINGER_COMPUTER_TOOLS_DIR points back to resources/cli/computer-tools,
+		// keep resolving the Shell-bundled PowerShell 7 under resources/runtime/pwsh.
+		if toolsRoot := filepath.Dir(filepath.Dir(tools)); toolsRoot != root {
+			candidates = append(candidates, filepath.Join(toolsRoot, "runtime", "pwsh", "pwsh.exe"))
+		}
+		for _, pwsh := range candidates {
+			if info, e := os.Stat(pwsh); e == nil && info.Mode().IsRegular() {
+				installed.PowerShellPath = pwsh
+				break
+			}
 		}
 	}
 	if manifest.Cua != "" {

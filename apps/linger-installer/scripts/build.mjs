@@ -23,6 +23,19 @@ await build({
   target: "node26",
 });
 await build({
+  entryPoints: [
+    path.resolve(
+      root,
+      "../../packages/local-installation/src/v2-esm-resolve.mjs",
+    ),
+  ],
+  outfile: path.join(output, "v2-esm-resolve.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node26",
+});
+await build({
   entryPoints: [path.join(root, "src/main.ts")],
   outfile: path.join(output, "installer.js"),
   bundle: true,

@@ -1,0 +1,203 @@
+name: App bundle release (V2 2+1 incremental)
+
+# High-frequency incremental business release pipeline (2+1 model: web + unified
+# backend + cached node-native-deps). Always builds web and backend with pnpm/Go
+# caches and deduplicates unchanged `.tar.zst` artifacts against the previous
+# channel manifest by deterministic SHA-256 (so shared `packages/*` edits are
+# never missed), while skipping `node-native-deps` unless pnpm-lock.yaml changed.
+on:
+  push:
+    tags: ["app-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version to publish (e.g. 0.1.10 or 0.1.11-canary.1)
+        required: true
+      channel:
+        description: Release channel
+        type: choice
+        default: stable
+        options: [stable, beta, canary]
+      rollout_percent:
+        description: Initial rollout percentage (0-100)
+        type: string
+        default: "100"
+      min_shell_version:
+        description: Minimum compatible Desktop Shell version
+        type: string
+        default: "0.1.10"
+      publish:
+        description: Upload bundles and sign/publish channel app-manifest.json
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-bundle-release-${{ github.ref }}-${{ inputs.channel || 'stable' }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPO: ${{ vars.RELEASE_REPO || 'simplexai-labs/linger' }}
+  APP_BUNDLE_CDN_URL: ${{ vars.APP_BUNDLE_CDN_URL || 'https://github.com/simplexai-labs/linger/releases/download' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      channel: ${{ steps.meta.outputs.channel }}
+      rollout_percent: ${{ steps.meta.outputs.rollout_percent }}
+      min_shell_version: ${{ steps.meta.outputs.min_shell_version }}
+      publish: ${{ steps.meta.outputs.publish }}
+      build_web: ${{ steps.plan.outputs.build_web }}
+      build_backend: ${{ steps.plan.outputs.build_backend }}
+      build_node_native_deps: ${{ steps.plan.outputs.build_node_native_deps }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ver="${{ inputs.version }}"
+            channel="${{ inputs.channel }}"
+            rollout="${{ inputs.rollout_percent }}"
+            min_shell="${{ inputs.min_shell_version }}"
+            publish="${{ inputs.publish }}"
+          else
+            ver="${GITHUB_REF_NAME#app-v}"
+            channel="stable"
+            if [[ "$ver" == *-* ]]; then channel="canary"; fi
+            rollout="100"
+            min_shell="0.1.10"
+            publish="true"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "rollout_percent=$rollout" >> "$GITHUB_OUTPUT"
+          echo "min_shell_version=$min_shell" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch previous channel manifest for incremental inheritance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .linger-runtime/app-bundles
+          channel="${{ steps.meta.outputs.channel }}"
+          url="https://github.com/${RELEASE_REPO}/releases/download/channel-${channel}/app-manifest.json"
+          if curl -fsSL "$url" -o .linger-runtime/app-bundles/prev-manifest.json; then
+            echo "Loaded previous manifest for channel=$channel"
+          else
+            echo "No previous manifest found for channel=$channel; building all 2+1 bundles"
+          fi
+
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          prev_arg=()
+          if [ -f .linger-runtime/app-bundles/prev-manifest.json ]; then
+            prev_arg=(--prev-manifest .linger-runtime/app-bundles/prev-manifest.json)
+          fi
+          node apps/desktop/scripts/build-app-bundles.mjs \
+            --mode plan \
+            --out .linger-runtime/app-bundles \
+            "${prev_arg[@]}"
+          node -e '
+            const fs = require("fs");
+            const plan = JSON.parse(fs.readFileSync(".linger-runtime/app-bundles/plan.json", "utf8"));
+            const out = process.env.GITHUB_OUTPUT;
+            for (const [id, item] of Object.entries(plan.bundles)) {
+              const key = "build_" + id.replaceAll("-", "_");
+              fs.appendFileSync(out, `${key}=${item.action === "BUILD"}\n`);
+            }
+          '
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-bundle-plan
+          path: .linger-runtime/app-bundles/plan.json
+          retention-days: 7
+
+  build-web:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build noarch web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .linger-runtime/app-bundles/bundles
+          pnpm --filter @linger/web run build:assets --skip-precompress
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-bundle-web
+          path: apps/web/dist
+          retention-days: 7
+
+  build-backend-targets:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [darwin-arm64, win32-x64, linux-x64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build unified backend bundle (${{ matrix.target }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/linger-installer/scripts/build.mjs
+          node apps/desktop/scripts/build-daemon.mjs --target "${{ matrix.target }}"
+          node apps/desktop/scripts/build-app-bundles.mjs \
+            --mode backend \
+            --target "${{ matrix.target }}" \
+            --daemon-dir "apps/desktop/dist/computer/${{ matrix.target }}" \
+            --installer-dir apps/linger-installer/dist \
+            --out .linger-runtime/app-bundles
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-bundle-backend-${{ matrix.target }}
+          path: .linger-runtime/app-bundles/bundles/backend
+          retention-days: 7
+
+  publish:
+    needs: [plan, build-web, build-backend-targets]
+    if: >-
+      always() &&
+      needs.plan.result == 'success' &&
+      (needs.build-web.result == 'success' || needs.build-web.result == 'skipped') &&
+      (needs.build-backend-targets.result == 'success' || needs.build-backend-targets.result == 'skipped') &&
+      needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: app-bundle*
+          path: .linger-runtime/app-bundles
+          merge-multiple: true
+      - name: Assemble and Ed25519-sign Schema 3 2+1 app-manifest.json
+        env:
+          DESKTOP_UPDATE_KEY_PEM: ${{ secrets.DESKTOP_UPDATE_KEY_PEM }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -n "$DESKTOP_UPDATE_KEY_PEM" ]; then
+            key="$RUNNER_TEMP/update.pem"
+            trap 'rm -f "$key"' EXIT
+            printf '%s\n' "$DESKTOP_UPDATE_KEY_PEM" > "$key"
+          fi
+          echo "Ready to sign and publish app-v${{ needs.plan.outputs.version }} (2+1) to channel=${{ needs.plan.outputs.channel }} (rollout=${{ needs.plan.outputs.rollout_percent }}%)"

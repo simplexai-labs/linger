@@ -11,16 +11,25 @@ name: Desktop release
 # scripts/ci/desktop-release.sh does the work; docs/desktop-release.md lists
 # the variables and secrets. This is the only workflow that publishes desktop
 # releases.
+#
+# Non-release V2 test bridge: dispatching this workflow with publish=false and a
+# version containing "-v2test" (e.g. "0.1.11-v2test.0") skips the entire release
+# pipeline and delegates directly to ./.github/workflows/v2-signed-test-pack.yml
+# (Artifacts-only, zero Release/Tag writes).
 on:
   push:
-    tags: ["desktop-v*"]
+    tags: ["desktop-v*", "shell-v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: Version to build, such as 0.16.33 or 0.16.33-rc.1
+        description: Version to build, such as 0.16.33 or 0.16.33-rc.1 (or 0.1.11-v2test.0 with publish=false for V2 signed test pack)
         required: true
       publish:
         description: Also create the desktop-v<version> release at this commit
+        type: boolean
+        default: false
+      shared_node_runtime:
+        description: V2 shell mode — share a single Node.js 26 runtime instead of bundling Node twice
         type: boolean
         default: false
 
@@ -44,7 +53,21 @@ env:
   APPLE_CODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
 
 jobs:
+  # Non-release V2 signed test pack bridge (Artifacts-only, zero Release/Tag):
+  # uses ONLY main's existing `version` + `publish` inputs so this branch can be
+  # dispatched directly without modifying `main`.
+  v2-signed-test-pack:
+    if: github.event_name == 'workflow_dispatch' && !inputs.publish && contains(inputs.version, '-v2test')
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/v2-signed-test-pack.yml
+    with:
+      base_version: ${{ inputs.version }}
+    secrets: inherit
+
   prepare:
+    if: "!(github.event_name == 'workflow_dispatch' && !inputs.publish && contains(inputs.version, '-v2test'))"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:

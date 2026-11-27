@@ -4,6 +4,12 @@ import {
   operationHeaders,
   teamHubData,
 } from "./http-client.js";
+import {
+  errorExitCode,
+  formatCommandError,
+  renderCommandError,
+} from "./command-errors.js";
+import { CliError } from "./errors.js";
 import { displayText } from "./display-text.js";
 import { requestBodyText } from "./test-support/fetch-text.js";
 
@@ -265,5 +271,103 @@ describe("direct TeamHub HTTP client", () => {
       "x-teamhub-run-id",
     ])
       expect(anonymous.has(key)).toBe(false);
+  });
+  it("retries 503 service_upgrading honoring Retry-After and succeeds once unfenced even with operationId", async () => {
+    const sleeps: number[] = [];
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "service_upgrading",
+              message: "Service upgrade in progress; please retry shortly",
+              retryable: true,
+            },
+          },
+          { status: 503, headers: { "Retry-After": "5" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "service_upgrading",
+              message: "Service upgrade in progress; please retry shortly",
+              retryable: true,
+            },
+          },
+          { status: 503, headers: { "Retry-After": "3" } },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ accepted: true }));
+    const client = createTeamHubClient(config, {
+      fetch: fetcher,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+    expect(
+      await teamHubData(
+        client.api.POST("/api/agent/v1/direct-messages", {
+          body: { content: "Retry me" } as never,
+          headers: operationHeaders("op-upgrade-1"),
+        }),
+      ),
+    ).toEqual({ accepted: true });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([5000, 3000]);
+  });
+  it("throws explicit retryable service_upgrading (never outcome_unknown) after bounded 503 retries exhaust", async () => {
+    const sleeps: number[] = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      Response.json(
+        {
+          error: {
+            code: "service_upgrading",
+            message: "Service upgrade in progress; please retry shortly",
+            retryable: true,
+            request_id: "req_upgrade_fence",
+          },
+        },
+        { status: 503, headers: { "Retry-After": "5" } },
+      ),
+    );
+    const client = createTeamHubClient(config, {
+      fetch: fetcher,
+      maxUpgradeRetries: 2,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+    let caught: unknown;
+    try {
+      await client.api.POST("/api/agent/v1/direct-messages", {
+        body: { content: "Still upgrading" } as never,
+        headers: operationHeaders("op-upgrade-2"),
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(CliError);
+    const cliErr = caught as CliError;
+    expect(cliErr.code).toBe("service_upgrading");
+    expect(cliErr.code).not.toBe("outcome_unknown");
+    expect(cliErr.details).toMatchObject({
+      http_status: 503,
+      retryable: true,
+      retry_after_seconds: 5,
+      operation_id: "op-upgrade-2",
+      request_id: "req_upgrade_fence",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([5000, 5000]);
+    expect(errorExitCode(cliErr)).toBe(1);
+    const formatted = formatCommandError(cliErr, { command: "message send" });
+    expect(formatted.code).toBe("service_upgrading");
+    expect(formatted.details?.retry_after_seconds).toBe(5);
+    const rendered = renderCommandError(formatted);
+    expect(rendered).toContain("teamhub: service_upgrading:");
+    expect(rendered).toContain("Retry after: 5s");
   });
 });

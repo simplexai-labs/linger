@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IPC } from "../shared/api.js";
+import type { BundleUpdaterState } from "./bundle-updater.js";
+import type { DesktopConfig } from "./config.js";
+import type { ReleaseOrchestratorModule } from "./release-orchestrator.js";
 import type { UpdateState } from "./updater.js";
 
 const handlers = vi.hoisted(
@@ -26,11 +29,17 @@ const { stubModule, testHost } = await import("./test-support.js");
 const SERVER = "http://localhost:3000";
 const PASSWORD = "a-private-password";
 
+type OrchestratorState = ReturnType<ReleaseOrchestratorModule["state"]>;
+
 const fixture = async (
   localServer: {
     ownsWindow?: () => Promise<boolean>;
     servesWindow?: () => Promise<boolean>;
     signInWithAccount?: () => Promise<void>;
+  } = {},
+  options: {
+    config?: Partial<DesktopConfig>;
+    withV2Updaters?: boolean;
   } = {},
 ) => {
   const local = {
@@ -45,6 +54,22 @@ const fixture = async (
     state: () => updateState,
     install: vi.fn(async () => {}),
     check: vi.fn(async () => {}),
+  };
+  let bundleState: BundleUpdaterState = { kind: "idle" };
+  let bundleLastCheckSucceeded = false;
+  const bundleUpdater = {
+    ...stubModule("BundleUpdater"),
+    state: () => bundleState,
+    lastCheckSucceeded: () => bundleLastCheckSucceeded,
+    check: vi.fn(async () => {}),
+  };
+  let orchestratorState: OrchestratorState = { kind: "idle" };
+  const orchestrator = {
+    ...stubModule("ReleaseOrchestrator"),
+    state: () => orchestratorState,
+    applyStaged: vi.fn(async () => {}),
+    rollbackNotice: () => undefined,
+    dismissRollbackNotice: vi.fn(),
   };
   const diagnostics = {
     ...stubModule("Diagnostics"),
@@ -101,10 +126,13 @@ const fixture = async (
       windows as never,
       stubModule("WorkspaceGrants"),
       updater as never,
+      ...(options.withV2Updaters
+        ? [bundleUpdater as never, orchestrator as never]
+        : []),
       local as never,
       new DesktopIpcModule({ defaultDisplayName: "Desk", driverUpdater }),
     ],
-    { serverUrl: SERVER },
+    { serverUrl: SERVER, ...options.config },
     bus,
   );
   await host.start();
@@ -113,6 +141,15 @@ const fixture = async (
   const setUpdate = (state: UpdateState) => {
     updateState = state;
     bus.emit("update.changed", state.kind);
+  };
+  const setBundleUpdate = (state: BundleUpdaterState, succeeded?: boolean) => {
+    bundleState = state;
+    if (succeeded !== undefined) bundleLastCheckSucceeded = succeeded;
+    bus.emit("bundle.update_changed", state.kind);
+  };
+  const setOrchestrator = (state: OrchestratorState) => {
+    orchestratorState = state;
+    bus.emit("bundle.update_changed", state.kind);
   };
   return {
     host,
@@ -123,8 +160,12 @@ const fixture = async (
     local,
     power,
     updater,
+    bundleUpdater,
+    orchestrator,
     send,
     setUpdate,
+    setBundleUpdate,
+    setOrchestrator,
     invoke,
     windows,
   };
@@ -266,6 +307,174 @@ describe("DesktopIpcModule updates", () => {
     expect(f.updater.install).not.toHaveBeenCalled();
     expect(f.updater.check).not.toHaveBeenCalled();
     await f.host.stop("quit");
+  });
+
+  it("never lets Shell failed or checking mask active V2 updates and routes install to orchestrator", async () => {
+    const f = await fixture({}, { withV2Updaters: true });
+    const diff = {
+      changedModules: ["web"] as const,
+      nodeDepsChanged: false,
+      scope: "web" as const,
+      action: "reload-page" as const,
+      requiresDrain: false,
+    };
+
+    f.setUpdate({ kind: "failed", error: "TypeError: fetch failed" });
+
+    // V2 downloading is visible even when Shell updater failed.
+    f.setBundleUpdate({
+      kind: "downloading",
+      version: "0.2.15",
+      changedModules: ["web"],
+      bytesDownloaded: 500,
+      bytesTotal: 1000,
+    });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "downloading",
+      version: "0.2.15",
+      scope: "web",
+      progress: {
+        bytesDownloaded: 500,
+        bytesTotal: 1000,
+        changedModules: ["web"],
+      },
+    });
+
+    // V2 ready wins over Shell failed and updateInstall calls applyStaged().
+    f.setBundleUpdate(
+      { kind: "staged", version: "0.2.15", changedModules: ["web"] },
+      true,
+    );
+    f.setOrchestrator({ kind: "ready", version: "0.2.15", diff });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "ready",
+      version: "0.2.15",
+      scope: "web",
+      action: "reload-page",
+    });
+    await f.invoke(IPC.updateInstall);
+    expect(f.orchestrator.applyStaged).toHaveBeenCalledTimes(1);
+    expect(f.updater.install).not.toHaveBeenCalled();
+
+    // V2 waiting wins over Shell failed and updateInstall still calls applyStaged().
+    f.setOrchestrator({ kind: "waiting", version: "0.2.15", diff });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "waiting",
+      version: "0.2.15",
+      scope: "web",
+      action: "reload-page",
+    });
+    await f.invoke(IPC.updateInstall);
+    expect(f.orchestrator.applyStaged).toHaveBeenCalledTimes(2);
+    expect(f.updater.install).not.toHaveBeenCalled();
+
+    // V2 applying maps to installing even while Shell failed.
+    f.setOrchestrator({ kind: "applying", version: "0.2.15", diff });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "installing",
+      version: "0.2.15",
+      scope: "web",
+      action: "reload-page",
+    });
+
+    // Shell checking also never masks V2 ready and routes install to orchestrator.
+    f.setUpdate({ kind: "checking" });
+    f.setOrchestrator({ kind: "ready", version: "0.2.15", diff });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "ready",
+      version: "0.2.15",
+      scope: "web",
+      action: "reload-page",
+    });
+    await f.invoke(IPC.updateInstall);
+    expect(f.orchestrator.applyStaged).toHaveBeenCalledTimes(3);
+    expect(f.updater.install).not.toHaveBeenCalled();
+
+    await f.host.stop("quit");
+  });
+
+  it("keeps actionable Shell updates prioritized over V2 updates", async () => {
+    const f = await fixture({}, { withV2Updaters: true });
+    const diff = {
+      changedModules: ["web"] as const,
+      nodeDepsChanged: false,
+      scope: "web" as const,
+      action: "reload-page" as const,
+      requiresDrain: false,
+    };
+    f.setOrchestrator({ kind: "ready", version: "0.2.15", diff });
+
+    f.setUpdate({ kind: "downloading", version: "0.3.0" });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "downloading",
+      version: "0.3.0",
+    });
+
+    f.setUpdate({
+      kind: "available",
+      version: "0.3.0",
+      url: "https://github.com/example/linger/releases/tag/v0.3.0",
+    });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "available",
+      version: "0.3.0",
+    });
+    await f.invoke(IPC.updateInstall);
+    expect(f.updater.install).toHaveBeenCalledTimes(1);
+    expect(f.orchestrator.applyStaged).not.toHaveBeenCalled();
+
+    f.setUpdate({ kind: "ready", version: "0.3.0" });
+    expect(await f.invoke(IPC.updateState)).toEqual({
+      kind: "ready",
+      version: "0.3.0",
+    });
+    await f.invoke(IPC.updateInstall);
+    expect(f.updater.install).toHaveBeenCalledTimes(2);
+    expect(f.orchestrator.applyStaged).not.toHaveBeenCalled();
+
+    await f.host.stop("quit");
+  });
+
+  it("suppresses unrelated Shell failed only when custom V2 feed checked cleanly, while preserving production Shell failures", async () => {
+    const prevFeed = process.env.LINGER_UPDATE_FEED_URL;
+    delete process.env.LINGER_UPDATE_FEED_URL;
+    try {
+      // Production (no custom V2 feed): Shell failure stays visible when V2 is idle.
+      const prod = await fixture({}, { withV2Updaters: true });
+      prod.setBundleUpdate({ kind: "idle" }, true);
+      prod.setUpdate({ kind: "failed", error: "GitHub unreachable" });
+      expect(await prod.invoke(IPC.updateState)).toEqual({
+        kind: "failed",
+        error: "GitHub unreachable",
+      });
+      await prod.host.stop("quit");
+
+      // Custom V2 feed: clean V2 check hides unrelated GitHub Shell failure.
+      const custom = await fixture(
+        {},
+        {
+          withV2Updaters: true,
+          config: { updateFeedUrl: "http://127.0.0.1:18787" },
+        },
+      );
+      custom.setUpdate({ kind: "failed", error: "TypeError: fetch failed" });
+      custom.setBundleUpdate({ kind: "idle" }, true);
+      expect(await custom.invoke(IPC.updateState)).toEqual({ kind: "idle" });
+
+      // Custom V2 feed failure still surfaces the V2 error.
+      custom.setBundleUpdate(
+        { kind: "failed", error: "Local feed down" },
+        false,
+      );
+      expect(await custom.invoke(IPC.updateState)).toEqual({
+        kind: "failed",
+        error: "Local feed down",
+      });
+      await custom.host.stop("quit");
+    } finally {
+      if (prevFeed === undefined) delete process.env.LINGER_UPDATE_FEED_URL;
+      else process.env.LINGER_UPDATE_FEED_URL = prevFeed;
+    }
   });
 });
 

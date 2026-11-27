@@ -36,13 +36,16 @@ export const stageDesktopComputerTools = async (
     nodeReleases = NODE_RUNTIME_RELEASES,
   } = {},
 ) => {
+  const useSharedNode = process.env.LINGER_SHARED_NODE_RUNTIME === "1";
   // One target at a time: the darwin targets share one cached Cua archive.
   for (const target of targets) {
     const bundle = computerToolsDirectory(target, dist);
     // A source build keeps tools that still match the frozen manifest and the
     // pinned Node.js, recorded beside them, so `pnpm start` needs no download;
     // release builds start from an empty dist/.
-    const node = JSON.stringify(nodeReleases[target] ?? null);
+    const node = JSON.stringify(
+      useSharedNode ? { shared: true } : (nodeReleases[target] ?? null),
+    );
     const pinned = `${bundle}.node.json`;
     const kept =
       (await readFile(pinned, "utf8").catch(() => null)) === node &&
@@ -55,8 +58,15 @@ export const stageDesktopComputerTools = async (
     await rm(bundle, { recursive: true, force: true });
     await mkdir(bundle, { recursive: true });
     const entries = await stage(bundle, target);
+    if (useSharedNode) {
+      // V2 unified Node 26: remove the duplicate runtime copy; the daemon gets
+      // LINGER_TOOLS_NODE_PATH pointing to the shared infra/node binary.
+      await rm(path.join(bundle, "runtime"), { recursive: true, force: true });
+    }
     await writeFile(pinned, node);
-    console.log(`Computer tools for ${target}: ${entries.length} files`);
+    console.log(
+      `Computer tools for ${target}: ${entries.length} files${useSharedNode ? " (shared Node 26)" : ""}`,
+    );
   }
   if (targets.includes(host)) {
     const computer = path.join(dist, "computer");

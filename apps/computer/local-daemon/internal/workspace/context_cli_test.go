@@ -48,6 +48,35 @@ func TestCodexContextCLIArgsEscapeSpecialCharacters(t *testing.T) {
 	}
 }
 
+func TestCodexContextCLIArgsForwardCLINodePathWhenSet(t *testing.T) {
+	withNode := CodexContextCLIArgs(map[string]string{
+		"TEAMHUB_CONFIG":       "/private/runtime/teamhub/config.json",
+		"TEAMHUB_PROFILE":      "runtime",
+		"PATH":                 "/trusted/cli:/bin",
+		"LINGER_CLI_NODE_PATH": "/Applications/Linger.app/Contents/MacOS/Linger",
+	})
+	wantWithNode := []string{
+		"-c", `shell_environment_policy.set.TEAMHUB_CONFIG="/private/runtime/teamhub/config.json"`,
+		"-c", `shell_environment_policy.set.TEAMHUB_PROFILE="runtime"`,
+		"-c", `shell_environment_policy.set.PATH="/trusted/cli:/bin"`,
+		"-c", `shell_environment_policy.set.LINGER_CLI_NODE_PATH="/Applications/Linger.app/Contents/MacOS/Linger"`,
+	}
+	if !slices.Equal(withNode, wantWithNode) {
+		t.Fatalf("args with LINGER_CLI_NODE_PATH = %q, want %q", withNode, wantWithNode)
+	}
+
+	withoutNode := CodexContextCLIArgs(map[string]string{
+		"TEAMHUB_CONFIG":       "/private/runtime/teamhub/config.json",
+		"TEAMHUB_PROFILE":      "runtime",
+		"PATH":                 "/trusted/cli:/bin",
+		"LINGER_CLI_NODE_PATH": "",
+	})
+	wantWithoutNode := wantWithNode[:6]
+	if !slices.Equal(withoutNode, wantWithoutNode) {
+		t.Fatalf("args with empty LINGER_CLI_NODE_PATH = %q, want %q", withoutNode, wantWithoutNode)
+	}
+}
+
 func TestCodexContextCLIArgsForwardWSLENVWhenSet(t *testing.T) {
 	withWSLENV := CodexContextCLIArgs(map[string]string{
 		"TEAMHUB_CONFIG":  `C:\work\.teamhub\cli\config.json`,

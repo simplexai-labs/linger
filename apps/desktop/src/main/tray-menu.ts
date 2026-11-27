@@ -1,7 +1,12 @@
 import type { Translate } from "../i18n/language.js";
+import type { UpdateScope } from "../shared/api.js";
 import type { StatusSummary } from "./status.js";
 import { trayMessages as m } from "./tray.messages.js";
 import type { AnnouncedUpdate, UpdateState } from "./updater.js";
+
+export type TrayUpdateState = UpdateState & {
+  readonly scope?: UpdateScope;
+};
 
 export type TrayAction =
   | "enroll"
@@ -30,7 +35,7 @@ export interface TrayMenuState {
   readonly enrolled: boolean;
   // The updater's progress; a failure says why, since it is otherwise only
   // in the log.
-  readonly update?: UpdateState;
+  readonly update?: TrayUpdateState;
   // A diagnostics server is set up, so reports can be sent from here.
   readonly canSendDiagnostics?: boolean;
 }
@@ -87,12 +92,16 @@ const updateItems = (
   update: TrayMenuState["update"],
   t: Translate,
 ): TrayMenuItem[] => {
+  const isServiceUpdate =
+    update?.scope === "web" || update?.scope === "backend";
   switch (update?.kind) {
     case "downloading":
       return [
         {
           kind: "label",
-          label: t(m.downloading, { version: update.version }),
+          label: isServiceUpdate
+            ? t(m.serviceDownloading)
+            : t(m.downloading, { version: update.version }),
         },
       ];
     case "ready":
@@ -100,16 +109,24 @@ const updateItems = (
         {
           kind: "action",
           action: "install-update",
-          label: t(m.restartToUpdate, { version: update.version }),
+          label: isServiceUpdate
+            ? t(m.updateServices)
+            : t(m.restartToUpdate, { version: update.version }),
         },
       ];
     case "waiting":
       return [
         {
           kind: "label",
-          label: t(m.waiting, { version: update.version }),
+          label: isServiceUpdate
+            ? t(m.serviceWaiting)
+            : t(m.waiting, { version: update.version }),
         },
       ];
+    case "installing":
+      return isServiceUpdate
+        ? [{ kind: "label", label: t(m.serviceInstalling) }]
+        : [];
     case "available":
       return [
         {

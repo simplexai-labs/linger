@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -115,6 +117,165 @@ func TestResolverRejectsCLIConfigurationThroughSymbolicParent(t *testing.T) {
 	_, err := resolver.Resolve(context.Background(), protocol.Command{TenantID: "tenant", AgentID: "agent", RegistrationID: "registration", AssignmentRevision: 1, WorkspaceGrantID: "grant", RuntimeType: "codex"}, json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
 	if err == nil {
 		t.Fatal("symbolic parent configuration must not be passed to the Runtime")
+	}
+}
+
+func TestResolverForwardsTrustedTeamHubCLINodePath(t *testing.T) {
+	root := t.TempDir()
+	trustedNode := filepath.Join(t.TempDir(), "Linger")
+	store := cliTestCredentialStore(t, true)
+	resolver := cliTestResolver(root, store)
+	resolver.TeamHubCLINodePath = "  " + trustedNode + "  "
+	resolver.Providers["codex"] = ProviderInstallation{
+		Type:           "codex",
+		ExecutablePath: "/trusted/codex",
+		Environment: map[string]string{
+			"PATH":                 "/bin",
+			"LINGER_CLI_NODE_PATH": "/untrusted/installation/node",
+			"linger_cli_node_path": "/untrusted/lowercase/node",
+		},
+	}
+
+	prepare, err := resolver.Resolve(context.Background(), cliTestCommand("context-node"), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"},"environment":{"LINGER_CLI_NODE_PATH":"/evil/wire/node"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := resolver.Resolve(context.Background(), cliTestCommand("context-node"), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"},"cli_run_context":{"scope":{"kind":"room","id":"room-1"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepare.Environment["LINGER_CLI_NODE_PATH"] != trustedNode {
+		t.Fatalf("LINGER_CLI_NODE_PATH = %q, want %q", prepare.Environment["LINGER_CLI_NODE_PATH"], trustedNode)
+	}
+	if _, leakedLower := prepare.Environment["linger_cli_node_path"]; leakedLower {
+		t.Fatalf("untrusted lowercase linger_cli_node_path leaked: %+v", prepare.Environment)
+	}
+	if prepare.Environment["LINGER_CLI_NODE_PATH"] != start.Environment["LINGER_CLI_NODE_PATH"] {
+		t.Fatalf("LINGER_CLI_NODE_PATH differs between prepare and start: %q vs %q", prepare.Environment["LINGER_CLI_NODE_PATH"], start.Environment["LINGER_CLI_NODE_PATH"])
+	}
+}
+
+func TestResolverRejectsUntrustedOrMissingTeamHubCLINodePath(t *testing.T) {
+	cases := []struct {
+		name        string
+		cliNodePath string
+		withCreds   bool
+	}{
+		{name: "empty node path", cliNodePath: "", withCreds: true},
+		{name: "relative node path", cliNodePath: "relative/bin/Linger", withCreds: true},
+		{name: "no cli credential", cliNodePath: filepath.Join(t.TempDir(), "Linger"), withCreds: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			store := cliTestCredentialStore(t, tc.withCreds)
+			resolver := cliTestResolver(root, store)
+			resolver.TeamHubCLINodePath = tc.cliNodePath
+			resolver.Providers["codex"] = ProviderInstallation{
+				Type:           "codex",
+				ExecutablePath: "/trusted/codex",
+				Environment: map[string]string{
+					"PATH":                 "/bin",
+					"LINGER_CLI_NODE_PATH": "/untrusted/installation/node",
+				},
+			}
+			spec, err := resolver.Resolve(context.Background(), cliTestCommand(""), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"},"environment":{"LINGER_CLI_NODE_PATH":"/evil/wire/node"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for k, v := range spec.Environment {
+				if strings.EqualFold(k, "LINGER_CLI_NODE_PATH") {
+					t.Fatalf("unexpected %s=%q in resolved environment: %+v", k, v, spec.Environment)
+				}
+			}
+		})
+	}
+}
+
+func TestResolverExternalizedTeamHubCLIRunsViaCLINodePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("teamhub.sh is a POSIX wrapper")
+	}
+	scriptSource := filepath.Join("..", "..", "..", "..", "..", "desktop", "scripts", "teamhub.sh")
+	wrapperBytes, err := os.ReadFile(scriptSource)
+	if err != nil {
+		t.Fatalf("read teamhub.sh: %v", err)
+	}
+
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeCLIDir := filepath.Join(tmp, "store", "backend", "backend-abc123", "computer-daemon", "teamhub-cli")
+	if err := os.MkdirAll(storeCLIDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wrapperPath := filepath.Join(storeCLIDir, "teamhub")
+	if err := os.WriteFile(wrapperPath, wrapperBytes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storeCLIDir, "teamhub.js"), []byte("// stub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	appDir := filepath.Join(tmp, "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeElectron := filepath.Join(appDir, "Linger")
+	fakeElectronScript := "#!/bin/sh\n" +
+		"if [ \"${ELECTRON_RUN_AS_NODE:-}\" != \"1\" ]; then echo 'missing ELECTRON_RUN_AS_NODE=1' >&2; exit 11; fi\n" +
+		"if [ \"${1:-}\" != \"--use-env-proxy\" ]; then echo \"missing --use-env-proxy: $1\" >&2; exit 12; fi\n" +
+		"shift\n" +
+		"printf 'fake-electron-ok:%s' \"$*\"\n"
+	if err := os.WriteFile(fakeElectron, []byte(fakeElectronScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	minimalBinDir := filepath.Join(tmp, "no-node-bin")
+	if err := os.MkdirAll(minimalBinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirnameBin, err := exec.LookPath("dirname")
+	if err != nil {
+		t.Fatalf("locate dirname: %v", err)
+	}
+	if err := os.Symlink(dirnameBin, filepath.Join(minimalBinDir, "dirname")); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	store := cliTestCredentialStore(t, true)
+	resolver := cliTestResolver(root, store)
+	resolver.TeamHubCLIBin = storeCLIDir
+	resolver.TeamHubCLINodePath = fakeElectron
+	resolver.Providers["codex"] = ProviderInstallation{
+		Type:           "codex",
+		ExecutablePath: "/trusted/codex",
+		Environment:    map[string]string{"PATH": minimalBinDir},
+	}
+
+	spec, err := resolver.Resolve(context.Background(), cliTestCommand("context-exec"), json.RawMessage(`{"kind":"run.start","runtime":{"type":"codex"},"session":{"threadId":""},"input":{"type":"text","text":"hi"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", "teamhub --version")
+	cmd.Env = make([]string, 0, len(spec.Environment))
+	for k, v := range spec.Environment {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("externalized teamhub failed without global node: %v\noutput: %s", err, string(out))
+	}
+	resolvedCLIDir, err := filepath.EvalSymlinks(storeCLIDir)
+	if err != nil {
+		resolvedCLIDir = storeCLIDir
+	}
+	expectedScript := filepath.Join(resolvedCLIDir, "teamhub.js")
+	if got := string(out); got != "fake-electron-ok:"+expectedScript+" --version" {
+		t.Fatalf("unexpected teamhub output: %q, want %q", got, "fake-electron-ok:"+expectedScript+" --version")
 	}
 }
 

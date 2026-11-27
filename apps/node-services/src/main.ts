@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -236,6 +238,22 @@ export async function main(
   }, SHUTDOWN_TIMEOUT_MS);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+function isDirectEntrypoint(
+  argvEntry: string | undefined,
+  moduleUrl: string,
+): boolean {
+  if (!argvEntry) return false;
+  const canonical = (target: string): string => {
+    const resolved = path.resolve(target);
+    try {
+      return realpathSync(resolved);
+    } catch {
+      return resolved;
+    }
+  };
+  return canonical(argvEntry) === canonical(fileURLToPath(moduleUrl));
+}
+
+if (isDirectEntrypoint(process.argv[1], import.meta.url)) {
   void main();
 }

@@ -210,8 +210,12 @@ export class SetupWindowModule implements Module {
 
   show(): void {
     if (this.#window && !this.#window.isDestroyed()) {
-      this.#window.show();
-      this.#window.focus();
+      if (process.env.LINGER_NO_FOCUS === "1") {
+        this.#window.showInactive();
+      } else {
+        this.#window.show();
+        this.#window.focus();
+      }
       return;
     }
     const window = new BrowserWindow({
@@ -243,7 +247,13 @@ export class SetupWindowModule implements Module {
     contents.on("will-navigate", (event) => event.preventDefault());
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     contents.on("will-attach-webview", (event) => event.preventDefault());
-    window.once("ready-to-show", () => window.show());
+    window.once("ready-to-show", () => {
+      if (process.env.LINGER_NO_FOCUS === "1") {
+        window.showInactive();
+      } else {
+        window.show();
+      }
+    });
     // Back from System Settings, a driver updater, or freeing disk space:
     // show what changed there.
     window.on("focus", () => {

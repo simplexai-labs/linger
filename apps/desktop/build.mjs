@@ -20,11 +20,13 @@ import {
   buildRuntime,
   RUNTIME_TARGETS,
 } from "./scripts/build-native-runtime.mjs";
+import { writeShellSeedManifest } from "./scripts/build-shell-seed-manifest.mjs";
 
 const desktopDir = fileURLToPath(new URL(".", import.meta.url));
-const { version } = JSON.parse(
+const { version: pkgVersion } = JSON.parse(
   await readFile(path.join(desktopDir, "package.json"), "utf8"),
 );
+const version = process.env.DESKTOP_VERSION?.trim() || pkgVersion;
 // The platforms this build is for: this machine unless
 // LINGER_DESKTOP_DAEMON_TARGETS lists targets, comma-separated (packaging
 // builds the one it ships).
@@ -196,8 +198,19 @@ const buildDaemonAndTools = async () => {
   await stageDesktopComputerTools(daemonTargets);
 };
 
+const buildShellSeed = async () => {
+  const seedDir = path.join(desktopDir, "dist", "seed");
+  await rm(seedDir, { recursive: true, force: true });
+  const { outFile, bytes } = await writeShellSeedManifest({
+    appVersion: version,
+    outFile: path.join(seedDir, "seed-manifest.json"),
+  });
+  console.log(`Shell seed manifest (${version}): ${outFile} (${bytes} bytes)`);
+};
+
 await Promise.all([
   buildNativeOutputs(),
   buildTeamhubCli({ desktopDir, daemonTargets }),
   buildDaemonAndTools(),
+  buildShellSeed(),
 ]);

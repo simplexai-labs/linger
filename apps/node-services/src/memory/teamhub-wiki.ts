@@ -131,7 +131,8 @@ export async function readPublishedWiki(
         `TeamHub Wiki read failed with HTTP ${response.status}`,
         [408, 429, 500, 502, 503, 504].includes(response.status),
         undefined,
-        response.status === 429 && Number.isFinite(retryAfterMs)
+        (response.status === 429 || response.status === 503) &&
+          Number.isFinite(retryAfterMs)
           ? retryAfterMs
           : undefined,
       );

@@ -182,4 +182,84 @@ describe("the tray in Chinese", () => {
       body: zhCN.tray.ready.replace("{version}", "0.17.0"),
     });
   });
+
+  it("distinguishes service updates (web/backend) from client major updates (shell) in EN and zh-CN", () => {
+    const zh = translator("zh-CN");
+    for (const scope of ["web", "backend"] as const) {
+      expect(
+        menu({
+          status: { tone: "online", label: "Online" },
+          preventSleep: false,
+          enrolled: true,
+          update: { kind: "ready", version: "0.1.10-v2test.1", scope },
+        })[1],
+      ).toEqual({
+        kind: "action",
+        action: "install-update",
+        label: "Update Services",
+      });
+      expect(
+        menu({
+          status: { tone: "online", label: "Online" },
+          preventSleep: false,
+          enrolled: true,
+          update: { kind: "downloading", version: "0.1.10-v2test.1", scope },
+        })[1],
+      ).toEqual({
+        kind: "label",
+        label: "Downloading Service Update…",
+      });
+      expect(
+        menu({
+          status: { tone: "busy", label: "Running 1 Task" },
+          preventSleep: false,
+          enrolled: true,
+          update: { kind: "waiting", version: "0.1.10-v2test.1", scope },
+        })[1],
+      ).toEqual({
+        kind: "label",
+        label: "Will Update Services When Tasks Finish",
+      });
+      expect(
+        menu({
+          status: { tone: "online", label: "Online" },
+          preventSleep: false,
+          enrolled: true,
+          update: { kind: "installing", version: "0.1.10-v2test.1", scope },
+        })[1],
+      ).toEqual({
+        kind: "label",
+        label: "Updating Services…",
+      });
+      expect(
+        trayMenu(
+          {
+            status: { tone: "online", label: zhCN.status.idle },
+            preventSleep: false,
+            enrolled: true,
+            update: { kind: "ready", version: "0.1.10-v2test.1", scope },
+          },
+          zh,
+        )[1],
+      ).toEqual({
+        kind: "action",
+        action: "install-update",
+        label: zhCN.tray.updateServices,
+      });
+    }
+
+    // Shell major updates keep Restart to Update wording.
+    expect(
+      menu({
+        status: { tone: "online", label: "Online" },
+        preventSleep: false,
+        enrolled: true,
+        update: { kind: "ready", version: "0.2.0", scope: "shell" },
+      })[1],
+    ).toEqual({
+      kind: "action",
+      action: "install-update",
+      label: "Restart to Update (0.2.0)",
+    });
+  });
 });

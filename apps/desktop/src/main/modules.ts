@@ -45,6 +45,18 @@ export interface BusEvents {
   "setup.open": [];
   "status.changed": [status: { tone: string; label: string }];
   "update.changed": [state: string];
+  // V2 modular incremental update events.
+  "bundle.staged": [appVersion: string, changedModules: readonly string[]];
+  "bundle.update_changed": [state: string];
+  "shell.update_required": [minShellVersion: string];
+  "release.switching": [appVersion: string];
+  "release.committed": [appVersion: string];
+  "release.rolled_back": [
+    fromVersion: string,
+    toVersion: string,
+    reason: string,
+  ];
+  "web.reload_ready": [appVersion: string];
 }
 
 export class EventBus {

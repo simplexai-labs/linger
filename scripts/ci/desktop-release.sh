@@ -113,17 +113,23 @@ release_version() {
   echo "$DESKTOP_VERSION"
 }
 
-# Tags are desktop-v<semver>, beside the cli-v<semver> tags of the CLI.
+# Tags are desktop-v<semver> or shell-v<semver> (V2 low-frequency shell), beside
+# the cli-v<semver> and app-v<semver> tags.
 # A bare version (a manual run) gets the tag it would be released under.
 cmd_version() {
-  local input="${1:-}" version
-  [[ -n "$input" ]] || die "version needs a tag such as desktop-v0.16.36"
-  version="${input#desktop-v}"
-  if [[ "$version" == "$input" && "$input" == *-v* ]]; then
-    die "$input is not a desktop tag; use desktop-v<version>"
+  local input="${1:-}" version prefix="desktop-v"
+  [[ -n "$input" ]] || die "version needs a tag such as desktop-v0.16.36 or shell-v0.2.0"
+  if [[ "$input" == shell-v* ]]; then
+    prefix="shell-v"
+    version="${input#shell-v}"
+  else
+    version="${input#desktop-v}"
+  fi
+  if [[ "$version" == "$input" && "$input" =~ ^[A-Za-z][A-Za-z0-9._-]*-v ]]; then
+    die "$input is not a desktop/shell tag; use desktop-v<version> or shell-v<version>"
   fi
   [[ "$version" =~ $version_pattern ]] || die "$input does not hold a version like 0.16.36 or 0.16.36-rc.1"
-  echo "tag=desktop-v$version"
+  echo "tag=${prefix}${version}"
   echo "version=$version"
   if [[ "$version" == *-* ]]; then
     echo "prerelease=true"

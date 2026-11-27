@@ -61,10 +61,122 @@
         height: 52px;
       }
       [data-mode="updating"] .actions,
+      [data-mode="updating"] #reason,
+      [data-mode="updating"] .code,
       [data-mode="starting"] .actions,
       [data-mode="failed"] #edit,
       [data-mode="failed"] .countdown {
         display: none;
+      }
+      /* Minimal centered updating layout: pure light radial canvas, no card chrome. */
+      body[data-mode="updating"] {
+        background: radial-gradient(
+          circle at 50% 42%,
+          #ffffff 0%,
+          #fafaf9 58%,
+          #f5f5f3 100%
+        );
+      }
+      body[data-mode="updating"] main {
+        width: auto;
+        max-width: 420px;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        transform: translateY(-18px);
+      }
+      body[data-mode="updating"] .mark {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 20px;
+        border-radius: 15px;
+        overflow: hidden;
+        box-shadow:
+          0 14px 32px rgba(20, 20, 16, 0.11),
+          0 2px 6px rgba(20, 20, 16, 0.06);
+      }
+      body[data-mode="updating"] .mark img {
+        width: 64px;
+        height: 64px;
+        display: block;
+      }
+      body[data-mode="updating"] h1 {
+        margin: 0 0 18px;
+        color: #1a1a16;
+        font-size: 15px;
+        font-weight: 560;
+        letter-spacing: -0.01em;
+      }
+      .update-progress {
+        display: none;
+      }
+      body[data-mode="updating"] .update-progress {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .progress-track {
+        position: relative;
+        width: 248px;
+        height: 4px;
+        border-radius: 999px;
+        background: #e9e9e5;
+        overflow: hidden;
+      }
+      .progress-fill {
+        position: relative;
+        height: 100%;
+        width: 0%;
+        border-radius: 999px;
+        background: #1a1a16;
+        transition:
+          width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+          background-color 200ms ease;
+        overflow: hidden;
+      }
+      .progress-fill::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255, 255, 255, 0.28) 50%,
+          transparent 100%
+        );
+        transform: translateX(-100%);
+        animation: update-shimmer 1.6s ease-in-out infinite;
+      }
+      body[data-mode="updating"][data-tone="rollback"] .progress-fill {
+        background: #b5320a;
+      }
+      body[data-mode="updating"][data-tone="rollback"] .progress-fill::after {
+        animation: none;
+      }
+      @keyframes update-shimmer {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(100%);
+        }
+      }
+      .progress-status {
+        margin: 0;
+        color: #78776e;
+        font-size: 12.5px;
+        line-height: 1.5;
+        font-variant-numeric: tabular-nums;
+      }
+      body[data-mode="updating"][data-tone="rollback"] .progress-status {
+        color: #b5320a;
       }
       /* Show Logs and Save Diagnostics belong to the start failure only. */
       body:not([data-mode="failed"]) .failed-only {
@@ -213,6 +325,19 @@
       </div>
       <h1 id="title" data-t="unreachableTitle"></h1>
       <p id="reason"></p>
+      <div class="update-progress" id="update-progress">
+        <div
+          class="progress-track"
+          id="progress-track"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <p class="progress-status" id="progress-status"></p>
+      </div>
       <span class="code" id="code"></span>
       <div class="actions">
         <button
@@ -289,10 +414,75 @@
       const local = ["updating", "starting", "failed"].find((mode) =>
         params.has(mode),
       );
-      if (local === "updating") {
+      let shellProgressTimer;
+      const setUpdateProgress = ({ title, detail, percent, tone } = {}) => {
+        if (shellProgressTimer) {
+          clearInterval(shellProgressTimer);
+          shellProgressTimer = undefined;
+        }
         document.body.dataset.mode = "updating";
-        $("title").textContent = t("updatingTitle");
-        $("reason").textContent = t("updating");
+        document.body.dataset.tone =
+          tone === "rollback" ? "rollback" : "normal";
+        if (typeof title === "string" && title) $("title").textContent = title;
+        const pct =
+          typeof percent === "number" && Number.isFinite(percent)
+            ? Math.max(0, Math.min(100, Math.round(percent)))
+            : undefined;
+        if (pct !== undefined) {
+          $("progress-fill").style.width = `${pct}%`;
+          $("progress-track").setAttribute("aria-valuenow", String(pct));
+        }
+        if (typeof detail === "string") {
+          $("progress-status").textContent =
+            pct !== undefined && tone !== "rollback"
+              ? `${detail} · ${pct}%`
+              : detail;
+        }
+      };
+      window.__lingerSetUpdateProgress = setUpdateProgress;
+
+      if (local === "updating") {
+        const rawPercent = params.get("percent");
+        const parsedPercent =
+          rawPercent !== null && rawPercent !== "" ? Number(rawPercent) : NaN;
+        const initialTitle = params.get("title") || t("updatingTitle");
+        const initialDetail = params.get("detail") || t("updating");
+        const initialTone =
+          params.get("tone") === "rollback" ? "rollback" : "normal";
+        if (Number.isFinite(parsedPercent)) {
+          setUpdateProgress({
+            title: initialTitle,
+            detail: initialDetail,
+            percent: parsedPercent,
+            tone: initialTone,
+          });
+        } else {
+          // Legacy Shell update without explicit percentage: smooth visual glide.
+          let synthetic = 18;
+          setUpdateProgress({
+            title: initialTitle,
+            detail: initialDetail,
+            percent: synthetic,
+            tone: initialTone,
+          });
+          shellProgressTimer = setInterval(() => {
+            synthetic = Math.min(
+              88,
+              synthetic + Math.max(1, Math.round((90 - synthetic) * 0.12)),
+            );
+            $("progress-fill").style.width = `${synthetic}%`;
+            $("progress-track").setAttribute(
+              "aria-valuenow",
+              String(synthetic),
+            );
+            $("progress-status").textContent =
+              `${initialDetail} · ${synthetic}%`;
+            if (synthetic >= 88) {
+              clearInterval(shellProgressTimer);
+              shellProgressTimer = undefined;
+            }
+          }, 900);
+        }
       } else if (local === "starting") {
         document.body.dataset.mode = "starting";
         $("title").textContent = t("startingTitle");

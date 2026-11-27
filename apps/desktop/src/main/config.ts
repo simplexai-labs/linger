@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -68,6 +68,13 @@ const desktopConfig = z.object({
   // releases (update-manifest.ts); GitHub's simplexai-labs/linger when unset.
   // A value that is not a URL is dropped rather than resetting the file.
   updateFeedUrl: z.string().url().optional().catch(undefined),
+  // V2 incremental update channel (stable / beta / canary).
+  updateChannel: z
+    .enum(["stable", "beta", "canary"])
+    .default("stable")
+    .catch("stable"),
+  // Stable anonymous identifier used for deterministic rollout bucketing (0..99).
+  installId: z.string().min(1).max(128).optional().catch(undefined),
   // Where Send Diagnostics uploads to (docs/diagnostics-upload.md); set by
   // hand for a self-hosted receiver. An invalid value is dropped, not the
   // whole file.
@@ -113,6 +120,13 @@ export class ConfigStore {
 
   get(): DesktopConfig {
     return this.#value;
+  }
+
+  ensureInstallId(): string {
+    if (this.#value.installId) return this.#value.installId;
+    const installId = randomUUID();
+    this.update({ installId });
+    return installId;
   }
 
   update(patch: Partial<DesktopConfig>): DesktopConfig {

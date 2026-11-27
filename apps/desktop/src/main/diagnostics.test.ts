@@ -447,4 +447,149 @@ describe("collectDiagnostics", () => {
       MAX_LOCALMODELS_BYTES + 128,
     );
   });
+
+  it("includes V2 update state, rollback history, and summary.v2Update while excluding store/, downloads/, and DB dumps", async () => {
+    const root = tempDirectory();
+    const userHome = path.join(root, "users", "alice");
+    const home = path.join(userHome, ".linger");
+    const output = path.join(root, "out");
+    mkdirSync(output);
+
+    write(
+      path.join(home, "state", "current.json"),
+      JSON.stringify({
+        appVersion: "0.1.11-v2test.2",
+        releaseFile: "releases/0.1.11-v2test.2/release.json",
+        updatedAt: "2026-11-27T06:00:00Z",
+      }),
+    );
+    write(
+      path.join(home, "state", "previous.json"),
+      JSON.stringify({
+        appVersion: "0.1.11-v2test.1",
+        releaseFile: "releases/0.1.11-v2test.1/release.json",
+        updatedAt: "2026-11-27T05:50:00Z",
+      }),
+    );
+    write(
+      path.join(home, "state", "denylist.json"),
+      JSON.stringify({
+        schema: 1,
+        entries: [
+          {
+            appVersion: "0.1.11-v2test.3",
+            failedAt: "2026-11-27T06:05:00Z",
+            stage: "healthcheck",
+            reason: "Health probes failed: teamhub-healthz",
+          },
+        ],
+      }),
+    );
+    const historyLines = Array.from({ length: 7 }, (_, i) =>
+      JSON.stringify({
+        timestamp: `2026-11-27T06:0${i}:00Z`,
+        failedVersion: `0.1.11-v2test.${i + 3}`,
+        restoredVersion: "0.1.11-v2test.2",
+        stage: "healthcheck",
+        changedModules: ["backend"],
+        failedServices: ["teamhub"],
+        reason: `probe failed at ${userHome}/secret-path postgres://simplexai:topsecret_${i}@127.0.0.1:5432/simplexai`,
+        serviceLogTails: {
+          teamhub: `OPENAI_API_KEY=sk-proj-diagsecret${i}99999999 exit 42`,
+        },
+        rollbackSafe: false,
+        dbRestored: true,
+        manualRecoveryRequired: false,
+        denylisted: true,
+      }),
+    );
+    write(
+      path.join(home, "state", "rollback-history.jsonl"),
+      `${historyLines.join("\n")}\n`,
+    );
+    write(
+      path.join(home, "releases", "0.1.11-v2test.2", "release.json"),
+      JSON.stringify({ schema: 1, appVersion: "0.1.11-v2test.2" }),
+    );
+    // Excluded paths that must NEVER enter the diagnostics zip:
+    write(
+      path.join(home, "store", "web", "web-111111111111", "index.html"),
+      "<html>big bundle</html>",
+    );
+    write(
+      path.join(home, "downloads", "backend.tar.zst"),
+      "compressed archive",
+    );
+    write(
+      path.join(
+        home,
+        "instances",
+        "desktop",
+        "backups",
+        "pre-0.1.11-v2test.3.dump",
+      ),
+      "PGDMP sensitive database contents",
+    );
+
+    const { file } = await collectDiagnostics({
+      userData: path.join(root, "userData"),
+      homes: [home],
+      output,
+      userHome,
+      summary: { version: "0.1.11-v2test.0" },
+    });
+    const entries = unzip(file);
+
+    expect(entries.has("linger-home/state/current.json")).toBe(true);
+    expect(entries.has("linger-home/state/previous.json")).toBe(true);
+    expect(entries.has("linger-home/state/denylist.json")).toBe(true);
+    expect(entries.has("linger-home/state/rollback-history.jsonl")).toBe(true);
+    expect(
+      entries.has("linger-home/releases/0.1.11-v2test.2/release.json"),
+    ).toBe(true);
+
+    // Must never bundle store/, downloads/, or DB dumps.
+    for (const key of entries.keys()) {
+      expect(key).not.toContain("/store/");
+      expect(key).not.toContain("/downloads/");
+      expect(key).not.toContain("/backups/");
+      expect(key).not.toMatch(/\.dump$/);
+    }
+
+    // Secrets and home paths must be redacted in both rollback-history.jsonl and summary.json.
+    const historyText = entries.get(
+      "linger-home/state/rollback-history.jsonl",
+    )!;
+    expect(historyText).not.toContain("topsecret_6");
+    expect(historyText).not.toContain("sk-proj-diagsecret699999999");
+    expect(historyText).not.toContain(userHome);
+    expect(historyText).toContain("~/secret-path");
+
+    const summary = JSON.parse(entries.get("summary.json")!) as {
+      v2Update?: {
+        currentVersion?: string;
+        denylistedVersions?: string[];
+        recentRollbacks?: Array<{
+          failedVersion: string;
+          failedServices: string[];
+          reason: string;
+          dbRestored: boolean;
+        }>;
+      };
+    };
+    expect(summary.v2Update?.currentVersion).toBe("0.1.11-v2test.2");
+    expect(summary.v2Update?.denylistedVersions).toEqual(["0.1.11-v2test.3"]);
+    expect(summary.v2Update?.recentRollbacks).toHaveLength(5);
+    expect(summary.v2Update?.recentRollbacks?.[0]?.failedVersion).toBe(
+      "0.1.11-v2test.5",
+    );
+    expect(summary.v2Update?.recentRollbacks?.[4]).toMatchObject({
+      failedVersion: "0.1.11-v2test.9",
+      failedServices: ["teamhub"],
+      dbRestored: true,
+    });
+    expect(summary.v2Update?.recentRollbacks?.[4]?.reason).not.toContain(
+      "topsecret_6",
+    );
+  });
 });

@@ -38,20 +38,26 @@ export interface TeamhubBinary {
 }
 export interface TeamhubBinaries {
   target: string;
-  sourceCommit: string;
-  sourceArchiveSha256: string;
+  sourceCommit?: string;
+  sourceArchiveSha256?: string;
+  /** V2 standalone bundle identifier (no source archive coupling required). */
+  artifactId?: string;
   goVersion: string;
   binaries: Record<TeamhubCommand, TeamhubBinary>;
 }
 
 export function parseTeamhubBinaries(value: unknown): TeamhubBinaries {
   const manifest = value as TeamhubBinaries;
+  const hasV1Source =
+    /^[0-9a-f]{40}$/.test(manifest?.sourceCommit ?? "") &&
+    /^[0-9a-f]{64}$/.test(manifest?.sourceArchiveSha256 ?? "");
+  const hasV2Bundle =
+    typeof manifest?.artifactId === "string" && manifest.artifactId.length > 0;
   const valid =
     !!manifest &&
     typeof manifest === "object" &&
     typeof manifest.target === "string" &&
-    /^[0-9a-f]{40}$/.test(manifest.sourceCommit ?? "") &&
-    /^[0-9a-f]{64}$/.test(manifest.sourceArchiveSha256 ?? "") &&
+    (hasV1Source || hasV2Bundle) &&
     typeof manifest.goVersion === "string" &&
     !!manifest.binaries &&
     TEAMHUB_COMMANDS.every((command) => {
@@ -68,8 +74,11 @@ export function parseTeamhubBinaries(value: unknown): TeamhubBinaries {
   if (!valid) throw new Error("Invalid TeamHub binary manifest.");
   return {
     target: manifest.target,
-    sourceCommit: manifest.sourceCommit,
-    sourceArchiveSha256: manifest.sourceArchiveSha256,
+    ...(manifest.sourceCommit ? { sourceCommit: manifest.sourceCommit } : {}),
+    ...(manifest.sourceArchiveSha256
+      ? { sourceArchiveSha256: manifest.sourceArchiveSha256 }
+      : {}),
+    ...(manifest.artifactId ? { artifactId: manifest.artifactId } : {}),
     goVersion: manifest.goVersion,
     binaries: Object.fromEntries(
       TEAMHUB_COMMANDS.map((command) => {
@@ -78,6 +87,27 @@ export function parseTeamhubBinaries(value: unknown): TeamhubBinaries {
       }),
     ) as Record<TeamhubCommand, TeamhubBinary>,
   };
+}
+
+/**
+ * Verifies a standalone V2 TeamHub bundle directory (`store/teamhub/<id>`)
+ * without requiring a legacy source checkout or `sourceArchiveSha256`.
+ */
+export async function verifyTeamhubBundleDirectory(
+  directory: string,
+  expectedTarget = `${process.platform}-${process.arch}`,
+): Promise<TeamhubBinaries> {
+  const manifest = await readTeamhubBinaries(directory);
+  if (!manifest) {
+    throw new Error(`Missing TeamHub bundle manifest in ${directory}`);
+  }
+  if (manifest.target !== expectedTarget) {
+    throw new Error(
+      `TeamHub bundle target mismatch: expected ${expectedTarget}, got ${manifest.target}`,
+    );
+  }
+  await verifyTeamhubBinaries(directory, manifest);
+  return manifest;
 }
 
 // The manifest in `directory`, or undefined when there is none.

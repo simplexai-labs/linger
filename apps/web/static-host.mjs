@@ -1,12 +1,15 @@
+import { timingSafeEqual } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import process from "node:process";
-import { extname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL, URL } from "node:url";
+import { extname, isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath, URL } from "node:url";
 
 import Negotiator from "negotiator";
 import sirv from "sirv";
 
 const reservedPathPrefixes = [
+  "/__internal",
   "/api/agent",
   "/assets",
   "/brand",
@@ -17,9 +20,57 @@ const reservedPathPrefixes = [
   "/v0",
 ];
 const supportedContentEncodings = ["br", "gzip", "identity"];
-export function createStaticHost({ root } = {}) {
-  const staticRoot = root ?? fileURLToPath(new URL("./dist", import.meta.url));
-  const serveFiles = sirv(staticRoot, {
+
+function canonicalPath(target) {
+  const resolved = resolve(target);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function isLoopbackAddress(address = "") {
+  return (
+    address === "127.0.0.1" ||
+    address === "::1" ||
+    address === "::ffff:127.0.0.1"
+  );
+}
+
+function tokenMatches(expected, actual) {
+  if (!expected || typeof actual !== "string") return false;
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(actual, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function readJsonBody(request, maxBytes = 16 * 1024) {
+  return new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    let total = 0;
+    request.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        rejectBody(new Error("Payload too large"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      try {
+        resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch (error) {
+        rejectBody(error);
+      }
+    });
+    request.on("error", rejectBody);
+  });
+}
+
+function makeSirvHandler(staticRoot) {
+  return sirv(staticRoot, {
     brotli: true,
     // sirv's ETag is W/"size-mtime", and the packaged source unpacks every
     // file at the epoch: two releases' index.html of one size share it, so
@@ -36,6 +87,19 @@ export function createStaticHost({ root } = {}) {
       response.setHeader("cache-control", cacheControlFor(pathname));
     },
   });
+}
+
+export function createStaticHost({
+  root = process.env.LINGER_WEB_ROOT,
+  controlToken = process.env.LINGER_WEB_CONTROL_TOKEN,
+  allowedStaticRoot = process.env.LINGER_ALLOWED_WEB_ROOT,
+  artifactId = process.env.LINGER_WEB_ARTIFACT_ID,
+} = {}) {
+  let activeRoot = resolve(
+    root || fileURLToPath(new URL("./dist", import.meta.url)),
+  );
+  let activeArtifactId = artifactId || "initial";
+  let serveFiles = makeSirvHandler(activeRoot);
 
   return async function staticHost(request, response) {
     let pathname;
@@ -49,6 +113,90 @@ export function createStaticHost({ root } = {}) {
     }
     setBrowserSecurityHeaders(response, pathname);
 
+    // V2 zero-downtime Web bundle hot-swap endpoint (loopback + constant-time token).
+    if (pathname === "/__internal/reload-static" && request.method === "POST") {
+      if (!controlToken) {
+        respondNotFound(response);
+        return;
+      }
+      const remote = request.socket?.remoteAddress ?? "";
+      if (remote && !isLoopbackAddress(remote)) {
+        response.statusCode = 403;
+        response.end(JSON.stringify({ ok: false, error: "forbidden" }));
+        return;
+      }
+      const provided = request.headers["x-linger-control-token"];
+      if (
+        !tokenMatches(
+          controlToken,
+          Array.isArray(provided) ? provided[0] : provided,
+        )
+      ) {
+        response.statusCode = 401;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+        return;
+      }
+      let body;
+      try {
+        body = await readJsonBody(request);
+      } catch {
+        response.statusCode = 400;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+        return;
+      }
+      if (!body || typeof body.root !== "string" || body.root.length === 0) {
+        response.statusCode = 400;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: false, error: "missing_root" }));
+        return;
+      }
+      const nextRoot = canonicalPath(body.root);
+      if (allowedStaticRoot) {
+        const base = canonicalPath(allowedStaticRoot);
+        const rel = relative(base, nextRoot);
+        if (
+          rel.startsWith("..") ||
+          isAbsolute(rel) ||
+          rel === "" ||
+          nextRoot === base
+        ) {
+          response.statusCode = 403;
+          response.setHeader("content-type", "application/json; charset=utf-8");
+          response.end(
+            JSON.stringify({ ok: false, error: "root_outside_allowed_dir" }),
+          );
+          return;
+        }
+      }
+      if (!existsSync(resolve(nextRoot, "index.html"))) {
+        response.statusCode = 400;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(
+          JSON.stringify({ ok: false, error: "missing_index_html" }),
+        );
+        return;
+      }
+      serveFiles = makeSirvHandler(nextRoot);
+      activeRoot = nextRoot;
+      activeArtifactId =
+        typeof body.artifactId === "string" && body.artifactId.length > 0
+          ? body.artifactId
+          : activeArtifactId;
+      response.statusCode = 200;
+      response.setHeader("cache-control", "no-store");
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(
+        JSON.stringify({
+          ok: true,
+          root: activeRoot,
+          artifactId: activeArtifactId,
+        }),
+      );
+      return;
+    }
+
     if (request.method !== "GET" && request.method !== "HEAD") {
       respondNotFound(response);
       return;
@@ -58,6 +206,7 @@ export function createStaticHost({ root } = {}) {
       const body = JSON.stringify({
         ok: true,
         service: "linger-web",
+        artifactId: activeArtifactId,
       });
 
       response.statusCode = 200;
@@ -322,6 +471,6 @@ function isMainModule() {
   const entrypoint = process.argv[1];
   return (
     typeof entrypoint === "string" &&
-    pathToFileURL(resolve(entrypoint)).href === import.meta.url
+    canonicalPath(entrypoint) === canonicalPath(fileURLToPath(import.meta.url))
   );
 }

@@ -119,7 +119,27 @@ describe("Web static host routing", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       service: "linger-web",
+      artifactId: "initial",
     });
+  });
+
+  it("reports LINGER_WEB_ARTIFACT_ID on /healthz when set", async () => {
+    vi.stubEnv("LINGER_WEB_ARTIFACT_ID", "web-abc123def456");
+    const v2Server = serveHost(createStaticHost({ root: fixtureRoot }));
+    const v2Port = await listen(v2Server);
+    try {
+      const response = await fetch(`http://127.0.0.1:${v2Port}/healthz`, {
+        headers: { connection: "close" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        service: "linger-web",
+        artifactId: "web-abc123def456",
+      });
+    } finally {
+      await close(v2Server);
+    }
   });
 
   it.each([

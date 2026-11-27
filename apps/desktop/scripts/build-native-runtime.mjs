@@ -73,7 +73,7 @@ export const RUNTIME_LAYOUTS = {
 };
 export const RUNTIME_DIRECTORY = ROOT;
 
-const PLATFORMS = {
+export const PLATFORMS = {
   "win32-x64": { os: "win32", cpu: "x64" },
   "linux-x64": { os: "linux", cpu: "x64", libc: "glibc" },
   "darwin-arm64": { os: "darwin", cpu: "arm64" },

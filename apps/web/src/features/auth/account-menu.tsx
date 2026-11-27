@@ -35,31 +35,45 @@ function updatePresentation(
   state: DesktopUpdate["state"],
   t: Translate,
 ): UpdatePresentation {
+  const isServiceUpdate =
+    state !== undefined &&
+    "scope" in state &&
+    (state.scope === "web" || state.scope === "backend");
   switch (state?.kind) {
     case "checking":
       return { status: t(accountMenuMessages.checking), attention: false };
     case "downloading":
       return {
-        status: t(accountMenuMessages.downloading, { version: state.version }),
+        status: isServiceUpdate
+          ? t(accountMenuMessages.serviceDownloading)
+          : t(accountMenuMessages.downloading, { version: state.version }),
         attention: false,
       };
     case "ready":
       return {
-        status: t(accountMenuMessages.ready, { version: state.version }),
+        status: isServiceUpdate
+          ? t(accountMenuMessages.serviceReady)
+          : t(accountMenuMessages.ready, { version: state.version }),
         action: {
-          label: t(accountMenuMessages.restartToUpdate),
+          label: isServiceUpdate
+            ? t(accountMenuMessages.updateServices)
+            : t(accountMenuMessages.restartToUpdate),
           run: "install",
         },
         attention: true,
       };
     case "waiting":
       return {
-        status: t(accountMenuMessages.waiting, { version: state.version }),
+        status: isServiceUpdate
+          ? t(accountMenuMessages.serviceWaiting)
+          : t(accountMenuMessages.waiting, { version: state.version }),
         attention: false,
       };
     case "installing":
       return {
-        status: t(accountMenuMessages.installing, { version: state.version }),
+        status: isServiceUpdate
+          ? t(accountMenuMessages.serviceInstalling)
+          : t(accountMenuMessages.installing, { version: state.version }),
         attention: false,
       };
     case "available":

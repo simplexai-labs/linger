@@ -32,6 +32,9 @@ inputs:
   windows-signing-password:
     description: Password for the Windows Authenticode .p12 certificate.
     default: ""
+  upload-artifacts:
+    description: Upload individual release files as workflow artifacts (set false when caller uploads grouped test artifacts).
+    default: "true"
 
 runs:
   using: composite
@@ -223,42 +226,42 @@ runs:
     # testers download the bare installer directly and downstream jobs
     # download the exact same artifact by filename.
     - uses: actions/upload-artifact@v7
-      if: inputs.target == 'darwin-arm64'
+      if: inputs.upload-artifacts == 'true' && inputs.target == 'darwin-arm64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-arm64.dmg
         archive: false
         if-no-files-found: error
         retention-days: 14
     - uses: actions/upload-artifact@v7
-      if: inputs.target == 'darwin-arm64'
+      if: inputs.upload-artifacts == 'true' && inputs.target == 'darwin-arm64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-arm64.app.tar.gz
         archive: false
         if-no-files-found: error
         retention-days: 14
     - uses: actions/upload-artifact@v7
-      if: inputs.target == 'linux-x64'
+      if: inputs.upload-artifacts == 'true' && inputs.target == 'linux-x64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-linux-x64.tar.gz
         archive: false
         if-no-files-found: error
         retention-days: 14
     - uses: actions/upload-artifact@v7
-      if: inputs.target == 'win32-x64'
+      if: inputs.upload-artifacts == 'true' && inputs.target == 'win32-x64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-setup.exe
         archive: false
         if-no-files-found: error
         retention-days: 14
     - uses: actions/upload-artifact@v7
-      if: inputs.target == 'win32-x64'
+      if: inputs.upload-artifacts == 'true' && inputs.target == 'win32-x64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-windows-x64-portable.zip
         archive: false
         if-no-files-found: error
         retention-days: 14
     - uses: actions/upload-artifact@v7
-      if: inputs.target == 'win32-x64'
+      if: inputs.upload-artifacts == 'true' && inputs.target == 'win32-x64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/windows-setup.sha256
         archive: false
