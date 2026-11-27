@@ -87,10 +87,8 @@ import type { PendingMessageFailure } from "./pending-message-failure";
 import { ReplyContext } from "./reply-context";
 import { RoomNoticeRow } from "./room-notice-row";
 import { ThreadReplyPreview } from "./thread-reply-preview";
-import { ownSendStartedAt } from "./recent-own-sends";
+import { OWN_ENTRANCE_MS, ownSendStartedAt } from "./recent-own-sends";
 
-// Matches --chat-pop-duration.
-const OWN_ENTRANCE_MS = 450;
 const SENDING_NOTICE_DELAY_MS = 1000;
 const EMPTY_ACTOR_KINDS: Readonly<Record<string, "human" | "agent">> = {};
 
