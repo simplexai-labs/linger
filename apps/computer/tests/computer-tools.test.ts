@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
   symlink,
@@ -640,6 +641,9 @@ it("stages a compact self-contained computer-tools bundle with bundled Pi MCP, j
       throw new Error("Fixture MCP server did not bind a TCP port");
 
     const toolsDir = path.join(root, "cli", "computer-tools");
+    const expectedJitiDir = await realpath(
+      path.join(toolsDir, "node_modules", "jiti"),
+    );
     const piMcpPath = path.join(toolsDir, "extensions", "pi-mcp.mjs");
     const mcpConfigPath = path.join(root, "managed-mcp.json");
     await writeFile(
@@ -667,13 +671,14 @@ it("stages a compact self-contained computer-tools bundle with bundled Pi MCP, j
         "--eval",
         `
       import assert from "node:assert/strict";
+      import { realpathSync } from "node:fs";
       import { createRequire } from "node:module";
       import path from "node:path";
 
       const req = createRequire(import.meta.url);
       const jitiEntry = req.resolve("jiti");
       assert.ok(
-        jitiEntry.startsWith(${JSON.stringify(path.join(toolsDir, "node_modules", "jiti"))}),
+        realpathSync(jitiEntry).startsWith(${JSON.stringify(expectedJitiDir)} + path.sep),
         "jiti must resolve from staged computer-tools",
       );
       const { createJiti } = req("jiti");
