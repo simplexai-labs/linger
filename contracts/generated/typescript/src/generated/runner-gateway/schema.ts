@@ -218,6 +218,7 @@ export const runnerGatewayEnvelopeSchema = {
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
+        "antigravity_usage_provider",
       ],
     },
     ReasoningEffort: {
@@ -5776,7 +5777,7 @@ export const runnerGatewayEnvelopeSchema = {
             maxLength: 128,
           },
           provider: {
-            enum: ["openai", "anthropic", "unknown"],
+            enum: ["openai", "anthropic", "antigravity", "unknown"],
           },
           last: {
             $ref: "#/$defs/RunTokenCounts",

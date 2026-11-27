@@ -26,7 +26,11 @@ export function redactSensitiveText(value: string): string {
       `$1${REDACTED}`,
     )
     .replace(
-      /\b((?:proxy-)?authorization|(?:set-)?cookie)\b([ \t]*[:=][ \t]*)(?![ \t]*(?:Bearer|Basic)[ \t]+\[Redacted\](?:[ \t]*(?:\r?\n|$)))(?![ \t]*["'[])[^\s\r\n][^\r\n]*/giu,
+      /\b((?:proxy-)?authorization)\b([ \t]*[:=][ \t]*)(?![ \t]*(?:Bearer|Basic)[ \t]+\[Redacted\](?=$|[\s,;"'}\])<>]))(?![ \t]*["'[])[^\s\r\n][^\r\n]*/giu,
+      `$1$2${REDACTED}`,
+    )
+    .replace(
+      /\b((?:set-)?cookie)\b([ \t]*[:=][ \t]*)(?![ \t]*["'[])[^\s\r\n][^\r\n]*/giu,
       `$1$2${REDACTED}`,
     )
     .replace(

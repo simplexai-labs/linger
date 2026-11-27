@@ -355,6 +355,7 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.operationBackgroundWait.Store(slices.Contains(command.ServiceFeatures, serviceFeatureOperationBackgroundWait))
 	d.dynamicReasoningEfforts.Store(slices.Contains(command.ServiceFeatures, serviceFeatureDynamicReasoningEfforts))
 	d.antigravityHistory.Store(slices.Contains(command.ServiceFeatures, serviceFeatureAntigravityHistory))
+	d.antigravityUsageProvider.Store(slices.Contains(command.ServiceFeatures, serviceFeatureAntigravityUsageProvider))
 	localModels := slices.Contains(command.ServiceFeatures, serviceFeatureLocalModels)
 	if err := d.activateStreamAndReplay(ctx, stream, command.ReconcileOperationIDs, localModels, helloRev); err != nil {
 		return err
@@ -534,6 +535,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.operationBackgroundWait.Store(false)
 		d.dynamicReasoningEfforts.Store(false)
 		d.antigravityHistory.Store(false)
+		d.antigravityUsageProvider.Store(false)
 	}
 	if d.localModelsStream == stream {
 		d.localModelsStream = nil
@@ -644,7 +646,11 @@ func (d *Daemon) replayRetainedEvents(ctx context.Context, stream transport.Stre
 	if err != nil {
 		return err
 	}
+	allowAntigravityProvider := d.antigravityUsageProvider.Load()
 	for _, event := range events {
+		if !allowAntigravityProvider {
+			event = downgradeAntigravityUsageProvider(event)
+		}
 		if err := stream.Send(ctx, event); err != nil {
 			return err
 		}
@@ -761,6 +767,9 @@ func (d *Daemon) deliverRecordedOperationEvent(ctx context.Context, event protoc
 	connectionLockWait = time.Since(lockStartedAt)
 	if d.operationStream == nil {
 		return connectionLockWait, 0
+	}
+	if !d.antigravityUsageProvider.Load() {
+		event = downgradeAntigravityUsageProvider(event)
 	}
 	sendStartedAt := time.Now()
 	_ = d.operationStream.Send(ctx, event)

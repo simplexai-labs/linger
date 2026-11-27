@@ -219,7 +219,7 @@ func validateRuntimeHomeIdentity(root string, identity RuntimeHomeIdentity) erro
 		return errors.New("Runtime home root must be absolute")
 	}
 	if identity.TenantID == "" || identity.OwnerActorID == "" || identity.AgentID == "" ||
-		identity.ScopeID == "" || (identity.ProviderType != "codex" && identity.ProviderType != "claude" && identity.ProviderType != "pi") {
+		identity.ScopeID == "" || (identity.ProviderType != "codex" && identity.ProviderType != "claude" && identity.ProviderType != "pi" && identity.ProviderType != "antigravity") {
 		return errors.New("Runtime home identity is incomplete")
 	}
 	return nil

@@ -436,3 +436,67 @@ func TestUIUnreachableDriverIsNotDispatched(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestUnifiedUIToolGuidanceAndInvalidHelpTopic(t *testing.T) {
+	description := unifiedUITools()[0].Description
+	for _, want := range []string{
+		"macOS and Windows: when the user names an app and window, discover and read it in one call:",
+		"To act, pass the role and name exactly as shown in v.text: v=await v.click(role,name).",
+		"and ui.help('computer'), ui.help('browser'), or ui.help() for unfamiliar methods.",
+	} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("ui_exec description missing %q: %s", want, description)
+		}
+	}
+	for _, stale := range []string{
+		"macOS: when the user names",
+		"Desktop: when the user names",
+		"v.click('AXButton',name)",
+		"'Button' on Windows",
+		"ui.help(namespace)",
+	} {
+		if strings.Contains(description, stale) {
+			t.Fatalf("ui_exec description kept stale text %q: %s", stale, description)
+		}
+	}
+
+	f := newUIRuntimeFixture(t, false, func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+		return uiTextResult("ok"), nil
+	})
+	clear, err := f.set.RegisterToolReviewer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear()
+
+	reply := cancellationSummary(t, f.execute(t, `await ui.help('window')`))
+	wantErr := `help topic "window" is invalid; call ui.help() or ui.help("browser")`
+	if !reply.IsError || !strings.Contains(reply.Structured.Error, wantErr) || strings.Contains(reply.Structured.Error, "computer") {
+		t.Fatalf("invalid help topic error = %q (isError=%v), want %q", reply.Structured.Error, reply.IsError, wantErr)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		endpoints map[string]mcpproxy.ToolEndpoint
+		want      string
+	}{
+		{
+			name:      "computer only",
+			endpoints: map[string]mcpproxy.ToolEndpoint{"computer": {}},
+			want:      `help topic "window" is invalid; call ui.help() or ui.help("computer")`,
+		},
+		{
+			name:      "computer and browser",
+			endpoints: map[string]mcpproxy.ToolEndpoint{"computer": {}, "browser": {}},
+			want:      `help topic "window" is invalid; call ui.help(), ui.help("computer"), or ui.help("browser")`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := &uiExecution{endpoints: tc.endpoints}
+			_, err := u.help(t.Context(), "window")
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("help() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

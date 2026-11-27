@@ -172,6 +172,11 @@ test("refuses to signal a PID whose recorded lease differs", async (context) => 
         ? NATIVE_PROCESS_IDENTITY_UNVERIFIED
         : NATIVE_PROCESS_REPLACED,
   });
+  if (windows) {
+    expect(await readdir(path.join(root, "native/processes"))).toEqual([
+      "web.json",
+    ]);
+  }
   await expect(startNativeProcess(options)).rejects.toThrow(/identity/i);
   expect(() => process.kill(processState.pid!, 0)).not.toThrow();
   await writeFile(file, original, { mode: 0o600 });
@@ -271,6 +276,37 @@ posix(
     // a short interrupt window reaches it without the production wait.
     await stopNativeProcess(root, "web", 300);
     await expect.poll(() => exited(pid)).toBe(true);
+  },
+);
+
+posix(
+  "stops a descendant spawned while handling SIGINT before concluding drain",
+  async (context) => {
+    const { expect } = context;
+    const root = await fixture(context);
+    const childCode = "process.on('SIGINT',()=>{});setInterval(()=>{},1000)";
+    await startNativeProcess({
+      root,
+      name: "web",
+      executable: process.execPath,
+      args: [
+        "-e",
+        `const {spawn}=require('node:child_process');const fs=require('node:fs');process.on('SIGINT',()=>{const c=spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{detached:true,stdio:'ignore'});fs.writeFileSync('spawned.pid',String(c.pid));c.unref();process.exit(0);});console.log('handler-ready');setInterval(()=>{},1000)`,
+      ],
+      cwd: root,
+      env: process.env,
+    });
+    await expect
+      .poll(async () =>
+        readFile(path.join(root, "native/logs/web.log"), "utf8"),
+      )
+      .toContain("handler-ready");
+    await stopNativeProcess(root, "web", 300);
+    const spawned = Number(
+      await readFile(path.join(root, "spawned.pid"), "utf8"),
+    );
+    expect(spawned).toBeGreaterThan(0);
+    await expect.poll(() => exited(spawned)).toBe(true);
   },
 );
 

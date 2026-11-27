@@ -362,8 +362,9 @@ func (p *piRuntime) args(plan piLaunchPlan, instructions string, wired bool) []s
 			args = append(args, "--skill", skills)
 		}
 	}
-	// The managed extension carries bash pipefail, the POSIX shell text check,
-	// permission review, and the Windows PowerShell UTF-8 override. Its
+	// The managed extension carries bash pipefail, the shell text check (for
+	// both POSIX bash and Windows PowerShell), the consecutive-failure loop
+	// guard, permission review, and the Windows PowerShell UTF-8 override. Its
 	// tool_call hook asks the Daemon over RPC for each bash, powershell, and
 	// MCP call, which the Daemon allows when permission review is off.
 	tools := piBaseToolsFor(p.goos())
@@ -383,10 +384,10 @@ func (p *piRuntime) canSyncMCP() bool {
 }
 
 // guardsShellText reports whether the managed extension runs the
-// shell-text-hook before the Run's bash calls. Windows Pi runs PowerShell, so
-// it skips the POSIX shell text check.
+// shell-text-hook before the Run's shell calls (both POSIX bash and Windows
+// PowerShell).
 func (p *piRuntime) guardsShellText(spec RunSpec) bool {
-	return !piUsesPowerShell(p.goos()) && spec.ShellTextHook != "" && p.profile.ManagedMCPExtension != ""
+	return spec.ShellTextHook != "" && p.profile.ManagedMCPExtension != ""
 }
 
 // piResolveProgram finds the Pi executable on the Daemon's own search path.

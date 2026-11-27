@@ -508,4 +508,24 @@ describe("static prompt prefix stability", () => {
       expect(staticPrefixBeforeMarker(a)).toBe(staticPrefixBeforeMarker(b));
     },
   );
+
+  it.each([false, true])(
+    "allows authorization and connection cards in AlterEgo prompts (compact=%s)",
+    (compactInstructions) => {
+      const prompt = composedFor({
+        contextKind: "alter_ego",
+        agentType: "general",
+        agentName: "Worker",
+        agentActorId: "actor:worker",
+        taskId: "task-1",
+        connectedAppKeys: [],
+        connectableAppKeys: [],
+        compactInstructions,
+      });
+      expect(prompt).toContain("teamhub browser connect");
+      expect(prompt).toContain("teamhub computer permissions request");
+      expect(prompt).toMatch(/authorization and connection cards/i);
+      expect(prompt).toMatch(/not chat messages|not chatting with people/i);
+    },
+  );
 });

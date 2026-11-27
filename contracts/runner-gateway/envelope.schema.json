@@ -214,7 +214,8 @@
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
-        "antigravity_history"
+        "antigravity_history",
+        "antigravity_usage_provider"
       ]
     },
     "ReasoningEffort": {
@@ -5692,7 +5693,7 @@
             "maxLength": 128
           },
           "provider": {
-            "enum": ["openai", "anthropic", "unknown"]
+            "enum": ["openai", "anthropic", "antigravity", "unknown"]
           },
           "last": {
             "$ref": "#/$defs/RunTokenCounts"

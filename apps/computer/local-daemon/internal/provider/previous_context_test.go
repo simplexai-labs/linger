@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -200,5 +201,98 @@ func TestExportPreviousContextAntigravityAndStaleCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "playground", ".previous-context.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected stale previous-context file removed, err=%v", err)
+	}
+}
+
+func TestExportPreviousContextAntigravityIsolatedHomeAndLegacyFallback(t *testing.T) {
+	runtimeHomeRoot := filepath.Join(t.TempDir(), "runtime-homes")
+	userHome := t.TempDir()
+	workspace := t.TempDir()
+
+	baseSpec := OperationSpec{
+		OperationKind:    "run.start",
+		Provider:         "antigravity",
+		WorkingDirectory: workspace,
+		TenantID:         "tenant-1",
+		OwnerActorID:     "owner-1",
+		AgentID:          "agent-1",
+		ScopeID:          "scope-1",
+		Environment:      map[string]string{"HOME": userHome},
+	}
+	isolatedHome, err := localworkspace.RuntimeHomePath(runtimeHomeRoot, localworkspace.RuntimeHomeIdentity{
+		TenantID: baseSpec.TenantID, OwnerActorID: baseSpec.OwnerActorID,
+		AgentID: baseSpec.AgentID, ScopeID: baseSpec.ScopeID, ProviderType: "antigravity",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedAppData := localworkspace.AntigravityAppDataDir(isolatedHome)
+	legacyAppData := filepath.Join(userHome, ".gemini", "antigravity-cli")
+
+	writeTranscript := func(storeRoot, sessionID, text string) {
+		t.Helper()
+		logsDir := filepath.Join(storeRoot, "brain", sessionID, ".system_generated", "logs")
+		if err := os.MkdirAll(logsDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		line := `{"type":"USER_INPUT","step_index":0,"created_at":"2026-08-01T10:00:00Z","content":"` + text + `"}` + "\n"
+		if err := os.WriteFile(filepath.Join(logsDir, "transcript.jsonl"), []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. Isolated RuntimeHome transcript takes precedence over legacy user store.
+	writeTranscript(isolatedAppData, "agy-iso-1", "isolated-context-body")
+	writeTranscript(legacyAppData, "agy-iso-1", "legacy-shadowed-body")
+	spec := baseSpec
+	spec.PreviousSession = &PreviousSession{ProviderType: "antigravity", SessionID: "agy-iso-1"}
+	relPath, ok := exportPreviousContext(context.Background(), runtimeHomeRoot, spec)
+	if !ok || relPath != previousContextRelPath {
+		t.Fatalf("isolated export = (%q, %v), want (%q, true)", relPath, ok, previousContextRelPath)
+	}
+	raw, err := os.ReadFile(filepath.Join(workspace, "playground", ".previous-context.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "isolated-context-body") || strings.Contains(string(raw), "legacy-shadowed-body") {
+		t.Fatalf("unexpected isolated markdown:\n%s", string(raw))
+	}
+
+	// 2. Session absent from isolated home falls back to legacy ~/.gemini/antigravity-cli.
+	writeTranscript(legacyAppData, "agy-legacy-1", "pre-upgrade-legacy-body")
+	spec = baseSpec
+	spec.PreviousSession = &PreviousSession{ProviderType: "antigravity", SessionID: "agy-legacy-1"}
+	relPath, ok = exportPreviousContext(context.Background(), runtimeHomeRoot, spec)
+	if !ok || relPath != previousContextRelPath {
+		t.Fatalf("legacy fallback export = (%q, %v), want (%q, true)", relPath, ok, previousContextRelPath)
+	}
+	raw, err = os.ReadFile(filepath.Join(workspace, "playground", ".previous-context.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "pre-upgrade-legacy-body") {
+		t.Fatalf("unexpected legacy fallback markdown:\n%s", string(raw))
+	}
+
+	// 3. Symlinked transcript in isolated home does not fall back to legacy store.
+	writeTranscript(legacyAppData, "agy-sym-1", "should-not-fallback")
+	symLogsDir := filepath.Join(isolatedAppData, "brain", "agy-sym-1", ".system_generated", "logs")
+	if err := os.MkdirAll(symLogsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(t.TempDir(), "outside.jsonl")
+	if err := os.WriteFile(outsideFile, []byte(`{"type":"USER_INPUT","step_index":0,"content":"outside"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(symLogsDir, "transcript.jsonl")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable on Windows: %v", err)
+		}
+		t.Fatal(err)
+	}
+	spec = baseSpec
+	spec.PreviousSession = &PreviousSession{ProviderType: "antigravity", SessionID: "agy-sym-1"}
+	if relPath, ok = exportPreviousContext(context.Background(), runtimeHomeRoot, spec); ok || relPath != "" {
+		t.Fatalf("symlink export = (%q, %v), want (\"\", false)", relPath, ok)
 	}
 }

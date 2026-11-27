@@ -65,6 +65,41 @@ test("dependency preparation can run while product installation awaits runtime a
   expect(jobs.get(prepared.id)?.state).toBe("succeeded");
   expect(jobs.get(install.id)?.state).toBe("waiting_user");
 });
+test("late log events after a terminal state do not overwrite job message or stage", async () => {
+  let emitLate!: Parameters<ConstructorParameters<typeof JobManager>[1]>[2];
+
+  const { jobs } = await setup(async (value, _signal, emit) => {
+    emitLate = emit;
+    emit({ kind: "stage", stage: "runtime", message: "Installing runtime" });
+    if (value.instance === "ok") {
+      return { code: 0, state: "ready", message: "Install succeeded" };
+    }
+    return { code: 5, state: "failed", message: "Terminal failure reason" };
+  });
+
+  const failed = await jobs.start({ ...input, instance: "fail" });
+  await jobs.wait(failed.id);
+  emitLate({
+    kind: "log",
+    stage: "services",
+    message: "late parallel log line",
+  });
+  expect(jobs.get(failed.id)?.state).toBe("failed");
+  expect(jobs.get(failed.id)?.stage).toBe("runtime");
+  expect(jobs.get(failed.id)?.message).toBe("Terminal failure reason");
+
+  const succeeded = await jobs.start({ ...input, instance: "ok" });
+  await jobs.wait(succeeded.id);
+  emitLate({
+    kind: "log",
+    stage: "images",
+    message: "another late parallel log line",
+  });
+  expect(jobs.get(succeeded.id)?.state).toBe("succeeded");
+  expect(jobs.get(succeeded.id)?.stage).toBe("runtime");
+  expect(jobs.get(succeeded.id)?.message).toBe("Install succeeded");
+});
+
 test("runtime model keys are removed from persisted events and job snapshots", async () => {
   const { jobs, dir } = await setup(async (_value, _signal, emit) => {
     emit({ kind: "log", message: "provider said runtime-private-key" });

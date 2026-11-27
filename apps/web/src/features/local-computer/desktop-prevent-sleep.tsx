@@ -1,10 +1,7 @@
-import { PowerIcon } from "@hugeicons/core-free-icons";
 import { type ReactNode, useEffect, useState } from "react";
 
-import { Icon } from "@/components/ui/icon";
 import { useT } from "@/i18n/use-translation";
 
-import { RowMark } from "./computer-row";
 import { computersMessages } from "./computers.messages";
 
 // The desktop app's settings bridge (`window.lingerDesktop.settings`); absent
@@ -89,15 +86,12 @@ export function DesktopPreventSleep({
 
   const content = (
     <div>
-      <label className="flex min-h-14 w-full cursor-pointer items-center gap-3 rounded-lg py-2 pr-2.5 pl-2 transition-colors duration-150 hover:bg-sidebar-muted/60">
-        <RowMark>
-          <Icon icon={PowerIcon} size={20} />
-        </RowMark>
+      <label className="flex min-h-14 w-full cursor-pointer items-center gap-4 px-4 py-3 transition-colors duration-150 hover:bg-muted/45 motion-reduce:transition-none">
         <span className="min-w-0 flex-1 text-left">
-          <span className="block text-sm text-foreground">
+          <span className="block text-sm font-medium text-foreground">
             {t(computersMessages.preventSleep)}
           </span>
-          <span className="block text-sm text-muted-foreground">
+          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
             {t(computersMessages.preventSleepHint)}
           </span>
         </span>
@@ -112,7 +106,7 @@ export function DesktopPreventSleep({
         />
       </label>
       {failed ? (
-        <p className="px-2 pt-1 text-xs text-app-danger" role="alert">
+        <p className="px-4 pb-3 text-xs text-app-danger" role="alert">
           {t(computersMessages.preventSleepFailed)}
         </p>
       ) : null}

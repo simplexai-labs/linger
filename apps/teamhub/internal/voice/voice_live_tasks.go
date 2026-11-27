@@ -308,12 +308,16 @@ func (s *Service) replyToVoiceLiveTask(ctx context.Context, session voicelive.Se
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := taskexecution.AppendTaskInput(ctx, store.New(tx), taskexecution.TaskInput{
+	result, err := taskexecution.AppendTaskInput(ctx, store.New(tx), taskexecution.TaskInput{
 		TaskID: task.WorkItemID, Cause: taskexecution.TaskInputSystem, Body: voicelive.TaskAnswer(details), Steer: true,
-	}); errors.Is(err, taskexecution.ErrNotFound) {
+	})
+	if errors.Is(err, taskexecution.ErrNotFound) {
 		return voicelive.ErrorOutput("task_not_found"), nil
 	} else if err != nil {
 		return "", err
+	}
+	if result.Delivery == "ignored" {
+		return voicelive.ErrorOutput("task_canceled"), nil
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err

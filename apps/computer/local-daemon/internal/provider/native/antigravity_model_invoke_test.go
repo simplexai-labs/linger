@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	localworkspace "github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
 )
 
 func TestInvokeAntigravityModelIsolatedAndClampsEffort(t *testing.T) {
@@ -253,13 +255,16 @@ func readAgyRequests(t *testing.T, path string) map[string][]map[string]any {
 }
 
 func TestAntigravityProbeHomeCaseInsensitiveLookup(t *testing.T) {
-	if got := antigravityProbeHome(map[string]string{"UserProfile": `  C:\Users\Alice  `}); got != `C:\Users\Alice` {
-		t.Fatalf("UserProfile = %q, want C:\\Users\\Alice", got)
+	wantWin := filepath.Join(`C:\Users\Alice`, ".gemini", "antigravity-cli")
+	if got := localworkspace.AntigravityUserAppDataDir(map[string]string{"UserProfile": `  C:\Users\Alice  `}); got != wantWin {
+		t.Fatalf("UserProfile = %q, want %q", got, wantWin)
 	}
-	if got := antigravityProbeHome(map[string]string{"Home": "/home/alice", "UserProfile": `C:\Users\Bob`}); got != "/home/alice" {
-		t.Fatalf("Home precedence = %q, want /home/alice", got)
+	wantHome := filepath.Join("/home/alice", ".gemini", "antigravity-cli")
+	if got := localworkspace.AntigravityUserAppDataDir(map[string]string{"Home": "/home/alice", "UserProfile": `C:\Users\Bob`}); got != wantHome {
+		t.Fatalf("Home precedence = %q, want %q", got, wantHome)
 	}
-	if got := antigravityProbeHome(map[string]string{"HOME": "/exact", "Home": "/folded"}); got != "/exact" {
-		t.Fatalf("exact HOME = %q, want /exact", got)
+	wantExact := filepath.Join("/exact", ".gemini", "antigravity-cli")
+	if got := localworkspace.AntigravityUserAppDataDir(map[string]string{"HOME": "/exact", "Home": "/folded"}); got != wantExact {
+		t.Fatalf("exact HOME = %q, want %q", got, wantExact)
 	}
 }

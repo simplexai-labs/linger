@@ -96,20 +96,202 @@ test("falls back to managedRuntimeEnvironment when no descriptors are supplied",
 
 test("reports separate stage timings for a runtime lookup", async () => {
   const timings: RuntimeLookupTimings[] = [];
-  // instanceRuntime reads the clock once at the start, twice per timed
-  // stage, and once for the total. Script it so the assertions are exact
-  // and independent of the test host's scheduler.
-  const now = vi.spyOn(performance, "now");
-  for (const value of [0, 0, 4, 4, 6, 6, 6, 6, 11, 11, 13, 13, 22, 25])
-    now.mockReturnValueOnce(value);
-  vi.mocked(localmodelsComputerTool).mockResolvedValue(undefined as never);
+  let clock = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => clock);
 
-  await instanceRuntime("/home", "local", {
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  };
+  const choice = deferred<"pi">();
+  const byok = deferred<undefined>();
+  const runtime = deferred<{ LINGER_PI_PATH: string }>();
+  const localModels = deferred<Record<string, string>>();
+  const tool = deferred<undefined>();
+
+  vi.mocked(loadInstance).mockImplementationOnce(async () => {
+    clock += 4;
+    return { name: "local", root: "/home/instances/local" } as Instance;
+  });
+  vi.mocked(readSetupChoice).mockImplementationOnce(() => choice.promise);
+  vi.mocked(readByokEnvironment).mockImplementationOnce(() => byok.promise);
+  vi.mocked(managedRuntimeEnvironment).mockImplementationOnce(
+    () => runtime.promise,
+  );
+  vi.mocked(localModelsEnvironment).mockImplementationOnce(
+    () => localModels.promise,
+  );
+  vi.mocked(localmodelsComputerTool).mockImplementationOnce(
+    () => tool.promise as never,
+  );
+
+  const pending = instanceRuntime("/home", "local", {
     onTimings: (value) => timings.push(value),
   });
+  await vi.waitFor(() => {
+    expect(readSetupChoice).toHaveBeenCalledTimes(1);
+    expect(readByokEnvironment).toHaveBeenCalledTimes(1);
+    expect(managedRuntimeEnvironment).toHaveBeenCalledTimes(1);
+    expect(localModelsEnvironment).toHaveBeenCalledTimes(1);
+    expect(localmodelsComputerTool).toHaveBeenCalledTimes(1);
+  });
+
+  // All 5 lookups started concurrently at clock = 4; settle them at staggered
+  // timestamps so per-stage durations exceed wall-clock total.
+  clock = 6;
+  choice.resolve("pi");
+  byok.resolve(undefined);
+  await Promise.resolve();
+  clock = 9;
+  localModels.resolve({});
+  await Promise.resolve();
+  clock = 11;
+  runtime.resolve({ LINGER_PI_PATH: "/probed/pi" });
+  await Promise.resolve();
+  clock = 13;
+  tool.resolve(undefined);
+
+  await pending;
 
   expect(timings).toEqual([
-    { config: 6, runtime: 5, localModels: 2, tool: 9, total: 25 },
+    { config: 8, runtime: 7, localModels: 5, tool: 9, total: 13 },
+  ]);
+});
+
+test("runs independent runtime lookups concurrently after loading the instance", async () => {
+  const entered = new Set<string>();
+  let releaseAll!: () => void;
+  const allEntered = new Promise<void>((resolve) => {
+    releaseAll = resolve;
+  });
+  const barrier = async (name: string) => {
+    entered.add(name);
+    if (entered.size === 5) releaseAll();
+    await allEntered;
+  };
+  vi.mocked(readSetupChoice).mockImplementationOnce(async () => {
+    await barrier("setupChoice");
+    return "pi";
+  });
+  vi.mocked(readByokEnvironment).mockImplementationOnce(async () => {
+    await barrier("byok");
+    return undefined;
+  });
+  vi.mocked(managedRuntimeEnvironment).mockImplementationOnce(async () => {
+    await barrier("runtime");
+    return { LINGER_PI_PATH: "/probed/pi" };
+  });
+  vi.mocked(localModelsEnvironment).mockImplementationOnce(async () => {
+    await barrier("localModels");
+    return {};
+  });
+  vi.mocked(localmodelsComputerTool).mockImplementationOnce(async () => {
+    await barrier("tool");
+    return undefined as never;
+  });
+
+  const result = await instanceRuntime("/home", "local");
+  expect(entered).toEqual(
+    new Set(["setupChoice", "byok", "runtime", "localModels", "tool"]),
+  );
+  expect(result).toEqual({
+    setupChoice: "pi",
+    environment: { LINGER_PI_PATH: "/probed/pi" },
+  });
+});
+
+test("drains sibling lookups before rejecting and reports settled timings", async () => {
+  const timings: RuntimeLookupTimings[] = [];
+  let clock = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => clock);
+
+  const deferred = <T>() => {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const choice = deferred<"pi">();
+  const byok = deferred<undefined>();
+  const runtime = deferred<{ LINGER_PI_PATH: string }>();
+  const localModels = deferred<Record<string, string>>();
+  const tool = deferred<undefined>();
+
+  vi.mocked(loadInstance).mockImplementationOnce(async () => {
+    clock += 2;
+    return { name: "local", root: "/home/instances/local" } as Instance;
+  });
+  vi.mocked(readSetupChoice).mockImplementationOnce(() => choice.promise);
+  vi.mocked(readByokEnvironment).mockImplementationOnce(() => byok.promise);
+  vi.mocked(managedRuntimeEnvironment).mockImplementationOnce(
+    () => runtime.promise,
+  );
+  vi.mocked(localModelsEnvironment).mockImplementationOnce(
+    () => localModels.promise,
+  );
+  vi.mocked(localmodelsComputerTool).mockImplementationOnce(
+    () => tool.promise as never,
+  );
+
+  let settled = false;
+  const outcome = instanceRuntime("/home", "local", {
+    onTimings: (value) => timings.push(value),
+  }).then(
+    (value) => {
+      settled = true;
+      return { ok: true as const, value };
+    },
+    (error: unknown) => {
+      settled = true;
+      return { ok: false as const, error };
+    },
+  );
+
+  await vi.waitFor(() => {
+    expect(readSetupChoice).toHaveBeenCalledTimes(1);
+    expect(readByokEnvironment).toHaveBeenCalledTimes(1);
+    expect(managedRuntimeEnvironment).toHaveBeenCalledTimes(1);
+    expect(localModelsEnvironment).toHaveBeenCalledTimes(1);
+    expect(localmodelsComputerTool).toHaveBeenCalledTimes(1);
+  });
+
+  const firstFailure = new Error("setup choice unreadable");
+  clock = 5;
+  choice.reject(firstFailure);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  // Sibling lookups are still pending, so instanceRuntime has neither rejected
+  // nor emitted timings yet.
+  expect(settled).toBe(false);
+  expect(timings).toEqual([]);
+
+  clock = 6;
+  byok.resolve(undefined);
+  await Promise.resolve();
+  clock = 8;
+  localModels.resolve({});
+  await Promise.resolve();
+  clock = 10;
+  runtime.resolve({ LINGER_PI_PATH: "/probed/pi" });
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  expect(timings).toEqual([]);
+
+  clock = 12;
+  tool.reject(new Error("tool probe failed"));
+
+  const result = await outcome;
+  expect(settled).toBe(true);
+  expect(result).toEqual({ ok: false, error: firstFailure });
+  expect(timings).toEqual([
+    { config: 9, runtime: 8, localModels: 6, tool: 10, total: 12 },
   ]);
 });
 

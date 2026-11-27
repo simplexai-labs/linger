@@ -16,7 +16,7 @@ import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 import { cn } from "@/lib/cn";
 
-import { appIcons } from "./computer-app-icons";
+import { AppBrandIcon } from "./computer-app-brand-icon";
 import { Hint } from "./computer-hint";
 import {
   appNames,
@@ -128,7 +128,7 @@ export function AppSetupDialog({
       size="lg"
       title={
         <span className="flex flex-wrap items-center gap-2">
-          <Icon icon={appIcons[app]} size={16} />
+          <AppBrandIcon active app={app} size={16} />
           {t(
             outdated
               ? computersMessages.updateApp
@@ -173,7 +173,11 @@ export function AppSetupDialog({
                   }}
                   type="button"
                 >
-                  <Icon icon={appIcons[option]} size={14} />
+                  <AppBrandIcon
+                    active={option === app}
+                    app={option}
+                    size={14}
+                  />
                   {appNames[option]}
                 </button>
               ))}
@@ -204,7 +208,7 @@ export function AppSetupDialog({
             <div className="grid w-full justify-items-center gap-2">
               <MiniTerminal command={login} />
               <MiniWindow>
-                <Icon icon={appIcons[app]} size={14} />
+                <AppBrandIcon active app={app} size={14} />
                 <span className="rounded-md bg-primary px-2.5 py-0.5 text-[12px] font-medium text-primary-foreground">
                   {t(computersMessages.signIn)}
                 </span>
@@ -217,7 +221,7 @@ export function AppSetupDialog({
             state={ready ? "done" : "todo"}
           >
             <span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-card pr-2.5 pl-2 text-xs shadow-outline">
-              <Icon icon={appIcons[app]} size={14} />
+              <AppBrandIcon active app={app} size={14} />
               {name}
               {ready ? <StepTick /> : null}
             </span>

@@ -285,9 +285,10 @@ func run(args []string) (resultErr error) {
 		teamhubBin = managedToolsBin
 	}
 	resolver := lingercontext.ExecutionResolver{
-		ServiceCommand: serviceCommand,
-		TeamHubCLIBin:  teamhubBin,
-		ProviderLookup: providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
+		ServiceCommand:       serviceCommand,
+		TeamHubCLIBin:        teamhubBin,
+		HostEnvironmentGuide: hostEnvironmentGuide(runtime.GOOS),
+		ProviderLookup:       providerCatalog.Lookup, WorkspaceGrants: workspaceGrants, Views: views,
 		CLICredentials: cliCredentials,
 		RegistrationLookup: func(ctx context.Context, registrationID string) (lingercontext.RegistrationBinding, bool, error) {
 			items, err := registrationStore.List(ctx)
@@ -966,6 +967,13 @@ func providerInstallations(discovered provider.DiscoveryResult, environment map[
 	}
 	sort.Strings(runtimes)
 	return providers, runtimes
+}
+
+func hostEnvironmentGuide(goos string) string {
+	if goos == "windows" {
+		return lingercontext.WindowsHostEnvironmentGuide
+	}
+	return ""
 }
 
 func installedTeamHubCLIBin() string {

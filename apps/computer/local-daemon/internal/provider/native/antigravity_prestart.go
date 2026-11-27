@@ -28,6 +28,10 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 	fence := captureReleaseFence(r.profile)
 	epoch := antigravityResidents.currentEpoch()
 	hookEP, hookArgs := antigravityHookConfig(r.profile.Logger)
+	launchArgs, err := antigravityLaunchArgs(spec.RuntimeHome, hookArgs)
+	if err != nil {
+		return nil, err
+	}
 	hookDir := ""
 	if hookEP != nil {
 		hookDir = hookEP.Dir()
@@ -56,7 +60,7 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 			return nil, fmt.Errorf("Antigravity process temp directory could not be retained: %w", err)
 		}
 	}
-	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil, hookArgs...)
+	proc, err := startACP(profileInvocation(program, nil, r.profile.Env), spec.Dir, r.profile.Logger, nil, launchArgs...)
 	if err != nil {
 		if releaseTemp != nil {
 			_ = releaseTemp()
@@ -65,8 +69,9 @@ func (r *antigravityRuntime) prestart(ctx context.Context, spec RunSpec, program
 	}
 	proc.res.bind(key, r.profile)
 	proc.res.bindEpoch(epoch)
+	proc.runtimeHome = cleanAntigravityRuntimeHome(spec.RuntimeHome)
 	proc.hookEP = hookEP
-	proc.storeRoot = antigravityStoreRoot(r.profile.Env)
+	proc.storeRoot = antigravityAppDataDir(spec.RuntimeHome, r.profile.Env)
 	proc.releaseTemp = releaseTemp
 	spec.Readiness.spawned()
 

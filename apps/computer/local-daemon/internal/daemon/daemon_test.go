@@ -1058,7 +1058,7 @@ func TestTerminalPayloadUsesProviderCompatibleSessionShapes(t *testing.T) {
 	decode := func(spec provider.OperationSpec, result provider.Result) map[string]any {
 		t.Helper()
 		var value map[string]any
-		if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &value); err != nil {
+		if err := json.Unmarshal(terminalPayloadFor(spec, result, false, false), &value); err != nil {
 			t.Fatal(err)
 		}
 		return value["session"].(map[string]any)
@@ -2340,7 +2340,7 @@ func TestTerminalPayloadFailureDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, false, false), &payload); err != nil {
 		t.Fatal(err)
 	}
 	diagnostics, ok := payload["diagnostics"].(map[string]any)
@@ -2361,7 +2361,7 @@ func TestTerminalPayloadFailureDiagnostics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var value map[string]any
-			if err := json.Unmarshal(terminalPayloadFor(spec, tc.result, false), &value); err != nil {
+			if err := json.Unmarshal(terminalPayloadFor(spec, tc.result, false, false), &value); err != nil {
 				t.Fatal(err)
 			}
 			if _, exists := value["diagnostics"]; exists {
@@ -2373,7 +2373,7 @@ func TestTerminalPayloadFailureDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	var invalid map[string]any
-	if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &invalid); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, false, false), &invalid); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := invalid["diagnostics"]; exists {
@@ -2388,7 +2388,7 @@ func TestTerminalPayloadExternalCodexSignal(t *testing.T) {
 	for _, unconfirmed := range []bool{false, true} {
 		result.CleanupUnconfirmed = unconfirmed
 		var payload map[string]any
-		if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &payload); err != nil {
+		if err := json.Unmarshal(terminalPayloadFor(spec, result, false, false), &payload); err != nil {
 			t.Fatal(err)
 		}
 		if unconfirmed {
@@ -2419,14 +2419,14 @@ func TestTerminalPayloadFailureDetailOptIn(t *testing.T) {
 		PublicDetail: "\n\u26a0 FAILED_PRECONDITION (code 400): User location is not supported for the API use. Authorization: Bearer sk-secret1234567890abcdefghij\n",
 	}
 	var without map[string]any
-	if err := json.Unmarshal(terminalPayloadFor(spec, result, false), &without); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, false, false), &without); err != nil {
 		t.Fatal(err)
 	}
 	if _, exists := without["failure"].(map[string]any)["detail"]; exists {
 		t.Fatalf("detail must stay omitted without feature gate: %+v", without)
 	}
 	var with map[string]any
-	if err := json.Unmarshal(terminalPayloadFor(spec, result, true), &with); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(spec, result, true, false), &with); err != nil {
 		t.Fatal(err)
 	}
 	detail, _ := with["failure"].(map[string]any)["detail"].(string)
@@ -2441,7 +2441,7 @@ func TestTerminalPayloadFailureDetailOptIn(t *testing.T) {
 	}
 	stderrOnly.Diagnostics.Signal = "SIGTERM"
 	var stderrPayload map[string]any
-	if err := json.Unmarshal(terminalPayloadFor(provider.OperationSpec{Provider: "codex", OperationKind: "run.start"}, stderrOnly, true), &stderrPayload); err != nil {
+	if err := json.Unmarshal(terminalPayloadFor(provider.OperationSpec{Provider: "codex", OperationKind: "run.start"}, stderrOnly, true, false), &stderrPayload); err != nil {
 		t.Fatal(err)
 	}
 	if got := stderrPayload["failure"].(map[string]any)["detail"]; got != "signal SIGTERM" {

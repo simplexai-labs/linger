@@ -199,10 +199,10 @@ evaluate(
             const stamp = /^.*?\\bsnapshot_id=(s[0-9a-f]+)\\b/.exec(text);
             const rows = [];
             for (const line of text.split('\\n')) {
-              const match = /^\\s*(?:-\\s+)?\\[(\\d+)\\]\\s+(AX\\w+)\\s+("(?:[^"\\\\]|\\\\.)*")(?=\\s|$)/.exec(line);
+              const match = /^\\s*(?:-\\s+)?\\[(\\d+)\\]\\s+([^\\s"]+)\\s+("(?:[^"\\\\]|\\\\.)*")(?=\\s|$)/.exec(line);
               if (match && match[2] === role && match[3] === stringify(name)) rows.push(match[1]);
             }
-            if (!stamp || rows.length !== 1) throw new Error((rows.length > 1 ? 'Several controls match ' : 'No control matches ') + role + ' ' + stringify(name) + '; copy the AX role and the quoted name exactly from v.text');
+            if (!stamp || rows.length !== 1) throw new Error((rows.length > 1 ? 'Several controls match ' : 'No control matches ') + role + ' ' + stringify(name) + '; copy the role and the quoted name exactly from v.text');
             const pending = c.click({pid, window_id, element_token: stamp[1] + ':' + rows[0]});
             const nextRevision = revisions.computer;
             return view(await pending, nextRevision);

@@ -217,7 +217,8 @@ var macKeyDescriptions = map[string]string{
 // MacToolGuide describes macOS targeting and permission requirements to the Runtime.
 const MacToolGuide = `Use computer.ui_exec for desktop and browser interaction. Within the script use ui.window for a specific macOS window, ui.page for the managed browser, and ui.computer for native methods. Window actions use the latest observation and return the updated window. Use the full app name and the requested window title to discover the target.
 Search with ` + "`teamhub web search`" + `; never open a search engine's results page with ui.page. When ui.page meets a CAPTCHA, a block page or a sign-in wall, read the humanlike-browse skill and open that site's home page in the Computer's own browser window with ui.computer.launch_app({agent_browser:true, urls:[homeURL]}). When a site in that window asks for a CAPTCHA, verification or login, reports a rate limit, or makes the requested item unavailable, call ui.computer.report_blocker({kind,url}) and stop. Keep the task on that window; respect its input pacing and limits. The user's everyday Chrome accepts no synthetic keys. For Save or Open sheets, read the app's focused window and use max_depth: 3.
-macOS permissions: ui.page and ui.browser need none, so a browser script error is a script bug, not a permission problem. ui.window and ui.computer need CuaDriver's Accessibility and Screen Recording; shell screenshots need Linger's Screen Recording. Before the first shell screenshot, or when one fails or comes back blank, run ` + "`teamhub computer permissions status`" + `; if Linger lacks screen_recording, run ` + "`teamhub computer permissions request --for shell --permissions screen_recording`" + ` and end the turn for the owner's permission card. When ui.window or ui.computer reports a missing permission, run the computer-use request command that status prints and end the turn. Never tell the user to open System Settings and never operate privacy prompts yourself.`
+macOS permissions: ui.page and ui.browser need none, so a browser script error is a script bug, not a permission problem. ui.window and ui.computer need CuaDriver's Accessibility and Screen Recording; shell screenshots need Linger's Screen Recording. Before the first shell screenshot, or when one fails or comes back blank, run ` + "`teamhub computer permissions status`" + `; if Linger lacks screen_recording, run ` + "`teamhub computer permissions request --for shell --permissions screen_recording`" + ` and end the turn for the owner's permission card. When ui.window or ui.computer reports a missing permission, run the computer-use request command that status prints and end the turn. Never tell the user to open System Settings and never operate privacy prompts yourself.
+To connect the user's everyday signed-in Chrome, or when a browser call returns BROWSER_CONNECTION_REQUIRED or BROWSER_CONNECTION_INVALID, run ` + "`teamhub browser connect`" + ` to post a browser connection card and end the turn to wait for the result; never ask for the extension token in a message or ask to relaunch Chrome with --remote-debugging-port.`
 
 // macCompactTool is the macOS shape of one Cua tool: the fields the Computer
 // routes, without Cua's delivery modes, scopes and capture ids.
@@ -838,6 +839,17 @@ func (c *cuaSession) sendInput(ctx context.Context, name string, arguments map[s
 	if appKeys {
 		return c.sendKeys(ctx, name, arguments, int(arguments["pid"].(float64)))
 	}
+	if name == "bring_to_front" && isModalPanel(ctx, arguments["pid"], arguments["window_id"]) {
+		// Cua fronts only ordinary windows. The dialog is already above the
+		// app's other windows, so bringing the app forward puts it in front.
+		window := arguments["window_id"]
+		delete(arguments, "window_id")
+		result, err := c.client.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments})
+		if err == nil && !failed(result) {
+			result = withNote(result, fmt.Sprintf("Window %v is this app's open dialog, which stays above its other windows, so the app was brought forward with it in front.", window))
+		}
+		return result, err
+	}
 	result, err := c.client.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments})
 	if err == nil && runtime.GOOS == "darwin" && name == "double_click" && arguments["delivery_mode"] != "foreground" && !agentChrome && strings.Contains(string(result), "AXOpen returned -25205") {
 		// Finder list rows refuse AXOpen, so nothing was sent. Open the
@@ -963,6 +975,11 @@ func (c *cuaSession) finishInput(ctx context.Context, name string, arguments map
 	}
 	if err == nil && inputTools[name] && ctx.Value(cuaInternalInput{}) == nil && (runtime.GOOS != "darwin" || namedWindow) {
 		result = c.withWindowState(ctx, arguments, result)
+	}
+	if err == nil && (name == "get_window_state" || name == "list_windows" || inputTools[name]) && ctx.Value(cuaInternalInput{}) == nil && !failed(result) {
+		if note := modalPanelNote(ctx, arguments["pid"], arguments["window_id"]); note != "" {
+			result = withNote(result, note)
+		}
 	}
 	if err == nil && name == "run_script" {
 		result = compactScriptResult(result)
@@ -1459,6 +1476,11 @@ func lsappPID(ctx context.Context, app string) (int, error) {
 		}
 		return lsappPID(ctx, strings.TrimSuffix(asn, ":"))
 	}
+	if list, listErr := exec.CommandContext(ctx, "/usr/bin/lsappinfo", "list").Output(); listErr == nil {
+		if pid := lsappListPID(string(list), app); pid > 0 {
+			return pid, nil
+		}
+	}
 	return 0, fmt.Errorf("%s is not running", app)
 }
 
@@ -1551,6 +1573,9 @@ func (c *cuaSession) focusApp(ctx context.Context, name string, arguments map[st
 	if window == nil && !keyboardInput(name, arguments) {
 		return fmt.Errorf("COMPUTER_TARGET_REQUIRED: foreground input at an element or point needs pid and window_id: %w", errNotSent)
 	}
+	// A modal dialog is in front of the app's ordinary windows without being
+	// one of them, so the front-window check and bring_to_front do not know it.
+	panel := window != nil && isModalPanel(ctx, pid, window)
 	var fronted any
 	for attempt := range 4 {
 		front, err := c.checkFront(ctx, int(number))
@@ -1573,7 +1598,7 @@ func (c *cuaSession) focusApp(ctx context.Context, name string, arguments map[st
 					c.remember(ctx, front, top.WindowID)
 				}
 			}
-			if window != nil && (top == nil || top.WindowID != window) {
+			if window != nil && !panel && (top == nil || top.WindowID != window) {
 				above := "no window of this app is shown"
 				if top != nil {
 					above = fmt.Sprintf("window %v %q of this app is in front of it and would receive the input", top.WindowID, top.Title)
@@ -1597,7 +1622,9 @@ func (c *cuaSession) focusApp(ctx context.Context, name string, arguments map[st
 		// A window the Agent named, or else the app's key window, comes
 		// forward with the app.
 		fronted = window
-		if fronted == nil {
+		if panel {
+			fronted = nil
+		} else if fronted == nil {
 			c.mu.Lock()
 			named, ok := c.named[int(number)]
 			c.mu.Unlock()
@@ -2051,7 +2078,21 @@ func (c *cuaSession) launchApp(ctx context.Context, arguments map[string]any) (j
 		}
 	}
 	if output, err := exec.CommandContext(ctx, "/usr/bin/open", open...).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		// open -a knows an app by its file name only. A name the bundle
+		// declares, such as "Bambu Studio" for BambuStudio.app, opens by path.
+		path := ""
+		if flag == "-a" && ctx.Err() == nil {
+			path = appPathByName(ctx, app)
+		}
+		if path == "" {
+			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+		if output, err := exec.CommandContext(ctx, "/usr/bin/open", append([]string{"-g", "-a", path}, addresses...)...).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("launch_app: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+		// lsappinfo may not know the name as given, such as one in another
+		// case, so the running app is found by the path that opened it.
+		app = path
 	}
 	deadline := time.Now().Add(launchAppWait)
 	if running && len(urls) > 0 {

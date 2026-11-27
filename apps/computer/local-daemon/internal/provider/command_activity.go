@@ -286,7 +286,7 @@ func numeric(word string) bool { return number.MatchString(word) }
 var commandWord = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // messageSends post to the Room, which shows the message itself.
-var messageSends = map[string]bool{"send": true, "direct": true, "emoji": true, "sequence": true}
+var messageSends = map[string]bool{"send": true, "direct": true, "emoji": true, "sequence": true, "card": true, "ask-user": true}
 
 // createsTaskFor reports a script that is one `teamhub task create` call. Its
 // receipt names the Task it created, which the Room links the step to.
