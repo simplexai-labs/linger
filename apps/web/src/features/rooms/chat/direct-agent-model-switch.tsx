@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useState } from "react";
+import { customModelsMessages } from "@/features/local-models/custom-models.messages";
 import { tenantLocalModelsQueryKey } from "@/features/local-models/local-models-queries";
 import { teamHubData } from "@/features/teamhub/teamhub-api";
 import { type TeamHubClient } from "@/features/teamhub/teamhub-client";
@@ -12,7 +13,7 @@ const EditAgentRuntimeDialog = lazy(async () => ({
 }));
 import {
   reasoningEffortLabel,
-  useResolvedAgentModelLabel,
+  useResolvedAgentModelMeta,
 } from "../members/use-agent-model-selection";
 import {
   anotherMeQueryKey,
@@ -42,7 +43,7 @@ function RuntimeSettingsEntry({ client, registration, tenantId, busy }: Props) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const effort = registration.runtime.reasoning_effort;
-  const label = useResolvedAgentModelLabel(
+  const { isCustom, label } = useResolvedAgentModelMeta(
     client,
     tenantId,
     registration.runtime,
@@ -104,6 +105,11 @@ function RuntimeSettingsEntry({ client, registration, tenantId, busy }: Props) {
         }}
       >
         <span className="agent-model-switch-trigger-label">{label}</span>
+        {isCustom ? (
+          <span className="ml-1 shrink-0 rounded-sm border border-border bg-muted px-1 py-0.5 text-[10px] leading-none font-medium text-muted-foreground">
+            {t(customModelsMessages.customModelBadge)}
+          </span>
+        ) : null}
         {/* A long model label shortens with an ellipsis; the effort stays. */}
         {effort ? (
           <>

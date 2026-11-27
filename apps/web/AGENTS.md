@@ -115,7 +115,21 @@ build:assets` to check the initial JS budget.
   Opening the page or
   reconnecting an offline Computer auto-refreshes `model-source` and triggers a
   fresh `POST .../local-models` memory snapshot for the owner, while
-  `LOCAL_COMPUTER_OFFLINE` disables BYOK edits immediately. A Computer's detail
+  `LOCAL_COMPUTER_OFFLINE` disables BYOK edits immediately. Inside the Local
+  model tab, segmented sub-tabs (`Official Curated` | `Custom · HF / ModelScope`,
+  persisted via `?tab=custom`) keep curated models separate from custom
+  Hugging Face / ModelScope repositories; switching to Custom widens `<main>`
+  to `1200px` and lazy-loads `CustomModelHubTab` (omnibox search/probe,
+  transient React-state-only gated token unlock, incompatible format detection
+  with GGUF search escape, `1.1x` disk hard-stop, transparent memory comfort
+  tiers with Standby-First `Install Anyway` escape hatch, sharded download
+  progress, isolated Quick Smoke Test with OOM `ctx=2048` retry / corrupt
+  re-download / 1-click delete, and an upgrade notice on
+  `LOCAL_MODELS_CUSTOM_UNSUPPORTED`). Agent and chat model pickers (`useResolvedAgentModelMeta`,
+  `DirectAgentModelSwitch`, `EditAgentRuntimeDialog`, and
+  `QuickCreateLocalAgentDialog`) cross-reference `localModelsQueryOptions` by
+  `pi_model` (`model.origin === "custom"`) to show a localized `Custom` badge.
+  A Computer's detail
   on the Computers page links here, reads `model-source` for its active runtime
   pill, and reads no local model library state itself.
 - `src/i18n`: the interface languages (English and Simplified Chinese).

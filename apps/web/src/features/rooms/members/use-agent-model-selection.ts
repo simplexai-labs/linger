@@ -2,7 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { localComputersQueryOptions } from "@/features/local-computer/local-computer-queries";
-import { localModelsQueryOptions } from "@/features/local-models/local-models-queries";
+import {
+  localModelsQueryOptions,
+  type LocalModelsView,
+} from "@/features/local-models/local-models-queries";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import { translate, type Translate } from "@/i18n/language";
 import type { Message } from "@/i18n/messages";
@@ -79,6 +82,73 @@ export function reasoningEffortLabel(
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : value;
 }
 
+/** Returns the set of Pi model IDs belonging to custom community models. */
+export function customLocalModelIds(
+  view: LocalModelsView | undefined,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  if (!view?.available) return ids;
+  for (const item of view.models) {
+    if (item.model.origin === "custom" && item.model.pi_model) {
+      ids.add(item.model.pi_model);
+    }
+  }
+  return ids;
+}
+
+export interface ResolvedAgentModelMeta {
+  isCustom: boolean;
+  label: string | undefined;
+}
+
+/**
+ * Resolves the human-readable model label and custom-origin flag for an
+ * Agent's current runtime by cross-referencing the Computer's local-models
+ * snapshot via structured `origin === "custom"`.
+ */
+export function useResolvedAgentModelMeta(
+  client: TeamHubClient,
+  tenantId: string,
+  runtime: TeamHubTenantAgent["runtime"] | undefined,
+): ResolvedAgentModelMeta {
+  const t = useT();
+  const placement = runtime?.placement;
+  const computerId =
+    placement?.type === "local" ? placement.computer_id : undefined;
+  const computers = useQuery({
+    ...localComputersQueryOptions(client, tenantId),
+    enabled: Boolean(computerId),
+  });
+  const catalogModel = computers.data?.items
+    .find((item) => item.computer_id === computerId)
+    ?.runtimes.find((item) => item.type === placement?.runtime_type)
+    ?.models.find((item) => item.id === runtime?.model);
+  const catalogLabel = catalogModel && runtimeModelLabel(catalogModel, t);
+  const localModels = useQuery({
+    ...localModelsQueryOptions(client, tenantId, computerId ?? ""),
+    enabled: Boolean(
+      placement?.runtime_type === "pi" &&
+      computerId &&
+      runtime?.model?.startsWith("localmodels-library/"),
+    ),
+  });
+  const localModel = localModels.data?.available
+    ? localModels.data.models.find(
+        (item) => item.model.pi_model === runtime?.model,
+      )?.model
+    : undefined;
+  const label =
+    catalogLabel ??
+    localModel?.name ??
+    (runtime?.model
+      ? runtimeModelLabel({ id: runtime.model, label: runtime.model }, t)
+      : undefined);
+  return {
+    isCustom: localModel?.origin === "custom",
+    label,
+  };
+}
+
 /**
  * Resolves the human-readable model label for an Agent's current runtime,
  * falling back to the Computer's local-models catalog for Bifrost-backed Pi
@@ -99,38 +169,5 @@ export function useResolvedAgentModelLabel(
   tenantId: string,
   runtime: TeamHubTenantAgent["runtime"] | undefined,
 ): string | undefined {
-  const t = useT();
-  const placement = runtime?.placement;
-  const computerId =
-    placement?.type === "local" ? placement.computer_id : undefined;
-  const computers = useQuery({
-    ...localComputersQueryOptions(client, tenantId),
-    enabled: Boolean(computerId),
-  });
-  const catalogModel = computers.data?.items
-    .find((item) => item.computer_id === computerId)
-    ?.runtimes.find((item) => item.type === placement?.runtime_type)
-    ?.models.find((item) => item.id === runtime?.model);
-  const catalogLabel = catalogModel && runtimeModelLabel(catalogModel, t);
-  const localModels = useQuery({
-    ...localModelsQueryOptions(client, tenantId, computerId ?? ""),
-    enabled: Boolean(
-      placement?.runtime_type === "pi" &&
-      computerId &&
-      !catalogLabel &&
-      runtime?.model?.startsWith("localmodels-library/"),
-    ),
-  });
-  const localModelLabel = localModels.data?.available
-    ? localModels.data.models.find(
-        (item) => item.model.pi_model === runtime?.model,
-      )?.model.name
-    : undefined;
-  return (
-    catalogLabel ??
-    localModelLabel ??
-    (runtime?.model
-      ? runtimeModelLabel({ id: runtime.model, label: runtime.model }, t)
-      : undefined)
-  );
+  return useResolvedAgentModelMeta(client, tenantId, runtime).label;
 }

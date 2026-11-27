@@ -10,7 +10,11 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestTeamHubRuntime } from "@/test/teamhub-test-runtime";
-import { labView } from "@/features/local-models/local-models-test-support";
+import {
+  labView,
+  localModel,
+  modelView,
+} from "@/features/local-models/local-models-test-support";
 import type { TestRouteHandler } from "@/test/teamhub-test-server";
 import type {
   TeamHubTenantAgent,
@@ -167,6 +171,96 @@ describe("Direct Agent runtime settings", () => {
     expect(
       await screen.findByRole("button", { name: "Qwen3 Coder 30B" }),
     ).toBeVisible();
+  });
+
+  it("shows the localized Custom badge when an Agent uses a custom local model", async () => {
+    const base = localAgent();
+    const customPiModel = "localmodels-library/custom-qwen-7b";
+    const piAgent: TeamHubTenantAgent = {
+      ...base,
+      runtime: {
+        model: customPiModel,
+        placement: {
+          computer_id: "computer-1",
+          runtime_type: "pi",
+          type: "local",
+          workspace_grant_id: "grant-1",
+        },
+      },
+    };
+    const runtime = createTestTeamHubRuntime();
+    runtime.server.on("GET", "/v0/tenants/{tenantId}/local-computers", () => ({
+      items: [
+        {
+          computer_id: "computer-1",
+          display_name: "Computer",
+          runtimes: [
+            {
+              models: [
+                {
+                  id: customPiModel,
+                  label: "Qwen2.5-7B-Instruct-GGUF",
+                },
+              ],
+              status: "ready",
+              type: "pi",
+            },
+          ],
+          status: "online",
+          workspace_grants: [
+            {
+              grant_id: "grant-1",
+              label: "Workspace",
+              mode: "workspace-write",
+            },
+          ],
+        },
+      ],
+    }));
+    runtime.server.on(
+      "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/local-models",
+      () =>
+        labView({
+          models: [
+            ...labView().models,
+            modelView(
+              localModel({
+                id: "custom.hf.bartowski--qwen2.5-7b-instruct-gguf:Q4_K_M",
+                name: "Qwen2.5-7B-Instruct-GGUF",
+                origin: "custom",
+                pi_model: customPiModel,
+                state: "loaded",
+                verification: { status: "verified" },
+              }),
+            ),
+          ],
+        }),
+    );
+
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: { queries: { retry: false } },
+            })
+          }
+        >
+          <DirectAgentModelSwitch
+            client={runtime.client}
+            currentActorId="actor-jenny"
+            registration={piAgent}
+            tenantId="tenant-northstar"
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    const trigger = await screen.findByRole("button", {
+      name: /Qwen2\.5-7B-Instruct-GGUF/i,
+    });
+    expect(await within(trigger).findByText("Custom")).toBeVisible();
   });
 });
 

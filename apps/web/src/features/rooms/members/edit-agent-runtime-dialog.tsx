@@ -25,6 +25,7 @@ import {
   type PiLocalModelsState,
   PiRuntimeSetupGuidance,
 } from "@/features/local-computer/pi-runtime-setup-guidance";
+import { customModelsMessages } from "@/features/local-models/custom-models.messages";
 import { localModelsQueryOptions } from "@/features/local-models/local-models-queries";
 import type { TeamHubClient } from "@/features/teamhub/teamhub-client";
 import type {
@@ -54,7 +55,10 @@ import {
   StatusDot,
 } from "./runtime-setting-rows";
 import { useAgentMoveTarget } from "./use-agent-move-target";
-import { reasoningEffortLabel } from "./use-agent-model-selection";
+import {
+  customLocalModelIds,
+  reasoningEffortLabel,
+} from "./use-agent-model-selection";
 
 type Runtime = NonNullable<TeamHubTenantAgentUpdateInput["runtime"]>;
 
@@ -119,6 +123,7 @@ export function EditAgentRuntimeDialog({
     ),
   });
   const piModelsState = classifyPiLocalModelsState(localModels.data);
+  const customModelIds = customLocalModelIds(localModels.data);
   const unavailableModelLabel =
     (localModels.data?.available
       ? localModels.data.models.find((item) => item.model.pi_model === model)
@@ -301,7 +306,16 @@ export function EditAgentRuntimeDialog({
             label={t(agentRuntimeMessages.model)}
             onToggle={() => toggle("model")}
             open={openRow === "model"}
-            value={<span className="truncate">{modelText}</span>}
+            value={
+              <>
+                <span className="truncate">{modelText}</span>
+                {model && customModelIds.has(model) ? (
+                  <span className="shrink-0 rounded-sm border border-border bg-muted px-1 py-0.5 text-[10px] leading-none font-medium text-muted-foreground">
+                    {t(customModelsMessages.customModelBadge)}
+                  </span>
+                ) : null}
+              </>
+            }
           >
             {model || selection.modelOptions.length ? (
               <OptionList
@@ -323,6 +337,11 @@ export function EditAgentRuntimeDialog({
                       ]
                     : []),
                   ...selection.modelOptions.map((item) => ({
+                    description: customModelIds.has(item.id) ? (
+                      <span className="rounded-sm border border-border bg-muted px-1 py-0.5 text-[10px] leading-none font-medium text-muted-foreground">
+                        {t(customModelsMessages.customModelBadge)}
+                      </span>
+                    ) : undefined,
                     label: item.label,
                     value: item.id,
                   })),
