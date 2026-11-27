@@ -1,15 +1,13 @@
-import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
-import { type ReactNode, useId } from "react";
+import type { ReactNode } from "react";
 
-import { Icon } from "@/components/ui/icon";
-import type { TeamHubAgentReasoningEffort } from "@/features/teamhub/teamhub-types";
+import { Select } from "@/components/ui/select";
 import { useT } from "@/i18n/use-translation";
 
 import type { LocalComputer } from "./agent-move-target";
 import { agentRuntimeMessages } from "./agent-runtime.messages";
 
-/* The pieces Runtime settings and Create local agent share: a heading for the
-   model, rows that open in place onto their choices, and the choices. */
+/* The pieces Runtime settings and Create local agent share: a row per
+   setting with the product's Select, and the status shown beside a choice. */
 
 export type StatusTone = "ok" | "off" | "warn";
 
@@ -81,181 +79,65 @@ export function Placeholder({ children }: { children: ReactNode }) {
   );
 }
 
-/** One setting as a row: its name and current value, opening in place onto
- * the choices for it. */
-export function SettingRow({
+/**
+ * One setting as a row: its name on the left and the product's Select on
+ * the right, whose choices open in the shared floating list.
+ */
+export function SettingSelect({
+  "aria-label": ariaLabel,
   children,
   disabled = false,
   label,
-  onToggle,
-  open,
+  onValueChange,
+  placeholder,
   value,
 }: {
+  "aria-label": string;
   children: ReactNode;
   disabled?: boolean;
   label: string;
-  onToggle: () => void;
-  open: boolean;
-  value: ReactNode;
+  onValueChange: (value: string) => void;
+  placeholder?: string;
+  value: string;
 }) {
-  const panelId = useId();
-  const expanded = open && !disabled;
-  // The choices line up under the value column: the label is w-28 and the
-  // gap gap-3, so the panel indents by both and each choice keeps the row's
-  // own 10px padding.
   return (
-    <div>
-      <button
-        aria-controls={expanded ? panelId : undefined}
-        aria-expanded={disabled ? undefined : expanded}
-        className={`flex w-full items-center gap-3 rounded-lg p-2.5 text-left text-sm transition-colors focus-visible:outline-none disabled:cursor-default enabled:hover:bg-accent focus-visible:bg-accent`}
+    <div className="flex items-center gap-3 py-0.5">
+      <span className="w-28 shrink-0 whitespace-nowrap pl-2.5 text-sm text-muted-foreground">
+        {label}
+      </span>
+      <Select
+        aria-label={ariaLabel}
+        className="w-full min-w-0 flex-1"
         disabled={disabled}
-        onClick={onToggle}
-        type="button"
+        onValueChange={onValueChange}
+        placeholder={placeholder}
+        value={value}
       >
-        <span className="w-28 shrink-0 whitespace-nowrap text-muted-foreground">
-          {label}
-        </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-foreground">
-          {value}
-        </span>
-        {disabled ? null : (
-          <Icon
-            className={`shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
-            icon={ArrowRight01Icon}
-          />
-        )}
-      </button>
-      {expanded ? (
-        <div className="pb-1 pl-[calc(7rem+0.75rem)]" id={panelId}>
-          {children}
-        </div>
-      ) : null}
+        {children}
+      </Select>
     </div>
   );
 }
 
-export interface Option {
-  description?: ReactNode;
-  disabled?: boolean;
-  label: string;
-  leading?: ReactNode;
-  value: string;
-}
-
-/** The choices of one setting as radios, the chosen one ticked. */
-export function OptionList({
-  label,
-  onChange,
-  options,
-  value,
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  options: readonly Option[];
-  value: string;
-}) {
-  const name = useId();
-  return (
-    <div aria-label={label} className="flex flex-col gap-0.5" role="radiogroup">
-      {options.map((option) => (
-        <OptionRow
-          checked={option.value === value}
-          key={option.value}
-          name={name}
-          onChange={onChange}
-          option={option}
-        />
-      ))}
-    </div>
-  );
-}
-
-function OptionRow({
-  checked,
+/** A choice's content: an optional mark, its name, and its status after it. */
+export function ChoiceLabel({
+  leading,
   name,
-  onChange,
-  option,
+  status,
 }: {
-  checked: boolean;
+  leading?: ReactNode;
   name: string;
-  onChange: (value: string) => void;
-  option: Option;
+  status?: ReactNode;
 }) {
-  const labelId = useId();
-  const descriptionId = useId();
   return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors hover:bg-accent has-[:disabled]:cursor-default has-[:disabled]:opacity-50 has-[:disabled]:hover:bg-transparent has-[:focus-visible]:bg-accent">
-      <input
-        aria-describedby={option.description ? descriptionId : undefined}
-        aria-labelledby={labelId}
-        checked={checked}
-        className="sr-only"
-        disabled={option.disabled}
-        name={name}
-        onChange={() => onChange(option.value)}
-        type="radio"
-        value={option.value}
-      />
-      {option.leading}
-      <span
-        className="min-w-0 flex-1 truncate font-medium text-foreground"
-        id={labelId}
-      >
-        {option.label}
-      </span>
-      {option.description ? (
-        <span
-          className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
-          id={descriptionId}
-        >
-          {option.description}
+    <span className="flex min-w-0 items-center gap-2">
+      {leading}
+      <span className="min-w-0 truncate">{name}</span>
+      {status ? (
+        <span className="flex shrink-0 items-center gap-1.5 pl-1 text-xs text-muted-foreground">
+          {status}
         </span>
       ) : null}
-      <span className="flex w-4 shrink-0 justify-center">
-        {checked ? <Icon icon={Tick02Icon} size={14} /> : null}
-      </span>
-    </label>
-  );
-}
-
-/** Reasoning efforts as one segmented choice. */
-export function EffortSegments({
-  efforts,
-  label,
-  labelOf,
-  onChange,
-  value,
-}: {
-  efforts: readonly TeamHubAgentReasoningEffort[];
-  label: string;
-  labelOf: (effort: TeamHubAgentReasoningEffort) => string;
-  onChange: (value: TeamHubAgentReasoningEffort) => void;
-  value?: TeamHubAgentReasoningEffort;
-}) {
-  const name = useId();
-  return (
-    <div
-      aria-label={label}
-      className="mx-2.5 grid auto-cols-fr grid-flow-col gap-0.5 rounded-lg bg-muted p-[3px]"
-      role="radiogroup"
-    >
-      {efforts.map((effort) => (
-        <label
-          className="cursor-pointer rounded-md py-1.5 text-center text-[13px] text-muted-foreground transition-colors has-[:checked]:bg-background has-[:checked]:font-medium has-[:checked]:text-foreground has-[:checked]:shadow-sm has-[:focus-visible]:text-foreground"
-          key={effort}
-        >
-          <input
-            checked={effort === value}
-            className="sr-only"
-            name={name}
-            onChange={() => onChange(effort)}
-            type="radio"
-            value={effort}
-          />
-          {labelOf(effort)}
-        </label>
-      ))}
-    </div>
+    </span>
   );
 }

@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -34,12 +35,12 @@ describe("EditAgentRuntimeDialog", () => {
     await screen.findByText(
       "The current model is unavailable. Choose another model.",
     );
-    expect(row("Model")).toHaveTextContent("removed-model · Unavailable");
-    openRow("Model");
-    const removed = screen.getByRole("radio", {
+    expect(setting("Model")).toHaveTextContent("removed-model · Unavailable");
+    const list = await openSetting("Model");
+    const removed = within(list).getByRole("option", {
       name: "removed-model · Unavailable",
     });
-    expect(removed).toBeChecked();
+    expect(removed).toHaveAttribute("aria-selected", "true");
     expect(removed).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
     expect(onSave).not.toHaveBeenCalled();
@@ -52,12 +53,11 @@ describe("EditAgentRuntimeDialog", () => {
     await screen.findByText(
       "The current model is unavailable. Choose another model.",
     );
-    const reasoning = row("Reasoning");
+    const reasoning = setting("Reasoning");
     expect(reasoning).toHaveTextContent("Medium · Unavailable");
     expect(reasoning).toBeDisabled();
-    expect(
-      screen.queryByRole("radiogroup", { name: "Agent reasoning effort" }),
-    ).toBeNull();
+    fireEvent.click(reasoning);
+    expect(reasoning).toHaveAttribute("aria-expanded", "false");
   });
   it("shows a known empty catalog without restoring defaults", async () => {
     const computer = localComputer("computer-old", "Old Mac", "online");
@@ -69,27 +69,34 @@ describe("EditAgentRuntimeDialog", () => {
     await screen.findByText("No models are available for this runtime.");
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
   });
-  it("locks Runtime in the Details model editor", async () => {
-    renderDialog({ onSave: vi.fn(), field: "model" });
-    expect(
-      await screen.findByRole("button", { name: /^Runtime/ }),
-    ).toBeDisabled();
-  });
+  it.each([
+    ["model", false],
+    ["reasoning", true],
+  ] as const)(
+    "locks the placement when opened from %s",
+    async (field, modelLocked) => {
+      renderDialog({ onSave: vi.fn(), field });
+      await waitFor(() =>
+        expect(setting("Model")).toHaveTextContent("Codex default"),
+      );
+      expect(setting("Computer")).toBeDisabled();
+      expect(setting("Runtime")).toBeDisabled();
+      expect(setting("Model")).toHaveProperty("disabled", modelLocked);
+    },
+  );
   it("edits the model and reasoning without changing the bound Computer or workspace", async () => {
     const onSave = vi.fn<(input: AgentRuntimeUpdateInput) => void>();
     renderDialog({ onSave });
     await waitFor(() =>
-      expect(row("Model")).toHaveTextContent("Codex default"),
+      expect(setting("Model")).toHaveTextContent("Codex default"),
     );
-    const computer = row("Computer");
+    const computer = setting("Computer");
     expect(computer).toHaveTextContent("Old Mac");
     // The composer opens the full Runtime settings, so the Computer stays
     // selectable there; leaving it alone keeps the bound placement.
     expect(computer).toBeEnabled();
-    openRow("Model");
-    await choose("Codex fast");
-    openRow("Reasoning");
-    await choose("High");
+    await choose("Model", "Codex fast");
+    await choose("Reasoning", "High");
     fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
     expect(onSave).toHaveBeenCalledWith({
       runtime: {
@@ -100,24 +107,25 @@ describe("EditAgentRuntimeDialog", () => {
     });
   });
 
-  it("opens one setting row at a time and collapses the open row on a second click", async () => {
+  it("opens a setting's choices in a list that closes once one is chosen", async () => {
     renderDialog({ onSave: vi.fn() });
-    await screen.findByRole("radiogroup", { name: "Agent runtime" });
-    expect(row("Runtime")).toHaveAttribute("aria-expanded", "true");
+    const model = await screen.findByRole("combobox", { name: "Agent model" });
+    await waitFor(() => expect(model).toHaveTextContent("Codex default"));
+    // No setting starts open.
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(model).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(row("Model"));
-    expect(row("Model")).toHaveAttribute("aria-expanded", "true");
-    expect(row("Runtime")).toHaveAttribute("aria-expanded", "false");
+    const list = await openSetting("Model");
+    expect(model).toHaveAttribute("aria-expanded", "true");
     expect(
-      screen.queryByRole("radiogroup", { name: "Agent runtime" }),
-    ).toBeNull();
-    expect(
-      screen.getByRole("radiogroup", { name: "Agent model" }),
-    ).toBeVisible();
-
-    fireEvent.click(row("Model"));
-    expect(row("Model")).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("radiogroup")).toBeNull();
+      within(list)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Codex default", "Codex fast"]);
+    fireEvent.click(within(list).getByRole("option", { name: "Codex fast" }));
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(model).toHaveAttribute("aria-expanded", "false");
+    expect(model).toHaveTextContent("Codex fast");
   });
 
   it.each(["computer", "workspace"])(
@@ -195,9 +203,10 @@ describe("EditAgentRuntimeDialog", () => {
       ],
     };
     renderDialog({ onSave, computersOverride: { items: [computer] } });
-    await waitFor(() => expect(row("Reasoning")).toHaveTextContent("Minimal"));
-    openRow("Reasoning");
-    fireEvent.click(screen.getByRole("radio", { name: "Custom tier" }));
+    await waitFor(() =>
+      expect(setting("Reasoning")).toHaveTextContent("Minimal"),
+    );
+    await choose("Reasoning", "Custom tier");
     fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
     expect(onSave).toHaveBeenCalledWith({
       runtime: {
@@ -222,10 +231,12 @@ describe("EditAgentRuntimeDialog", () => {
         },
       ];
       renderDialog({ onSave, computersOverride: { items: [computer] } });
-      await waitFor(() => expect(row("Runtime")).toHaveTextContent("Codex"));
-      await choose(type === "pi" ? "Pi" : "Claude Code");
       await waitFor(() =>
-        expect(row("Model")).toHaveTextContent("Custom model"),
+        expect(setting("Runtime")).toHaveTextContent("Codex"),
+      );
+      await choose("Runtime", type === "pi" ? "Pi" : "Claude Code", "Ready");
+      await waitFor(() =>
+        expect(setting("Model")).toHaveTextContent("Custom model"),
       );
       fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
       expect(onSave).toHaveBeenCalledWith({
@@ -255,7 +266,7 @@ describe("EditAgentRuntimeDialog", () => {
       },
     ];
     renderDialog({ computersOverride: { items: [computer] }, onSave: vi.fn() });
-    await chooseRuntime("Pi", "Not installed");
+    await choose("Runtime", "Pi", "Not installed");
     expect(
       screen.getByText("npm install -g @earendil-works/pi-coding-agent"),
     ).toBeVisible();
@@ -281,7 +292,7 @@ describe("EditAgentRuntimeDialog", () => {
       },
     ];
     renderDialog({ computersOverride: { items: [computer] }, onSave: vi.fn() });
-    await chooseRuntime("Antigravity", "Update needed");
+    await choose("Runtime", "Antigravity", "Update needed");
     expect(screen.getByText("Antigravity update required")).toBeVisible();
     expect(
       screen.getByText("antigravity version 1.5.9 is below minimum 1.5.12"),
@@ -322,7 +333,7 @@ describe("EditAgentRuntimeDialog", () => {
       onSave,
       queryClient,
     });
-    await chooseRuntime("Claude Code", "Sign-in required");
+    await choose("Runtime", "Claude Code", "Sign-in required");
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
 
     await act(async () => {
@@ -344,7 +355,7 @@ describe("EditAgentRuntimeDialog", () => {
       });
     });
     await waitFor(() =>
-      expect(row("Model")).toHaveTextContent("Claude default"),
+      expect(setting("Model")).toHaveTextContent("Claude default"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Save Runtime" }));
     expect(onSave).toHaveBeenCalledWith({
@@ -363,13 +374,12 @@ describe("EditAgentRuntimeDialog", () => {
   it("blocks an unauthenticated target and allows choosing a ready runtime again", async () => {
     const onSave = vi.fn();
     renderDialog({ onSave });
-    await waitFor(() => expect(row("Runtime")).toHaveTextContent("Codex"));
-    await chooseRuntime("Claude Code", "Sign-in required");
+    await waitFor(() => expect(setting("Runtime")).toHaveTextContent("Codex"));
+    await choose("Runtime", "Claude Code", "Sign-in required");
     expect(screen.getByText("Claude Code sign-in required")).toBeVisible();
     expect(screen.getByText("claude auth login")).toBeVisible();
     expect(screen.getByRole("button", { name: "Save Runtime" })).toBeDisabled();
-    openRow("Runtime");
-    await choose("Codex");
+    await choose("Runtime", "Codex", "Ready");
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Save Runtime" }),
@@ -412,12 +422,14 @@ describe("EditAgentRuntimeDialog", () => {
       onSave,
       registration,
     });
-    await waitFor(() => expect(row("Computer")).toHaveTextContent("Old Mac"));
+    await waitFor(() =>
+      expect(setting("Computer")).toHaveTextContent("Old Mac"),
+    );
     expect(screen.queryByText(agentRuntimeMessages.moveHint.source)).toBeNull();
-    await chooseComputer("New Mac", "Online");
-    expect(row("Runtime")).toHaveTextContent("Codex");
-    expect(row("Model")).toHaveTextContent("Codex fast");
-    expect(row("Reasoning")).toHaveTextContent("High");
+    await choose("Computer", "New Mac", "Online");
+    expect(setting("Runtime")).toHaveTextContent("Codex");
+    expect(setting("Model")).toHaveTextContent("Codex fast");
+    expect(setting("Reasoning")).toHaveTextContent("High");
     expect(
       screen.getByText(agentRuntimeMessages.moveHint.source),
     ).toBeVisible();
@@ -464,10 +476,12 @@ describe("EditAgentRuntimeDialog", () => {
       onSave,
       registration,
     });
-    await waitFor(() => expect(row("Computer")).toHaveTextContent("Old Mac"));
-    await chooseComputer("New Mac", "Online");
-    expect(row("Model")).toHaveTextContent("Codex next");
-    expect(row("Reasoning")).toHaveTextContent("Medium");
+    await waitFor(() =>
+      expect(setting("Computer")).toHaveTextContent("Old Mac"),
+    );
+    await choose("Computer", "New Mac", "Online");
+    expect(setting("Model")).toHaveTextContent("Codex next");
+    expect(setting("Reasoning")).toHaveTextContent("Medium");
     fireEvent.click(screen.getByRole("button", { name: "Move Agent" }));
     expect(onSave).toHaveBeenCalledWith({
       runtime: expect.objectContaining({
@@ -501,16 +515,17 @@ describe("EditAgentRuntimeDialog", () => {
       field: "computer",
       onSave,
     });
-    await waitFor(() => expect(row("Computer")).toHaveTextContent("Old Mac"));
-    await chooseComputer("New Mac", "Online");
-    expect(row("Runtime")).toHaveTextContent("Choose a runtime");
+    await waitFor(() =>
+      expect(setting("Computer")).toHaveTextContent("Old Mac"),
+    );
+    await choose("Computer", "New Mac", "Online");
+    expect(setting("Runtime")).toHaveTextContent("Choose a runtime");
     expect(
       screen.getByText("Codex isn't ready on New Mac. Choose another Runtime."),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Move Agent" })).toBeDisabled();
-    openRow("Runtime");
-    await choose("Claude Code");
-    expect(row("Model")).toHaveTextContent("Claude default");
+    await choose("Runtime", "Claude Code", "Ready");
+    expect(setting("Model")).toHaveTextContent("Claude default");
     fireEvent.click(screen.getByRole("button", { name: "Move Agent" }));
     expect(onSave).toHaveBeenCalledWith({
       runtime: {
@@ -539,16 +554,23 @@ describe("EditAgentRuntimeDialog", () => {
       field: "computer",
       onSave: vi.fn(),
     });
-    const offline = await screen.findByRole("radio", { name: "Offline Mac" });
-    expect(offline).toHaveAccessibleDescription("Offline");
+    await waitFor(() =>
+      expect(setting("Computer")).toHaveTextContent("Old Mac"),
+    );
+    const list = await openSetting("Computer");
+    const offline = within(list).getByRole("option", {
+      name: optionName("Offline Mac", "Offline"),
+    });
     expect(offline).toBeEnabled();
-    const legacy = screen.getByRole("radio", { name: "Legacy Mac" });
-    expect(legacy).toHaveAccessibleDescription("Online · Upgrade required");
+    const legacy = within(list).getByRole("option", {
+      name: optionName("Legacy Mac", "Online · Upgrade required"),
+    });
     expect(legacy).toBeDisabled();
-    const current = screen.getByRole("radio", { name: "Old Mac" });
-    expect(current).toHaveAccessibleDescription("Online");
+    const current = within(list).getByRole("option", {
+      name: optionName("Old Mac", "Online"),
+    });
     expect(current).toBeEnabled();
-    expect(current).toBeChecked();
+    expect(current).toHaveAttribute("aria-selected", "true");
   });
 
   it("cannot move to a computer without a writable workspace", async () => {
@@ -567,8 +589,10 @@ describe("EditAgentRuntimeDialog", () => {
       field: "computer",
       onSave,
     });
-    await waitFor(() => expect(row("Computer")).toHaveTextContent("Old Mac"));
-    await chooseComputer("New Mac", "Online");
+    await waitFor(() =>
+      expect(setting("Computer")).toHaveTextContent("Old Mac"),
+    );
+    await choose("Computer", "New Mac", "Online");
     expect(
       screen.getByText(
         "This computer has no writable workspace. Choose another computer.",
@@ -599,7 +623,7 @@ describe("EditAgentRuntimeDialog", () => {
       onClose,
       onSave: vi.fn(),
     });
-    await chooseRuntime("Pi", "Ready");
+    await choose("Runtime", "Pi", "Ready");
 
     const link = await screen.findByRole("link", { name: "Settings › Models" });
     expect(link).toHaveAttribute(
@@ -638,7 +662,8 @@ describe("EditAgentRuntimeDialog", () => {
         onClose,
         onSave: vi.fn(),
       });
-      await chooseRuntime(
+      await choose(
+        "Runtime",
         "Pi",
         mode === "ready-empty" ? "Ready" : "Not installed",
       );
@@ -713,7 +738,9 @@ describe("EditAgentRuntimeDialog", () => {
     });
 
     await waitFor(() =>
-      expect(row("Model")).toHaveTextContent("Qwen3 Coder 30B · Unavailable"),
+      expect(setting("Model")).toHaveTextContent(
+        "Qwen3 Coder 30B · Unavailable",
+      ),
     );
   });
 
@@ -817,7 +844,7 @@ describe("EditAgentRuntimeDialog", () => {
       onSave: vi.fn(),
     });
 
-    await chooseRuntime("Pi", "Model needed");
+    await choose("Runtime", "Pi", "Model needed");
 
     expect(await screen.findByText("Pi needs a model")).toBeVisible();
     const links = screen.getAllByRole("link", { name: "Settings › Models" });
@@ -881,7 +908,7 @@ describe("EditAgentRuntimeDialog", () => {
       onSave: vi.fn(),
     });
 
-    await chooseRuntime("Pi", "Downloading model");
+    await choose("Runtime", "Pi", "Downloading model");
 
     expect(await screen.findByText("Downloading local model")).toBeVisible();
     expect(
@@ -923,7 +950,7 @@ describe("EditAgentRuntimeDialog", () => {
       onSave: vi.fn(),
     });
 
-    await chooseRuntime("Pi", "Model needed");
+    await choose("Runtime", "Pi", "Model needed");
 
     expect(
       await screen.findByText("Local model download stopped"),
@@ -955,7 +982,7 @@ describe("EditAgentRuntimeDialog", () => {
       onSave: vi.fn(),
     });
 
-    await chooseRuntime("Pi", "Sign-in required");
+    await choose("Runtime", "Pi", "Sign-in required");
 
     expect(await screen.findByText("Pi sign-in required")).toBeVisible();
     expect(screen.getByText("Or enter /login in Pi.")).toBeVisible();
@@ -993,7 +1020,7 @@ describe("EditAgentRuntimeDialog", () => {
       ),
     ).not.toBeInTheDocument();
 
-    await chooseRuntime("Claude Code", "Could not check");
+    await choose("Runtime", "Claude Code", "Could not check");
 
     expect(await screen.findByText("Couldn't check Claude Code")).toBeVisible();
     expect(
@@ -1002,34 +1029,45 @@ describe("EditAgentRuntimeDialog", () => {
   });
 });
 
-/** A setting row's toggle; its accessible name starts with the row label. */
-function row(label: string) {
-  return screen.getByRole("button", { name: new RegExp(`^${label}`) });
+const settingNames = {
+  Computer: "Agent computer",
+  Model: "Agent model",
+  Reasoning: "Agent reasoning effort",
+  Runtime: "Agent runtime",
+} as const;
+
+type Setting = keyof typeof settingNames;
+
+/** A setting's Select trigger. */
+function setting(label: Setting) {
+  return screen.getByRole("combobox", { name: settingNames[label] });
 }
 
-function openRow(label: string) {
-  const button = row(label);
-  if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+/** Opens a setting's Select once the dialog has loaded and returns its
+ * floating list. */
+async function openSetting(label: Setting) {
+  await waitFor(() => expect(setting(label)).toBeEnabled());
+  fireEvent.click(setting(label));
+  return screen.findByRole("listbox");
 }
 
-async function choose(name: string) {
-  fireEvent.click(await screen.findByRole("radio", { name }));
+/** A choice's name: its label, followed by its status when it has one. */
+function optionName(name: string, status?: string) {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^${escape(name)}${status ? `\\s*${escape(status)}` : ""}$`,
+  );
 }
 
-/** Checks the status a Runtime option reports before choosing it; a Pi
- * status settles once the Computer's local models load. */
-async function chooseRuntime(name: string, status: string) {
-  openRow("Runtime");
-  const option = await screen.findByRole("radio", { name });
-  await waitFor(() => expect(option).toHaveAccessibleDescription(status));
-  fireEvent.click(option);
-}
-
-async function chooseComputer(name: string, status: string) {
-  openRow("Computer");
-  const option = await screen.findByRole("radio", { name });
-  await waitFor(() => expect(option).toHaveAccessibleDescription(status));
-  fireEvent.click(option);
+/** Picks a choice and checks its list closes. A Computer or Runtime status
+ * is checked before choosing; a Pi status settles once the Computer's local
+ * models load. */
+async function choose(label: Setting, name: string, status?: string) {
+  const list = await openSetting(label);
+  fireEvent.click(
+    await within(list).findByRole("option", { name: optionName(name, status) }),
+  );
+  await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
 }
 
 function mockLocalModelsApi(overrides: Record<string, unknown>) {

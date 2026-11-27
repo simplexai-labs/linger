@@ -1,12 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, type ReactNode, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useId } from "react";
 import { Link } from "react-router";
 
-import { LaptopIcon } from "@hugeicons/core-free-icons";
-
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import { ModalDialog } from "@/components/ui/modal-dialog";
+import { SelectItem } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import {
   appNames,
@@ -47,10 +45,8 @@ import {
 import { agentRuntimeMessages } from "./agent-runtime.messages";
 import {
   ComputerStatus,
-  EffortSegments,
-  OptionList,
-  Placeholder,
-  SettingRow,
+  ChoiceLabel,
+  SettingSelect,
   StatusDot,
 } from "./runtime-setting-rows";
 import { useAgentMoveTarget } from "./use-agent-move-target";
@@ -131,19 +127,6 @@ export function EditAgentRuntimeDialog({
     (computers.isError && !computers.data) ||
     (!loading && (!computer || (!moving && !grant)));
   const canSave = Boolean(modelIsAvailable && localReady && target);
-  // The row the dialog was opened from starts open; one row opens at a time.
-  const [openRow, setOpenRow] = useState<AgentRuntimeField | undefined>(field);
-  const modelText = modelIsAvailable
-    ? selection.selectedModel?.label
-    : model && !loading
-      ? t(agentRuntimeMessages.unavailableOption, {
-          name: unavailableModelLabel,
-        })
-      : model || t(agentRuntimeMessages.noModels);
-
-  function toggle(row: AgentRuntimeField) {
-    setOpenRow((current) => (current === row ? undefined : row));
-  }
 
   const modelsLink = (text: string) =>
     selection.computerId ? (
@@ -212,147 +195,111 @@ export function EditAgentRuntimeDialog({
     >
       <form id={formId} onSubmit={submit}>
         <fieldset className="min-w-0 px-3 pb-1" disabled={isPending || loading}>
-          <SettingRow
+          <SettingSelect
+            aria-label={t(agentRuntimeMessages.computerLabel)}
             disabled={placementLocked}
             label={t(agentRuntimeMessages.computer)}
-            onToggle={() => toggle("computer")}
-            open={openRow === "computer"}
-            value={
-              computer ? (
-                <>
-                  <span className="truncate">{computer.display_name}</span>
-                  <ComputerStatus computer={computer} />
-                </>
-              ) : (
-                <Placeholder>
-                  {t(agentRuntimeMessages.chooseComputer)}
-                </Placeholder>
-              )
-            }
+            onValueChange={selection.selectComputer}
+            placeholder={t(agentRuntimeMessages.chooseComputer)}
+            value={selection.computerId}
           >
-            <OptionList
-              label={t(agentRuntimeMessages.computerLabel)}
-              onChange={(value) => {
-                selection.selectComputer(value);
-                setOpenRow(undefined);
-              }}
-              options={(computers.data?.items ?? []).map((item) => ({
-                description: <ComputerStatus computer={item} labelled />,
-                disabled: item.upgrade_required,
-                label: item.display_name,
-                leading: (
-                  <Icon
-                    className="shrink-0 text-muted-foreground"
-                    icon={LaptopIcon}
+            {(computers.data?.items ?? []).map((item) => (
+              <SelectItem
+                disabled={item.upgrade_required}
+                key={item.computer_id}
+                triggerLabel={
+                  <ChoiceLabel
+                    name={item.display_name}
+                    status={<ComputerStatus computer={item} />}
                   />
-                ),
-                value: item.computer_id,
-              }))}
-              value={selection.computerId}
-            />
-          </SettingRow>
-          <SettingRow
+                }
+                value={item.computer_id}
+              >
+                <ChoiceLabel
+                  name={item.display_name}
+                  status={<ComputerStatus computer={item} labelled />}
+                />
+              </SelectItem>
+            ))}
+          </SettingSelect>
+          <SettingSelect
+            aria-label={t(agentRuntimeMessages.runtimeLabel)}
             disabled={placementLocked}
             label={t(agentRuntimeMessages.runtime)}
-            onToggle={() => toggle("runtime")}
-            open={openRow === "runtime"}
-            value={
-              selection.runtimeType ? (
-                <>
-                  <RuntimeLogo type={selection.runtimeType} />
-                  <span className="truncate">
-                    {runtimeLabels[selection.runtimeType]}
-                  </span>
-                </>
-              ) : (
-                <Placeholder>
-                  {t(agentRuntimeMessages.chooseRuntime)}
-                </Placeholder>
-              )
+            onValueChange={(value) =>
+              selection.selectRuntime(value as TeamHubLocalRuntimeType)
             }
+            placeholder={t(agentRuntimeMessages.chooseRuntime)}
+            value={selection.runtimeType}
           >
-            <OptionList
-              label={t(agentRuntimeMessages.runtimeLabel)}
-              onChange={(value) => {
-                selection.selectRuntime(value as TeamHubLocalRuntimeType);
-                setOpenRow(undefined);
-              }}
-              options={(computer?.runtimes ?? []).map((item) => ({
-                description: (
-                  <>
-                    <StatusDot tone={item.status === "ready" ? "ok" : "warn"} />
-                    {t(
-                      item.type === "pi" &&
-                        item.status === "authentication_required"
-                        ? piAuthRequiredStatusMessage(piModelsState)
-                        : runtimeStatusLabels[item.status],
-                    )}
-                  </>
-                ),
-                label: runtimeLabels[item.type],
-                leading: <RuntimeLogo type={item.type} />,
-                value: item.type,
-              }))}
-              value={selection.runtimeType}
-            />
-          </SettingRow>
-          <SettingRow
+            {(computer?.runtimes ?? []).map((item) => (
+              <SelectItem
+                key={item.type}
+                triggerLabel={
+                  <ChoiceLabel
+                    leading={<RuntimeLogo type={item.type} />}
+                    name={runtimeLabels[item.type]}
+                  />
+                }
+                value={item.type}
+              >
+                <ChoiceLabel
+                  leading={<RuntimeLogo type={item.type} />}
+                  name={runtimeLabels[item.type]}
+                  status={
+                    <>
+                      <StatusDot
+                        tone={item.status === "ready" ? "ok" : "warn"}
+                      />
+                      {t(
+                        item.type === "pi" &&
+                          item.status === "authentication_required"
+                          ? piAuthRequiredStatusMessage(piModelsState)
+                          : runtimeStatusLabels[item.status],
+                      )}
+                    </>
+                  }
+                />
+              </SelectItem>
+            ))}
+          </SettingSelect>
+          <SettingSelect
+            aria-label={t(agentRuntimeMessages.modelLabel)}
             disabled={field === "reasoning"}
             label={t(agentRuntimeMessages.model)}
-            onToggle={() => toggle("model")}
-            open={openRow === "model"}
-            value={<span className="truncate">{modelText}</span>}
+            onValueChange={selection.selectModel}
+            placeholder={t(agentRuntimeMessages.noModels)}
+            value={model}
           >
-            {model || selection.modelOptions.length ? (
-              <OptionList
-                label={t(agentRuntimeMessages.modelLabel)}
-                onChange={(value) => {
-                  selection.selectModel(value);
-                  setOpenRow(undefined);
-                }}
-                options={[
-                  ...(model && !modelIsAvailable
-                    ? [
-                        {
-                          disabled: true,
-                          label: t(agentRuntimeMessages.unavailableOption, {
-                            name: unavailableModelLabel,
-                          }),
-                          value: model,
-                        },
-                      ]
-                    : []),
-                  ...selection.modelOptions.map((item) => ({
-                    label: item.label,
-                    value: item.id,
-                  })),
-                ]}
-                value={model}
-              />
-            ) : (
-              <p className="px-2.5 py-2 text-sm text-muted-foreground">
-                {t(agentRuntimeMessages.noModels)}
-              </p>
-            )}
-          </SettingRow>
+            {model && !modelIsAvailable ? (
+              <SelectItem disabled value={model}>
+                {t(agentRuntimeMessages.unavailableOption, {
+                  name: unavailableModelLabel,
+                })}
+              </SelectItem>
+            ) : null}
+            {selection.modelOptions.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SettingSelect>
           {selection.runtimeType === "pi" &&
           selection.computerId &&
           !loading &&
           !unavailable &&
           localReady &&
           selection.modelOptions.length > 0 ? (
-            <p className="px-2.5 pb-1 text-xs text-muted-foreground">
+            <p className="pb-1 pl-[calc(7rem+0.75rem)] text-xs text-muted-foreground">
               <RichMessage
                 message={createAgentMessages.manageModels}
                 tags={{ link: modelsLink }}
               />
             </p>
           ) : null}
-          <ReasoningRow
+          <ReasoningSelect
             allowed={selection.selectedModel?.allowed_reasoning_effort}
             onChange={selection.selectReasoningEffort}
-            onToggle={() => toggle("reasoning")}
-            open={openRow === "reasoning"}
             savedUnavailableEffort={selection.savedUnavailableEffort}
             value={selection.reasoningEffort}
           />
@@ -670,45 +617,49 @@ function RuntimeSetupGuidance({
 /* Model and Reasoning are separate choices. While the model's options can't
    be read, its saved Reasoning still shows, marked unavailable like the
    model. */
-function ReasoningRow({
+function ReasoningSelect({
   allowed,
   onChange,
-  onToggle,
-  open,
   savedUnavailableEffort,
   value,
 }: {
   allowed?: readonly TeamHubAgentReasoningEffort[];
   onChange: (value: TeamHubAgentReasoningEffort) => void;
-  onToggle: () => void;
-  open: boolean;
   savedUnavailableEffort?: TeamHubAgentReasoningEffort;
   value?: TeamHubAgentReasoningEffort;
 }) {
   const t = useT();
-  const available = Boolean(allowed?.length);
-  if (!available && !savedUnavailableEffort) return null;
-  const text = available
-    ? value && reasoningEffortLabel(value, t)
-    : t(agentRuntimeMessages.unavailableOption, {
-        name: reasoningEffortLabel(savedUnavailableEffort!, t),
-      });
+  if (!allowed?.length) {
+    if (!savedUnavailableEffort) return null;
+    return (
+      <SettingSelect
+        aria-label={t(agentRuntimeMessages.reasoningLabel)}
+        disabled
+        label={t(agentRuntimeMessages.reasoning)}
+        onValueChange={() => {}}
+        value={savedUnavailableEffort}
+      >
+        <SelectItem disabled value={savedUnavailableEffort}>
+          {t(agentRuntimeMessages.unavailableOption, {
+            name: reasoningEffortLabel(savedUnavailableEffort, t),
+          })}
+        </SelectItem>
+      </SettingSelect>
+    );
+  }
   return (
-    <SettingRow
-      disabled={!available}
+    <SettingSelect
+      aria-label={t(agentRuntimeMessages.reasoningLabel)}
       label={t(agentRuntimeMessages.reasoning)}
-      onToggle={onToggle}
-      open={open}
-      value={<span className="truncate">{text}</span>}
+      onValueChange={(next) => onChange(next)}
+      value={value ?? ""}
     >
-      <EffortSegments
-        efforts={allowed ?? []}
-        label={t(agentRuntimeMessages.reasoningLabel)}
-        labelOf={(effort) => reasoningEffortLabel(effort, t)}
-        onChange={onChange}
-        value={value}
-      />
-    </SettingRow>
+      {allowed.map((effort) => (
+        <SelectItem key={effort} value={effort}>
+          {reasoningEffortLabel(effort, t)}
+        </SelectItem>
+      ))}
+    </SettingSelect>
   );
 }
 

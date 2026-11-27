@@ -532,18 +532,18 @@ describe("quick Local Agent creation", () => {
     });
     const create = agentCreations(runtime);
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
-    await choose("Runtime", "Claude Code");
+    await choose("Local Computer", "Jenny's Mac", "Online");
+    await choose("Runtime", "Claude Code", "Ready");
     await choose("Model", "Second");
-    expect(row("Thinking effort")).toHaveTextContent("Medium");
+    expect(setting("Thinking effort")).toHaveTextContent("Medium");
     await choose("Thinking effort", "High");
     expect(create.count()).toBe(0);
-    await choose("Local Computer", "Other Mac");
-    expect(row("Model")).toHaveTextContent("GPT-5.4");
-    expect(row("Thinking effort")).toBeDisabled();
-    await choose("Local Computer", "Jenny's Mac");
-    expect(row("Thinking effort")).toHaveTextContent("Low");
-    await choose("Runtime", "Claude Code");
+    await choose("Local Computer", "Other Mac", "Online");
+    expect(setting("Model")).toHaveTextContent("GPT-5.4");
+    expect(setting("Thinking effort")).toBeDisabled();
+    await choose("Local Computer", "Jenny's Mac", "Online");
+    expect(setting("Thinking effort")).toHaveTextContent("Low");
+    await choose("Runtime", "Claude Code", "Ready");
     await choose("Model", "Second");
     await choose("Thinking effort", "High");
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -580,7 +580,7 @@ describe("quick Local Agent creation", () => {
       });
     const create = agentCreations(runtime);
     const { queryClient } = renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
+    await choose("Local Computer", "Jenny's Mac", "Online");
     expect(
       screen.queryByRole("region", { name: "Connect a Local Computer" }),
     ).not.toBeInTheDocument();
@@ -608,10 +608,13 @@ describe("quick Local Agent creation", () => {
     });
     const create = agentCreations(runtime);
     renderCreation(runtime, "local");
-    await openRow("Local Computer");
-    const offline = await screen.findByRole("radio", { name: "Jenny's Mac" });
-    expect(offline).toHaveAccessibleDescription("Offline");
+    const list = await openSetting("Local Computer");
+    const offline = within(list).getByRole("option", {
+      name: optionName("Jenny's Mac", "Offline"),
+    });
+    expect(offline).toBeEnabled();
     fireEvent.click(offline);
+    expect(setting("Local Computer")).toHaveTextContent("Jenny's MacOffline");
     expect(screen.getByText(OFFLINE_COMPUTER_HINT)).toBeVisible();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Create" })).toBeEnabled(),
@@ -619,6 +622,53 @@ describe("quick Local Agent creation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(await screen.findByText("Agent chat ready")).toBeVisible();
     expect(create.count()).toBe(1);
+  });
+
+  it("preselects the first online Computer when none is the desktop app's", async () => {
+    const runtime = await testRuntime();
+    const inventory =
+      await runtime.client.listTenantLocalComputers("tenant-northstar");
+    const computer = inventory.items[0]!;
+    vi.spyOn(runtime.client, "listTenantLocalComputers").mockResolvedValue({
+      items: [
+        {
+          ...computer,
+          computer_id: "computer-offline",
+          display_name: "Offline Mac",
+          status: "offline",
+        },
+        computer,
+      ],
+    });
+    const create = agentCreations(runtime);
+    renderCreation(runtime, "local");
+    const trigger = await screen.findByRole("combobox", {
+      name: "Local Computer",
+    });
+    await waitFor(() => expect(trigger).toHaveTextContent("Jenny's Mac"));
+    expect(setting("Runtime")).toHaveTextContent("Codex");
+    expect(setting("Model")).toBeEnabled();
+    expect(screen.queryByText(OFFLINE_COMPUTER_HINT)).not.toBeInTheDocument();
+    const list = await openSetting("Local Computer");
+    expect(
+      within(list).getByRole("option", {
+        name: optionName("Jenny's Mac", "Online"),
+      }),
+    ).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(list, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByText("Agent chat ready");
+    expect(await create.call(0)).toEqual({
+      tenantId: "tenant-northstar",
+      body: expect.objectContaining({
+        runtime: expect.objectContaining({
+          placement: expect.objectContaining({
+            computer_id: computer.computer_id,
+          }),
+        }),
+      }),
+    });
   });
 
   it.each(["no-model", "no-grant", "no-computer"])(
@@ -650,7 +700,7 @@ describe("quick Local Agent creation", () => {
           }),
         ).toBeVisible();
       } else {
-        await screen.findByRole("button", { name: /^Local Computer/ });
+        await screen.findByRole("combobox", { name: "Local Computer" });
         expect(
           screen.queryByRole("region", { name: "Connect a Local Computer" }),
         ).not.toBeInTheDocument();
@@ -698,12 +748,12 @@ describe("quick Local Agent creation", () => {
     });
     const create = agentCreations(runtime);
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
-    expect(row("Runtime")).toHaveTextContent("Codex");
-    expect(row("Model")).toHaveTextContent("DeepSeek V4.1 Flash");
-    await choose("Runtime", "Pi");
-    expect(row("Model")).toHaveTextContent("Pi model");
-    await choose("Runtime", "Codex");
+    await choose("Local Computer", "Jenny's Mac", "Online");
+    expect(setting("Runtime")).toHaveTextContent("Codex");
+    expect(setting("Model")).toHaveTextContent("DeepSeek V4.1 Flash");
+    await choose("Runtime", "Pi", "Ready");
+    expect(setting("Model")).toHaveTextContent("Pi model");
+    await choose("Runtime", "Codex", "Ready");
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await screen.findByText("Agent chat ready");
     expect(await create.call(0)).toEqual({
@@ -726,8 +776,7 @@ describe("quick Local Agent creation", () => {
       .mockResolvedValue(inventory);
     const create = agentCreations(runtime);
     const { queryClient } = renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
-    await openRow("Local Computer");
+    await choose("Local Computer", "Jenny's Mac", "Online");
     fireEvent.click(
       screen.getByRole("button", { name: "Connect new computer" }),
     );
@@ -739,9 +788,8 @@ describe("quick Local Agent creation", () => {
       screen.getByText("Connect a server", { exact: false }),
     ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(row("Local Computer")).toHaveTextContent("Jenny's Mac");
-    expect(row("Runtime")).toHaveTextContent("Codex");
-    await openRow("Local Computer");
+    expect(setting("Local Computer")).toHaveTextContent("Jenny's Mac");
+    expect(setting("Runtime")).toHaveTextContent("Codex");
     fireEvent.click(
       screen.getByRole("button", { name: "Connect new computer" }),
     );
@@ -759,7 +807,7 @@ describe("quick Local Agent creation", () => {
     );
     expect(create.count()).toBe(0);
     fireEvent.click(screen.getByRole("button", { name: "Use this computer" }));
-    expect(row("Local Computer")).toHaveTextContent("New Linux computer");
+    expect(setting("Local Computer")).toHaveTextContent("New Linux computer");
     expect(
       screen.queryByRole("region", { name: "Connect a Local Computer" }),
     ).not.toBeInTheDocument();
@@ -791,8 +839,8 @@ describe("quick Local Agent creation", () => {
         items: [{ ...computer, runtimes: [...computer.runtimes, pi] }],
       });
     const { queryClient } = renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
-    await choose("Runtime", "Pi");
+    await choose("Local Computer", "Jenny's Mac", "Online");
+    await choose("Runtime", "Pi", "Sign-in required");
     expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
     expect(await screen.findByText("Or enter /login in Pi.")).toBeVisible();
     list.mockResolvedValue({
@@ -807,7 +855,7 @@ describe("quick Local Agent creation", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Create" })).toBeEnabled(),
     );
-    expect(row("Runtime")).toHaveTextContent("Pi");
+    expect(setting("Runtime")).toHaveTextContent("Pi");
     const manageLink = screen.getByRole("link", { name: "Settings › Models" });
     expect(manageLink).toHaveAttribute(
       "href",
@@ -832,8 +880,8 @@ describe("quick Local Agent creation", () => {
       ],
     });
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
-    await choose("Runtime", "Pi");
+    await choose("Local Computer", "Jenny's Mac", "Online");
+    await choose("Runtime", "Pi", "Ready");
 
     const link = await screen.findByRole("link", { name: "Settings › Models" });
     expect(link).toHaveAttribute(
@@ -869,7 +917,7 @@ describe("quick Local Agent creation", () => {
       ],
     });
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
+    await choose("Local Computer", "Jenny's Mac", "Online");
 
     expect(await screen.findByText("Codex update required")).toBeVisible();
     expect(
@@ -939,7 +987,7 @@ describe("quick Local Agent creation", () => {
     );
 
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
+    await choose("Local Computer", "Jenny's Mac", "Online");
 
     expect(await screen.findByText("Downloading local model")).toBeVisible();
     expect(
@@ -989,16 +1037,18 @@ describe("quick Local Agent creation", () => {
     );
 
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
-    await openRow("Runtime");
+    await choose("Local Computer", "Jenny's Mac", "Online");
+    const list = await openSetting("Runtime");
 
     // Codex is chosen, yet Pi still says what it is waiting for.
-    expect(screen.getByRole("radio", { name: "Codex" })).toBeChecked();
-    await waitFor(() =>
-      expect(
-        screen.getByRole("radio", { name: "Pi" }),
-      ).toHaveAccessibleDescription("Model needed"),
-    );
+    expect(
+      within(list).getByRole("option", { name: optionName("Codex", "Ready") }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      await within(list).findByRole("option", {
+        name: optionName("Pi", "Model needed"),
+      }),
+    ).toBeVisible();
   });
 
   it("guides Pi to Settings › Models in Quick Create when no local model is downloaded", async () => {
@@ -1056,7 +1106,7 @@ describe("quick Local Agent creation", () => {
     );
 
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
+    await choose("Local Computer", "Jenny's Mac", "Online");
 
     expect(await screen.findByText("Pi needs a model")).toBeVisible();
     expect(
@@ -1150,7 +1200,7 @@ describe("quick Local Agent creation", () => {
       renderCreation(runtime, "local");
 
       expect(
-        await screen.findByRole("button", { name: /^Model/ }),
+        await screen.findByRole("combobox", { name: "Model" }),
       ).toBeVisible();
       expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
     });
@@ -1168,9 +1218,8 @@ describe("quick Local Agent creation", () => {
       renderCreation(runtime, "local");
 
       expect(
-        await screen.findByRole("button", { name: /^Model/ }),
+        await screen.findByRole("combobox", { name: "Model" }),
       ).toBeVisible();
-      await openRow("Local Computer");
       expect(
         screen.queryByRole("button", { name: "Connect new computer" }),
       ).not.toBeInTheDocument();
@@ -1187,7 +1236,6 @@ describe("quick Local Agent creation", () => {
       );
       renderCreation(runtime, "local");
 
-      await openRow("Local Computer");
       expect(
         await screen.findByRole("button", { name: "Connect new computer" }),
       ).toBeVisible();
@@ -1227,7 +1275,7 @@ describe("quick Local Agent creation", () => {
       },
     ];
     renderCreation(runtime, "local");
-    await choose("Local Computer", "Jenny's Mac");
+    await choose("Local Computer", "Jenny's Mac", "Online");
     expect(await screen.findByText("agy update")).toBeVisible();
     expect(
       screen.queryByText("The npm commands need Node.js."),
@@ -1237,34 +1285,44 @@ describe("quick Local Agent creation", () => {
 });
 
 async function chooseLocalRuntime(name = "Jenny's Mac") {
-  await choose("Local Computer", name);
-  expect(row("Model")).toBeVisible();
-  expect(row("Thinking effort")).toBeVisible();
+  await choose("Local Computer", name, "Online");
+  expect(setting("Model")).toBeVisible();
+  expect(setting("Thinking effort")).toBeVisible();
   expect(
     screen.queryByRole("region", { name: "Connect a Local Computer" }),
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
 }
 
-/** A setting row's toggle; its accessible name starts with the row label. */
-function row(label: string) {
-  return screen.getByRole("button", { name: new RegExp(`^${label}`) });
+/** A setting's Select trigger, named after the setting. */
+function setting(label: string) {
+  return screen.getByRole("combobox", { name: label });
 }
 
-/** Opens a setting row once the dialog has loaded, unless it is open. */
-async function openRow(label: string) {
-  const button = await screen.findByRole("button", {
-    name: new RegExp(`^${label}`),
-  });
-  if (button.getAttribute("aria-expanded") !== "true") fireEvent.click(button);
+/** Opens a setting's Select once the dialog has loaded and returns its
+ * floating list. */
+async function openSetting(label: string) {
+  await waitFor(() => expect(setting(label)).toBeEnabled());
+  fireEvent.click(setting(label));
+  return screen.findByRole("listbox");
 }
 
-/** Picks an option of a setting row. Picking the option already chosen
- * changes nothing, so the row then stays open. */
-async function choose(label: string, option: string) {
-  await openRow(label);
-  const group = await screen.findByRole("radiogroup", { name: label });
-  fireEvent.click(within(group).getByRole("radio", { name: option }));
+/** A choice's name: its label, followed by its status when it has one. */
+function optionName(name: string, status?: string) {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^${escape(name)}${status ? `\\s*${escape(status)}` : ""}$`,
+  );
+}
+
+/** Picks a choice of a setting and checks its list closes. Computer and
+ * Runtime choices read their name followed by their status. */
+async function choose(label: string, name: string, status?: string) {
+  const list = await openSetting(label);
+  fireEvent.click(
+    await within(list).findByRole("option", { name: optionName(name, status) }),
+  );
+  await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
 }
 
 function CreationWithLogout() {
