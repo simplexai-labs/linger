@@ -1,14 +1,11 @@
-import {
-  Camera01Icon,
-  PencilEdit02Icon,
-  PlusSignIcon,
-} from "@hugeicons/core-free-icons";
+import { Camera01Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { Icon } from "@/components/ui/icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import background from "./profile-background.png";
 import { Button } from "@/components/ui/button";
 import { ActorAvatar } from "@/features/rooms/members/actor-avatar";
+import { AvatarEditButton } from "@/features/rooms/members/avatar-edit-button";
 import { accountProfileQueryKey } from "./account-profile-queries";
 import {
   teamHubIdentityQueryKey,
@@ -90,100 +87,103 @@ export function AccountProfileHero({
   }
   return (
     <section aria-label={t(accountSettingsMessages.profileAppearance)}>
-      <div className="relative flex min-h-64 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted px-4 py-8">
+      <div className="relative h-32 overflow-hidden rounded-xl bg-muted">
         <img
           alt=""
           src={account.background_image || background}
           className="absolute inset-0 size-full object-cover"
         />
-        <div className="absolute right-3 top-3 z-10">
-          <Button
-            className="bg-card shadow-md"
-            size="compact"
+        <Button
+          className="absolute right-2.5 top-2.5 bg-card shadow-md"
+          size="compact"
+          disabled={busy}
+          onClick={() => backgroundInput.current?.click()}
+        >
+          <Icon icon={Camera01Icon} size={14} />
+          {t(accountSettingsMessages.changeCover)}
+        </Button>
+      </div>
+      {/* The avatar overlaps the cover's lower edge; a ring in the page's
+          colour keeps it apart from the photo. */}
+      <div className="-mt-9 flex items-end gap-4 px-5">
+        <div className="relative shrink-0 rounded-[20%] bg-background p-1">
+          <AvatarEditButton
             disabled={busy}
-            onClick={() => backgroundInput.current?.click()}
-          >
-            <Icon icon={Camera01Icon} size={14} />
-            {t(accountSettingsMessages.changeCover)}
-          </Button>
-        </div>
-        <div className="relative flex w-48 flex-col items-center gap-5 rounded-2xl bg-card/90 px-3 pb-3 pt-7 text-foreground shadow-md backdrop-blur-md">
-          <button
-            type="button"
-            aria-label={t(accountSettingsMessages.uploadProfilePhoto)}
-            className="relative rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            disabled={busy}
+            label={t(accountSettingsMessages.uploadProfilePhoto)}
             onClick={() => avatarInput.current?.click()}
           >
             {account.avatar_image ? (
               <img
                 alt={t(commonMessages.avatar, { name: account.name })}
                 src={account.avatar_image}
-                className="size-16 rounded-full object-cover"
+                className="size-16 rounded-[20%] object-cover"
               />
             ) : (
               <ActorAvatar
                 actorId={actorId}
                 kind="human"
                 name={account.name}
+                showTitle={false}
                 size="lg"
               />
             )}
-            <span className="absolute -bottom-0.5 -right-1 flex size-5 items-center justify-center rounded-full border border-card bg-primary text-primary-foreground">
-              <Icon icon={PlusSignIcon} size={14} />
-            </span>
-          </button>
+          </AvatarEditButton>
+        </div>
+        <div className="min-w-0 flex-1 pb-2">
           {editing ? (
             <form
-              className="w-full"
+              className="flex max-w-md items-center gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (name.trim() && !busy) update.mutate({ name: name.trim() });
               }}
             >
               <input
-                // eslint-disable-next-line jsx-a11y/no-autofocus -- the field is focused on purpose because the user just opened this dialog or inline editor
+                // eslint-disable-next-line jsx-a11y/no-autofocus -- the field is focused on purpose because the user just opened this inline editor
                 autoFocus
                 aria-label={t(accountSettingsMessages.profileDisplayName)}
-                className="ui-field-control w-full text-center"
+                className="ui-field-control min-w-0 flex-1"
                 maxLength={120}
                 value={name}
                 disabled={busy}
                 onChange={(event) => setName(event.target.value)}
               />
-              <div className="mt-2 flex justify-center gap-2">
-                <Button
-                  size="compact"
-                  disabled={busy}
-                  onClick={() => setEditing(false)}
-                >
-                  {t(commonMessages.cancel)}
-                </Button>
-                <Button
-                  type="submit"
-                  size="compact"
-                  disabled={busy || !name.trim()}
-                  tone="primary"
-                >
-                  {t(commonMessages.save)}
-                </Button>
-              </div>
+              <Button
+                size="compact"
+                disabled={busy}
+                onClick={() => setEditing(false)}
+              >
+                {t(commonMessages.cancel)}
+              </Button>
+              <Button
+                type="submit"
+                size="compact"
+                disabled={busy || !name.trim()}
+                tone="primary"
+              >
+                {t(commonMessages.save)}
+              </Button>
             </form>
           ) : (
-            <button
-              type="button"
-              aria-label={t(accountSettingsMessages.editDisplayName)}
-              disabled={busy}
-              onClick={() => {
-                setName(account.name);
-                setEditing(true);
-                update.reset();
-              }}
-              className="flex min-h-8 w-full items-center justify-center gap-2 rounded-lg bg-foreground/5 px-2 text-sm font-medium transition-colors duration-150 hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="truncate">{account.name}</span>
-              <Icon icon={PencilEdit02Icon} size={14} className="shrink-0" />
-            </button>
+            <div className="flex min-w-0 items-center gap-1">
+              <h2 className="truncate text-xl font-medium text-foreground">
+                {account.name}
+              </h2>
+              <Button
+                aria-label={t(accountSettingsMessages.editDisplayName)}
+                className="shrink-0 text-muted-foreground"
+                disabled={busy}
+                onClick={() => {
+                  setName(account.name);
+                  setEditing(true);
+                  update.reset();
+                }}
+                size="compactIcon"
+                tone="ghost"
+              >
+                <Icon icon={PencilEdit02Icon} size={14} />
+              </Button>
+            </div>
           )}
         </div>
       </div>

@@ -1,5 +1,4 @@
 /* eslint-disable jsx-a11y/no-autofocus -- The name input is mounted only after an explicit edit action. */
-import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   lazy,
@@ -11,9 +10,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { Icon } from "@/components/ui/icon";
 import { AgentConnectors } from "@/features/apps/agent-connectors";
-import { Hint } from "@/features/local-computer/computer-hint";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type { Message } from "@/i18n/messages";
 import { useT } from "@/i18n/use-translation";
@@ -25,6 +22,7 @@ import type {
 
 import { tenantAgentsQueryOptions } from "../room-queries";
 import { ActorAvatar } from "./actor-avatar";
+import { AvatarEditButton } from "./avatar-edit-button";
 import { agentInfoMessages } from "./agent-info.messages";
 import { AgentStatus } from "./agent-status";
 
@@ -289,27 +287,12 @@ function AgentInfoIdentity({
   return (
     <div className="mx-auto flex w-full max-w-[780px] flex-col items-center px-5 pb-4 pt-5 text-center">
       {canEdit ? (
-        <Hint placement="bottom" text={t(agentInfoMessages.editAvatar)}>
-          <button
-            aria-label={t(agentInfoMessages.editAvatar)}
-            className="group relative rounded-[20%] outline-none focus-visible:ring-2 focus-visible:ring-app-focus"
-            onClick={onEdit}
-            type="button"
-          >
-            {/* Pointed at or focused, the avatar dims and a pencil shows at
-                its centre; otherwise the face stays unmarked. */}
-            <span className="block transition-[filter] duration-150 group-hover:brightness-[.55] group-focus-visible:brightness-[.55]">
-              {avatar}
-            </span>
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 flex items-center justify-center text-primary-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-              data-avatar-edit-badge
-            >
-              <Icon icon={PencilEdit02Icon} size={18} />
-            </span>
-          </button>
-        </Hint>
+        <AvatarEditButton
+          label={t(agentInfoMessages.editAvatar)}
+          onClick={onEdit}
+        >
+          {avatar}
+        </AvatarEditButton>
       ) : (
         avatar
       )}
