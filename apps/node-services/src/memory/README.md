@@ -941,3 +941,8 @@ Daily/Weekly are indexed after they are generated. Generation does not wait for 
 indexed at a time per process, and a database advisory lock serializes processes.
 
 Historical Wiki and Daily/Weekly rebuilds use the separate entry in "Production history rebuild".
+
+The readable Wiki publisher checks its directory-lock ownership before replacing
+or retiring pages, including the rename after staging file contents. A reported
+lock compromise prevents further publication; cleanup may still remove that
+writer's unique temporary file, and it does not release a successor's lock.
