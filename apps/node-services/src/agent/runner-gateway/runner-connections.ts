@@ -23,6 +23,7 @@ import {
   LocalComputerOfflineError,
   LocalComputerPlacementError,
   LocalRuntimeAdmissionUnavailableError,
+  LocalRuntimeAuthenticationRequiredError,
   MINIMUM_CURRENT_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_CANCEL_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION,
@@ -1049,6 +1050,14 @@ export class RunnerConnections {
     // A transient new-Run diagnostic must never mask a revoked owner/grant.
     if (!connection.hello.runtimes.includes(requirement.runtimeType)) {
       throw new LocalRuntimeAdmissionUnavailableError();
+    }
+    const runtimeDiagnostic = connection.hello.runtime_diagnostics.find(
+      ({ type }) => type === requirement.runtimeType,
+    );
+    if (runtimeDiagnostic?.status === "authentication_required") {
+      throw new LocalRuntimeAuthenticationRequiredError(
+        requirement.runtimeType,
+      );
     }
     const model = findRuntimeModel(
       this.owners

@@ -163,7 +163,7 @@ export class RunnerOperationPreparation {
       ({ type }) => type === runtimeType,
     );
     if (runtimeDiagnostic?.status === "authentication_required") {
-      throw new LocalRuntimeAuthenticationRequiredError();
+      throw new LocalRuntimeAuthenticationRequiredError(runtimeType);
     }
     if (runtimeDiagnostic?.status !== "ready") {
       throw new RunnerGatewayError(

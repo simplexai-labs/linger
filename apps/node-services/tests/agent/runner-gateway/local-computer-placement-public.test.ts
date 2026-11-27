@@ -7,6 +7,7 @@ import {
   LocalComputerOfflineError,
   LocalComputerPlacementError,
   LocalRuntimeAdmissionUnavailableError,
+  LocalRuntimeAuthenticationRequiredError,
   MINIMUM_CURRENT_COMPUTER_VERSION,
   runtimeModelCatalogForComputer,
 } from "../../../src/agent/runner-gateway/local-computer-management.js";
@@ -675,20 +676,107 @@ describe("RunnerGateway", () => {
     },
   );
 
-  it.each([
-    { runtimeType: "claude", status: "ready" },
-    { runtimeType: "claude", status: "authentication_required" },
-    { runtimeType: "codex", status: "ready" },
-  ] as const)(
-    "accepts a $status $runtimeType default model without forwarding its alias",
-    async ({ runtimeType, status }) => {
+  it.each(["antigravity", "claude"] as const)(
+    "reports authentication_required rather than model_not_offered for an unauthenticated %s with an empty catalog",
+    async (runtimeType) => {
+      const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
+      const peer = new RecordingPeer();
+      const diagnostics = runtimeDiagnostics({
+        ready: [],
+        authenticationRequired: [runtimeType],
+      }).map((diagnostic) => ({
+        ...diagnostic,
+        models: [],
+      })) as unknown as RunnerHello["runtime_diagnostics"];
+      const connection = await gateway.acceptConnection(
+        authenticatedPrincipal(),
+        {
+          ...hello(),
+          runtimes: [runtimeType],
+          runtime_diagnostics: diagnostics,
+          workspace_grants: [
+            {
+              grant_id: "grant-owner",
+              tenant_id: "tenant-acme",
+              label: "Linger workspace",
+              mode: "workspace-write",
+              scope: "owner",
+            },
+          ],
+        },
+        peer,
+      );
+      const placement = {
+        type: "local" as const,
+        assignmentRevision: 1,
+        tenantId: "tenant-acme",
+        ownerActorId: "actor-alice",
+        computerId: "runner-local",
+        runtimeType,
+        workspaceGrantId: "grant-owner",
+      };
+      const modelId = `${runtimeType}-default`;
+      try {
+        let caught: unknown;
+        try {
+          gateway.requireLocalPlacement(placement, modelId);
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(LocalRuntimeAuthenticationRequiredError);
+        expect(caught).toMatchObject({
+          code: "RUNTIME_AUTHENTICATION_REQUIRED",
+          failure: {
+            code: "authentication_required",
+            runtime_type: runtimeType,
+          },
+        });
+        await expect(
+          gateway.ensureReadyLocalAgentRunner({
+            placement,
+            modelId,
+            agentId: "agent-reviewer",
+          }),
+        ).rejects.toBeInstanceOf(LocalRuntimeAuthenticationRequiredError);
+        // A revoked owner/grant must still win over a Runtime auth diagnostic.
+        expect(() =>
+          gateway.requireLocalPlacement(
+            { ...placement, ownerActorId: "actor-bob" },
+            modelId,
+          ),
+        ).toThrow(LocalComputerPlacementError);
+        expect(() =>
+          gateway.requireLocalPlacement(
+            { ...placement, ownerActorId: "actor-bob" },
+            modelId,
+          ),
+        ).not.toThrow(LocalRuntimeAuthenticationRequiredError);
+
+        await connection.receive({
+          type: "runner.runtime_diagnostics",
+          protocol_version: "2",
+          runner_id: "runner-local",
+          sent_at: "2026-07-29T00:00:15.000Z",
+          revision: 1,
+          runtime_diagnostics: runtimeDiagnostics({ ready: [runtimeType] }),
+        });
+        expect(() =>
+          gateway.requireLocalPlacement(placement, modelId),
+        ).not.toThrow();
+      } finally {
+        connection.disconnect();
+      }
+    },
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "accepts a ready %s default model without forwarding its alias",
+    async (runtimeType) => {
       const gateway = createTestRunnerGateway({ heartbeatIntervalMs: 1_000 });
       const peer = new RecordingPeer();
       const modelId = `${runtimeType}-default`;
       const diagnostics = runtimeDiagnostics({
-        ready: status === "ready" ? [runtimeType] : [],
-        authenticationRequired:
-          status === "authentication_required" ? [runtimeType] : [],
+        ready: [runtimeType],
       });
       for (const diagnostic of diagnostics) {
         diagnostic.models =

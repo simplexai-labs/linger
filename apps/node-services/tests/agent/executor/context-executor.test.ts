@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   LocalComputerModelError,
   LocalComputerOfflineError,
+  LocalRuntimeAuthenticationRequiredError,
 } from "../../../src/agent/runner-gateway/local-computer-management.js";
 import { RunnerOperationError } from "../../../src/agent/runner-gateway/runner-operation.js";
 import {
@@ -2125,6 +2126,49 @@ describe("ContextExecutor preflight before activation", () => {
     await eventually(() => expect(provider.inputs).toHaveLength(1));
     await harness.executor.stop();
   });
+
+  it.each(["antigravity", "claude"] as const)(
+    "fails queued Runs with authentication_required when %s requires authentication",
+    async (runtimeType) => {
+      let authenticated = false;
+      const provider = new RecordingProvider();
+      const harness = await createPreflightHarness(provider, {
+        preflight: async () => {
+          if (!authenticated) {
+            throw new LocalRuntimeAuthenticationRequiredError(runtimeType);
+          }
+        },
+      });
+      await harness.create(harness.createOptions);
+      const { runId } = await harness.executor.submitTrustedTurn([
+        message("unauthenticated", "hello"),
+      ]);
+
+      await expect(harness.executor.start()).rejects.toBeInstanceOf(
+        LocalRuntimeAuthenticationRequiredError,
+      );
+      expect(harness.activations).toHaveLength(0);
+      expect(harness.state().getLocalRun(runId)).toMatchObject({
+        status: "failed",
+        terminal: {
+          type: "failed",
+          failure: {
+            code: "authentication_required",
+            runtime_type: runtimeType,
+          },
+        },
+      });
+
+      // After signing in, the next input activates and runs.
+      authenticated = true;
+      await harness.executor.submitTrustedTurn([
+        message("authenticated", "again"),
+      ]);
+      await harness.executor.start();
+      await eventually(() => expect(provider.inputs).toHaveLength(1));
+      await harness.executor.stop();
+    },
+  );
 });
 
 describe("ContextExecutor activation abort", () => {
