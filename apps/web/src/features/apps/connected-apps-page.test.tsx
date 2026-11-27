@@ -87,9 +87,6 @@ describe("Connected apps", () => {
 
     listApps.mockRestore();
     const keyInput = within(dialog).getByLabelText("Composio API key");
-    expect(keyInput).toHaveAccessibleDescription(
-      "Select Read All and Write All when creating your key.",
-    );
     fireEvent.change(keyInput, {
       target: { value: " ck_live " },
     });

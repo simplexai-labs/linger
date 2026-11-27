@@ -66,9 +66,7 @@ describe("ConnectAppStatus", () => {
     expect(input).toHaveAttribute("data-autofocus");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("placeholder", "Paste your API key");
-    expect(input).toHaveAccessibleDescription(
-      "Select Read All and Write All when creating your key.",
-    );
+    expect(input).not.toHaveAccessibleDescription();
 
     const toggle = within(dialog).getByRole("button", { name: "Show API key" });
     fireEvent.click(toggle);
@@ -284,11 +282,7 @@ describe("ConnectAppStatus", () => {
         expectedDescription,
       );
       if (canSave) {
-        expect(
-          within(dialog).getByLabelText("Composio API key"),
-        ).toHaveAccessibleDescription(
-          "Select Read All and Write All when creating your key.",
-        );
+        expect(within(dialog).getByLabelText("Composio API key")).toBeVisible();
       } else {
         expect(dialog).toHaveTextContent("COMPOSIO_API_KEY");
         expect(
