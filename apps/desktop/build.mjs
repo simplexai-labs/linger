@@ -1,24 +1,30 @@
 // Bundles main (ESM) and the sandboxed preloads (CJS) into dist/, and builds
 // the Go daemon that runs agents. Workspace packages are bundled from source.
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { build } from "esbuild";
 
-import { buildDaemon, buildTeamhubLauncher } from "./scripts/build-daemon.mjs";
+import { buildDaemon } from "./scripts/build-daemon.mjs";
+import {
+  buildInstallerBundle,
+  buildTeamhubCli,
+  desktopEsbuildConfigs,
+} from "./scripts/build-steps.mjs";
 import { stageDesktopComputerTools } from "./scripts/stage-computer-tools.mjs";
-import { hostedDiagnosticsUploadUrl } from "./scripts/diagnostics-upload-url.mjs";
 import { buildTeamhub, TEAMHUB_TARGETS } from "./scripts/build-teamhub.mjs";
 import {
   buildRuntime,
   RUNTIME_TARGETS,
 } from "./scripts/build-native-runtime.mjs";
 
-const { version } = JSON.parse(await readFile("package.json", "utf8"));
+const desktopDir = fileURLToPath(new URL(".", import.meta.url));
+const { version } = JSON.parse(
+  await readFile(path.join(desktopDir, "package.json"), "utf8"),
+);
 // The platforms this build is for: this machine unless
 // LINGER_DESKTOP_DAEMON_TARGETS lists targets, comma-separated (packaging
 // builds the one it ships).
@@ -89,159 +95,24 @@ const sourceDependencies = (() => {
     sha256,
   };
 })();
-const common = {
-  bundle: true,
-  platform: "node",
-  target: "node24",
-  sourcemap: true,
-  external: ["electron"],
-  define: {
-    __DESKTOP_VERSION__: JSON.stringify(version),
-    __SOURCE_ARCHIVE__: JSON.stringify(sourceArchive),
-    __SOURCE_DEPENDENCIES__: JSON.stringify(sourceDependencies),
-    __HOSTED_DIAGNOSTICS_UPLOAD_URL__: JSON.stringify(
-      hostedDiagnosticsUploadUrl(process.env.LINGER_DIAGNOSTICS_UPLOAD_URL),
-    ),
-  },
-  logLevel: "warning",
-};
-// Some bundled dependencies still call require().
-const requireShim = {
-  js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
-};
 
-await Promise.all([
-  build({
-    ...common,
-    entryPoints: ["src/main/index.ts"],
-    outfile: "dist/main/index.mjs",
-    format: "esm",
-    banner: requireShim,
-    loader: {
-      ".html": "text",
-      ".png": "binary",
-      ".svg": "binary",
-      ".woff2": "binary",
-    },
-  }),
-  build({
-    ...common,
-    entryPoints: ["src/preload/index.ts"],
-    outfile: "dist/preload/index.cjs",
-    format: "cjs",
-  }),
-  build({
-    ...common,
-    entryPoints: ["src/preload/shell.ts"],
-    outfile: "dist/preload/shell.cjs",
-    format: "cjs",
-  }),
-  build({
-    ...common,
-    entryPoints: ["src/preload/setup.ts"],
-    outfile: "dist/preload/setup.cjs",
-    format: "cjs",
-  }),
-]);
-
-const run = (script, args, failure) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script, ...args], {
-      stdio: "inherit",
-    });
-    child.on("error", reject);
-    child.on("exit", (code) =>
-      code === 0 ? resolve() : reject(new Error(failure)),
-    );
-  });
+await Promise.all(
+  desktopEsbuildConfigs({
+    desktopDir,
+    version,
+    sourceArchive,
+    sourceDependencies,
+  }).map((config) => build(config)),
+);
 
 // The local installer that "Run on this computer" opens. It runs under a
 // pinned Node 26 that the desktop downloads, not the app's own Node.
-await run(
-  "../linger-installer/scripts/build.mjs",
-  [],
-  "installer build failed",
-);
-await rm("dist/installer", { recursive: true, force: true });
-await cp("../linger-installer/dist", "dist/installer", { recursive: true });
-if (bundledSource) {
-  await mkdir("dist/installer/source");
-  await cp(bundledSource, path.join("dist/installer", sourceArchive.file));
-}
-// The publisher's pinned localmodels tool, native PostgreSQL sources and
-// voice tools (LiveKit and ffmpeg) for this target, as distribution.json; the
-// installer reads it beside itself. Native installs need it. The build takes the
-// tracked distribution/<target>.json of the one target that has it (macOS
-// builds darwin-x64 too, which has none) unless LINGER_DESKTOP_DISTRIBUTION
-// names another file.
-const tracked = daemonTargets
-  .map((target) => path.join("distribution", `${target}.json`))
-  .filter((file) => existsSync(file));
-const distribution =
-  process.env.LINGER_DESKTOP_DISTRIBUTION ||
-  (tracked.length === 1 ? tracked[0] : undefined);
-if (distribution) {
-  const value = JSON.parse(await readFile(distribution, "utf8"));
-  if (
-    typeof value.platform !== "string" ||
-    typeof value.arch !== "string" ||
-    !value.localmodelsTool ||
-    !Array.isArray(value.nativeSources)
-  )
-    throw new Error(
-      `${distribution} needs platform, arch, localmodelsTool and nativeSources`,
-    );
-  // The installer refuses a distribution for another computer.
-  if (!daemonTargets.includes(`${value.platform}-${value.arch}`))
-    throw new Error(
-      `${distribution} is for ${value.platform}-${value.arch}, not ${daemonTargets.join(", ")}`,
-    );
-  const voiceTools = value.voiceTools ?? [];
-  if (!Array.isArray(voiceTools))
-    throw new Error(`${distribution}: voiceTools must be a list`);
-  // A source with a `file` ships in the app (PostgreSQL and the voice tools)
-  // from LINGER_NATIVE_POSTGRES_DIR, by default the packaging cache; the
-  // build checks it against the pin.
-  for (const source of [...value.nativeSources, ...voiceTools]) {
-    if (source.file === undefined) continue;
-    if (
-      typeof source.file !== "string" ||
-      !/^native\/[\w.-]+\.tar\.gz$/.test(source.file)
-    )
-      throw new Error(
-        `${distribution}: bundled file must be native/<name>.tar.gz`,
-      );
-    const from = path.join(
-      process.env.LINGER_NATIVE_POSTGRES_DIR ||
-        path.join(homedir(), ".cache", "linger-desktop"),
-      path.basename(source.file),
-    );
-    const bytes = await readFile(from).catch(() => {
-      throw new Error(
-        `${distribution} bundles ${path.basename(source.file)}; put it in LINGER_NATIVE_POSTGRES_DIR (see AGENTS.md)`,
-      );
-    });
-    if (
-      bytes.length !== source.bytes ||
-      createHash("sha256").update(bytes).digest("hex") !== source.sha256
-    )
-      throw new Error(`${from} does not match ${distribution}`);
-    await mkdir(path.join("dist/installer", path.dirname(source.file)), {
-      recursive: true,
-    });
-    await cp(from, path.join("dist/installer", source.file));
-  }
-  await writeFile(
-    "dist/installer/distribution.json",
-    JSON.stringify({
-      platform: value.platform,
-      arch: value.arch,
-      localmodelsTool: value.localmodelsTool,
-      nativeSources: value.nativeSources,
-      voiceTools,
-    }),
-  );
-}
+await buildInstallerBundle({
+  desktopDir,
+  daemonTargets,
+  bundledSource,
+  sourceArchive,
+});
 
 // TeamHub compiled from the source package for targets that should not
 // compile it themselves (Windows); the desktop hands the binaries to Native.
@@ -316,36 +187,6 @@ const buildNativeOutputs = async () => {
   }
 };
 
-// The teamhub CLI that runtimes use to reply, built from the same checkout as
-// the server so their API versions match (as the Go daemon bundles it). The
-// launcher runs it with the bundled Node or the app's own Node, so the
-// computer needs no system Node.
-const buildTeamhubCli = async () => {
-  await run(
-    "../teamhub-cli/scripts/build-cli.mjs",
-    ["--outdir", "dist/teamhub-cli"],
-    "teamhub CLI build failed",
-  );
-  await Promise.all([
-    rm("dist/teamhub-cli/teamhub.cmd", { force: true }),
-    rm("dist/teamhub-cli/teamhub.exe", { force: true }),
-  ]);
-  await writeFile(
-    "dist/teamhub-cli/teamhub",
-    (await readFile("scripts/teamhub.sh", "utf8")).replace(/\r\n/g, "\n"),
-    { mode: 0o755 },
-  );
-  const windowsTarget = daemonTargets.find((target) =>
-    target.startsWith("win32-"),
-  );
-  if (windowsTarget) {
-    await buildTeamhubLauncher(
-      windowsTarget,
-      path.resolve("dist/teamhub-cli/teamhub.exe"),
-    );
-  }
-};
-
 // The Go Local Computer daemon (dist/computer/<platform>-<arch>/) for each
 // target, and the browser and computer-control tools it loads
 // (dist/computer-tools/<platform>-<arch>/). Without the tools the daemon runs
@@ -357,6 +198,6 @@ const buildDaemonAndTools = async () => {
 
 await Promise.all([
   buildNativeOutputs(),
-  buildTeamhubCli(),
+  buildTeamhubCli({ desktopDir, daemonTargets }),
   buildDaemonAndTools(),
 ]);

@@ -18,6 +18,13 @@ Gateway and runs Agents. The daemon exits with the app.
   binary; pnpm does not run its install script. Set `ELECTRON_MIRROR` when the
   default host is unreachable.
 - `pnpm --filter @linger/desktop start`: build and run from source.
+- `pnpm --filter @linger/desktop dev -- [options]`: watch desktop main/preload,
+  installer, `teamhub-cli`, and Go daemon sources, rebuild incrementally, and
+  auto-restart Electron in an isolated `.linger-runtime/desktop-dev/<profile>`
+  directory (`--server http://127.0.0.1:3000` for Web HMR, `--quick-install`
+  for local checkout installation, `--localmodels <llm-inference-lab-dir>` for
+  live Python edits without restarts, `--debug simulate|tiny`, `--reset`,
+  `--skip-daemon`, `--no-watch`, `--dry-run`).
 - `python3 packaging/mac/package.py [--arch arm64|x64]`: build
   `out/Linger-<version>-<arch>.dmg` for Apple silicon and Intel on Linux
   after `node build.mjs` with the darwin daemon targets. The daemon is signed
@@ -850,10 +857,21 @@ building a package.
   `runtimeEnvironment`, the desktop logs `local_server.local_models_restored`
   and emits `computer.runtime` once so an already-running daemon refreshes its
   library snapshot and Pi model catalog.
+- `LINGER_BUNDLED_LOCALMODELS_KIT_DIR`: optional packaging-time directory
+  holding `<target>.tgz` matching `distribution/<target>.json`'s
+  `localmodelsTool` byte size and SHA-256; when set, `build.mjs` and
+  `scripts/ci/desktop-release.sh` fail closed on missing, linked, or mismatched
+  archives and stage it as `dist/installer/bundled-localmodels-kit.tgz` beside
+  `distribution.json`. When unset, any stale copy is removed so official
+  releases never embed a kit archive.
 - `LINGER_LOCALMODELS_DEV_PYTHON`, `LINGER_LOCALMODELS_DEV_MODULE_DIR`:
   absolute Python and module directory for running a local `localmodels`
   checkout in Quick Install and the Desktop Computer without fetching the
-  published kit. `LOCALMODELS_DEBUG` (`simulate` or `tiny`) or
+  published kit. Both variables also configure `ComputerDaemonModule`'s
+  `local_models` block directly (preserving custom install state/model paths
+  when present, or deriving them under `LINGER_HOME`), so connecting Desktop to
+  `pnpm dev` via `LINGER_SERVER_URL` works without Quick Install and Python
+  edits apply on the next call. `LOCALMODELS_DEBUG` (`simulate` or `tiny`) or
   `~/.config/localmodels/debug.json` enables fast local-model testing in both
   source and packaged builds.
 - Without a display, run with `--ozone-platform=headless --disable-gpu`. The

@@ -42,6 +42,7 @@ import { legacyMigrationPending } from "@linger/local-installation/home";
 import { loadInstance } from "@linger/local-installation/instance";
 import { foldersInUse } from "@linger/local-installation/native-process";
 import {
+  bundledToolArchivePath,
   ensureLocalmodelsTool,
   readPublishedTool,
 } from "@linger/local-installation/localmodels-tool";
@@ -879,9 +880,11 @@ export class LocalServerModule implements Module {
       "installer",
     );
     const prepareTool = async (): Promise<void> => {
-      const source = await readPublishedTool(
-        path.join(installerDirectory, "distribution.json"),
+      const distributionFile = path.join(
+        installerDirectory,
+        "distribution.json",
       );
+      const source = await readPublishedTool(distributionFile);
       if (!source) return;
       const startedAt = Date.now();
       await ensureLocalmodelsTool(
@@ -889,6 +892,7 @@ export class LocalServerModule implements Module {
         { signal: effectiveSignal },
         {
           source,
+          bundledArchivePath: bundledToolArchivePath(distributionFile),
           fetcher: followHttps(this.#options.fetch ?? fetch),
         },
       );
