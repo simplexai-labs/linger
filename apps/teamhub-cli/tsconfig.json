@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2024",
-    "lib": ["ES2024"],
+    "lib": ["ES2024", "ESNext.Temporal"],
     "noEmit": true,
     "types": ["node"],
     "resolveJsonModule": true

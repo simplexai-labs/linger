@@ -42,9 +42,9 @@ import {
 } from "./connector-schemas.js";
 import { displayText } from "./display-text.js";
 import {
+  calendarDateWindow,
   dateInZone,
   freeSlotsFromBusy,
-  midnight,
   rfc3339,
   timeWindow,
   utc,
@@ -1006,11 +1006,7 @@ export async function executeOutlookCalendar(
         date = new Date(Date.parse(date + "T12:00:00Z") + 86400000)
           .toISOString()
           .slice(0, 10);
-      const next = new Date(Date.parse(date + "T12:00:00Z") + 86400000)
-        .toISOString()
-        .slice(0, 10);
-      from = midnight(date, zone);
-      to = midnight(next, zone);
+      ({ from, to } = calendarDateWindow(date, zone));
     }
 
     const fromStr = displayText(from);

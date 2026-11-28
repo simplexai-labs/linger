@@ -2702,6 +2702,73 @@ describe("GitHub commands", () => {
   });
 });
 
+describe.each([
+  {
+    command: "gcal",
+    app: "gcal",
+    settingsTool: "GOOGLECALENDAR_GET_CALENDAR",
+    eventsTool: "GOOGLECALENDAR_EVENTS_LIST",
+    startField: "timeMin",
+    endField: "timeMax",
+    listField: "items",
+  },
+  {
+    command: "outlook-calendar",
+    app: "outlook",
+    settingsTool: "OUTLOOK_GET_MAILBOX_SETTINGS",
+    eventsTool: "OUTLOOK_GET_CALENDAR_VIEW",
+    startField: "start_datetime",
+    endField: "end_datetime",
+    listField: "value",
+  },
+])(
+  "$command local date windows",
+  ({
+    command,
+    app,
+    settingsTool,
+    eventsTool,
+    startField,
+    endField,
+    listField,
+  }) => {
+    it.each([
+      ["2026-09-05", "2026-09-05T04:00:00.000Z", "2026-09-06T04:00:00.000Z"],
+      ["2026-09-06", "2026-09-06T04:00:00.000Z", "2026-09-07T03:00:00.000Z"],
+    ])(
+      "queries the valid local times on %s around Santiago's midnight change",
+      async (date, start, end) => {
+        const windows: Json[] = [];
+        const f = await fixture(app, (slug, args) => {
+          if (slug === settingsTool) return { timeZone: "America/Santiago" };
+          if (slug !== eventsTool)
+            throw new Error("Expected a calendar events query");
+          windows.push(args);
+          return { [listField]: [] };
+        });
+        const result = await f.run([command, "list", "--date", date]);
+
+        expect(result.code, JSON.stringify(result.error)).toBe(0);
+        expect(windows).toEqual([
+          expect.objectContaining({ [startField]: start, [endField]: end }),
+        ]);
+      },
+    );
+  },
+);
+
+it("reports a skipped local date before fetching calendar events", async () => {
+  const f = await fixture("gcal", (slug) => {
+    if (slug === "GOOGLECALENDAR_GET_CALENDAR")
+      return { timeZone: "Pacific/Apia" };
+    throw new Error("A skipped date should not fetch events");
+  });
+
+  const result = await f.run(["gcal", "list", "--date", "2011-12-30"]);
+
+  expect(result.error.error.code).toBe("unsupported_combination");
+});
+
 describe("outlook-calendar connector", () => {
   it("lists calendars, queries by mailbox Windows timezone, and searches with OData filter", async () => {
     const f = await fixture("outlook", (slug, args) => {

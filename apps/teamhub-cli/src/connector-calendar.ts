@@ -595,14 +595,20 @@ export function wallTimeToInstant(
   }
   return undefined;
 }
-export function midnight(date: string, zone: string): string {
-  const instant = wallTimeToInstant(`${date}T00:00:00`, zone);
-  if (instant === undefined)
+export function calendarDateWindow(date: string, zone: string) {
+  const day = Temporal.PlainDate.from(date);
+  // A clock change can put the first instant of the day after midnight.
+  const start = day.toZonedDateTime(zone);
+  if (!start.toPlainDate().equals(day))
     throw new CliError(
       "unsupported_combination",
-      "This local date has no representable midnight; use an explicit time window.",
+      "This local date was skipped in the selected time zone. Use an explicit time window.",
     );
-  return new Date(instant).toISOString();
+  const end = day.add({ days: 1 }).toZonedDateTime(zone);
+  return {
+    from: start.toInstant().toString({ fractionalSecondDigits: 3 }),
+    to: end.toInstant().toString({ fractionalSecondDigits: 3 }),
+  };
 }
 async function executeCalendar(
   action: Action,
@@ -662,11 +668,7 @@ async function executeCalendar(
         date = new Date(Date.parse(date + "T12:00:00Z") + 86400000)
           .toISOString()
           .slice(0, 10);
-      const next = new Date(Date.parse(date + "T12:00:00Z") + 86400000)
-        .toISOString()
-        .slice(0, 10);
-      from = midnight(date, zone);
-      to = midnight(next, zone);
+      ({ from, to } = calendarDateWindow(date, zone));
     }
     const raw = await runtime.call(
       action === "calendars"

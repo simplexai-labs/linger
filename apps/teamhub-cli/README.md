@@ -96,6 +96,10 @@ Other Connected Apps (such as Canva or Linear) have no dedicated commands and ar
 
 `teamhub apps connect <app-key>` asks for access to any Connected App that supports Agent tools; without an authorized account it posts an authorization card in the current chat. `teamhub apps auto-reminders list|set` lists or toggles automatic reminders for the Sponsor's own connections.
 
+### Calendar dates
+
+`teamhub gcal list` and `teamhub outlook-calendar list` use the first valid instant of the selected local date for `--date`. The query ends at the following local date boundary. If a clock change skips midnight, the window includes all available times on the requested date.
+
 ## Web search
 
 `teamhub web` searches the web and reads pages through providers whose API keys are saved once for the whole deployment, in TeamHub; keys never reach the Computer.
