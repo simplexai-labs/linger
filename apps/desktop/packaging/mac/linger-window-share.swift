@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
@@ -167,19 +169,32 @@ private final class WindowShareManager: @unchecked Sendable {
 }
 
 if #available(macOS 14.0, *) {
+    // Initialize the CoreGraphics / AppKit WindowServer connection on the main
+    // thread before ScreenCaptureKit touches CGS (prevents CGS_REQUIRE_INIT
+    // SIGABRT) while keeping the helper hidden from the Dock.
+    _ = CGMainDisplayID()
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
+
     let manager = WindowShareManager()
-    while let line = readLine(strippingNewline: true) {
-        guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            continue
+    DispatchQueue.global(qos: .userInitiated).async {
+        while let line = readLine(strippingNewline: true) {
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            if let raw = object["watch"] as? NSNumber {
+                manager.watch(windowID: raw.uint32Value)
+            } else if let raw = object["stop"] as? NSNumber {
+                manager.stop(windowID: raw.uint32Value)
+            }
         }
-        if let raw = object["watch"] as? NSNumber {
-            manager.watch(windowID: raw.uint32Value)
-        } else if let raw = object["stop"] as? NSNumber {
-            manager.stop(windowID: raw.uint32Value)
+        manager.stopAll()
+        DispatchQueue.main.async {
+            app.terminate(nil)
         }
     }
-    manager.stopAll()
+    app.run()
 } else {
     exit(0)
 }
