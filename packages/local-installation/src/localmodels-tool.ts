@@ -794,7 +794,7 @@ export function localmodelsResumeModelsFile(home: string): string {
   );
 }
 const RESUME_MODELS_SCHEMA = "linger.localmodels-resume/v1";
-const LIBRARY_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/;
+const LIBRARY_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 
 /** Reports whether `id` is a valid localmodels library model identifier. */
 export function isLibraryModelId(id: unknown): id is string {
@@ -1031,13 +1031,18 @@ function isReadOnlyOrStopCommand(args: readonly string[]): boolean {
   const [group, verb] = args;
   if (group === "harness" || group === "debug") return true;
   if (group === "stack") return verb === "down" || verb === "remove";
-  if (group === "library")
+  if (group === "library") {
+    if (verb === "custom") {
+      const subverb = args[2];
+      return subverb === "search" || subverb === "probe";
+    }
     return (
       verb === "status" ||
       verb === "unload" ||
       verb === "remove" ||
       verb === "cancel"
     );
+  }
   if (group === "foundations") return verb === "stop";
   if (group === "gateway") return verb === "stop";
   if (group === "source")
@@ -1767,6 +1772,9 @@ const STOPPED_DOWNLOAD_ERROR_CODES = new Set([
   "DOWNLOAD_FAILED",
   "NETWORK_UNAVAILABLE",
   "DISK_INSUFFICIENT",
+  "HUB_AUTH_REQUIRED",
+  "HUB_FORBIDDEN",
+  "HUB_UNREACHABLE",
 ]);
 
 /**

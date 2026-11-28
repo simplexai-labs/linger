@@ -7,6 +7,8 @@ import type {
   DebugHistoryInspectionRequest,
   DebugHistoryInspectionResult,
   LocalMcpRelayDescriptor,
+  LocalModelCustomProbeResult,
+  LocalModelCustomSearchResult,
   RunnerHello,
 } from "@linger/wire-contracts/runner-gateway/types";
 import { AgentRunnerLifecycle } from "./agent-runner-lifecycle.js";
@@ -59,6 +61,9 @@ import {
   RunnerLocalModels,
   type LocalModelActionAck,
   type LocalModelActionCommand,
+  type LocalModelCustomDownloadCommand,
+  type LocalModelCustomProbeCommand,
+  type LocalModelCustomSearchCommand,
 } from "./runner-local-models.js";
 import {
   RunnerLocalSpeech,
@@ -390,6 +395,24 @@ export class RunnerGateway
     command: LocalAsrTranscribeCommand,
   ): Promise<LocalAsrTranscribeResult> {
     return this.#localSpeech.transcribe(command);
+  }
+
+  async searchCustomLocalModels(
+    command: LocalModelCustomSearchCommand,
+  ): Promise<LocalModelCustomSearchResult> {
+    return this.#localModels.searchCustom(command);
+  }
+
+  async probeCustomLocalModel(
+    command: LocalModelCustomProbeCommand,
+  ): Promise<LocalModelCustomProbeResult> {
+    return this.#localModels.probeCustom(command);
+  }
+
+  async downloadCustomLocalModel(
+    command: LocalModelCustomDownloadCommand,
+  ): Promise<LocalModelActionAck> {
+    return this.#localModels.downloadCustom(command);
   }
 
   async modelSource(command: LocalModelSourceCommand) {

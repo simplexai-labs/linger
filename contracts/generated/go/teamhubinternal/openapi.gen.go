@@ -893,6 +893,24 @@ func (e LocalModelCapability) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelCustomHub.
+const (
+	LocalModelCustomHubHuggingface LocalModelCustomHub = "huggingface"
+	LocalModelCustomHubModelscope  LocalModelCustomHub = "modelscope"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomHub enum.
+func (e LocalModelCustomHub) Valid() bool {
+	switch e {
+	case LocalModelCustomHubHuggingface:
+		return true
+	case LocalModelCustomHubModelscope:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelDegradationReason.
 const (
 	LocalModelDegradationReasonAboveSoftBudget  LocalModelDegradationReason = "above_soft_budget"
@@ -941,6 +959,7 @@ func (e LocalModelDownloadProgressStep) Valid() bool {
 // Defines values for LocalModelEngine.
 const (
 	LocalModelEngineLlamaCpp   LocalModelEngine = "llama.cpp"
+	LocalModelEngineMlx        LocalModelEngine = "mlx"
 	LocalModelEnginePolystrata LocalModelEngine = "polystrata"
 	LocalModelEngineStrata     LocalModelEngine = "strata"
 )
@@ -949,6 +968,8 @@ const (
 func (e LocalModelEngine) Valid() bool {
 	switch e {
 	case LocalModelEngineLlamaCpp:
+		return true
+	case LocalModelEngineMlx:
 		return true
 	case LocalModelEnginePolystrata:
 		return true
@@ -978,6 +999,7 @@ func (e LocalModelErrorCause) Valid() bool {
 const (
 	CANCELLED                 LocalModelErrorCode = "CANCELLED"
 	CHECKSUMMISMATCH          LocalModelErrorCode = "CHECKSUM_MISMATCH"
+	CORRUPTWEIGHTS            LocalModelErrorCode = "CORRUPT_WEIGHTS"
 	DISKINSUFFICIENT          LocalModelErrorCode = "DISK_INSUFFICIENT"
 	DOWNLOADFAILED            LocalModelErrorCode = "DOWNLOAD_FAILED"
 	DRIVERUPDATEREQUIRED      LocalModelErrorCode = "DRIVER_UPDATE_REQUIRED"
@@ -985,6 +1007,11 @@ const (
 	GATEWAYREGISTRATIONFAILED LocalModelErrorCode = "GATEWAY_REGISTRATION_FAILED"
 	GPUUNSUPPORTED            LocalModelErrorCode = "GPU_UNSUPPORTED"
 	HEALTHCHECKFAILED         LocalModelErrorCode = "HEALTH_CHECK_FAILED"
+	HUBAUTHREQUIRED           LocalModelErrorCode = "HUB_AUTH_REQUIRED"
+	HUBFORBIDDEN              LocalModelErrorCode = "HUB_FORBIDDEN"
+	HUBFORMATUNSUPPORTED      LocalModelErrorCode = "HUB_FORMAT_UNSUPPORTED"
+	HUBREPONOTFOUND           LocalModelErrorCode = "HUB_REPO_NOT_FOUND"
+	HUBUNREACHABLE            LocalModelErrorCode = "HUB_UNREACHABLE"
 	INVALIDSTATE              LocalModelErrorCode = "INVALID_STATE"
 	JOBRUNNING                LocalModelErrorCode = "JOB_RUNNING"
 	LOADNOROOM                LocalModelErrorCode = "LOAD_NO_ROOM"
@@ -996,6 +1023,7 @@ const (
 	PLATFORMUNSUPPORTED       LocalModelErrorCode = "PLATFORM_UNSUPPORTED"
 	RUNTIMEDEPENDENCYMISSING  LocalModelErrorCode = "RUNTIME_DEPENDENCY_MISSING"
 	UNKNOWNERROR              LocalModelErrorCode = "UNKNOWN_ERROR"
+	UNSUPPORTEDARCHITECTURE   LocalModelErrorCode = "UNSUPPORTED_ARCHITECTURE"
 )
 
 // Valid indicates whether the value is a known member of the LocalModelErrorCode enum.
@@ -1004,6 +1032,8 @@ func (e LocalModelErrorCode) Valid() bool {
 	case CANCELLED:
 		return true
 	case CHECKSUMMISMATCH:
+		return true
+	case CORRUPTWEIGHTS:
 		return true
 	case DISKINSUFFICIENT:
 		return true
@@ -1018,6 +1048,16 @@ func (e LocalModelErrorCode) Valid() bool {
 	case GPUUNSUPPORTED:
 		return true
 	case HEALTHCHECKFAILED:
+		return true
+	case HUBAUTHREQUIRED:
+		return true
+	case HUBFORBIDDEN:
+		return true
+	case HUBFORMATUNSUPPORTED:
+		return true
+	case HUBREPONOTFOUND:
+		return true
+	case HUBUNREACHABLE:
 		return true
 	case INVALIDSTATE:
 		return true
@@ -1040,6 +1080,8 @@ func (e LocalModelErrorCode) Valid() bool {
 	case RUNTIMEDEPENDENCYMISSING:
 		return true
 	case UNKNOWNERROR:
+		return true
+	case UNSUPPORTEDARCHITECTURE:
 		return true
 	default:
 		return false
@@ -1118,6 +1160,24 @@ func (e LocalModelFit) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelFormat.
+const (
+	LocalModelFormatGguf LocalModelFormat = "gguf"
+	LocalModelFormatMlx  LocalModelFormat = "mlx"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelFormat enum.
+func (e LocalModelFormat) Valid() bool {
+	switch e {
+	case LocalModelFormatGguf:
+		return true
+	case LocalModelFormatMlx:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelHostArch.
 const (
 	LocalModelHostArchArm64 LocalModelHostArch = "arm64"
@@ -1187,6 +1247,24 @@ const (
 func (e LocalModelNoteCode) Valid() bool {
 	switch e {
 	case LocalModelNoteNoRoomToLoad:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelOrigin.
+const (
+	LocalModelOriginCurated LocalModelOrigin = "curated"
+	LocalModelOriginCustom  LocalModelOrigin = "custom"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelOrigin enum.
+func (e LocalModelOrigin) Valid() bool {
+	switch e {
+	case LocalModelOriginCurated:
+		return true
+	case LocalModelOriginCustom:
 		return true
 	default:
 		return false
@@ -1295,6 +1373,54 @@ func (e LocalModelStorageFileRole) Valid() bool {
 	case LocalModelStorageFileRoleOther:
 		return true
 	case LocalModelStorageFileRoleWeights:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelVerificationFailureKind.
+const (
+	LocalModelVerificationFailureKindCorrupt         LocalModelVerificationFailureKind = "corrupt"
+	LocalModelVerificationFailureKindOom             LocalModelVerificationFailureKind = "oom"
+	LocalModelVerificationFailureKindUnknown         LocalModelVerificationFailureKind = "unknown"
+	LocalModelVerificationFailureKindUnsupportedArch LocalModelVerificationFailureKind = "unsupported_arch"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelVerificationFailureKind enum.
+func (e LocalModelVerificationFailureKind) Valid() bool {
+	switch e {
+	case LocalModelVerificationFailureKindCorrupt:
+		return true
+	case LocalModelVerificationFailureKindOom:
+		return true
+	case LocalModelVerificationFailureKindUnknown:
+		return true
+	case LocalModelVerificationFailureKindUnsupportedArch:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelVerificationStatus.
+const (
+	LocalModelVerificationStatusFailed   LocalModelVerificationStatus = "failed"
+	LocalModelVerificationStatusRunning  LocalModelVerificationStatus = "running"
+	LocalModelVerificationStatusUntested LocalModelVerificationStatus = "untested"
+	LocalModelVerificationStatusVerified LocalModelVerificationStatus = "verified"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelVerificationStatus enum.
+func (e LocalModelVerificationStatus) Valid() bool {
+	switch e {
+	case LocalModelVerificationStatusFailed:
+		return true
+	case LocalModelVerificationStatusRunning:
+		return true
+	case LocalModelVerificationStatusUntested:
+		return true
+	case LocalModelVerificationStatusVerified:
 		return true
 	default:
 		return false
@@ -3716,6 +3842,9 @@ type LocalModel struct {
 	ConcurrencyProbing *bool `json:"concurrency_probing,omitempty"`
 	ContextTokens      int64 `json:"context_tokens"`
 
+	// Custom Provenance and Standby-First metadata for a custom hub model.
+	Custom *LocalModelCustomInfo `json:"custom,omitempty"`
+
 	// DegradationReason Why a loaded model stepped down from its requested posture or overrode normal memory headroom.
 	DegradationReason *LocalModelDegradationReason `json:"degradation_reason,omitempty"`
 
@@ -3768,6 +3897,9 @@ type LocalModel struct {
 	// OomRetries Number of automatic OOM step-down retries taken before this load succeeded; omitted when 0.
 	OomRetries *int `json:"oom_retries,omitempty"`
 
+	// Origin Whether a model entry comes from the curated catalog or a custom hub repository.
+	Origin *LocalModelOrigin `json:"origin,omitempty"`
+
 	// Parameters Total parameter scale for display, such as 30B or 4B.
 	Parameters *string `json:"parameters,omitempty"`
 
@@ -3801,7 +3933,10 @@ type LocalModel struct {
 
 	// TokensPerSecond Warm speed measured at the last load; absent when unknown.
 	TokensPerSecond *float32 `json:"tokens_per_second,omitempty"`
-	Vision          bool     `json:"vision"`
+
+	// Verification Smoke-test verification record for a custom model.
+	Verification *LocalModelVerification `json:"verification,omitempty"`
+	Vision       bool                    `json:"vision"`
 }
 
 // LocalModelArchitecture Weight activation topology: dense activates all parameters per token; moe activates a subset.
@@ -3856,15 +3991,43 @@ type LocalModelAvailabilityReasonMemoryKind string
 // LocalModelCapability Model capability verified by localmodels on this platform.
 type LocalModelCapability string
 
+// LocalModelCustomHub Remote model hub hosting a custom repository.
+type LocalModelCustomHub string
+
+// LocalModelCustomInfo Provenance and Standby-First metadata for a custom hub model.
+type LocalModelCustomInfo struct {
+	AcceptedRisk *bool `json:"accepted_risk,omitempty"`
+
+	// Format Local weight format supported by localmodels engines.
+	Format LocalModelFormat `json:"format"`
+
+	// Hub Remote model hub hosting a custom repository.
+	Hub              LocalModelCustomHub `json:"hub"`
+	MmprojBytes      *int64              `json:"mmproj_bytes,omitempty"`
+	MmprojFile       *string             `json:"mmproj_file,omitempty"`
+	RepoId           string              `json:"repo_id"`
+	Revision         *string             `json:"revision,omitempty"`
+	ShardCount       int                 `json:"shard_count"`
+	StandbyOnRestart bool                `json:"standby_on_restart"`
+	Url              *string             `json:"url,omitempty"`
+	VariantId        string              `json:"variant_id"`
+}
+
 // LocalModelDegradationReason Why a loaded model stepped down from its requested posture or overrode normal memory headroom.
 type LocalModelDegradationReason string
 
 // LocalModelDownloadProgress defines model for LocalModelDownloadProgress.
 type LocalModelDownloadProgress struct {
-	BytesPerSecond *int64                         `json:"bytes_per_second,omitempty"`
-	DoneBytes      int64                          `json:"done_bytes"`
-	Step           LocalModelDownloadProgressStep `json:"step"`
-	TotalBytes     int64                          `json:"total_bytes"`
+	BytesPerSecond *int64 `json:"bytes_per_second,omitempty"`
+	DoneBytes      int64  `json:"done_bytes"`
+
+	// ShardCount Total number of shards in this download.
+	ShardCount *int `json:"shard_count,omitempty"`
+
+	// ShardIndex 1-based index of the shard currently downloading.
+	ShardIndex *int                           `json:"shard_index,omitempty"`
+	Step       LocalModelDownloadProgressStep `json:"step"`
+	TotalBytes int64                          `json:"total_bytes"`
 }
 
 // LocalModelDownloadProgressStep defines model for LocalModelDownloadProgress.Step.
@@ -3916,6 +4079,9 @@ type LocalModelFamily string
 // LocalModelFit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
 type LocalModelFit string
 
+// LocalModelFormat Local weight format supported by localmodels engines.
+type LocalModelFormat string
+
 // LocalModelGpu defines model for LocalModelGpu.
 type LocalModelGpu struct {
 	FreeBytes  int64   `json:"free_bytes"`
@@ -3944,6 +4110,9 @@ type LocalModelHost struct {
 	OsLabel       string                 `json:"os_label"`
 	Platform      LocalModelHostPlatform `json:"platform"`
 	RamTotalBytes int64                  `json:"ram_total_bytes"`
+
+	// SupportedFormats Weight formats the host can run natively (gguf, mlx).
+	SupportedFormats *[]LocalModelFormat `json:"supported_formats,omitempty"`
 }
 
 // LocalModelHostArch defines model for LocalModelHost.Arch.
@@ -3965,6 +4134,9 @@ type LocalModelNote struct {
 
 // LocalModelNoteCode defines model for LocalModelNote.Code.
 type LocalModelNoteCode string
+
+// LocalModelOrigin Whether a model entry comes from the curated catalog or a custom hub repository.
+type LocalModelOrigin string
 
 // LocalModelPool One place models load into. The system and unified budgets are 80% of RAM, as localmodels computes them.
 type LocalModelPool struct {
@@ -4067,6 +4239,42 @@ type LocalModelStorageFile struct {
 
 // LocalModelStorageFileRole defines model for LocalModelStorageFile.Role.
 type LocalModelStorageFileRole string
+
+// LocalModelVerification Smoke-test verification record for a custom model.
+type LocalModelVerification struct {
+	ContextTokens *int64 `json:"context_tokens,omitempty"`
+
+	// Failure Structured details of a failed custom model smoke test.
+	Failure *LocalModelVerificationFailure `json:"failure,omitempty"`
+
+	// Status Smoke-test verification state for a custom model.
+	Status LocalModelVerificationStatus `json:"status"`
+
+	// TestedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	TestedAt *Timestamp `json:"tested_at,omitempty"`
+}
+
+// LocalModelVerificationFailure Structured details of a failed custom model smoke test.
+type LocalModelVerificationFailure struct {
+	CanRedownload    bool `json:"can_redownload"`
+	CanRetryLowerCtx bool `json:"can_retry_lower_ctx"`
+
+	// Code Closed localmodels library error set. It is extended only together with the localmodels library contract; UNKNOWN_ERROR preserves forward compatibility with newer localmodels releases.
+	Code          LocalModelErrorCode `json:"code"`
+	ContextTokens int64               `json:"context_tokens"`
+
+	// DiagnosticLog Redacted diagnostic excerpt from the smoke test; owner-only in public views.
+	DiagnosticLog *string `json:"diagnostic_log,omitempty"`
+
+	// Kind Classified failure category of a custom model smoke test.
+	Kind LocalModelVerificationFailureKind `json:"kind"`
+}
+
+// LocalModelVerificationFailureKind Classified failure category of a custom model smoke test.
+type LocalModelVerificationFailureKind string
+
+// LocalModelVerificationStatus Smoke-test verification state for a custom model.
+type LocalModelVerificationStatus string
 
 // LocalModelsDebugInfo Present only when localmodels debug mode (tiny or simulate) is active on the Computer. config_path is shown only to the Computer owner.
 type LocalModelsDebugInfo struct {

@@ -31,7 +31,7 @@ func TestDiagnosticBoundaries(t *testing.T) {
 }
 
 func TestRecognizableTokensWithoutFieldNames(t *testing.T) {
-	for _, prefix := range []string{"sk-", "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "glpat-", "xoxb-", "xoxe-", "xapp-", "sk_live_", "rk_live_"} {
+	for _, prefix := range []string{"sk-", "hf_", "ms_", "ms-", "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "glpat-", "xoxb-", "xoxe-", "xapp-", "sk_live_", "rk_live_"} {
 		token := prefix + strings.Repeat("Z7", 24)
 		out := Text("first: '" + token + "'. next: ok")
 		if strings.Contains(out, token) || !strings.HasSuffix(out, "'. next: ok") {
@@ -42,6 +42,21 @@ func TestRecognizableTokensWithoutFieldNames(t *testing.T) {
 		if got := Text("value=" + token + "."); strings.Contains(got, token) || !strings.HasSuffix(got, ".") {
 			t.Errorf("token not bounded: %q", got)
 		}
+	}
+}
+
+func TestTextWithSecretsScrubsLiteralTokens(t *testing.T) {
+	literal := "custom-opaque-hub-secret-value"
+	hf := "hf_" + strings.Repeat("A1", 12)
+	ms := "ms-" + strings.Repeat("b2", 12)
+	got := TextWithSecrets("hub refused "+literal+" and "+hf+" and "+ms, literal)
+	for _, secret := range []string{literal, hf, ms} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("secret %q survived in %q", secret, got)
+		}
+	}
+	if TextWithSecrets(got, literal) != got {
+		t.Fatalf("TextWithSecrets not idempotent: %q", got)
 	}
 }
 

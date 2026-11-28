@@ -903,6 +903,7 @@ export async function restoreByokSource(
 interface ObservedLibraryModel {
   id: string;
   piModel: string;
+  origin?: string;
 }
 
 interface ObservedFailedLibraryModel extends ObservedLibraryModel {
@@ -1008,6 +1009,9 @@ async function observeLibraryModels(
     const model: ObservedLibraryModel = {
       id: entry.id,
       piModel: typeof entry.pi_model === "string" ? entry.pi_model : "",
+      ...(typeof entry.origin === "string" && entry.origin.trim()
+        ? { origin: entry.origin.trim() }
+        : {}),
     };
     if (entry.state === "loaded") {
       loadedModels.push(model);
@@ -1293,6 +1297,7 @@ async function restoreLibraryModelsUnderLock(
       : selectLibraryModel(library.failedModels, plan.savedRuntimeModel);
     const target = idleTarget ?? failedTarget;
     if (!target) return { handled: false, restoredIds: [] };
+    if (target.origin === "custom") return { handled: true, restoredIds: [] };
     targetIds = [target.id];
   }
 
@@ -1336,6 +1341,10 @@ async function restoreLibraryModelsUnderLock(
     const failed = idle ? undefined : failedById.get(modelId);
     if (!idle && !failed) {
       // Model was removed from the library since the stop; drop it from pending.
+      await settlePending(modelId);
+      continue;
+    }
+    if ((idle ?? failed)?.origin === "custom") {
       await settlePending(modelId);
       continue;
     }

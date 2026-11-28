@@ -5,6 +5,9 @@ import {
 import type {
   LocalModelActionAck,
   LocalModelActionCommand,
+  LocalModelCustomDownloadCommand,
+  LocalModelCustomProbeCommand,
+  LocalModelCustomSearchCommand,
 } from "./runner-local-models.js";
 import type {
   LocalAsrTranscribeCommand,
@@ -18,6 +21,8 @@ import type {
   ByokModelList,
   ByokTestResult,
   ComputerPermissionStatus,
+  LocalModelCustomProbeResult,
+  LocalModelCustomSearchResult,
   ModelSourceStatus,
 } from "@linger/wire-contracts/runner-gateway/types";
 
@@ -118,6 +123,10 @@ export const FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION = "0.69.0";
 // load). An older Computer rejects the unknown field and closes the
 // connection, so force-load actions are refused before sending.
 export const FIRST_LOCAL_MODELS_FORCE_LOAD_COMPUTER_VERSION = "0.70.0";
+// The first release that understands the `local_models_custom` welcome feature
+// and handles `execute` kind `local_models_custom` plus `custom_download` and
+// `smoke_test` actions on `local_models`.
+export const FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION = "0.71.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
@@ -239,6 +248,17 @@ export interface LocalComputerManagement {
   transcribeLocalAsr?(
     command: LocalAsrTranscribeCommand,
   ): Promise<LocalAsrTranscribeResult>;
+  searchCustomLocalModels?(
+    command: LocalModelCustomSearchCommand,
+  ): Promise<LocalModelCustomSearchResult>;
+
+  probeCustomLocalModel?(
+    command: LocalModelCustomProbeCommand,
+  ): Promise<LocalModelCustomProbeResult>;
+
+  downloadCustomLocalModel?(
+    command: LocalModelCustomDownloadCommand,
+  ): Promise<LocalModelActionAck>;
 
   modelSource?(command: LocalModelSourceCommand): Promise<{
     readonly status?: ModelSourceStatus;

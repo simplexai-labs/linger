@@ -1,8 +1,15 @@
 import type {
   CapabilityLocalModelsAccepted,
+  CapabilityLocalModelsCustomFailed,
+  CapabilityLocalModelsCustomSucceeded,
   CapabilityLocalModelsRefused,
   DaemonToAgentEnvelope,
   LocalModelActionRefusal,
+  LocalModelCustomDownloadInput,
+  LocalModelCustomProbeInput,
+  LocalModelCustomProbeResult,
+  LocalModelCustomSearchInput,
+  LocalModelCustomSearchResult,
   LocalModelsSnapshot,
   RunnerLocalModels as RunnerLocalModelsFrame,
 } from "@linger/wire-contracts/runner-gateway/types";
@@ -13,6 +20,7 @@ import {
 import { logAgentEvent } from "../observability/agent-log.js";
 import {
   FIRST_LOCAL_MODELS_FORCE_LOAD_COMPUTER_VERSION,
+  FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
   isComputerVersionAtLeast,
   LocalComputerCapabilityError,
   LocalComputerNotFoundError,
@@ -33,7 +41,9 @@ export type LocalModelActionKind =
   | "load"
   | "unload"
   | "remove"
-  | "refresh";
+  | "refresh"
+  | "smoke_test"
+  | "custom_download";
 
 /** One action on an owned Computer's model library. */
 export interface LocalModelActionCommand {
@@ -41,19 +51,58 @@ export interface LocalModelActionCommand {
   readonly ownerActorId: string;
   readonly computerId: string;
   readonly action: LocalModelActionKind;
-  /** Absent only for refresh. */
+  /** Absent only for refresh and custom_download. */
   readonly modelId?: string;
   /** Only for load. */
   readonly unloadFirst?: readonly string[];
   /** Only for load. Override the memory safety guard when allowed. */
   readonly force?: boolean;
+  /** For load or smoke_test. */
+  readonly contextTokens?: number;
+  /** Only for custom_download. */
+  readonly customDownload?: LocalModelCustomDownloadInput;
+  readonly expiresAt: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface LocalModelCustomSearchCommand {
+  readonly tenantId: string;
+  readonly ownerActorId: string;
+  readonly computerId: string;
+  readonly input: LocalModelCustomSearchInput;
+  readonly signal?: AbortSignal;
+}
+
+export interface LocalModelCustomProbeCommand {
+  readonly tenantId: string;
+  readonly ownerActorId: string;
+  readonly computerId: string;
+  readonly input: LocalModelCustomProbeInput;
+  readonly signal?: AbortSignal;
+}
+
+export interface LocalModelCustomDownloadCommand {
+  readonly tenantId: string;
+  readonly ownerActorId: string;
+  readonly computerId: string;
+  readonly customDownload: LocalModelCustomDownloadInput;
+  readonly expiresAt: string;
+  readonly signal?: AbortSignal;
+}
+
+export interface LocalModelSmokeTestCommand {
+  readonly tenantId: string;
+  readonly ownerActorId: string;
+  readonly computerId: string;
+  readonly modelId: string;
+  readonly contextTokens: 2048 | 4096;
   readonly expiresAt: string;
   readonly signal?: AbortSignal;
 }
 
 /** The Computer's immediate answer; progress arrives only as snapshots. */
 export type LocalModelActionAck =
-  | { readonly outcome: "accepted" }
+  | { readonly outcome: "accepted"; readonly modelId?: string }
   | { readonly outcome: "refused"; readonly refusal: LocalModelActionRefusal };
 
 /** The Computer did not answer an action before it expired. */
@@ -64,9 +113,35 @@ export class LocalModelsActionTimeoutError extends Error {
   }
 }
 
+/** The connected Computer release predates custom local models (0.71.0). */
+export class LocalModelsCustomUnsupportedError extends LocalComputerCapabilityError {
+  constructor() {
+    super(
+      "Local Computer must be updated to 0.71.0 or later for custom local models",
+    );
+    this.name = "LocalModelsCustomUnsupportedError";
+  }
+}
+
+/** Structured refusal or failure returned by a synchronous custom hub call. */
+export class LocalModelsCustomError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = "LocalModelsCustomError";
+  }
+}
+
 type LocalModelsOutcome =
   | CapabilityLocalModelsAccepted
   | CapabilityLocalModelsRefused;
+
+type LocalModelsCustomOutcome =
+  | CapabilityLocalModelsCustomSucceeded
+  | CapabilityLocalModelsCustomFailed;
 
 interface ActionWaiter {
   readonly connection: ConnectedRunner;
@@ -76,6 +151,14 @@ interface ActionWaiter {
   readonly reject: (error: unknown) => void;
 }
 
+interface CustomWaiter {
+  readonly connection: ConnectedRunner;
+  readonly action: "search" | "probe";
+  readonly resolve: (outcome: LocalModelsCustomOutcome) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+const CUSTOM_HUB_RPC_TIMEOUT_MS = 45_000;
 // The Computer answers once localmodels has validated the action, which can
 // take a few seconds. Past the command's expiry (and never past this bound)
 // the action is unconfirmed, not refused: the Computer may still run it, and
@@ -92,6 +175,7 @@ export class RunnerLocalModels {
   readonly #waiters = new Map<string, ActionWaiter>();
 
   readonly #snapshotRelay: RunnerSnapshotRelay<LocalModelsSnapshot>;
+  readonly #customWaiters = new Map<string, CustomWaiter>();
 
   constructor(
     private readonly context: RunnerGatewayContext,
@@ -166,6 +250,20 @@ export class RunnerLocalModels {
         "Local Computer must be updated before force loading a model",
       );
     }
+    const requiresCustomSupport =
+      command.action === "smoke_test" ||
+      command.action === "custom_download" ||
+      command.contextTokens !== undefined ||
+      command.customDownload !== undefined;
+    if (
+      requiresCustomSupport &&
+      !isComputerVersionAtLeast(
+        connection.hello.daemon_version,
+        FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
+      )
+    ) {
+      throw new LocalModelsCustomUnsupportedError();
+    }
     const commandId = this.context.createId();
     const envelope = parseAgentToDaemonEnvelope({
       type: "execute",
@@ -182,7 +280,13 @@ export class RunnerLocalModels {
       ...(command.unloadFirst === undefined
         ? {}
         : { unload_first: [...command.unloadFirst] }),
-      ...(command.force ? { force: true } : {}),
+      ...(command.force === undefined ? {} : { force: command.force }),
+      ...(command.contextTokens === undefined
+        ? {}
+        : { context_tokens: command.contextTokens }),
+      ...(command.customDownload === undefined
+        ? {}
+        : { custom_download: command.customDownload }),
     });
     const signal = command.signal;
     let onAbort: (() => void) | undefined;
@@ -219,8 +323,176 @@ export class RunnerLocalModels {
       this.#waiters.delete(commandId);
     }
     return result.outcome === "accepted"
-      ? { outcome: "accepted" }
+      ? {
+          outcome: "accepted",
+          ...(command.action === "custom_download" &&
+          result.model_id !== undefined
+            ? { modelId: result.model_id }
+            : {}),
+        }
       : { outcome: "refused", refusal: result.refusal };
+  }
+
+  async searchCustom(
+    command: LocalModelCustomSearchCommand,
+  ): Promise<LocalModelCustomSearchResult> {
+    const result = await this.#runCustomRpc({
+      tenantId: command.tenantId,
+      ownerActorId: command.ownerActorId,
+      computerId: command.computerId,
+      action: "search",
+      search: command.input,
+      signal: command.signal,
+    });
+    if (!result.search_result) {
+      throw new LocalModelsCustomError(
+        "TOOL_FAILED",
+        "Local Computer returned no custom model search result",
+        true,
+      );
+    }
+    return result.search_result;
+  }
+
+  async probeCustom(
+    command: LocalModelCustomProbeCommand,
+  ): Promise<LocalModelCustomProbeResult> {
+    const result = await this.#runCustomRpc({
+      tenantId: command.tenantId,
+      ownerActorId: command.ownerActorId,
+      computerId: command.computerId,
+      action: "probe",
+      probe: command.input,
+      signal: command.signal,
+    });
+    if (!result.probe_result) {
+      throw new LocalModelsCustomError(
+        "TOOL_FAILED",
+        "Local Computer returned no custom model probe result",
+        true,
+      );
+    }
+    return result.probe_result;
+  }
+
+  async downloadCustom(
+    command: LocalModelCustomDownloadCommand,
+  ): Promise<LocalModelActionAck> {
+    return this.act({
+      tenantId: command.tenantId,
+      ownerActorId: command.ownerActorId,
+      computerId: command.computerId,
+      action: "custom_download",
+      customDownload: command.customDownload,
+      expiresAt: command.expiresAt,
+      signal: command.signal,
+    });
+  }
+
+  async smokeTest(
+    command: LocalModelSmokeTestCommand,
+  ): Promise<LocalModelActionAck> {
+    return this.act({
+      tenantId: command.tenantId,
+      ownerActorId: command.ownerActorId,
+      computerId: command.computerId,
+      action: "smoke_test",
+      modelId: command.modelId,
+      contextTokens: command.contextTokens,
+      expiresAt: command.expiresAt,
+      signal: command.signal,
+    });
+  }
+
+  async #runCustomRpc(command: {
+    readonly tenantId: string;
+    readonly ownerActorId: string;
+    readonly computerId: string;
+    readonly action: "search" | "probe";
+    readonly search?: LocalModelCustomSearchInput;
+    readonly probe?: LocalModelCustomProbeInput;
+    readonly signal?: AbortSignal;
+  }): Promise<CapabilityLocalModelsCustomSucceeded> {
+    command.signal?.throwIfAborted();
+    const connection = this.owners
+      .connections()
+      .getConnection(command.computerId);
+    if (!isServingConnection(connection)) {
+      throw new LocalComputerOfflineError();
+    }
+    if (
+      connection.tenantOwners.get(command.tenantId) !== command.ownerActorId
+    ) {
+      throw new LocalComputerNotFoundError();
+    }
+    if (
+      !isComputerVersionAtLeast(
+        connection.hello.daemon_version,
+        FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
+      )
+    ) {
+      throw new LocalModelsCustomUnsupportedError();
+    }
+    if (connection.localModelsRevision === 0) {
+      throw new LocalComputerCapabilityError(
+        "Local Computer has not reported a model library",
+      );
+    }
+    const commandId = this.context.createId();
+    const expiresAt = new Date(
+      Date.now() + CUSTOM_HUB_RPC_TIMEOUT_MS,
+    ).toISOString();
+    const envelope = parseAgentToDaemonEnvelope({
+      type: "execute",
+      kind: "local_models_custom",
+      protocol_version: RUNNER_GATEWAY_PROTOCOL_VERSION,
+      command_id: commandId,
+      runner_id: command.computerId,
+      tenant_id: command.tenantId,
+      owner_actor_id: command.ownerActorId,
+      connection_epoch: connection.connectionEpoch,
+      expires_at: expiresAt,
+      action: command.action,
+      ...(command.search === undefined ? {} : { search: command.search }),
+      ...(command.probe === undefined ? {} : { probe: command.probe }),
+    });
+    const signal = command.signal;
+    let onAbort: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = new Promise<LocalModelsCustomOutcome>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new LocalModelsActionTimeoutError()),
+        CUSTOM_HUB_RPC_TIMEOUT_MS,
+      );
+      timer.unref();
+      onAbort = () => reject(signal?.reason);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      this.#customWaiters.set(commandId, {
+        connection,
+        action: command.action,
+        resolve,
+        reject,
+      });
+    });
+    let result: LocalModelsCustomOutcome;
+    try {
+      [, result] = await Promise.all([
+        this.owners.connections().sendToCurrentRunner(envelope),
+        outcome,
+      ]);
+    } finally {
+      clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+      this.#customWaiters.delete(commandId);
+    }
+    if (result.outcome === "failed") {
+      throw new LocalModelsCustomError(
+        result.error.code,
+        result.error.message,
+        result.error.retryable,
+      );
+    }
+    return result;
   }
 
   receiveOutcome(connection: ConnectedRunner, envelope: LocalModelsOutcome) {
@@ -246,13 +518,45 @@ export class RunnerLocalModels {
     if (
       waiter.connection !== connection ||
       waiter.action !== envelope.action ||
-      waiter.modelId !== envelope.model_id
+      (waiter.action !== "custom_download" &&
+        waiter.modelId !== envelope.model_id)
     ) {
       throw new RunnerGatewayProtocolError(
         "Runner local-models command identity mismatch",
       );
     }
     this.#waiters.delete(envelope.command_id);
+    waiter.resolve(envelope);
+  }
+
+  receiveCustomOutcome(
+    connection: ConnectedRunner,
+    envelope: LocalModelsCustomOutcome,
+  ) {
+    if (
+      envelope.connection_epoch !== connection.connectionEpoch ||
+      connection.tenantOwners.get(envelope.tenant_id) !==
+        envelope.owner_actor_id
+    ) {
+      throw new RunnerGatewayProtocolError(
+        "Runner local-models custom outcome identity mismatch",
+      );
+    }
+    const waiter = this.#customWaiters.get(envelope.command_id);
+    if (!waiter) {
+      logAgentEvent("info", "runner.local_models_custom.late_outcome", {
+        runnerId: connection.runnerId,
+        commandId: envelope.command_id,
+        outcome: envelope.outcome,
+      });
+      return;
+    }
+    if (waiter.connection !== connection || waiter.action !== envelope.action) {
+      throw new RunnerGatewayProtocolError(
+        "Runner local-models custom command identity mismatch",
+      );
+    }
+    this.#customWaiters.delete(envelope.command_id);
     waiter.resolve(envelope);
   }
 
@@ -263,6 +567,11 @@ export class RunnerLocalModels {
       this.#waiters.delete(commandId);
       waiter.reject(new LocalComputerOfflineError());
     }
+    for (const [commandId, waiter] of this.#customWaiters) {
+      if (waiter.connection !== connection) continue;
+      this.#customWaiters.delete(commandId);
+      waiter.reject(new LocalComputerOfflineError());
+    }
   }
 }
 
@@ -270,4 +579,12 @@ export function isLocalModelsOutcome(
   envelope: DaemonToAgentEnvelope,
 ): envelope is LocalModelsOutcome {
   return envelope.type === "executed" && envelope.kind === "local_models";
+}
+
+export function isLocalModelsCustomOutcome(
+  envelope: DaemonToAgentEnvelope,
+): envelope is LocalModelsCustomOutcome {
+  return (
+    envelope.type === "executed" && envelope.kind === "local_models_custom"
+  );
 }

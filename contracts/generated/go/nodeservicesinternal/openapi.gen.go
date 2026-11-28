@@ -781,18 +781,22 @@ func (e LocalModelActionAckOutcome) Valid() bool {
 
 // Defines values for LocalModelActionKind.
 const (
-	LocalModelActionKindCancel   LocalModelActionKind = "cancel"
-	LocalModelActionKindDownload LocalModelActionKind = "download"
-	LocalModelActionKindLoad     LocalModelActionKind = "load"
-	LocalModelActionKindRefresh  LocalModelActionKind = "refresh"
-	LocalModelActionKindRemove   LocalModelActionKind = "remove"
-	LocalModelActionKindUnload   LocalModelActionKind = "unload"
+	LocalModelActionKindCancel         LocalModelActionKind = "cancel"
+	LocalModelActionKindCustomDownload LocalModelActionKind = "custom_download"
+	LocalModelActionKindDownload       LocalModelActionKind = "download"
+	LocalModelActionKindLoad           LocalModelActionKind = "load"
+	LocalModelActionKindRefresh        LocalModelActionKind = "refresh"
+	LocalModelActionKindRemove         LocalModelActionKind = "remove"
+	LocalModelActionKindSmokeTest      LocalModelActionKind = "smoke_test"
+	LocalModelActionKindUnload         LocalModelActionKind = "unload"
 )
 
 // Valid indicates whether the value is a known member of the LocalModelActionKind enum.
 func (e LocalModelActionKind) Valid() bool {
 	switch e {
 	case LocalModelActionKindCancel:
+		return true
+	case LocalModelActionKindCustomDownload:
 		return true
 	case LocalModelActionKindDownload:
 		return true
@@ -801,6 +805,8 @@ func (e LocalModelActionKind) Valid() bool {
 	case LocalModelActionKindRefresh:
 		return true
 	case LocalModelActionKindRemove:
+		return true
+	case LocalModelActionKindSmokeTest:
 		return true
 	case LocalModelActionKindUnload:
 		return true
@@ -813,6 +819,7 @@ func (e LocalModelActionKind) Valid() bool {
 const (
 	CANCELLED                 LocalModelActionRefusalCode = "CANCELLED"
 	CHECKSUMMISMATCH          LocalModelActionRefusalCode = "CHECKSUM_MISMATCH"
+	CORRUPTWEIGHTS            LocalModelActionRefusalCode = "CORRUPT_WEIGHTS"
 	DISKINSUFFICIENT          LocalModelActionRefusalCode = "DISK_INSUFFICIENT"
 	DOWNLOADFAILED            LocalModelActionRefusalCode = "DOWNLOAD_FAILED"
 	DRIVERUPDATEREQUIRED      LocalModelActionRefusalCode = "DRIVER_UPDATE_REQUIRED"
@@ -820,6 +827,11 @@ const (
 	GATEWAYREGISTRATIONFAILED LocalModelActionRefusalCode = "GATEWAY_REGISTRATION_FAILED"
 	GPUUNSUPPORTED            LocalModelActionRefusalCode = "GPU_UNSUPPORTED"
 	HEALTHCHECKFAILED         LocalModelActionRefusalCode = "HEALTH_CHECK_FAILED"
+	HUBAUTHREQUIRED           LocalModelActionRefusalCode = "HUB_AUTH_REQUIRED"
+	HUBFORBIDDEN              LocalModelActionRefusalCode = "HUB_FORBIDDEN"
+	HUBFORMATUNSUPPORTED      LocalModelActionRefusalCode = "HUB_FORMAT_UNSUPPORTED"
+	HUBREPONOTFOUND           LocalModelActionRefusalCode = "HUB_REPO_NOT_FOUND"
+	HUBUNREACHABLE            LocalModelActionRefusalCode = "HUB_UNREACHABLE"
 	INVALIDSTATE              LocalModelActionRefusalCode = "INVALID_STATE"
 	JOBRUNNING                LocalModelActionRefusalCode = "JOB_RUNNING"
 	LOADNOROOM                LocalModelActionRefusalCode = "LOAD_NO_ROOM"
@@ -833,6 +845,7 @@ const (
 	TOOLFAILED                LocalModelActionRefusalCode = "TOOL_FAILED"
 	TOOLNOTINSTALLED          LocalModelActionRefusalCode = "TOOL_NOT_INSTALLED"
 	UNKNOWNERROR              LocalModelActionRefusalCode = "UNKNOWN_ERROR"
+	UNSUPPORTEDARCHITECTURE   LocalModelActionRefusalCode = "UNSUPPORTED_ARCHITECTURE"
 )
 
 // Valid indicates whether the value is a known member of the LocalModelActionRefusalCode enum.
@@ -841,6 +854,8 @@ func (e LocalModelActionRefusalCode) Valid() bool {
 	case CANCELLED:
 		return true
 	case CHECKSUMMISMATCH:
+		return true
+	case CORRUPTWEIGHTS:
 		return true
 	case DISKINSUFFICIENT:
 		return true
@@ -855,6 +870,16 @@ func (e LocalModelActionRefusalCode) Valid() bool {
 	case GPUUNSUPPORTED:
 		return true
 	case HEALTHCHECKFAILED:
+		return true
+	case HUBAUTHREQUIRED:
+		return true
+	case HUBFORBIDDEN:
+		return true
+	case HUBFORMATUNSUPPORTED:
+		return true
+	case HUBREPONOTFOUND:
+		return true
+	case HUBUNREACHABLE:
 		return true
 	case INVALIDSTATE:
 		return true
@@ -881,6 +906,344 @@ func (e LocalModelActionRefusalCode) Valid() bool {
 	case TOOLNOTINSTALLED:
 		return true
 	case UNKNOWNERROR:
+		return true
+	case UNSUPPORTEDARCHITECTURE:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomHub.
+const (
+	LocalModelCustomHubHuggingface LocalModelCustomHub = "huggingface"
+	LocalModelCustomHubModelscope  LocalModelCustomHub = "modelscope"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomHub enum.
+func (e LocalModelCustomHub) Valid() bool {
+	switch e {
+	case LocalModelCustomHubHuggingface:
+		return true
+	case LocalModelCustomHubModelscope:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomIncompatibleReason.
+const (
+	LocalModelCustomIncompatibleReasonMlxUnsupported  LocalModelCustomIncompatibleReason = "mlx_unsupported"
+	LocalModelCustomIncompatibleReasonNoRunnableFiles LocalModelCustomIncompatibleReason = "no_runnable_files"
+	LocalModelCustomIncompatibleReasonRawSafetensors  LocalModelCustomIncompatibleReason = "raw_safetensors"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomIncompatibleReason enum.
+func (e LocalModelCustomIncompatibleReason) Valid() bool {
+	switch e {
+	case LocalModelCustomIncompatibleReasonMlxUnsupported:
+		return true
+	case LocalModelCustomIncompatibleReasonNoRunnableFiles:
+		return true
+	case LocalModelCustomIncompatibleReasonRawSafetensors:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomMemoryEstimateBasis.
+const (
+	LocalModelCustomMemoryEstimateBasisGgufHeader LocalModelCustomMemoryEstimateBasis = "gguf_header"
+	LocalModelCustomMemoryEstimateBasisRough      LocalModelCustomMemoryEstimateBasis = "rough_1.2x_plus_0.8gb"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomMemoryEstimateBasis enum.
+func (e LocalModelCustomMemoryEstimateBasis) Valid() bool {
+	switch e {
+	case LocalModelCustomMemoryEstimateBasisGgufHeader:
+		return true
+	case LocalModelCustomMemoryEstimateBasisRough:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomMemoryStatus.
+const (
+	LocalModelCustomMemoryStatusComfortable LocalModelCustomMemoryStatus = "comfortable"
+	LocalModelCustomMemoryStatusExceeds     LocalModelCustomMemoryStatus = "exceeds"
+	LocalModelCustomMemoryStatusTight       LocalModelCustomMemoryStatus = "tight"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomMemoryStatus enum.
+func (e LocalModelCustomMemoryStatus) Valid() bool {
+	switch e {
+	case LocalModelCustomMemoryStatusComfortable:
+		return true
+	case LocalModelCustomMemoryStatusExceeds:
+		return true
+	case LocalModelCustomMemoryStatusTight:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomProbeHostArch.
+const (
+	LocalModelCustomProbeHostArchArm64 LocalModelCustomProbeHostArch = "arm64"
+	LocalModelCustomProbeHostArchX8664 LocalModelCustomProbeHostArch = "x86_64"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomProbeHostArch enum.
+func (e LocalModelCustomProbeHostArch) Valid() bool {
+	switch e {
+	case LocalModelCustomProbeHostArchArm64:
+		return true
+	case LocalModelCustomProbeHostArchX8664:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomProbeHostPlatform.
+const (
+	LocalModelCustomProbeHostPlatformDarwin  LocalModelCustomProbeHostPlatform = "darwin"
+	LocalModelCustomProbeHostPlatformLinux   LocalModelCustomProbeHostPlatform = "linux"
+	LocalModelCustomProbeHostPlatformWindows LocalModelCustomProbeHostPlatform = "windows"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomProbeHostPlatform enum.
+func (e LocalModelCustomProbeHostPlatform) Valid() bool {
+	switch e {
+	case LocalModelCustomProbeHostPlatformDarwin:
+		return true
+	case LocalModelCustomProbeHostPlatformLinux:
+		return true
+	case LocalModelCustomProbeHostPlatformWindows:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomProbeHub.
+const (
+	LocalModelCustomProbeHubAuto        LocalModelCustomProbeHub = "auto"
+	LocalModelCustomProbeHubHuggingface LocalModelCustomProbeHub = "huggingface"
+	LocalModelCustomProbeHubModelscope  LocalModelCustomProbeHub = "modelscope"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomProbeHub enum.
+func (e LocalModelCustomProbeHub) Valid() bool {
+	switch e {
+	case LocalModelCustomProbeHubAuto:
+		return true
+	case LocalModelCustomProbeHubHuggingface:
+		return true
+	case LocalModelCustomProbeHubModelscope:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomProbeOutcome.
+const (
+	LocalModelCustomProbeOutcomeGated        LocalModelCustomProbeOutcome = "gated"
+	LocalModelCustomProbeOutcomeIncompatible LocalModelCustomProbeOutcome = "incompatible"
+	LocalModelCustomProbeOutcomeNotFound     LocalModelCustomProbeOutcome = "not_found"
+	LocalModelCustomProbeOutcomeReady        LocalModelCustomProbeOutcome = "ready"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomProbeOutcome enum.
+func (e LocalModelCustomProbeOutcome) Valid() bool {
+	switch e {
+	case LocalModelCustomProbeOutcomeGated:
+		return true
+	case LocalModelCustomProbeOutcomeIncompatible:
+		return true
+	case LocalModelCustomProbeOutcomeNotFound:
+		return true
+	case LocalModelCustomProbeOutcomeReady:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomRepoFormat.
+const (
+	LocalModelCustomRepoFormatGguf        LocalModelCustomRepoFormat = "gguf"
+	LocalModelCustomRepoFormatMlx         LocalModelCustomRepoFormat = "mlx"
+	LocalModelCustomRepoFormatSafetensors LocalModelCustomRepoFormat = "safetensors"
+	LocalModelCustomRepoFormatUnknown     LocalModelCustomRepoFormat = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomRepoFormat enum.
+func (e LocalModelCustomRepoFormat) Valid() bool {
+	switch e {
+	case LocalModelCustomRepoFormatGguf:
+		return true
+	case LocalModelCustomRepoFormatMlx:
+		return true
+	case LocalModelCustomRepoFormatSafetensors:
+		return true
+	case LocalModelCustomRepoFormatUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomSearchFormat.
+const (
+	LocalModelCustomSearchFormatAll        LocalModelCustomSearchFormat = "all"
+	LocalModelCustomSearchFormatCompatible LocalModelCustomSearchFormat = "compatible"
+	LocalModelCustomSearchFormatGguf       LocalModelCustomSearchFormat = "gguf"
+	LocalModelCustomSearchFormatMlx        LocalModelCustomSearchFormat = "mlx"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomSearchFormat enum.
+func (e LocalModelCustomSearchFormat) Valid() bool {
+	switch e {
+	case LocalModelCustomSearchFormatAll:
+		return true
+	case LocalModelCustomSearchFormatCompatible:
+		return true
+	case LocalModelCustomSearchFormatGguf:
+		return true
+	case LocalModelCustomSearchFormatMlx:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomSearchHub.
+const (
+	LocalModelCustomSearchHubAll         LocalModelCustomSearchHub = "all"
+	LocalModelCustomSearchHubHuggingface LocalModelCustomSearchHub = "huggingface"
+	LocalModelCustomSearchHubModelscope  LocalModelCustomSearchHub = "modelscope"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomSearchHub enum.
+func (e LocalModelCustomSearchHub) Valid() bool {
+	switch e {
+	case LocalModelCustomSearchHubAll:
+		return true
+	case LocalModelCustomSearchHubHuggingface:
+		return true
+	case LocalModelCustomSearchHubModelscope:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomSearchResponseArch.
+const (
+	LocalModelCustomSearchArchArm64 LocalModelCustomSearchResponseArch = "arm64"
+	LocalModelCustomSearchArchX8664 LocalModelCustomSearchResponseArch = "x86_64"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomSearchResponseArch enum.
+func (e LocalModelCustomSearchResponseArch) Valid() bool {
+	switch e {
+	case LocalModelCustomSearchArchArm64:
+		return true
+	case LocalModelCustomSearchArchX8664:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelCustomSearchResponsePlatform.
+const (
+	LocalModelCustomSearchPlatformDarwin  LocalModelCustomSearchResponsePlatform = "darwin"
+	LocalModelCustomSearchPlatformLinux   LocalModelCustomSearchResponsePlatform = "linux"
+	LocalModelCustomSearchPlatformWindows LocalModelCustomSearchResponsePlatform = "windows"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelCustomSearchResponsePlatform enum.
+func (e LocalModelCustomSearchResponsePlatform) Valid() bool {
+	switch e {
+	case LocalModelCustomSearchPlatformDarwin:
+		return true
+	case LocalModelCustomSearchPlatformLinux:
+		return true
+	case LocalModelCustomSearchPlatformWindows:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelFamily.
+const (
+	LocalModelFamilyClaude   LocalModelFamily = "claude"
+	LocalModelFamilyDeepseek LocalModelFamily = "deepseek"
+	LocalModelFamilyGemma    LocalModelFamily = "gemma"
+	LocalModelFamilyGlm      LocalModelFamily = "glm"
+	LocalModelFamilyGrok     LocalModelFamily = "grok"
+	LocalModelFamilyKimi     LocalModelFamily = "kimi"
+	LocalModelFamilyLlama    LocalModelFamily = "llama"
+	LocalModelFamilyMistral  LocalModelFamily = "mistral"
+	LocalModelFamilyOpenai   LocalModelFamily = "openai"
+	LocalModelFamilyOther    LocalModelFamily = "other"
+	LocalModelFamilyPhi      LocalModelFamily = "phi"
+	LocalModelFamilyQwen     LocalModelFamily = "qwen"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelFamily enum.
+func (e LocalModelFamily) Valid() bool {
+	switch e {
+	case LocalModelFamilyClaude:
+		return true
+	case LocalModelFamilyDeepseek:
+		return true
+	case LocalModelFamilyGemma:
+		return true
+	case LocalModelFamilyGlm:
+		return true
+	case LocalModelFamilyGrok:
+		return true
+	case LocalModelFamilyKimi:
+		return true
+	case LocalModelFamilyLlama:
+		return true
+	case LocalModelFamilyMistral:
+		return true
+	case LocalModelFamilyOpenai:
+		return true
+	case LocalModelFamilyOther:
+		return true
+	case LocalModelFamilyPhi:
+		return true
+	case LocalModelFamilyQwen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelFormat.
+const (
+	LocalModelFormatGguf LocalModelFormat = "gguf"
+	LocalModelFormatMlx  LocalModelFormat = "mlx"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelFormat enum.
+func (e LocalModelFormat) Valid() bool {
+	switch e {
+	case LocalModelFormatGguf:
+		return true
+	case LocalModelFormatMlx:
 		return true
 	default:
 		return false
@@ -2183,6 +2546,8 @@ type LocalComputerToolResult struct {
 
 // LocalModelActionAck The Computer's immediate answer. accepted means the job started (or a snapshot is coming for refresh); refused means nothing changed. Progress and outcomes arrive only as snapshots.
 type LocalModelActionAck struct {
+	// ModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
+	ModelId *LocalModelId              `json:"model_id,omitempty"`
 	Outcome LocalModelActionAckOutcome `json:"outcome"`
 	Refusal *LocalModelActionRefusal   `json:"refusal,omitempty"`
 
@@ -2193,10 +2558,14 @@ type LocalModelActionAck struct {
 // LocalModelActionAckOutcome defines model for LocalModelActionAck.Outcome.
 type LocalModelActionAckOutcome string
 
-// LocalModelActionCommand TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first and force only with load.
+// LocalModelActionCommand TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh and custom_download; unload_first and force only with load; context_tokens with load or smoke_test.
 type LocalModelActionCommand struct {
-	// Action refresh asks the Computer to reread its library and send a snapshot; it names no model.
-	Action LocalModelActionKind `json:"action"`
+	// Action refresh asks the Computer to reread its library and send a snapshot; it names no model. custom_download starts a Standby-First custom hub download; smoke_test verifies an installed custom model in isolation.
+	Action        LocalModelActionKind `json:"action"`
+	ContextTokens *int64               `json:"context_tokens,omitempty"`
+
+	// CustomDownload Parameters to start a Standby-First custom model download on the Computer.
+	CustomDownload *LocalModelCustomDownloadInput `json:"custom_download,omitempty"`
 
 	// ExpiresAt UTC timestamp in RFC 3339 format with an explicit offset.
 	ExpiresAt Timestamp `json:"expires_at"`
@@ -2212,7 +2581,7 @@ type LocalModelActionCommand struct {
 	UnloadFirst *[]LocalModelId `json:"unload_first,omitempty"`
 }
 
-// LocalModelActionKind refresh asks the Computer to reread its library and send a snapshot; it names no model.
+// LocalModelActionKind refresh asks the Computer to reread its library and send a snapshot; it names no model. custom_download starts a Standby-First custom hub download; smoke_test verifies an installed custom model in isolation.
 type LocalModelActionKind string
 
 // LocalModelActionRefusal defines model for LocalModelActionRefusal.
@@ -2237,6 +2606,255 @@ type LocalModelActionRefusal struct {
 
 // LocalModelActionRefusalCode Why the Computer refused an action before starting it: a localmodels library error or a reason the library is unavailable.
 type LocalModelActionRefusalCode string
+
+// LocalModelCustomDefaultQuant defines model for LocalModelCustomDefaultQuant.
+type LocalModelCustomDefaultQuant struct {
+	Id        string `json:"id"`
+	Label     string `json:"label"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// LocalModelCustomDownloadCommand Internal Agent Service command to start a custom model download.
+type LocalModelCustomDownloadCommand struct {
+	// CustomDownload Parameters to start a Standby-First custom model download on the Computer.
+	CustomDownload LocalModelCustomDownloadInput `json:"custom_download"`
+
+	// ExpiresAt UTC timestamp in RFC 3339 format with an explicit offset.
+	ExpiresAt Timestamp `json:"expires_at"`
+
+	// RequestId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	RequestId Id `json:"request_id"`
+}
+
+// LocalModelCustomDownloadInput Parameters to start a Standby-First custom model download on the Computer.
+type LocalModelCustomDownloadInput struct {
+	Files       *[]string `json:"files,omitempty"`
+	ForceMemory *bool     `json:"force_memory,omitempty"`
+
+	// Hub Remote model hub hosting a custom repository.
+	Hub      LocalModelCustomHub `json:"hub"`
+	Mmproj   *string             `json:"mmproj,omitempty"`
+	Replace  *bool               `json:"replace,omitempty"`
+	RepoId   string              `json:"repo_id"`
+	Revision *string             `json:"revision,omitempty"`
+
+	// Token Transient read-only hub token; never persisted or logged.
+	Token     *string `json:"token,omitempty"`
+	VariantId string  `json:"variant_id"`
+}
+
+// LocalModelCustomGgufMeta defines model for LocalModelCustomGgufMeta.
+type LocalModelCustomGgufMeta struct {
+	Architecture    *string `json:"architecture,omitempty"`
+	HasChatTemplate *bool   `json:"has_chat_template,omitempty"`
+	Moe             *bool   `json:"moe,omitempty"`
+	NCtxTrain       *int64  `json:"n_ctx_train,omitempty"`
+	NLayer          *int    `json:"n_layer,omitempty"`
+}
+
+// LocalModelCustomHub Remote model hub hosting a custom repository.
+type LocalModelCustomHub string
+
+// LocalModelCustomIncompatibleReason defines model for LocalModelCustomIncompatibleReason.
+type LocalModelCustomIncompatibleReason string
+
+// LocalModelCustomMemoryEstimateBasis defines model for LocalModelCustomMemoryEstimateBasis.
+type LocalModelCustomMemoryEstimateBasis string
+
+// LocalModelCustomMemoryStatus defines model for LocalModelCustomMemoryStatus.
+type LocalModelCustomMemoryStatus string
+
+// LocalModelCustomMmprojCandidate defines model for LocalModelCustomMmprojCandidate.
+type LocalModelCustomMmprojCandidate struct {
+	Path        string  `json:"path"`
+	Recommended bool    `json:"recommended"`
+	Sha256      *string `json:"sha256,omitempty"`
+	SizeBytes   int64   `json:"size_bytes"`
+}
+
+// LocalModelCustomProbeHost defines model for LocalModelCustomProbeHost.
+type LocalModelCustomProbeHost struct {
+	Arch                 LocalModelCustomProbeHostArch     `json:"arch"`
+	DiskFreeBytes        int64                             `json:"disk_free_bytes"`
+	Platform             LocalModelCustomProbeHostPlatform `json:"platform"`
+	PoolHardCeilingBytes *int64                            `json:"pool_hard_ceiling_bytes,omitempty"`
+	PoolSoftBudgetBytes  *int64                            `json:"pool_soft_budget_bytes,omitempty"`
+	PoolTotalBytes       *int64                            `json:"pool_total_bytes,omitempty"`
+	SupportedFormats     []LocalModelFormat                `json:"supported_formats"`
+
+	// TargetPool A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
+	TargetPool *LocalModelPoolId `json:"target_pool,omitempty"`
+}
+
+// LocalModelCustomProbeHostArch defines model for LocalModelCustomProbeHost.Arch.
+type LocalModelCustomProbeHostArch string
+
+// LocalModelCustomProbeHostPlatform defines model for LocalModelCustomProbeHost.Platform.
+type LocalModelCustomProbeHostPlatform string
+
+// LocalModelCustomProbeHub defines model for LocalModelCustomProbeHub.
+type LocalModelCustomProbeHub string
+
+// LocalModelCustomProbeOutcome defines model for LocalModelCustomProbeOutcome.
+type LocalModelCustomProbeOutcome string
+
+// LocalModelCustomProbeRepo defines model for LocalModelCustomProbeRepo.
+type LocalModelCustomProbeRepo struct {
+	// Family Model family for brand presentation; never inferred from name.
+	Family *LocalModelFamily `json:"family,omitempty"`
+
+	// Format Weight format detected in a remote Hugging Face or ModelScope repository.
+	Format *LocalModelCustomRepoFormat `json:"format,omitempty"`
+	Gated  *bool                       `json:"gated,omitempty"`
+
+	// Hub Remote model hub hosting a custom repository.
+	Hub      LocalModelCustomHub `json:"hub"`
+	License  *string             `json:"license,omitempty"`
+	Owner    *string             `json:"owner,omitempty"`
+	RepoId   string              `json:"repo_id"`
+	Revision *string             `json:"revision,omitempty"`
+	Title    *string             `json:"title,omitempty"`
+	Url      string              `json:"url"`
+}
+
+// LocalModelCustomProbeRequest Zero-download metadata probe of a Hugging Face or ModelScope repository or file URL.
+type LocalModelCustomProbeRequest struct {
+	FileName *string                   `json:"file_name,omitempty"`
+	Hub      *LocalModelCustomProbeHub `json:"hub,omitempty"`
+	Revision *string                   `json:"revision,omitempty"`
+	Target   string                    `json:"target"`
+
+	// Token Transient read-only hub token; never persisted or logged.
+	Token *string `json:"token,omitempty"`
+}
+
+// LocalModelCustomProbeResponse Classified zero-download probe outcome. Gated repositories return HTTP 200 with outcome gated and hub_http_status (401 or 403) so browser clients never confuse hub authentication with session expiry.
+type LocalModelCustomProbeResponse struct {
+	GgufMeta *LocalModelCustomGgufMeta  `json:"gguf_meta,omitempty"`
+	Host     *LocalModelCustomProbeHost `json:"host,omitempty"`
+
+	// Hub Remote model hub hosting a custom repository.
+	Hub                  *LocalModelCustomHub                `json:"hub,omitempty"`
+	HubHttpStatus        *int                                `json:"hub_http_status,omitempty"`
+	MetadataComplete     *bool                               `json:"metadata_complete,omitempty"`
+	MetadataNote         *string                             `json:"metadata_note,omitempty"`
+	MmprojCandidates     *[]LocalModelCustomMmprojCandidate  `json:"mmproj_candidates,omitempty"`
+	Outcome              LocalModelCustomProbeOutcome        `json:"outcome"`
+	QuantVariants        *[]LocalModelCustomQuantVariant     `json:"quant_variants,omitempty"`
+	Reason               *LocalModelCustomIncompatibleReason `json:"reason,omitempty"`
+	RecommendedVariantId *string                             `json:"recommended_variant_id,omitempty"`
+	Repo                 *LocalModelCustomProbeRepo          `json:"repo,omitempty"`
+	RepoId               *string                             `json:"repo_id,omitempty"`
+	SelectedQuantId      *string                             `json:"selected_quant_id,omitempty"`
+	SuggestedSearchQuery *string                             `json:"suggested_search_query,omitempty"`
+	TokenProvided        *bool                               `json:"token_provided,omitempty"`
+}
+
+// LocalModelCustomQuantFile defines model for LocalModelCustomQuantFile.
+type LocalModelCustomQuantFile struct {
+	Path      string  `json:"path"`
+	Revision  *string `json:"revision,omitempty"`
+	Sha256    *string `json:"sha256,omitempty"`
+	SizeBytes int64   `json:"size_bytes"`
+}
+
+// LocalModelCustomQuantVariant defines model for LocalModelCustomQuantVariant.
+type LocalModelCustomQuantVariant struct {
+	AlreadyInstalled bool     `json:"already_installed"`
+	BitsPerWeight    *float32 `json:"bits_per_weight,omitempty"`
+
+	// CustomModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
+	CustomModelId        LocalModelId                        `json:"custom_model_id"`
+	DiskOk               bool                                `json:"disk_ok"`
+	DiskRequiredBytes    int64                               `json:"disk_required_bytes"`
+	EstimatedMemoryBytes int64                               `json:"estimated_memory_bytes"`
+	Files                []LocalModelCustomQuantFile         `json:"files"`
+	Id                   string                              `json:"id"`
+	Label                string                              `json:"label"`
+	MemoryEstimateBasis  LocalModelCustomMemoryEstimateBasis `json:"memory_estimate_basis"`
+	MemoryStatus         LocalModelCustomMemoryStatus        `json:"memory_status"`
+	MmprojBytes          int64                               `json:"mmproj_bytes"`
+	MmprojFile           *string                             `json:"mmproj_file,omitempty"`
+	Quant                string                              `json:"quant"`
+	ShardCount           int                                 `json:"shard_count"`
+	Sharded              bool                                `json:"sharded"`
+	TotalDownloadBytes   int64                               `json:"total_download_bytes"`
+	WeightsBytes         int64                               `json:"weights_bytes"`
+}
+
+// LocalModelCustomRepoFormat Weight format detected in a remote Hugging Face or ModelScope repository.
+type LocalModelCustomRepoFormat string
+
+// LocalModelCustomSearchFormat defines model for LocalModelCustomSearchFormat.
+type LocalModelCustomSearchFormat string
+
+// LocalModelCustomSearchHub defines model for LocalModelCustomSearchHub.
+type LocalModelCustomSearchHub string
+
+// LocalModelCustomSearchRequest Search or list trending custom repositories from Hugging Face or ModelScope.
+type LocalModelCustomSearchRequest struct {
+	Format *LocalModelCustomSearchFormat `json:"format,omitempty"`
+	Hub    *LocalModelCustomSearchHub    `json:"hub,omitempty"`
+	Limit  *int                          `json:"limit,omitempty"`
+	Query  *string                       `json:"query,omitempty"`
+
+	// Token Transient read-only hub token; never persisted or logged.
+	Token *string `json:"token,omitempty"`
+}
+
+// LocalModelCustomSearchResponse defines model for LocalModelCustomSearchResponse.
+type LocalModelCustomSearchResponse struct {
+	Arch             LocalModelCustomSearchResponseArch     `json:"arch"`
+	Format           LocalModelCustomSearchFormat           `json:"format"`
+	Hub              LocalModelCustomSearchHub              `json:"hub"`
+	Platform         LocalModelCustomSearchResponsePlatform `json:"platform"`
+	Query            string                                 `json:"query"`
+	Results          []LocalModelCustomSearchResultItem     `json:"results"`
+	SupportedFormats []LocalModelFormat                     `json:"supported_formats"`
+	Warnings         []string                               `json:"warnings"`
+}
+
+// LocalModelCustomSearchResponseArch defines model for LocalModelCustomSearchResponse.Arch.
+type LocalModelCustomSearchResponseArch string
+
+// LocalModelCustomSearchResponsePlatform defines model for LocalModelCustomSearchResponse.Platform.
+type LocalModelCustomSearchResponsePlatform string
+
+// LocalModelCustomSearchResultItem defines model for LocalModelCustomSearchResultItem.
+type LocalModelCustomSearchResultItem struct {
+	Architecture  *string                       `json:"architecture,omitempty"`
+	Compatible    bool                          `json:"compatible"`
+	ContextTokens *int64                        `json:"context_tokens,omitempty"`
+	DefaultQuant  *LocalModelCustomDefaultQuant `json:"default_quant,omitempty"`
+	Description   *string                       `json:"description,omitempty"`
+	Downloads     int64                         `json:"downloads"`
+
+	// Family Model family for brand presentation; never inferred from name.
+	Family *LocalModelFamily `json:"family,omitempty"`
+
+	// Format Weight format detected in a remote Hugging Face or ModelScope repository.
+	Format LocalModelCustomRepoFormat `json:"format"`
+	Gated  bool                       `json:"gated"`
+
+	// Hub Remote model hub hosting a custom repository.
+	Hub                 LocalModelCustomHub `json:"hub"`
+	IncompatibilityCode *string             `json:"incompatibility_code,omitempty"`
+	License             *string             `json:"license,omitempty"`
+	Likes               int64               `json:"likes"`
+	Owner               string              `json:"owner"`
+	ParameterBillions   *float32            `json:"parameter_billions,omitempty"`
+	QuantCount          *int                `json:"quant_count,omitempty"`
+	RepoId              string              `json:"repo_id"`
+	Title               string              `json:"title"`
+	UpdatedAt           *string             `json:"updated_at,omitempty"`
+	Url                 string              `json:"url"`
+}
+
+// LocalModelFamily Model family for brand presentation; never inferred from name.
+type LocalModelFamily string
+
+// LocalModelFormat Local weight format supported by localmodels engines.
+type LocalModelFormat string
 
 // LocalModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 type LocalModelId = string
@@ -3305,6 +3923,15 @@ type ConfigureLocalComputerBrowserConnectionJSONRequestBody = BrowserConnectionC
 // ActOnLocalComputerModelsJSONRequestBody defines body for ActOnLocalComputerModels for application/json ContentType.
 type ActOnLocalComputerModelsJSONRequestBody = LocalModelActionCommand
 
+// DownloadLocalComputerCustomModelJSONRequestBody defines body for DownloadLocalComputerCustomModel for application/json ContentType.
+type DownloadLocalComputerCustomModelJSONRequestBody = LocalModelCustomDownloadCommand
+
+// ProbeLocalComputerCustomModelJSONRequestBody defines body for ProbeLocalComputerCustomModel for application/json ContentType.
+type ProbeLocalComputerCustomModelJSONRequestBody = LocalModelCustomProbeRequest
+
+// SearchLocalComputerCustomModelsJSONRequestBody defines body for SearchLocalComputerCustomModels for application/json ContentType.
+type SearchLocalComputerCustomModelsJSONRequestBody = LocalModelCustomSearchRequest
+
 // ActOnLocalComputerSpeechJSONRequestBody defines body for ActOnLocalComputerSpeech for application/json ContentType.
 type ActOnLocalComputerSpeechJSONRequestBody = LocalSpeechActionCommand
 
@@ -4335,6 +4962,21 @@ type ClientInterface interface {
 
 	ActOnLocalComputerModels(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DownloadLocalComputerCustomModelWithBody request with any body
+	DownloadLocalComputerCustomModelWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	DownloadLocalComputerCustomModel(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body DownloadLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ProbeLocalComputerCustomModelWithBody request with any body
+	ProbeLocalComputerCustomModelWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ProbeLocalComputerCustomModel(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ProbeLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SearchLocalComputerCustomModelsWithBody request with any body
+	SearchLocalComputerCustomModelsWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SearchLocalComputerCustomModels(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body SearchLocalComputerCustomModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ActOnLocalComputerSpeechWithBody request with any body
 	ActOnLocalComputerSpeechWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -5001,6 +5643,78 @@ func (c *Client) ActOnLocalComputerModelsWithBody(ctx context.Context, tenantId 
 
 func (c *Client) ActOnLocalComputerModels(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewActOnLocalComputerModelsRequest(c.Server, tenantId, ownerActorId, computerId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DownloadLocalComputerCustomModelWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadLocalComputerCustomModelRequestWithBody(c.Server, tenantId, ownerActorId, computerId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DownloadLocalComputerCustomModel(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body DownloadLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadLocalComputerCustomModelRequest(c.Server, tenantId, ownerActorId, computerId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProbeLocalComputerCustomModelWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProbeLocalComputerCustomModelRequestWithBody(c.Server, tenantId, ownerActorId, computerId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ProbeLocalComputerCustomModel(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ProbeLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewProbeLocalComputerCustomModelRequest(c.Server, tenantId, ownerActorId, computerId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SearchLocalComputerCustomModelsWithBody(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSearchLocalComputerCustomModelsRequestWithBody(c.Server, tenantId, ownerActorId, computerId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SearchLocalComputerCustomModels(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body SearchLocalComputerCustomModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSearchLocalComputerCustomModelsRequest(c.Server, tenantId, ownerActorId, computerId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6647,6 +7361,189 @@ func NewActOnLocalComputerModelsRequestWithBody(server string, tenantId TenantId
 	return req, nil
 }
 
+// NewDownloadLocalComputerCustomModelRequest calls the generic DownloadLocalComputerCustomModel builder with application/json body
+func NewDownloadLocalComputerCustomModelRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body DownloadLocalComputerCustomModelJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewDownloadLocalComputerCustomModelRequestWithBody(server, tenantId, ownerActorId, computerId, "application/json", bodyReader)
+}
+
+// NewDownloadLocalComputerCustomModelRequestWithBody generates requests for DownloadLocalComputerCustomModel with any type of body
+func NewDownloadLocalComputerCustomModelRequestWithBody(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenantId", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "ownerActorId", ownerActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "computerId", computerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/owners/%s/local-computers/%s/local-models/custom/download", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewProbeLocalComputerCustomModelRequest calls the generic ProbeLocalComputerCustomModel builder with application/json body
+func NewProbeLocalComputerCustomModelRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ProbeLocalComputerCustomModelJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewProbeLocalComputerCustomModelRequestWithBody(server, tenantId, ownerActorId, computerId, "application/json", bodyReader)
+}
+
+// NewProbeLocalComputerCustomModelRequestWithBody generates requests for ProbeLocalComputerCustomModel with any type of body
+func NewProbeLocalComputerCustomModelRequestWithBody(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenantId", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "ownerActorId", ownerActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "computerId", computerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/owners/%s/local-computers/%s/local-models/custom/probe", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewSearchLocalComputerCustomModelsRequest calls the generic SearchLocalComputerCustomModels builder with application/json body
+func NewSearchLocalComputerCustomModelsRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body SearchLocalComputerCustomModelsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSearchLocalComputerCustomModelsRequestWithBody(server, tenantId, ownerActorId, computerId, "application/json", bodyReader)
+}
+
+// NewSearchLocalComputerCustomModelsRequestWithBody generates requests for SearchLocalComputerCustomModels with any type of body
+func NewSearchLocalComputerCustomModelsRequestWithBody(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "tenantId", tenantId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "ownerActorId", ownerActorId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "computerId", computerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/tenants/%s/owners/%s/local-computers/%s/local-models/custom/search", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewActOnLocalComputerSpeechRequest calls the generic ActOnLocalComputerSpeech builder with application/json body
 func NewActOnLocalComputerSpeechRequest(server string, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerSpeechJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -7316,6 +8213,21 @@ type ClientWithResponsesInterface interface {
 	ActOnLocalComputerModelsWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActOnLocalComputerModelsResponse, error)
 
 	ActOnLocalComputerModelsWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ActOnLocalComputerModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*ActOnLocalComputerModelsResponse, error)
+
+	// DownloadLocalComputerCustomModelWithBodyWithResponse request with any body
+	DownloadLocalComputerCustomModelWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DownloadLocalComputerCustomModelResponse, error)
+
+	DownloadLocalComputerCustomModelWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body DownloadLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*DownloadLocalComputerCustomModelResponse, error)
+
+	// ProbeLocalComputerCustomModelWithBodyWithResponse request with any body
+	ProbeLocalComputerCustomModelWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProbeLocalComputerCustomModelResponse, error)
+
+	ProbeLocalComputerCustomModelWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ProbeLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*ProbeLocalComputerCustomModelResponse, error)
+
+	// SearchLocalComputerCustomModelsWithBodyWithResponse request with any body
+	SearchLocalComputerCustomModelsWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchLocalComputerCustomModelsResponse, error)
+
+	SearchLocalComputerCustomModelsWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body SearchLocalComputerCustomModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchLocalComputerCustomModelsResponse, error)
 
 	// ActOnLocalComputerSpeechWithBodyWithResponse request with any body
 	ActOnLocalComputerSpeechWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ActOnLocalComputerSpeechResponse, error)
@@ -8429,6 +9341,114 @@ func (r ActOnLocalComputerModelsResponse) ContentType() string {
 	return ""
 }
 
+type DownloadLocalComputerCustomModelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LocalModelActionAck
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON502      *BadGateway
+	JSON503      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadLocalComputerCustomModelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadLocalComputerCustomModelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DownloadLocalComputerCustomModelResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ProbeLocalComputerCustomModelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LocalModelCustomProbeResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON502      *BadGateway
+	JSON503      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r ProbeLocalComputerCustomModelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ProbeLocalComputerCustomModelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ProbeLocalComputerCustomModelResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SearchLocalComputerCustomModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *LocalModelCustomSearchResponse
+	JSON400      *BadRequest
+	JSON401      *Unauthenticated
+	JSON404      *NotFound
+	JSON409      *Conflict
+	JSON502      *BadGateway
+	JSON503      *ServiceUnavailable
+}
+
+// Status returns HTTPResponse.Status
+func (r SearchLocalComputerCustomModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SearchLocalComputerCustomModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SearchLocalComputerCustomModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ActOnLocalComputerSpeechResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -9199,6 +10219,57 @@ func (c *ClientWithResponses) ActOnLocalComputerModelsWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseActOnLocalComputerModelsResponse(rsp)
+}
+
+// DownloadLocalComputerCustomModelWithBodyWithResponse request with arbitrary body returning *DownloadLocalComputerCustomModelResponse
+func (c *ClientWithResponses) DownloadLocalComputerCustomModelWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DownloadLocalComputerCustomModelResponse, error) {
+	rsp, err := c.DownloadLocalComputerCustomModelWithBody(ctx, tenantId, ownerActorId, computerId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadLocalComputerCustomModelResponse(rsp)
+}
+
+func (c *ClientWithResponses) DownloadLocalComputerCustomModelWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body DownloadLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*DownloadLocalComputerCustomModelResponse, error) {
+	rsp, err := c.DownloadLocalComputerCustomModel(ctx, tenantId, ownerActorId, computerId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadLocalComputerCustomModelResponse(rsp)
+}
+
+// ProbeLocalComputerCustomModelWithBodyWithResponse request with arbitrary body returning *ProbeLocalComputerCustomModelResponse
+func (c *ClientWithResponses) ProbeLocalComputerCustomModelWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ProbeLocalComputerCustomModelResponse, error) {
+	rsp, err := c.ProbeLocalComputerCustomModelWithBody(ctx, tenantId, ownerActorId, computerId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProbeLocalComputerCustomModelResponse(rsp)
+}
+
+func (c *ClientWithResponses) ProbeLocalComputerCustomModelWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body ProbeLocalComputerCustomModelJSONRequestBody, reqEditors ...RequestEditorFn) (*ProbeLocalComputerCustomModelResponse, error) {
+	rsp, err := c.ProbeLocalComputerCustomModel(ctx, tenantId, ownerActorId, computerId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseProbeLocalComputerCustomModelResponse(rsp)
+}
+
+// SearchLocalComputerCustomModelsWithBodyWithResponse request with arbitrary body returning *SearchLocalComputerCustomModelsResponse
+func (c *ClientWithResponses) SearchLocalComputerCustomModelsWithBodyWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchLocalComputerCustomModelsResponse, error) {
+	rsp, err := c.SearchLocalComputerCustomModelsWithBody(ctx, tenantId, ownerActorId, computerId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSearchLocalComputerCustomModelsResponse(rsp)
+}
+
+func (c *ClientWithResponses) SearchLocalComputerCustomModelsWithResponse(ctx context.Context, tenantId TenantId, ownerActorId OwnerActorId, computerId ComputerId, body SearchLocalComputerCustomModelsJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchLocalComputerCustomModelsResponse, error) {
+	rsp, err := c.SearchLocalComputerCustomModels(ctx, tenantId, ownerActorId, computerId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSearchLocalComputerCustomModelsResponse(rsp)
 }
 
 // ActOnLocalComputerSpeechWithBodyWithResponse request with arbitrary body returning *ActOnLocalComputerSpeechResponse
@@ -10855,6 +11926,210 @@ func ParseActOnLocalComputerModelsResponse(rsp *http.Response) (*ActOnLocalCompu
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest LocalModelActionAck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDownloadLocalComputerCustomModelResponse parses an HTTP response from a DownloadLocalComputerCustomModelWithResponse call
+func ParseDownloadLocalComputerCustomModelResponse(rsp *http.Response) (*DownloadLocalComputerCustomModelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadLocalComputerCustomModelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LocalModelActionAck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseProbeLocalComputerCustomModelResponse parses an HTTP response from a ProbeLocalComputerCustomModelWithResponse call
+func ParseProbeLocalComputerCustomModelResponse(rsp *http.Response) (*ProbeLocalComputerCustomModelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ProbeLocalComputerCustomModelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LocalModelCustomProbeResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthenticated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest BadGateway
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ServiceUnavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSearchLocalComputerCustomModelsResponse parses an HTTP response from a SearchLocalComputerCustomModelsWithResponse call
+func ParseSearchLocalComputerCustomModelsResponse(rsp *http.Response) (*SearchLocalComputerCustomModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SearchLocalComputerCustomModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LocalModelCustomSearchResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

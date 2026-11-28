@@ -59,6 +59,8 @@ export function redactLocalmodelsOutput(text: string): string {
       )
       .replace(/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g, "[REDACTED]")
       .replace(/\b(?:gh[pousr]|glpat)[-_][A-Za-z0-9_-]{16,}/g, "[REDACTED]")
+      .replace(/\bhf_[A-Za-z0-9]{16,}/g, "[REDACTED]")
+      .replace(/\bms[-_][A-Za-z0-9_-]{16,}/g, "[REDACTED]")
       // eslint-disable-next-line no-control-regex -- Strip control bytes from upstream output.
       .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
   );

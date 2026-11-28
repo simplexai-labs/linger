@@ -34,6 +34,7 @@ import {
   clearResumeLocalModels,
   configuredDevTool,
   ensureLocalmodelsTool,
+  isStoppedDownloadErrorCode,
   localmodelsBifrostAddrFile,
   localmodelsBifrostDirectory,
   localmodelsLegacyToolsMarkerFile,
@@ -1590,6 +1591,19 @@ test("stopLocalmodels and read-only commands isolate paths without allocating or
   await runLocalmodels(
     f.home,
     ["setup", "inspect", "--json"],
+    {},
+    { run: inspectRun },
+  );
+  // Read-only library custom search and probe also never allocate or persist a port.
+  await runLocalmodels(
+    f.home,
+    ["library", "custom", "search", "--config-stdin", "--json"],
+    {},
+    { run: inspectRun },
+  );
+  await runLocalmodels(
+    f.home,
+    ["library", "custom", "probe", "--config-stdin", "--json"],
     {},
     { run: inspectRun },
   );
@@ -3291,4 +3305,45 @@ test("falls through to the normal download path when the bundled kit archive is 
   expect(tool.moduleDir).toBe(
     path.join(f.home, "tools", "localmodels", source.sha256, "modules"),
   );
+});
+
+test("stopLocalmodels unloads loaded custom model IDs and skips custom stopped-download failures", async () => {
+  const f = await fixture();
+  const customLoaded = "custom.hf.bartowski--qwen2.5-7b-instruct-gguf:Q4_K_M";
+  const customStopped = "custom.ms.org--gated-model:Q4_K_M";
+  const seen: string[][] = [];
+  const run = vi.fn<typeof runLocalmodels>(async (_home, args) => {
+    seen.push(args);
+    if (args[0] === "library" && args[1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            { id: customLoaded, state: "loaded", origin: "custom" },
+            {
+              id: customStopped,
+              state: "failed",
+              origin: "custom",
+              error: { code: "HUB_AUTH_REQUIRED" },
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return { code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" };
+  });
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000) },
+    { run, installed: async () => true },
+  );
+  const unloaded = seen
+    .filter((args) => args[0] === "library" && args[1] === "unload")
+    .map((args) => args[2]);
+  expect(unloaded).toEqual([customLoaded]);
+  expect(isStoppedDownloadErrorCode("HUB_AUTH_REQUIRED")).toBe(true);
+  expect(isStoppedDownloadErrorCode("HUB_FORBIDDEN")).toBe(true);
+  expect(isStoppedDownloadErrorCode("HUB_UNREACHABLE")).toBe(true);
 });

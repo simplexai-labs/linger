@@ -17,6 +17,7 @@ export type AgentToDaemonEnvelope =
   | CapabilityLocalModelsExecute
   | CapabilityLocalSpeechActionExecute
   | CapabilityLocalAsrTranscribeExecute
+  | CapabilityLocalModelsCustom
   | CapabilityModelSource
   | OperationPrepare
   | ProviderPrepare
@@ -41,6 +42,7 @@ export type ServiceFeature =
   | "model_invoke_outcomes"
   | "local_models_engine"
   | "local_models_concurrency_probe"
+  | "local_models_custom"
   | "local_model_unavailable"
   | "model_gateway_unavailable"
   | "local_models_external_holders"
@@ -118,12 +120,20 @@ export type CapabilityComputerPermission = LocalSkillCommandIdentity & {
   kind: "computer_permission";
 };
 /**
- * Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; every other action names one. unload_first is only for load.
+ * Ask the Computer to act on its model library. The Computer answers at once with accepted or refused and supervises the localmodels job itself; progress and the outcome arrive as runner.local_models snapshots. refresh rereads the library and needs no model_id; custom_download carries custom_download without model_id; every other action names model_id. unload_first and force are only for load; context_tokens is for load or smoke_test.
  */
 export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
   type: "execute";
   kind: "local_models";
-  action: "download" | "cancel" | "load" | "unload" | "remove" | "refresh";
+  action:
+    | "download"
+    | "cancel"
+    | "load"
+    | "unload"
+    | "remove"
+    | "refresh"
+    | "smoke_test"
+    | "custom_download";
   model_id?: LocalModelId;
   /**
    * @maxItems 64
@@ -133,6 +143,8 @@ export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
    * Only for load. Override the memory safety guard when the Computer allows forced loading.
    */
   force?: boolean;
+  context_tokens?: PositiveInteger;
+  custom_download?: LocalModelCustomDownloadInput;
 } & {
   [k: string]: unknown;
 };
@@ -140,6 +152,7 @@ export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
  * Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
  */
 export type LocalModelId = string;
+export type LocalModelCustomHub = "huggingface" | "modelscope";
 /**
  * Ask the Computer to act on its localmodels speech library or runtime configuration.
  */
@@ -173,6 +186,16 @@ export type CapabilityLocalAsrTranscribeExecute = LocalSkillCommandIdentity & {
   use_gpu?: boolean;
   keep_loaded_seconds?: number;
   audio_wav_base64: string;
+};
+/**
+ * Synchronous custom hub search or zero-download probe on the Computer. Sent only to Computer 0.71.0 and later.
+ */
+export type CapabilityLocalModelsCustom = LocalSkillCommandIdentity & {
+  type: "execute";
+  kind: "local_models_custom";
+  action: "search" | "probe";
+  search?: LocalModelCustomSearchInput;
+  probe?: LocalModelCustomProbeInput;
 };
 export type CapabilityModelSource = LocalSkillCommandIdentity & {
   type: "execute";
@@ -287,6 +310,8 @@ export type DaemonToAgentEnvelope =
   | CapabilityLocalSpeechActionRefused
   | CapabilityLocalAsrTranscribeSucceeded
   | CapabilityLocalAsrTranscribeFailed
+  | CapabilityLocalModelsCustomSucceeded
+  | CapabilityLocalModelsCustomFailed
   | CapabilityModelSourceSucceeded
   | CapabilityModelSourceFailed
   | OperationPrepared
@@ -385,6 +410,7 @@ export type NonNegativeInteger = number;
  * Why a Computer reports no model library: TOOL_NOT_INSTALLED when the Computer config names no localmodels tool, TOOL_FAILED when the tool did not answer library status.
  */
 export type LocalModelsUnavailableCode = "TOOL_NOT_INSTALLED" | "TOOL_FAILED";
+export type LocalModelFormat = "gguf" | "mlx";
 /**
  * A place a model can live: gpu:<index>, system (RAM beside GPUs) or unified (RAM of a GPU-less or Apple silicon host).
  */
@@ -412,6 +438,13 @@ export type LocalModelErrorCode =
   | "MODEL_FILES_MISSING"
   | "GATEWAY_REGISTRATION_FAILED"
   | "CANCELLED"
+  | "HUB_AUTH_REQUIRED"
+  | "HUB_FORBIDDEN"
+  | "HUB_REPO_NOT_FOUND"
+  | "HUB_FORMAT_UNSUPPORTED"
+  | "HUB_UNREACHABLE"
+  | "UNSUPPORTED_ARCHITECTURE"
+  | "CORRUPT_WEIGHTS"
   | "UNKNOWN_ERROR";
 /**
  * Model family for brand presentation; never inferred from name.
@@ -573,7 +606,15 @@ export type CapabilityComputerPermissionFailed = LocalSkillCommandIdentity & {
 export type CapabilityLocalModelsAccepted = LocalSkillCommandIdentity & {
   type: "executed";
   kind: "local_models";
-  action: "download" | "cancel" | "load" | "unload" | "remove" | "refresh";
+  action:
+    | "download"
+    | "cancel"
+    | "load"
+    | "unload"
+    | "remove"
+    | "refresh"
+    | "smoke_test"
+    | "custom_download";
   model_id?: LocalModelId;
   outcome: "accepted";
 };
@@ -583,7 +624,15 @@ export type CapabilityLocalModelsAccepted = LocalSkillCommandIdentity & {
 export type CapabilityLocalModelsRefused = LocalSkillCommandIdentity & {
   type: "executed";
   kind: "local_models";
-  action: "download" | "cancel" | "load" | "unload" | "remove" | "refresh";
+  action:
+    | "download"
+    | "cancel"
+    | "load"
+    | "unload"
+    | "remove"
+    | "refresh"
+    | "smoke_test"
+    | "custom_download";
   model_id?: LocalModelId;
   refusal: LocalModelActionRefusal;
   outcome: "refused";
@@ -611,6 +660,13 @@ export type LocalModelActionRefusalCode =
   | "MODEL_FILES_MISSING"
   | "GATEWAY_REGISTRATION_FAILED"
   | "CANCELLED"
+  | "HUB_AUTH_REQUIRED"
+  | "HUB_FORBIDDEN"
+  | "HUB_REPO_NOT_FOUND"
+  | "HUB_FORMAT_UNSUPPORTED"
+  | "HUB_UNREACHABLE"
+  | "UNSUPPORTED_ARCHITECTURE"
+  | "CORRUPT_WEIGHTS"
   | "UNKNOWN_ERROR"
   | "TOOL_NOT_INSTALLED"
   | "TOOL_FAILED";
@@ -696,6 +752,26 @@ export type CapabilityLocalAsrTranscribeFailed = LocalSkillCommandIdentity & {
   error_code: string;
   error_message?: string;
   retryable?: boolean;
+};
+export type CapabilityLocalModelsCustomSucceeded = LocalSkillCommandIdentity & {
+  type: "executed";
+  kind: "local_models_custom";
+  action: "search" | "probe";
+  outcome: "succeeded";
+  search_result?: LocalModelCustomSearchResult;
+  probe_result?: LocalModelCustomProbeResult;
+};
+export type LocalModelCustomRepoFormat =
+  | "gguf"
+  | "mlx"
+  | "safetensors"
+  | "unknown";
+export type CapabilityLocalModelsCustomFailed = LocalSkillCommandIdentity & {
+  type: "executed";
+  kind: "local_models_custom";
+  action: "search" | "probe";
+  error: AgentRunnerError;
+  outcome: "failed";
 };
 export type CapabilityModelSourceSucceeded = LocalSkillCommandIdentity & {
   type: "executed";
@@ -1146,6 +1222,34 @@ export interface LocalSkillCommandIdentity {
   connection_epoch: PositiveInteger;
   expires_at: Timestamp;
 }
+export interface LocalModelCustomDownloadInput {
+  hub: LocalModelCustomHub;
+  repo_id: string;
+  revision?: string;
+  variant_id: string;
+  /**
+   * @maxItems 256
+   */
+  files?: string[];
+  mmproj?: string;
+  force_memory?: boolean;
+  replace?: boolean;
+  token?: string;
+}
+export interface LocalModelCustomSearchInput {
+  hub?: "all" | "huggingface" | "modelscope";
+  query?: string;
+  format?: "compatible" | "gguf" | "mlx" | "all";
+  limit?: number;
+  token?: string;
+}
+export interface LocalModelCustomProbeInput {
+  target: string;
+  hub?: "auto" | "huggingface" | "modelscope";
+  revision?: string;
+  file_name?: string;
+  token?: string;
+}
 /**
  * A BYOK endpoint: requests go to base_url + path + endpoint in protocol, and models are listed at base_url + path + /models. model_id is required except to list the endpoint's models.
  */
@@ -1564,6 +1668,51 @@ export interface LocalModelHost {
    * @maxItems 64
    */
   gpus: LocalModelGpu[];
+  /**
+   * Weight formats this Computer can run natively. Sent only when runner.welcome service_features names local_models_custom.
+   *
+   * @maxItems 8
+   */
+  supported_formats?:
+    | []
+    | [LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat, LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat, LocalModelFormat, LocalModelFormat]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ];
 }
 export interface LocalModelGpu {
   index: NonNegativeInteger;
@@ -1686,7 +1835,7 @@ export interface LocalModel {
   /**
    * Inference engine family for this model. Sent only when runner.welcome service_features names local_models_engine.
    */
-  engine?: "llama.cpp" | "polystrata" | "strata";
+  engine?: "llama.cpp" | "polystrata" | "strata" | "mlx";
   /**
    * Display-only engine version and backend for this model. Sent only when runner.welcome service_features names local_models_engine.
    */
@@ -1732,6 +1881,12 @@ export interface LocalModel {
    * True when loaded via --force overriding normal memory headroom checks; omitted when false. Sent only when runner.welcome service_features names local_models_admission_v2.
    */
   forced?: boolean;
+  /**
+   * Whether this entry is curated or custom. Sent only when runner.welcome service_features names local_models_custom.
+   */
+  origin?: "curated" | "custom";
+  custom?: LocalModelCustomInfo;
+  verification?: LocalModelVerification;
 }
 export interface LocalModelAvailability {
   downloadable: boolean;
@@ -1909,6 +2064,14 @@ export interface LocalModelDownloadProgress {
   done_bytes: NonNegativeInteger;
   total_bytes: NonNegativeInteger;
   bytes_per_second?: NonNegativeInteger;
+  /**
+   * 1-based shard index for sharded custom downloads. Sent only when runner.welcome service_features names local_models_custom.
+   */
+  shard_index?: number;
+  /**
+   * Total shard count for sharded custom downloads. Sent only when runner.welcome service_features names local_models_custom.
+   */
+  shard_count?: number;
 }
 /**
  * Present only while loaded.
@@ -2018,6 +2181,39 @@ export interface LocalModelPressureWarning {
   pool?: LocalModelPoolId;
   free_bytes?: NonNegativeInteger;
   budget_bytes?: NonNegativeInteger;
+}
+/**
+ * Custom hub metadata. Sent only when runner.welcome service_features names local_models_custom.
+ */
+export interface LocalModelCustomInfo {
+  hub: LocalModelCustomHub;
+  repo_id: string;
+  revision?: string;
+  url?: string;
+  format: LocalModelFormat;
+  variant_id: string;
+  shard_count: number;
+  mmproj_file?: string;
+  mmproj_bytes?: NonNegativeInteger;
+  accepted_risk?: boolean;
+  standby_on_restart: boolean;
+}
+/**
+ * Standby-First smoke-test verification state. Sent only when runner.welcome service_features names local_models_custom.
+ */
+export interface LocalModelVerification {
+  status: "untested" | "running" | "verified" | "failed";
+  context_tokens?: PositiveInteger;
+  tested_at?: Timestamp;
+  failure?: LocalModelVerificationFailure;
+}
+export interface LocalModelVerificationFailure {
+  kind: "oom" | "unsupported_arch" | "corrupt" | "unknown";
+  code: LocalModelErrorCode;
+  context_tokens: PositiveInteger;
+  can_retry_lower_ctx: boolean;
+  can_redownload: boolean;
+  diagnostic_log?: string;
 }
 /**
  * Present only when localmodels debug mode is active and the Agent Service declared local_models_diagnostics.
@@ -2536,6 +2732,418 @@ export interface LocalAsrTranscribeSegment {
   start: number;
   end: number;
   text: string;
+}
+export interface LocalModelCustomSearchResult {
+  query: string;
+  hub: "all" | "huggingface" | "modelscope";
+  format: "compatible" | "gguf" | "mlx" | "all";
+  platform: "linux" | "darwin" | "windows";
+  arch: "x86_64" | "arm64";
+  /**
+   * @maxItems 8
+   */
+  supported_formats:
+    | []
+    | [LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat, LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat, LocalModelFormat, LocalModelFormat]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ];
+  /**
+   * @maxItems 100
+   */
+  results: LocalModelCustomSearchResultItem[];
+  /**
+   * @maxItems 20
+   */
+  warnings:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
+}
+export interface LocalModelCustomSearchResultItem {
+  hub: LocalModelCustomHub;
+  repo_id: string;
+  url: string;
+  title: string;
+  owner: string;
+  format: LocalModelCustomRepoFormat;
+  family?: LocalModelFamily;
+  architecture?: string;
+  parameter_billions?: number;
+  context_tokens?: NonNegativeInteger;
+  downloads: NonNegativeInteger;
+  likes: NonNegativeInteger;
+  updated_at?: string;
+  description?: string;
+  license?: string;
+  gated: boolean;
+  compatible: boolean;
+  incompatibility_code?: string;
+  quant_count?: NonNegativeInteger;
+  default_quant?: LocalModelCustomDefaultQuant;
+}
+export interface LocalModelCustomDefaultQuant {
+  id: string;
+  label: string;
+  size_bytes: NonNegativeInteger;
+}
+export interface LocalModelCustomProbeResult {
+  outcome: "ready" | "gated" | "incompatible" | "not_found";
+  repo?: LocalModelCustomProbeRepo;
+  metadata_complete?: boolean;
+  metadata_note?: string;
+  gguf_meta?: LocalModelCustomGgufMeta;
+  host?: LocalModelCustomProbeHost;
+  /**
+   * @maxItems 32
+   */
+  mmproj_candidates?: LocalModelCustomMmprojCandidate[];
+  recommended_variant_id?: string;
+  selected_quant_id?: string;
+  /**
+   * @maxItems 128
+   */
+  quant_variants?: LocalModelCustomQuantVariant[];
+  hub_http_status?: number;
+  token_provided?: boolean;
+  reason?: "raw_safetensors" | "mlx_unsupported" | "no_runnable_files";
+  suggested_search_query?: string;
+  hub?: LocalModelCustomHub;
+  repo_id?: string;
+}
+export interface LocalModelCustomProbeRepo {
+  hub: LocalModelCustomHub;
+  repo_id: string;
+  revision?: string;
+  url: string;
+  title?: string;
+  owner?: string;
+  format?: LocalModelCustomRepoFormat;
+  family?: LocalModelFamily;
+  license?: string;
+  gated?: boolean;
+}
+export interface LocalModelCustomGgufMeta {
+  architecture?: string;
+  n_ctx_train?: NonNegativeInteger;
+  n_layer?: NonNegativeInteger;
+  moe?: boolean;
+  has_chat_template?: boolean;
+}
+export interface LocalModelCustomProbeHost {
+  platform: "linux" | "darwin" | "windows";
+  arch: "x86_64" | "arm64";
+  /**
+   * @maxItems 8
+   */
+  supported_formats:
+    | []
+    | [LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat, LocalModelFormat]
+    | [LocalModelFormat, LocalModelFormat, LocalModelFormat, LocalModelFormat]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ]
+    | [
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+        LocalModelFormat,
+      ];
+  disk_free_bytes: NonNegativeInteger;
+  target_pool?: LocalModelPoolId;
+  pool_total_bytes?: NonNegativeInteger;
+  pool_soft_budget_bytes?: NonNegativeInteger;
+  pool_hard_ceiling_bytes?: NonNegativeInteger;
+}
+export interface LocalModelCustomMmprojCandidate {
+  path: string;
+  size_bytes: NonNegativeInteger;
+  sha256?: string;
+  recommended: boolean;
+}
+export interface LocalModelCustomQuantVariant {
+  id: string;
+  custom_model_id: LocalModelId;
+  label: string;
+  quant: string;
+  bits_per_weight?: number;
+  sharded: boolean;
+  shard_count: PositiveInteger;
+  /**
+   * @maxItems 256
+   */
+  files: LocalModelCustomQuantFile[];
+  weights_bytes: NonNegativeInteger;
+  mmproj_file?: string;
+  mmproj_bytes: NonNegativeInteger;
+  total_download_bytes: NonNegativeInteger;
+  disk_required_bytes: NonNegativeInteger;
+  disk_ok: boolean;
+  estimated_memory_bytes: NonNegativeInteger;
+  memory_estimate_basis: "gguf_header" | "rough_1.2x_plus_0.8gb";
+  memory_status: "comfortable" | "tight" | "exceeds";
+  already_installed: boolean;
+}
+export interface LocalModelCustomQuantFile {
+  path: string;
+  size_bytes: NonNegativeInteger;
+  sha256?: string;
+  revision?: string;
 }
 export interface ModelSourceStatus {
   mode: "local" | "subscription" | "byok";

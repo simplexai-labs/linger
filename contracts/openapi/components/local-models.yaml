@@ -47,6 +47,13 @@ components:
         - MODEL_FILES_MISSING
         - GATEWAY_REGISTRATION_FAILED
         - CANCELLED
+        - HUB_AUTH_REQUIRED
+        - HUB_FORBIDDEN
+        - HUB_REPO_NOT_FOUND
+        - HUB_FORMAT_UNSUPPORTED
+        - HUB_UNREACHABLE
+        - UNSUPPORTED_ARCHITECTURE
+        - CORRUPT_WEIGHTS
         - UNKNOWN_ERROR
     LocalModelsUnavailableCode:
       description: >-
@@ -80,6 +87,13 @@ components:
         - MODEL_FILES_MISSING
         - GATEWAY_REGISTRATION_FAILED
         - CANCELLED
+        - HUB_AUTH_REQUIRED
+        - HUB_FORBIDDEN
+        - HUB_REPO_NOT_FOUND
+        - HUB_FORMAT_UNSUPPORTED
+        - HUB_UNREACHABLE
+        - UNSUPPORTED_ARCHITECTURE
+        - CORRUPT_WEIGHTS
         - UNKNOWN_ERROR
         - TOOL_NOT_INSTALLED
         - TOOL_FAILED
@@ -171,6 +185,145 @@ components:
           maxItems: 64
           items:
             $ref: "#/components/schemas/LocalModelGpu"
+        supported_formats:
+          description: Weight formats the host can run natively (gguf, mlx).
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/LocalModelFormat"
+    LocalModelFormat:
+      description: Local weight format supported by localmodels engines.
+      type: string
+      enum: [gguf, mlx]
+      x-enum-varnames: [LocalModelFormatGguf, LocalModelFormatMlx]
+    LocalModelCustomRepoFormat:
+      description: Weight format detected in a remote Hugging Face or ModelScope repository.
+      type: string
+      enum: [gguf, mlx, safetensors, unknown]
+      x-enum-varnames:
+        [
+          LocalModelCustomRepoFormatGguf,
+          LocalModelCustomRepoFormatMlx,
+          LocalModelCustomRepoFormatSafetensors,
+          LocalModelCustomRepoFormatUnknown,
+        ]
+    LocalModelOrigin:
+      description: Whether a model entry comes from the curated catalog or a custom hub repository.
+      type: string
+      enum: [curated, custom]
+      x-enum-varnames: [LocalModelOriginCurated, LocalModelOriginCustom]
+    LocalModelCustomHub:
+      description: Remote model hub hosting a custom repository.
+      type: string
+      enum: [huggingface, modelscope]
+      x-enum-varnames:
+        [LocalModelCustomHubHuggingface, LocalModelCustomHubModelscope]
+    LocalModelCustomInfo:
+      description: Provenance and Standby-First metadata for a custom hub model.
+      type: object
+      additionalProperties: false
+      required:
+        [hub, repo_id, format, variant_id, shard_count, standby_on_restart]
+      properties:
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomHub"
+        repo_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          pattern: "^https://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]+$"
+        format:
+          $ref: "#/components/schemas/LocalModelFormat"
+        variant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        shard_count:
+          type: integer
+          minimum: 1
+          maximum: 256
+        mmproj_file:
+          type: string
+          minLength: 1
+          maxLength: 512
+        mmproj_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        accepted_risk:
+          type: boolean
+        standby_on_restart:
+          type: boolean
+    LocalModelVerificationStatus:
+      description: Smoke-test verification state for a custom model.
+      type: string
+      enum: [untested, running, verified, failed]
+      x-enum-varnames:
+        [
+          LocalModelVerificationStatusUntested,
+          LocalModelVerificationStatusRunning,
+          LocalModelVerificationStatusVerified,
+          LocalModelVerificationStatusFailed,
+        ]
+    LocalModelVerificationFailureKind:
+      description: Classified failure category of a custom model smoke test.
+      type: string
+      enum: [oom, unsupported_arch, corrupt, unknown]
+      x-enum-varnames:
+        [
+          LocalModelVerificationFailureKindOom,
+          LocalModelVerificationFailureKindUnsupportedArch,
+          LocalModelVerificationFailureKindCorrupt,
+          LocalModelVerificationFailureKindUnknown,
+        ]
+    LocalModelVerificationFailure:
+      description: Structured details of a failed custom model smoke test.
+      type: object
+      additionalProperties: false
+      required:
+        [kind, code, context_tokens, can_retry_lower_ctx, can_redownload]
+      properties:
+        kind:
+          $ref: "#/components/schemas/LocalModelVerificationFailureKind"
+        code:
+          $ref: "#/components/schemas/LocalModelErrorCode"
+        context_tokens:
+          type: integer
+          format: int64
+          minimum: 1
+        can_retry_lower_ctx:
+          type: boolean
+        can_redownload:
+          type: boolean
+        diagnostic_log:
+          description: Redacted diagnostic excerpt from the smoke test; owner-only in public views.
+          type: string
+          maxLength: 4000
+    LocalModelVerification:
+      description: Smoke-test verification record for a custom model.
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/LocalModelVerificationStatus"
+        context_tokens:
+          type: integer
+          format: int64
+          minimum: 1
+        tested_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        failure:
+          $ref: "#/components/schemas/LocalModelVerificationFailure"
     LocalModelPoolHolder:
       description: >-
         Something holding pool memory. A component is a foundation service such
@@ -404,6 +557,14 @@ components:
           type: integer
           format: int64
           minimum: 0
+        shard_index:
+          description: 1-based index of the shard currently downloading.
+          type: integer
+          minimum: 1
+        shard_count:
+          description: Total number of shards in this download.
+          type: integer
+          minimum: 1
     LocalModelEndpoint:
       type: object
       additionalProperties: false
@@ -554,12 +715,13 @@ components:
         Inference engine family that runs this model entry. Never inferred from
         name or description.
       type: string
-      enum: [llama.cpp, polystrata, strata]
+      enum: [llama.cpp, polystrata, strata, mlx]
       x-enum-varnames:
         [
           LocalModelEngineLlamaCpp,
           LocalModelEnginePolystrata,
           LocalModelEngineStrata,
+          LocalModelEngineMlx,
         ]
     LocalModelStorageFile:
       description: >-
@@ -870,6 +1032,15 @@ components:
         forced:
           description: True when loaded via --force overriding normal memory headroom checks; omitted when false.
           type: boolean
+        origin:
+          $ref: "#/components/schemas/LocalModelOrigin"
+          description: Absent means curated for backward compatibility.
+        custom:
+          $ref: "#/components/schemas/LocalModelCustomInfo"
+          description: Present when origin is custom.
+        verification:
+          $ref: "#/components/schemas/LocalModelVerification"
+          description: Smoke-test verification state for custom models.
     LocalModelsUnavailableReason:
       type: object
       additionalProperties: false
@@ -934,9 +1105,20 @@ components:
     LocalModelActionKind:
       description: >-
         refresh asks the Computer to reread its library and send a snapshot; it
-        names no model.
+        names no model. custom_download starts a Standby-First custom hub
+        download; smoke_test verifies an installed custom model in isolation.
       type: string
-      enum: [download, cancel, load, unload, remove, refresh]
+      enum:
+        [
+          download,
+          cancel,
+          load,
+          unload,
+          remove,
+          refresh,
+          smoke_test,
+          custom_download,
+        ]
       x-enum-varnames:
         [
           LocalModelActionKindDownload,
@@ -945,12 +1127,15 @@ components:
           LocalModelActionKindUnload,
           LocalModelActionKindRemove,
           LocalModelActionKindRefresh,
+          LocalModelActionKindSmokeTest,
+          LocalModelActionKindCustomDownload,
         ]
     LocalModelActionCommand:
       description: >-
         TeamHub asks Agent Service to send one execute local_models frame to an
-        owned Computer. model_id is required except for refresh; unload_first
-        and force only with load.
+        owned Computer. model_id is required except for refresh and
+        custom_download; unload_first and force only with load; context_tokens
+        with load or smoke_test.
       type: object
       additionalProperties: false
       required: [request_id, action, expires_at]
@@ -970,6 +1155,13 @@ components:
         force:
           description: Only with load. Override the memory safety guard when the Computer allows forced loading.
           type: boolean
+        context_tokens:
+          type: integer
+          format: int64
+          minimum: 512
+          maximum: 1048576
+        custom_download:
+          $ref: "#/components/schemas/LocalModelCustomDownloadInput"
         expires_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
     LocalModelActionRefusal:
@@ -1017,20 +1209,24 @@ components:
           type: string
           enum: [accepted, refused]
           x-enum-varnames: [LocalModelActionAccepted, LocalModelActionRefused]
+        model_id:
+          $ref: "#/components/schemas/LocalModelId"
+          description: Assigned model ID when returned by the Computer (for example on custom_download).
         refusal:
           $ref: "#/components/schemas/LocalModelActionRefusal"
           description: Present only when refused.
     LocalModelActionRequest:
       description: >-
         A Human's action on one model. The click is the approval; there is no
-        separate confirm step on the Computer. unload_first and force only with load.
+        separate confirm step on the Computer. unload_first and force are only
+        for load; context_tokens is for load or smoke_test (4096 or 2048).
       type: object
       additionalProperties: false
       required: [action]
       properties:
         action:
           type: string
-          enum: [download, cancel, load, unload, remove]
+          enum: [download, cancel, load, unload, remove, smoke_test]
           x-enum-varnames:
             [
               LocalModelActionRequestDownload,
@@ -1038,6 +1234,7 @@ components:
               LocalModelActionRequestLoad,
               LocalModelActionRequestUnload,
               LocalModelActionRequestRemove,
+              LocalModelActionRequestSmokeTest,
             ]
         unload_first:
           description: Loaded models in the same pool to unload before the load starts.
@@ -1049,6 +1246,12 @@ components:
         force:
           description: Only with load. Override the memory safety guard when the Computer allows forced loading.
           type: boolean
+        context_tokens:
+          description: Context token budget for smoke_test (4096 or 2048) or load.
+          type: integer
+          format: int64
+          minimum: 512
+          maximum: 1048576
     LocalModelActionAccepted:
       type: object
       additionalProperties: false
@@ -1060,7 +1263,7 @@ components:
           $ref: "#/components/schemas/LocalModelId"
         action:
           type: string
-          enum: [download, cancel, load, unload, remove]
+          enum: [download, cancel, load, unload, remove, smoke_test]
           x-enum-varnames:
             [
               LocalModelActionAcceptedDownload,
@@ -1068,7 +1271,600 @@ components:
               LocalModelActionAcceptedLoad,
               LocalModelActionAcceptedUnload,
               LocalModelActionAcceptedRemove,
+              LocalModelActionAcceptedSmokeTest,
             ]
+    LocalModelCustomSearchHub:
+      type: string
+      enum: [all, huggingface, modelscope]
+      x-enum-varnames:
+        [
+          LocalModelCustomSearchHubAll,
+          LocalModelCustomSearchHubHuggingface,
+          LocalModelCustomSearchHubModelscope,
+        ]
+    LocalModelCustomSearchFormat:
+      type: string
+      enum: [compatible, gguf, mlx, all]
+      x-enum-varnames:
+        [
+          LocalModelCustomSearchFormatCompatible,
+          LocalModelCustomSearchFormatGguf,
+          LocalModelCustomSearchFormatMlx,
+          LocalModelCustomSearchFormatAll,
+        ]
+    LocalModelCustomSearchRequest:
+      description: Search or list trending custom repositories from Hugging Face or ModelScope.
+      type: object
+      additionalProperties: false
+      properties:
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomSearchHub"
+        query:
+          type: string
+          maxLength: 256
+        format:
+          $ref: "#/components/schemas/LocalModelCustomSearchFormat"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+        token:
+          description: Transient read-only hub token; never persisted or logged.
+          type: string
+          maxLength: 4096
+    LocalModelCustomDefaultQuant:
+      type: object
+      additionalProperties: false
+      required: [id, label, size_bytes]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelCustomSearchResultItem:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          hub,
+          repo_id,
+          url,
+          title,
+          owner,
+          format,
+          downloads,
+          likes,
+          gated,
+          compatible,
+        ]
+      properties:
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomHub"
+        repo_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        owner:
+          type: string
+          minLength: 1
+          maxLength: 120
+        format:
+          $ref: "#/components/schemas/LocalModelCustomRepoFormat"
+        family:
+          $ref: "#/components/schemas/LocalModelFamily"
+        architecture:
+          type: string
+          maxLength: 64
+        parameter_billions:
+          type: number
+          minimum: 0
+        context_tokens:
+          type: integer
+          format: int64
+          minimum: 0
+        downloads:
+          type: integer
+          format: int64
+          minimum: 0
+        likes:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 2000
+        license:
+          type: string
+          maxLength: 120
+        gated:
+          type: boolean
+        compatible:
+          type: boolean
+        incompatibility_code:
+          type: string
+          maxLength: 64
+        quant_count:
+          type: integer
+          minimum: 0
+        default_quant:
+          $ref: "#/components/schemas/LocalModelCustomDefaultQuant"
+    LocalModelCustomSearchResponse:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          query,
+          hub,
+          format,
+          platform,
+          arch,
+          supported_formats,
+          results,
+          warnings,
+        ]
+      properties:
+        query:
+          type: string
+          maxLength: 256
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomSearchHub"
+        format:
+          $ref: "#/components/schemas/LocalModelCustomSearchFormat"
+        platform:
+          type: string
+          enum: [linux, darwin, windows]
+          x-enum-varnames:
+            [
+              LocalModelCustomSearchPlatformLinux,
+              LocalModelCustomSearchPlatformDarwin,
+              LocalModelCustomSearchPlatformWindows,
+            ]
+        arch:
+          type: string
+          enum: [x86_64, arm64]
+          x-enum-varnames:
+            [LocalModelCustomSearchArchX8664, LocalModelCustomSearchArchArm64]
+        supported_formats:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/LocalModelFormat"
+        results:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/LocalModelCustomSearchResultItem"
+        warnings:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 400
+    LocalModelCustomProbeHub:
+      type: string
+      enum: [auto, huggingface, modelscope]
+      x-enum-varnames:
+        [
+          LocalModelCustomProbeHubAuto,
+          LocalModelCustomProbeHubHuggingface,
+          LocalModelCustomProbeHubModelscope,
+        ]
+    LocalModelCustomProbeRequest:
+      description: Zero-download metadata probe of a Hugging Face or ModelScope repository or file URL.
+      type: object
+      additionalProperties: false
+      required: [target]
+      properties:
+        target:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomProbeHub"
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 512
+        token:
+          description: Transient read-only hub token; never persisted or logged.
+          type: string
+          maxLength: 4096
+    LocalModelCustomProbeRepo:
+      type: object
+      additionalProperties: false
+      required: [hub, repo_id, url]
+      properties:
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomHub"
+        repo_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        owner:
+          type: string
+          minLength: 1
+          maxLength: 120
+        format:
+          $ref: "#/components/schemas/LocalModelCustomRepoFormat"
+        family:
+          $ref: "#/components/schemas/LocalModelFamily"
+        license:
+          type: string
+          maxLength: 120
+        gated:
+          type: boolean
+    LocalModelCustomGgufMeta:
+      type: object
+      additionalProperties: false
+      properties:
+        architecture:
+          type: string
+          maxLength: 64
+        n_ctx_train:
+          type: integer
+          format: int64
+          minimum: 0
+        n_layer:
+          type: integer
+          minimum: 0
+        moe:
+          type: boolean
+        has_chat_template:
+          type: boolean
+    LocalModelCustomProbeHost:
+      type: object
+      additionalProperties: false
+      required: [platform, arch, supported_formats, disk_free_bytes]
+      properties:
+        platform:
+          type: string
+          enum: [linux, darwin, windows]
+          x-enum-varnames:
+            [
+              LocalModelCustomProbeHostPlatformLinux,
+              LocalModelCustomProbeHostPlatformDarwin,
+              LocalModelCustomProbeHostPlatformWindows,
+            ]
+        arch:
+          type: string
+          enum: [x86_64, arm64]
+          x-enum-varnames:
+            [
+              LocalModelCustomProbeHostArchX8664,
+              LocalModelCustomProbeHostArchArm64,
+            ]
+        supported_formats:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/LocalModelFormat"
+        disk_free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        target_pool:
+          $ref: "#/components/schemas/LocalModelPoolId"
+        pool_total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        pool_soft_budget_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        pool_hard_ceiling_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+    LocalModelCustomMmprojCandidate:
+      type: object
+      additionalProperties: false
+      required: [path, size_bytes, recommended]
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 512
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        sha256:
+          type: string
+          maxLength: 128
+        recommended:
+          type: boolean
+    LocalModelCustomQuantFile:
+      type: object
+      additionalProperties: false
+      required: [path, size_bytes]
+      properties:
+        path:
+          type: string
+          minLength: 1
+          maxLength: 512
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        sha256:
+          type: string
+          maxLength: 128
+        revision:
+          type: string
+          maxLength: 128
+    LocalModelCustomMemoryEstimateBasis:
+      type: string
+      enum: [gguf_header, rough_1.2x_plus_0.8gb]
+      x-enum-varnames:
+        [
+          LocalModelCustomMemoryEstimateBasisGgufHeader,
+          LocalModelCustomMemoryEstimateBasisRough,
+        ]
+    LocalModelCustomMemoryStatus:
+      type: string
+      enum: [comfortable, tight, exceeds]
+      x-enum-varnames:
+        [
+          LocalModelCustomMemoryStatusComfortable,
+          LocalModelCustomMemoryStatusTight,
+          LocalModelCustomMemoryStatusExceeds,
+        ]
+    LocalModelCustomQuantVariant:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          custom_model_id,
+          label,
+          quant,
+          sharded,
+          shard_count,
+          files,
+          weights_bytes,
+          mmproj_bytes,
+          total_download_bytes,
+          disk_required_bytes,
+          disk_ok,
+          estimated_memory_bytes,
+          memory_estimate_basis,
+          memory_status,
+          already_installed,
+        ]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        custom_model_id:
+          $ref: "#/components/schemas/LocalModelId"
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+        quant:
+          type: string
+          minLength: 1
+          maxLength: 64
+        bits_per_weight:
+          type: number
+          minimum: 0
+        sharded:
+          type: boolean
+        shard_count:
+          type: integer
+          minimum: 1
+        files:
+          type: array
+          maxItems: 256
+          items:
+            $ref: "#/components/schemas/LocalModelCustomQuantFile"
+        weights_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        mmproj_file:
+          type: string
+          maxLength: 512
+        mmproj_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        total_download_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        disk_required_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        disk_ok:
+          type: boolean
+        estimated_memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        memory_estimate_basis:
+          $ref: "#/components/schemas/LocalModelCustomMemoryEstimateBasis"
+        memory_status:
+          $ref: "#/components/schemas/LocalModelCustomMemoryStatus"
+        already_installed:
+          type: boolean
+    LocalModelCustomProbeOutcome:
+      type: string
+      enum: [ready, gated, incompatible, not_found]
+      x-enum-varnames:
+        [
+          LocalModelCustomProbeOutcomeReady,
+          LocalModelCustomProbeOutcomeGated,
+          LocalModelCustomProbeOutcomeIncompatible,
+          LocalModelCustomProbeOutcomeNotFound,
+        ]
+    LocalModelCustomIncompatibleReason:
+      type: string
+      enum: [raw_safetensors, mlx_unsupported, no_runnable_files]
+      x-enum-varnames:
+        [
+          LocalModelCustomIncompatibleReasonRawSafetensors,
+          LocalModelCustomIncompatibleReasonMlxUnsupported,
+          LocalModelCustomIncompatibleReasonNoRunnableFiles,
+        ]
+    LocalModelCustomProbeResponse:
+      description: >-
+        Classified zero-download probe outcome. Gated repositories return HTTP
+        200 with outcome gated and hub_http_status (401 or 403) so browser
+        clients never confuse hub authentication with session expiry.
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          $ref: "#/components/schemas/LocalModelCustomProbeOutcome"
+        repo:
+          $ref: "#/components/schemas/LocalModelCustomProbeRepo"
+        metadata_complete:
+          type: boolean
+        metadata_note:
+          type: string
+          maxLength: 400
+        gguf_meta:
+          $ref: "#/components/schemas/LocalModelCustomGgufMeta"
+        host:
+          $ref: "#/components/schemas/LocalModelCustomProbeHost"
+        mmproj_candidates:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/LocalModelCustomMmprojCandidate"
+        recommended_variant_id:
+          type: string
+          maxLength: 128
+        selected_quant_id:
+          type: string
+          maxLength: 128
+        quant_variants:
+          type: array
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/LocalModelCustomQuantVariant"
+        hub_http_status:
+          type: integer
+          minimum: 400
+          maximum: 499
+        token_provided:
+          type: boolean
+        reason:
+          $ref: "#/components/schemas/LocalModelCustomIncompatibleReason"
+        suggested_search_query:
+          type: string
+          maxLength: 256
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomHub"
+        repo_id:
+          type: string
+          maxLength: 256
+    LocalModelCustomDownloadInput:
+      description: Parameters to start a Standby-First custom model download on the Computer.
+      type: object
+      additionalProperties: false
+      required: [hub, repo_id, variant_id]
+      properties:
+        hub:
+          $ref: "#/components/schemas/LocalModelCustomHub"
+        repo_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 128
+        variant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        files:
+          type: array
+          maxItems: 256
+          items:
+            type: string
+            minLength: 1
+            maxLength: 512
+        mmproj:
+          type: string
+          minLength: 1
+          maxLength: 512
+        force_memory:
+          type: boolean
+        replace:
+          type: boolean
+        token:
+          description: Transient read-only hub token; never persisted or logged.
+          type: string
+          maxLength: 4096
+    LocalModelCustomDownloadCommand:
+      description: Internal Agent Service command to start a custom model download.
+      type: object
+      additionalProperties: false
+      required: [request_id, expires_at, custom_download]
+      properties:
+        request_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        expires_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+        custom_download:
+          $ref: "#/components/schemas/LocalModelCustomDownloadInput"
+    LocalModelCustomDownloadAccepted:
+      type: object
+      additionalProperties: false
+      required: [computer_id, action]
+      properties:
+        computer_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        model_id:
+          $ref: "#/components/schemas/LocalModelId"
+        action:
+          type: string
+          enum: [custom_download]
+          x-enum-varnames: [LocalModelCustomDownloadAcceptedCustomDownload]
     LocalModelsRefreshAccepted:
       type: object
       additionalProperties: false
@@ -1108,6 +1904,14 @@ components:
         - LOCAL_MODEL_GPU_UNSUPPORTED
         - LOCAL_MODEL_DRIVER_UPDATE_REQUIRED
         - LOCAL_MODEL_RUNTIME_DEPENDENCY_MISSING
+        - LOCAL_MODELS_CUSTOM_UNSUPPORTED
+        - LOCAL_MODEL_HUB_AUTH_REQUIRED
+        - LOCAL_MODEL_HUB_FORBIDDEN
+        - LOCAL_MODEL_HUB_REPO_NOT_FOUND
+        - LOCAL_MODEL_HUB_FORMAT_UNSUPPORTED
+        - LOCAL_MODEL_HUB_UNREACHABLE
+        - LOCAL_MODEL_UNSUPPORTED_ARCHITECTURE
+        - LOCAL_MODEL_CORRUPT_WEIGHTS
         - LOCAL_MODEL_ACTION_FAILED
         - LOCAL_MODEL_ACTION_UNCONFIRMED
         - LOCAL_MODELS_SERVICE_UNAVAILABLE
@@ -1134,6 +1938,19 @@ components:
         retryable:
           type: boolean
           default: false
+        need_bytes:
+          description: Structured byte requirement on disk or memory refusals.
+          type: integer
+          format: int64
+          minimum: 0
+        free_bytes:
+          description: Structured available byte count on disk or memory refusals.
+          type: integer
+          format: int64
+          minimum: 0
+        pool:
+          $ref: "#/components/schemas/LocalModelPoolId"
+          description: Memory pool implicated in a LOAD_NO_ROOM refusal.
     LocalModelsErrorResponse:
       type: object
       additionalProperties: false

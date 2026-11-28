@@ -204,6 +204,54 @@ describe("Runner Gateway local models", () => {
         "local_models_engine",
         "local_models_concurrency_probe",
         "local_voice_asr",
+        "local_models_custom",
+        "local_model_unavailable",
+        "model_gateway_unavailable",
+        "local_models_external_holders",
+        "local_models_storage",
+        "runtime_failure_detail",
+        "operation_background_wait",
+        "dynamic_reasoning_efforts",
+        "antigravity_history",
+        "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
+      ],
+    ],
+    [
+      "0.71.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "model_invoke_outcomes",
+        "local_models_engine",
+        "local_models_concurrency_probe",
+        "local_voice_asr",
+        "local_models_custom",
+        "local_model_unavailable",
+        "model_gateway_unavailable",
+        "local_models_external_holders",
+        "local_models_storage",
+        "runtime_failure_detail",
+        "operation_background_wait",
+        "dynamic_reasoning_efforts",
+        "antigravity_history",
+        "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
+      ],
+    ],
+    [
+      "0.69.0",
+      [
+        "local_models",
+        "byok_endpoint",
+        "local_models_diagnostics",
+        "model_invoke_outcomes",
+        "local_models_engine",
+        "local_models_concurrency_probe",
+        "local_voice_asr",
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
@@ -1326,5 +1374,132 @@ describe("runner.local_models concurrency probing and ModelQueue wiring", () => 
         expiresAt: new Date(Date.now() + 30_000).toISOString(),
       }),
     ).rejects.toBeInstanceOf(LocalComputerCapabilityError);
+  });
+
+  it("rejects custom model RPCs and smoke_test on Computers below 0.71.0", async () => {
+    const { gateway, connection } = await connectWithPi("0.70.0");
+    await connection.receive({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: snapshot("v1"),
+    });
+    await expect(
+      gateway.probeCustomLocalModel({
+        ...target,
+        input: { target: "bartowski/Qwen2.5-7B-Instruct-GGUF" },
+      }),
+    ).rejects.toMatchObject({ name: "LocalModelsCustomUnsupportedError" });
+    await expect(
+      gateway.searchCustomLocalModels({
+        ...target,
+        input: { query: "qwen" },
+      }),
+    ).rejects.toMatchObject({ name: "LocalModelsCustomUnsupportedError" });
+    await expect(
+      gateway.actOnLocalModels({
+        ...target,
+        action: "smoke_test",
+        modelId: "custom.hf.bartowski--qwen:Q4_K_M",
+        contextTokens: 4096,
+        expiresAt: new Date(Date.now() + 10_000).toISOString(),
+      }),
+    ).rejects.toMatchObject({ name: "LocalModelsCustomUnsupportedError" });
+  });
+
+  it("relays custom search, probe, download, and smoke_test on Computers 0.71.0+", async () => {
+    const { gateway, connection, sent } = await connectWithPi("0.71.0");
+    await connection.receive({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 1,
+      local_models: snapshot("v1"),
+    });
+
+    const probePromise = gateway.probeCustomLocalModel({
+      ...target,
+      input: {
+        target: "meta-llama/Llama-3.1-8B-GGUF",
+        hub: "huggingface",
+      },
+    });
+    const probeFrame = sent.find(
+      (frame) =>
+        frame.type === "execute" && frame.kind === "local_models_custom",
+    );
+    expect(probeFrame).toBeDefined();
+    if (
+      probeFrame?.type === "execute" &&
+      probeFrame.kind === "local_models_custom"
+    ) {
+      await connection.receive({
+        type: "executed",
+        kind: "local_models_custom",
+        protocol_version: "2",
+        command_id: probeFrame.command_id,
+        runner_id: target.computerId,
+        tenant_id: target.tenantId,
+        owner_actor_id: target.ownerActorId,
+        connection_epoch: probeFrame.connection_epoch,
+        expires_at: probeFrame.expires_at,
+        action: "probe",
+        outcome: "succeeded",
+        probe_result: {
+          outcome: "gated",
+          hub_http_status: 401,
+          token_provided: false,
+          repo: {
+            hub: "huggingface",
+            repo_id: "meta-llama/Llama-3.1-8B-GGUF",
+            url: "https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF",
+          },
+        },
+      });
+    }
+    const probeRes = await probePromise;
+    expect(probeRes.outcome).toBe("gated");
+    expect(probeRes.hub_http_status).toBe(401);
+
+    const downloadPromise = gateway.downloadCustomLocalModel({
+      ...target,
+      customDownload: {
+        hub: "huggingface",
+        repo_id: "bartowski/Qwen2.5-7B-Instruct-GGUF",
+        variant_id: "Q4_K_M",
+      },
+      expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    });
+    const dlFrame = sent.find(
+      (frame) =>
+        frame.type === "execute" &&
+        frame.kind === "local_models" &&
+        frame.action === "custom_download",
+    );
+    expect(dlFrame).toBeDefined();
+    if (dlFrame?.type === "execute" && dlFrame.kind === "local_models") {
+      await connection.receive({
+        type: "executed",
+        kind: "local_models",
+        protocol_version: "2",
+        command_id: dlFrame.command_id,
+        runner_id: target.computerId,
+        tenant_id: target.tenantId,
+        owner_actor_id: target.ownerActorId,
+        connection_epoch: dlFrame.connection_epoch,
+        expires_at: dlFrame.expires_at,
+        action: "custom_download",
+        model_id: "custom.hf.bartowski--qwen2.5-7b-instruct-gguf:Q4_K_M",
+        outcome: "accepted",
+      });
+    }
+    const dlAck = await downloadPromise;
+    expect(dlAck).toEqual({
+      outcome: "accepted",
+      modelId: "custom.hf.bartowski--qwen2.5-7b-instruct-gguf:Q4_K_M",
+    });
   });
 });

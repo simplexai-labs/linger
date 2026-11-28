@@ -712,3 +712,135 @@ func TestLocalModelsForceLoadAndAdmissionV2Gating(t *testing.T) {
 		t.Fatalf("v2 snapshot lost admission v2 fields: %+v", v2Snap.Models)
 	}
 }
+func TestPublishLocalModelsGatesCustomFeature(t *testing.T) {
+	shardIdx, shardCnt, ctxTokens := uint64(1), uint64(3), uint64(4096)
+	snapshot := wire.LocalModelsSnapshot{
+		Available:  true,
+		ObservedAt: "2026-11-26T00:00:00Z",
+		Host: &wire.LocalModelHost{
+			Platform: "darwin", Arch: "arm64", OsLabel: "macOS", EngineLabel: "llama.cpp",
+			Gpus: []wire.LocalModelGpu{}, SupportedFormats: []string{"gguf", "mlx"},
+		},
+		Pools: []wire.LocalModelPool{},
+		Models: []wire.LocalModel{
+			{
+				ID: "custom.hf.bartowski--qwen:Q4_K_M", Name: "Qwen", Quant: "Q4_K_M",
+				Fit: "unified", Pool: "unified", State: "downloading",
+				Engine:   "mlx",
+				Origin:   "custom",
+				Custom:   &wire.LocalModelCustomInfo{Hub: "huggingface", RepoID: "bartowski/Qwen", Format: "gguf", VariantID: "Q4_K_M", ShardCount: 3, StandbyOnRestart: true},
+				Download: &wire.LocalModelDownloadProgress{Step: "download", DoneBytes: 10, TotalBytes: 100, ShardIndex: &shardIdx, ShardCount: &shardCnt},
+				Verification: &wire.LocalModelVerification{
+					Status: "verified", ContextTokens: &ctxTokens,
+				},
+				Error: &wire.LocalModelError{Code: "HUB_AUTH_REQUIRED", Detail: "gated"},
+			},
+		},
+	}
+
+	streamOld := &browserEventStream{}
+	dOld := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: streamOld}
+	dOld.localModelsDiagnostics.Store(true)
+	dOld.localModelsEngine.Store(true)
+	dOld.PublishLocalModels(snapshot)
+	var oldFrame wire.RunnerLocalModels
+	if err := json.Unmarshal(streamOld.events[0].Payload, &oldFrame); err != nil {
+		t.Fatal(err)
+	}
+	if len(oldFrame.LocalModels.Host.SupportedFormats) != 0 {
+		t.Fatalf("legacy service received supported_formats: %v", oldFrame.LocalModels.Host.SupportedFormats)
+	}
+	oldModel := oldFrame.LocalModels.Models[0]
+	if oldModel.Origin != "" || oldModel.Custom != nil || oldModel.Verification != nil || oldModel.Engine != "" ||
+		oldModel.Download.ShardIndex != nil || oldModel.Download.ShardCount != nil ||
+		oldModel.Error.Code != "UNKNOWN_ERROR" {
+		t.Fatalf("legacy service received custom fields: %+v", oldModel)
+	}
+
+	streamNew := &browserEventStream{}
+	dNew := &Daemon{computerID: "computer", protocolVersion: protocol.Version, localModelsStream: streamNew}
+	dNew.localModelsDiagnostics.Store(true)
+	dNew.localModelsEngine.Store(true)
+	dNew.localModelsCustom.Store(true)
+	dNew.PublishLocalModels(snapshot)
+	var newFrame wire.RunnerLocalModels
+	if err := json.Unmarshal(streamNew.events[0].Payload, &newFrame); err != nil {
+		t.Fatal(err)
+	}
+	if len(newFrame.LocalModels.Host.SupportedFormats) != 2 {
+		t.Fatalf("new service lost supported_formats: %v", newFrame.LocalModels.Host.SupportedFormats)
+	}
+	newModel := newFrame.LocalModels.Models[0]
+	if newModel.Origin != "custom" || newModel.Custom == nil || newModel.Verification == nil || newModel.Engine != "mlx" ||
+		newModel.Download.ShardIndex == nil || *newModel.Download.ShardIndex != 1 || newModel.Error.Code != "HUB_AUTH_REQUIRED" {
+		t.Fatalf("new service lost custom fields: %+v", newModel)
+	}
+}
+
+type fakeCustomLocalModels struct {
+	fakeLocalModels
+	searchResult wire.LocalModelCustomSearchResult
+	probeResult  wire.LocalModelCustomProbeResult
+	customErr    error
+	assignedID   string
+}
+
+func (f *fakeCustomLocalModels) ActWithResult(ctx context.Context, action localmodels.Action, deadline time.Time) (string, *wire.LocalModelActionRefusal, bool) {
+	refusal, answered := f.Act(ctx, action, deadline)
+	id := action.Model
+	if id == "" {
+		id = f.assignedID
+	}
+	return id, refusal, answered
+}
+
+func (f *fakeCustomLocalModels) SearchCustom(_ context.Context, _ wire.LocalModelCustomSearchInput) (wire.LocalModelCustomSearchResult, error) {
+	return f.searchResult, f.customErr
+}
+
+func (f *fakeCustomLocalModels) ProbeCustom(_ context.Context, _ wire.LocalModelCustomProbeInput) (wire.LocalModelCustomProbeResult, error) {
+	return f.probeResult, f.customErr
+}
+
+func TestHandleLocalModelsCustomCommandSearchAndProbe(t *testing.T) {
+	httpStatus := uint64(401)
+	lib := &fakeCustomLocalModels{
+		probeResult: wire.LocalModelCustomProbeResult{
+			Outcome:       "gated",
+			HubHTTPStatus: &httpStatus,
+			Repo: &wire.LocalModelCustomProbeRepo{
+				Hub: "huggingface", RepoID: "meta-llama/Llama-3.1-8B-GGUF", URL: "https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF",
+			},
+		},
+	}
+	stream := &browserEventStream{}
+	d := &Daemon{
+		computerID:      "computer",
+		protocolVersion: protocol.Version,
+		owners:          []ComputerOwner{{TenantID: "tenant", OwnerActorID: "owner"}},
+		localModels:     lib,
+	}
+	payload, _ := json.Marshal(wire.CapabilityLocalModelsCustom{
+		ProtocolVersion: protocol.Version, CommandID: "cmd-1", RunnerID: "computer",
+		TenantID: "tenant", OwnerActorID: "owner", ConnectionEpoch: 1,
+		ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano),
+		Type:      wire.TypeExecute, Kind: wire.KindLocalModelsCustom, Action: "probe",
+		Probe: &wire.LocalModelCustomProbeInput{Target: "meta-llama/Llama-3.1-8B-GGUF", Hub: "huggingface"},
+	})
+	if err := d.handleLocalModelsCustomCommand(t.Context(), stream, protocol.Command{
+		Type: protocol.CommandCapabilityLocalModelsCustom, ProtocolVersion: protocol.Version,
+		CommandID: "cmd-1", RunnerID: "computer", ConnectionEpoch: 1, Payload: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.events) != 1 || stream.events[0].Type != protocol.EventCapabilityLocalModelsCustomSucceeded {
+		t.Fatalf("unexpected events: %+v", stream.events)
+	}
+	var res wire.CapabilityLocalModelsCustomSucceeded
+	if err := json.Unmarshal(stream.events[0].Payload, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.ProbeResult == nil || res.ProbeResult.Outcome != "gated" || *res.ProbeResult.HubHTTPStatus != 401 {
+		t.Fatalf("unexpected probe response: %+v", res.ProbeResult)
+	}
+}

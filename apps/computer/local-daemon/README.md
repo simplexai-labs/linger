@@ -403,6 +403,17 @@ downloaded model that Run's Agent names.
   `runner.welcome`'s `service_features` names `local_models_admission_v2`; it
   is stripped otherwise. `load` commands may carry `force: true` (passed to
   `localmodels library load --force`).
+  Custom hub models (`origin`, `custom`, `verification`, `download.shard_index`,
+  `download.shard_count`, `engine: "mlx"`, `host.supported_formats`, and
+  hub/verification error codes) are sent only when `runner.welcome`'s
+  `service_features` names `local_models_custom` (Computer 0.71.0 or later) and
+  are stripped/downgraded otherwise. Custom `search`, `probe`, and
+  `custom_download` pass transient hub tokens to `localmodels` exclusively over
+  stdin (`--config-stdin`, never argv), redact `hf_` and `ms_`/`ms-` tokens
+  plus the literal token from all tool output and `diagnostic_log` (capped at
+  4000 runes), and follow Standby-First admission: `origin == "custom"` rows
+  enter the Pi catalog only when `state == "loaded"` or
+  `verification.status == "verified"`.
   The snapshot is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters the `download` phase, the Daemon publishes
