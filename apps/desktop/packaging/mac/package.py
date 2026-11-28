@@ -229,6 +229,11 @@ def stage_app(arch, version, electron_version, workdir, cache):
     computer = os.path.join(resources, "computer")
     os.makedirs(computer)
     shutil.copy2(daemon_binary(arch), computer)
+    helper = window_share_binary(arch)
+    if os.path.isfile(helper):
+        dest = os.path.join(computer, "linger-window-share")
+        shutil.copy2(helper, dest)
+        os.chmod(dest, 0o755)
     computer_tools.copy(resources, target)
     write_icon(resources)
 
@@ -259,6 +264,31 @@ def stage_app(arch, version, electron_version, workdir, cache):
 
 def daemon_binary(arch):
     return os.path.join(DESKTOP, "dist", "computer", f"darwin-{arch}", "linger-computer-daemon")
+
+
+def window_share_binary(arch):
+    staged = os.path.join(DESKTOP, "dist", "computer", f"darwin-{arch}", "linger-window-share")
+    if os.path.isfile(staged):
+        return staged
+    override = os.environ.get("LINGER_MACOS_WINDOW_SHARE_BIN", "").strip()
+    if override and os.path.isfile(override):
+        return override
+    return staged
+
+
+def check_window_share_helper(arch, required=False):
+    path = window_share_binary(arch)
+    if not os.path.isfile(path):
+        if required:
+            sys.exit(
+                f"dist/ is missing linger-window-share for darwin-{arch}; compile "
+                "packaging/mac/linger-window-share.swift on macOS or set LINGER_MACOS_WINDOW_SHARE_BIN"
+            )
+        return
+    with open(path, "rb") as source:
+        magic = source.read(4)
+    if magic not in MACHO_MAGIC:
+        sys.exit(f"{path} is not a Mach-O executable")
 
 
 def bundled_node(path):
@@ -642,10 +672,16 @@ def main():
     version = package["version"]
     electron_version = package["devDependencies"]["electron"].lstrip("^~")
     arches = args.arch or ["arm64", "x64"]
+    require_window_share = bool(
+        args.developer_id
+        or args.notary_key
+        or os.environ.get("LINGER_MACOS_WINDOW_SHARE_BIN", "").strip()
+    )
     for arch in arches:
         if not os.path.exists(daemon_binary(arch)):
             sys.exit(f"dist/ is missing the daemon for darwin-{arch}; run "
                      "`LINGER_DESKTOP_DAEMON_TARGETS=darwin-arm64,darwin-x64 node build.mjs` first")
+        check_window_share_helper(arch, required=require_window_share)
     for arch in arches:
         if f"darwin-{arch}" in NATIVE_TARGETS:
             check_teamhub(f"darwin-{arch}")

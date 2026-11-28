@@ -6,17 +6,29 @@
 //
 // Without a target it builds for this machine.
 import { spawn } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktop = fileURLToPath(new URL("../", import.meta.url));
 const localDaemon = path.join(desktop, "../computer/local-daemon");
+const windowShareSource = path.join(
+  desktop,
+  "packaging/mac/linger-window-share.swift",
+);
 
 // Node platform-arch -> Go GOOS/GOARCH.
 export const DAEMON_TARGETS = {
-  "darwin-arm64": { goos: "darwin", goarch: "arm64" },
-  "darwin-x64": { goos: "darwin", goarch: "amd64" },
+  "darwin-arm64": {
+    goos: "darwin",
+    goarch: "arm64",
+    swiftTarget: "arm64-apple-macos14.0",
+  },
+  "darwin-x64": {
+    goos: "darwin",
+    goarch: "amd64",
+    swiftTarget: "x86_64-apple-macos14.0",
+  },
   "linux-x64": { goos: "linux", goarch: "amd64" },
   "linux-arm64": { goos: "linux", goarch: "arm64" },
   "win32-x64": { goos: "windows", goarch: "amd64" },
@@ -83,9 +95,34 @@ export const buildDaemon = async (targets) => {
         if (error?.code === "ENOENT") throw error;
         throw new Error(`Go build of the daemon for ${target} failed`);
       });
+      await stageWindowShareHelper(target, go);
     }),
   );
 };
+
+async function stageWindowShareHelper(target, go) {
+  if (go.goos !== "darwin") return;
+  const outputDir = path.join(desktop, "dist/computer", target);
+  const output = path.join(outputDir, "linger-window-share");
+  const prebuilt = process.env.LINGER_MACOS_WINDOW_SHARE_BIN?.trim();
+  if (prebuilt) {
+    await mkdir(outputDir, { recursive: true });
+    await copyFile(prebuilt, output);
+    await chmod(output, 0o755);
+    return;
+  }
+  if (process.platform !== "darwin" || !go.swiftTarget) return;
+  await mkdir(outputDir, { recursive: true });
+  await run("swiftc", [
+    "-O",
+    "-target",
+    go.swiftTarget,
+    windowShareSource,
+    "-o",
+    output,
+  ]);
+  await chmod(output, 0o755);
+}
 
 export async function buildTeamhubLauncher(target, outputPath) {
   const go = DAEMON_TARGETS[target];

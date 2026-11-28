@@ -212,6 +212,18 @@ class MacSigningTest(unittest.TestCase):
     def test_tools_node_gets_the_node_entitlements(self):
         self.assertTrue(self.mac.bundled_node("Contents/Resources/runtime/bin/node"))
         self.assertFalse(self.mac.bundled_node("Contents/Resources/computer/linger-computer-daemon"))
+        self.assertFalse(self.mac.bundled_node("Contents/Resources/computer/linger-window-share"))
+
+    def test_window_share_helper_is_signed_with_hardened_runtime(self):
+        app = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, app)
+        helper = os.path.join(app, "Contents", "Resources", "computer", "linger-window-share")
+        os.makedirs(os.path.dirname(helper), exist_ok=True)
+        with open(helper, "wb") as out:
+            out.write(MACHO)
+        args = self.mac.Signing("rcodesign", "id.p12", "id.password").app_args(app)
+        flags = [args[i + 1] for i, arg in enumerate(args) if arg == "--code-signature-flags"]
+        self.assertIn("Contents/Resources/computer/linger-window-share:runtime", flags)
 
     def test_cua_app_keeps_its_vendor_signature(self):
         app = tempfile.mkdtemp()

@@ -26,6 +26,9 @@ inputs:
   macos-notary-key-json:
     description: App Store Connect API key JSON for macOS notarization.
     default: ""
+  macos-window-share-bin:
+    description: Precompiled macOS linger-window-share Mach-O helper to bundle beside linger-computer-daemon.
+    default: ""
   windows-signing-p12-base64:
     description: Base64-encoded Windows Authenticode .p12 certificate.
     default: ""
@@ -196,6 +199,7 @@ runs:
         # the address stays masked. Without it Send Diagnostics is hidden.
         LINGER_DIAGNOSTICS_UPLOAD_URL: ${{ inputs.diagnostics-upload-url }}
         DESKTOP_REQUIRE_MACOS_SIGNING: ${{ inputs.require-macos-signing }}
+        LINGER_MACOS_WINDOW_SHARE_BIN: ${{ inputs.macos-window-share-bin }}
       run: scripts/ci/desktop-release.sh build ${{ inputs.target }}
     - name: Prune unused Go build cache entries
       if: success() && steps.gobuild.outputs.cache-hit != 'true'

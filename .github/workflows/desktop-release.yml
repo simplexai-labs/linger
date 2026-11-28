@@ -86,8 +86,32 @@ jobs:
           fi
           echo "Release repository: $RELEASE_REPO"
 
-  build:
+  build-macos-window-share:
+    name: build-helper (darwin-arm64)
     needs: prepare
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile macOS ScreenCaptureKit window-share helper
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/window-share"
+          swiftc -O -target arm64-apple-macos14.0 \
+            apps/desktop/packaging/mac/linger-window-share.swift \
+            -o "$RUNNER_TEMP/window-share/linger-window-share"
+          chmod 0755 "$RUNNER_TEMP/window-share/linger-window-share"
+          file "$RUNNER_TEMP/window-share/linger-window-share"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linger-window-share-darwin-arm64
+          path: ${{ runner.temp }}/window-share/linger-window-share
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    needs: [prepare, build-macos-window-share]
     # The packaging scripts build the DMG and the Windows installer on Linux
     # with Docker, which the macOS and Windows runners do not offer.
     runs-on: ubuntu-24.04
@@ -110,11 +134,21 @@ jobs:
       LINGER_NATIVE_POSTGRES_DIR: ${{ github.workspace }}/.linger-runtime/native-deps
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        if: matrix.target == 'darwin-arm64'
+        with:
+          name: linger-window-share-darwin-arm64
+          path: ${{ runner.temp }}/window-share
+          skip-decompress: true
+      - name: Mark macOS window-share helper executable
+        if: matrix.target == 'darwin-arm64'
+        run: chmod 0755 "${{ runner.temp }}/window-share/linger-window-share"
       - uses: ./.github/actions/desktop-build
         with:
           target: ${{ matrix.target }}
           docker-image: ${{ matrix.docker_image }}
           require-macos-signing: ${{ needs.prepare.outputs.publish == 'true' && env.RELEASE_REPO == 'simplexai-labs/linger' }}
+          macos-window-share-bin: ${{ matrix.target == 'darwin-arm64' && format('{0}/window-share/linger-window-share', runner.temp) || '' }}
           ghcr-token: ${{ github.token }}
           diagnostics-upload-url: ${{ secrets.LINGER_DIAGNOSTICS_UPLOAD_URL }}
           macos-developer-id-p12-base64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
