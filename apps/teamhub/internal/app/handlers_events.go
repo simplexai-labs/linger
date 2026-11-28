@@ -26,6 +26,11 @@ func (a *App) listRoomEvents(c *gin.Context) {
 func (a *App) ensureStreamSession(c *gin.Context, flusher http.Flusher, digest []byte) bool {
 	code, err := a.streamSessionInvalidationCode(c.Request.Context(), digest)
 	if err != nil {
+		// A client that hangs up during the lookup surfaces here too; that
+		// is a normal disconnect, not an operational failure worth a line.
+		if c.Request.Context().Err() == nil {
+			a.logger.Error("stream session lookup failed; dropping the stream", "error", err)
+		}
 		return false
 	}
 	if code == "" {
@@ -39,6 +44,9 @@ func (a *App) ensureStreamSession(c *gin.Context, flusher http.Flusher, digest [
 func (a *App) resetStreamSessionExpiry(c *gin.Context, flusher http.Flusher, digest []byte, timer *time.Timer) bool {
 	session, err := a.sessions.Active(c.Request.Context(), digest)
 	if err != nil {
+		if c.Request.Context().Err() == nil {
+			a.logger.Error("stream session lookup failed; dropping the stream", "error", err)
+		}
 		a.ensureStreamSession(c, flusher, digest)
 		return false
 	}
