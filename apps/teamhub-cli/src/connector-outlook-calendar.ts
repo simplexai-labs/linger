@@ -1120,6 +1120,13 @@ export async function executeOutlookCalendar(
       { operation_rejected: true },
     );
 
+  if (input.description !== undefined && current.isOnlineMeeting === true)
+    throw new CliError(
+      "unsupported_combination",
+      "Edit the online meeting description in Outlook to preserve its join information.",
+      { operation_rejected: true },
+    );
+
   if (action === "cancel") {
     const hasAttendees =
       Array.isArray(current.attendees) && current.attendees.length > 0;

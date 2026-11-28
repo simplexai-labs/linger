@@ -2949,6 +2949,29 @@ describe("outlook-calendar connector", () => {
     }
   });
 
+  it("protects Outlook online meeting details when replacing a description", async () => {
+    let isOnlineMeeting = true;
+    const writes: Json[] = [];
+    const f = await fixture("outlook", (slug, args) => {
+      if (slug === "OUTLOOK_GET_EVENT")
+        return { id: "evt_teams", isOrganizer: true, isOnlineMeeting };
+      expect(slug).toBe("OUTLOOK_UPDATE_CALENDAR_EVENT");
+      writes.push(args);
+      return { id: "evt_teams" };
+    });
+    const command = ["outlook-calendar", "update", "evt_teams"];
+    const first = await f.run([...command, "--content", "New agenda"]);
+    expect(first.error?.error?.code).toBe("unsupported_combination");
+    expect(writes).toHaveLength(0);
+    expect((await f.run([...command, "--title", "New title"])).code).toBe(0);
+    expect(writes[0]).not.toHaveProperty("body");
+    isOnlineMeeting = false;
+    expect((await f.run([...command, "--content", "New agenda"])).code).toBe(0);
+    expect(writes[1]?.body).toEqual({
+      contentType: "Text",
+      content: "New agenda",
+    });
+  });
   it("creates with --teams, updates attendees, rejects recurring/non-organizer writes, and cancels or deletes appropriately", async () => {
     let currentEvent: Json = {
       id: "evt_1",

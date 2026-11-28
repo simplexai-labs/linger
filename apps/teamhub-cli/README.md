@@ -88,6 +88,9 @@ Nine applications have dedicated commands: Gmail, Outlook (mail via `teamhub out
 Choose an account with `--account <connection ID|full label>`; labels match case-insensitively, connection IDs exactly. A connection ID that no longer matches a delegated account returns `account_ambiguous` with the delegated candidates instead of switching accounts. Without a delegation, the command posts an authorization card in an allowed chat that names the requested label and exits with `authorization_required`; the Agent ends its turn, and the card's result wakes it to run the original command again.
 Mail `--markdown` is converted to HTML by TeamHub; only `--attach` adds attachments.
 
+Use Outlook to edit the description of an online meeting. Outlook's event
+body includes the information that keeps its join details active.
+
 Feishu Mail has the same verbs as Gmail, including `canvas-draft`, but TeamHub runs its tools itself instead of Composio, through the owner's own lark-cli on their Computer. Use these commands rather than lark-cli's own mail commands, which skip the sponsor's card. `send` and `reply` first save a draft and then send it, so the sponsor's card shows exactly what the draft holds. Attachments travel inside the call, about 640 KiB in total. Search text is at most 50 characters, and `list --folder all` needs `--query`, since Feishu lists one folder at a time.
 
 GitHub reads the connected account, its repositories, issues and pull requests at once; `github comment` and `github create-issue` wait for the sponsor's confirmation card.
