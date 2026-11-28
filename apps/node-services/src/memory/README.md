@@ -306,6 +306,12 @@ then keeps one entry per source. An entry has only `citeAs` (`S<n>` for items, `
 `evidenceId`, `kind`, `title`, `timeHint`, `sections` (at most 4 matched and neighboring sections to read),
 `roomId` for a Room conversation, and either `content` (text around its best match, keeping the time and
 speaker heading of its message) or `snippet` (about 200 characters around the best match).
+For a paragraph longer than the available text budget, Memory scores overlapping passages with the same
+query analyzer and keeps the passage with the most distinct query terms. Equal coverage favors matches
+away from a cut edge. A long enclosing heading is shortened to leave room for the evidence; passage cuts
+preserve complete UTF-16 surrogate pairs. A passage cut only at its start still marks omitted later
+paragraphs separately. This selection changes only the displayed excerpt, not source
+ranking, evidence IDs or the full sections returned by a read.
 
 Memory keeps every search and read result within an output budget of JSON characters (UTF-16 units); the
 CLI passes results through unchanged. The Daemon limits one tool result to 15% of the model's context
