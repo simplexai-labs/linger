@@ -343,7 +343,12 @@ original text are both usable, and the Room file projection boundary does not na
 tools are authorized to read.
 
 The Raw directory comes from deterministic splitting of the source text by
-`apps/node-services/src/memory/search/chunks.ts`, and the second step reads only the Chunks the Agent explicitly
+`apps/node-services/src/memory/search/chunks.ts`. Fenced code keeps its surrounding heading until a matching
+closing fence with only trailing spaces or tabs; fence indentation is at most three spaces, and a backtick
+opener's info string cannot contain backticks. Chunk content and offsets retain the unchanged source text.
+The `raw-md-v6` index profile rebuilds older chunks on normal reconciliation even when the source hash and
+chunk count have not changed; it adds no startup scan.
+The second step reads only the Chunks the Agent explicitly
 selects. The requested sections share the read budget left after the title, source and directory, in request order;
 a section's unused share carries over to the next. A section that does not fit returns a non-empty first page with
 `truncated` and `nextOffset` (a UTF-16 offset that never splits a surrogate pair), and reading on from `nextOffset`
