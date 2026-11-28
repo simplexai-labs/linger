@@ -47,6 +47,7 @@ Memory, and Voice services.
   schemas and host file helpers.
 - `contracts`: authoritative cross-process OpenAPI and generated Go/TypeScript modules.
 - `packages/document-model`: shared Room Document schema inspection and deterministic state helpers.
+- `packages/connector`: the seam between a chat surface and a Room (`@linger/connector`, with `@linger/connector/ilink` and `@linger/connector/text`). It transports messages and declares what a surface can render; it never creates a Message or chooses an author.
 - `packages/service-kit`: shared isomorphic guards and helpers (`@linger/service-kit`) and the Node JSON logger and SHA-256 helper (`@linger/service-kit/node`).
 - `skills`: versioned built-in Skill assets embedded into TeamHub.
 - `.agents/skills/verify-linger`: acceptance recipes and an isolated
