@@ -3944,39 +3944,24 @@ describe("LocalServerModule", () => {
     }
   });
 
-  it("preserves the Windows private-path refusal when home preflight fails", async () => {
-    const winCheckout = (home: string) => {
-      checkout(home);
-      writeFileSync(
-        path.join(path.dirname(home), "installer", "distribution.json"),
-        JSON.stringify({
-          platform: "win32",
-          arch: "x64",
-          nativeSources: [{ target: "win32-x64" }],
-        }),
-      );
-    };
-    const f = fixture(
-      (home) => ({
-        ...withCheckout(home),
-        platform: "win32",
-        arch: "x64",
-        daemonDirectory: "C:\\Users\\me\\AppData\\Roaming\\Linger\\computer",
-        checkPrivateLocation: async () => {
-          throw Object.assign(
-            new Error(
-              "Windows private path validation failed: home is inside a folder other accounts on this computer can rename or replace (ancestor: C:\\Users\\me, sid: S-1-5-21-1-2-3-1007).",
-            ),
-            {
-              code: "WINDOWS_PRIVATE_PATH_UNSAFE",
-              reason: "UNSAFE_PARENT_ACCESS",
-            },
-          );
-        },
-      }),
-      {},
-      winCheckout,
-    );
+  it("preserves the Windows refusal and keeps existing sources when home preflight fails", async () => {
+    const f = fixture({
+      platform: "win32",
+      sourceArchive: { file: "source/linger.tar.gz", sha256: "a".repeat(64) },
+      checkPrivateLocation: async () => {
+        throw Object.assign(
+          new Error("Windows private path validation failed"),
+          {
+            code: "WINDOWS_PRIVATE_PATH_UNSAFE",
+            reason: "UNSAFE_PARENT_ACCESS",
+          },
+        );
+      },
+    });
+    const oldSource = path.join(f.home, "desktop", "source", "old");
+    mkdirSync(oldSource, { recursive: true });
+    const oldSettings = path.join(oldSource, ".env");
+    writeFileSync(oldSettings, "TZ=UTC\n");
     await f.host.start();
     try {
       await expect(f.module.begin()).rejects.toThrow(
@@ -3990,6 +3975,10 @@ describe("LocalServerModule", () => {
           reason: "UNSAFE_PARENT_ACCESS",
         },
       });
+      expect(readFileSync(oldSettings, "utf8")).toBe("TZ=UTC\n");
+      expect(
+        existsSync(path.join(f.home, "instances", LOCAL_INSTANCE, "user.env")),
+      ).toBe(false);
     } finally {
       await f.host.stop("quit");
     }
@@ -4345,6 +4334,7 @@ describe("LocalServerModule install location", () => {
       checkout: "/src",
       platform: "win32",
       freeBytes: Number.MAX_SAFE_INTEGER,
+      checkPrivateLocation: async () => {},
     });
     await f.host.start();
     try {
@@ -4358,21 +4348,43 @@ describe("LocalServerModule install location", () => {
     }
   });
 
-  it("reports an unsafe Windows folder without selecting it", async () => {
+  it("blocks installation after an unsafe Windows selection until the location is reset", async () => {
+    const checkPrivateLocation = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("This folder has shared access."));
     const f = fixture({
+      checkout: "/src",
       platform: "win32",
-      checkPrivateLocation: async () => {
-        throw new Error("This folder has shared access.");
-      },
+      checkPrivateLocation,
     });
     const picked = path.join(f.root, "shared");
-    await f.module.chooseLocation(picked);
-    expect(f.module.status().location).toEqual({
-      path: f.home,
-      custom: false,
-      error: "This folder has shared access.",
-      rejectedPath: picked,
-    });
+    await f.host.start();
+    try {
+      await f.module.chooseLocation(picked);
+      expect(f.module.status().location).toEqual({
+        path: f.home,
+        custom: false,
+        error: "This folder has shared access.",
+        rejectedPath: picked,
+      });
+      await expect(f.module.begin()).rejects.toThrow(
+        "This folder has shared access.",
+      );
+      expect(checkPrivateLocation.mock.calls).toEqual([[picked]]);
+      expect(existsSync(path.join(f.home, "installer", "args.json"))).toBe(
+        false,
+      );
+      await f.module.chooseLocation(null);
+      const resetLocation = f.module.status().location;
+      expect(resetLocation).toMatchObject({
+        path: f.home,
+        custom: false,
+      });
+      expect(resetLocation.error).toBeUndefined();
+      expect(resetLocation.rejectedPath).toBeUndefined();
+    } finally {
+      await f.host.stop("quit");
+    }
   });
 
   it("reads freeDiskBytes read-only without creating missing folders or probe files", async () => {

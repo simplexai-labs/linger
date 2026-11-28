@@ -2135,43 +2135,10 @@ export class LocalServerModule implements Module {
       this.#progress = 0;
       this.#endSignIn();
       this.#advance("prepare", 0, "Checking this computer…");
-      await this.#adoptSourceKeys(home);
-      // Keep what runs now until this version replaces it, and keep an
-      // in-flight pre-stage's .partial folder for this same home.
-      const record = await this.#readRecord();
-      const sourcePrefix = this.#options.sourceArchive?.sha256.slice(0, 16);
-      await this.#timed("prune_sources", () =>
-        this.#schedulePruneSources(home, [
-          record?.repo,
-          sourcePrefix,
-          ...(sourcePrefix &&
-          (this.#prestage?.home === resolvedHome ||
-            this.#prestageSettling.has(resolvedHome))
-            ? [`${sourcePrefix}.partial`]
-            : []),
-        ]),
-      );
-      signal.throwIfAborted();
+      if (this.#locationError) throw new Error(this.#locationError);
       const platform = this.#options.platform ?? process.platform;
-      // Check the target install location (default or custom) for write access
-      // and free space, including any planned local model's disk budget.
-      const model =
-        this.#check.state === "checked" &&
-        (plan.runtime === "local" ||
-          (plan.runtime === "recommended" &&
-            this.#check.recommendation === "local-models"))
-          ? this.#check.model
-          : undefined;
-      const error = await checkLocation(
-        home,
-        this.#freeBytes() + (model?.diskBytes ?? 0),
-      );
-      if (error) throw new Error(`${home}: ${error}`);
       // On Windows, pre-check both the install home and the Computer daemon
-      // directory (<userData>/computer) before unpacking so private-path
-      // validation failures (such as symlink/junction ancestors or foreign
-      // target ownership) fail immediately instead of after installation and
-      // enrollment.
+      // directory before changing install state so a refusal leaves files intact.
       if (platform === "win32") {
         const checkPrivate =
           this.#options.checkPrivateLocation ?? windowsPrivateLocation;
@@ -2197,6 +2164,38 @@ export class LocalServerModule implements Module {
           }
         });
       }
+      signal.throwIfAborted();
+      await this.#adoptSourceKeys(home);
+      // Keep what runs now until this version replaces it, and keep an
+      // in-flight pre-stage's .partial folder for this same home.
+      const record = await this.#readRecord();
+      const sourcePrefix = this.#options.sourceArchive?.sha256.slice(0, 16);
+      await this.#timed("prune_sources", () =>
+        this.#schedulePruneSources(home, [
+          record?.repo,
+          sourcePrefix,
+          ...(sourcePrefix &&
+          (this.#prestage?.home === resolvedHome ||
+            this.#prestageSettling.has(resolvedHome))
+            ? [`${sourcePrefix}.partial`]
+            : []),
+        ]),
+      );
+      signal.throwIfAborted();
+      // Count space reclaimed by source cleanup and reserve room for the
+      // planned local model on the disk that holds the install location.
+      const model =
+        this.#check.state === "checked" &&
+        (plan.runtime === "local" ||
+          (plan.runtime === "recommended" &&
+            this.#check.recommendation === "local-models"))
+          ? this.#check.model
+          : undefined;
+      const error = await checkLocation(
+        home,
+        this.#freeBytes() + (model?.diskBytes ?? 0),
+      );
+      if (error) throw new Error(`${home}: ${error}`);
       const node = await this.#timed("node", () => this.#ensureNode(signal));
       const keysChanged = Object.keys(plan.keys ?? {}).length > 0;
       if (keysChanged)
