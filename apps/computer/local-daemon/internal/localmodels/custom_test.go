@@ -231,24 +231,20 @@ setlocal
 >"` + argvCapture + `" echo %*
 set /p "stdinLine="
 >"` + stdinCapture + `" echo(%stdinLine%
-echo(%*| findstr /C:"custom search" >nul
-if not errorlevel 1 (
+if /I "%~6"=="custom" if /I "%~7"=="search" (
   echo {"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}
   exit /b 0
 )
-echo(%*| findstr /C:"custom probe" >nul
-if not errorlevel 1 (
+if /I "%~6"=="custom" if /I "%~7"=="probe" (
   echo {"schema":"localmodels.library-custom-probe/v1","ok":true,"outcome":"gated","hub_http_status":401,"token_provided":true,"repo":{"hub":"huggingface","repo_id":"meta-llama/Llama-3.1-8B-GGUF","url":"https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}
   exit /b 0
 )
-echo(%*| findstr /C:"custom download" >nul
-if not errorlevel 1 (
+if /I "%~6"=="custom" if /I "%~7"=="download" (
   echo {"schema":"localmodels.library-event/v1","event":"progress","model":"custom.hf.bartowski--qwen:Q4_K_M","phase":"download","done":10,"total":100,"shard_index":1,"shard_count":2}
   echo {"schema":"localmodels.library-event/v1","event":"result","model":"custom.hf.bartowski--qwen:Q4_K_M","ok":true}
   exit /b 0
 )
-echo(%*| findstr /C:"status" >nul
-if not errorlevel 1 (
+if /I "%~5"=="status" (
   echo {"schema":"localmodels.library-status/v1","tool_version":"0.1.0.dev60","observed_at":"2026-11-26T00:00:00Z","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":16000000000,"disk_free_bytes":100000000000,"gpus":[],"supported_formats":["gguf"]},"pools":[],"models":[]}
   exit /b 0
 )
