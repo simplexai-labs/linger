@@ -154,7 +154,7 @@ const WINDOWS_TO_IANA: Readonly<Record<string, string>> = {
   "India Standard Time": "Asia/Kolkata",
   "Sri Lanka Standard Time": "Asia/Colombo",
   "Nepal Standard Time": "Asia/Kathmandu",
-  "Central Asia Standard Time": "Asia/Almaty",
+  "Central Asia Standard Time": "Asia/Bishkek",
   "Bangladesh Standard Time": "Asia/Dhaka",
   "Omsk Standard Time": "Asia/Omsk",
   "Myanmar Standard Time": "Asia/Yangon",

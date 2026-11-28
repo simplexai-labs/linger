@@ -2853,6 +2853,58 @@ describe("outlook-calendar connector", () => {
     });
   });
 
+  it("keeps early appointments in a Central Asia mailbox date", async () => {
+    const start = "2026-11-24T18:30:00Z";
+    const end = "2026-11-24T18:45:00Z";
+    const mailboxZone = "Central Asia Standard Time";
+    let calendarWindow: Json | undefined;
+    const f = await fixture("outlook", (slug, args) => {
+      if (slug === "OUTLOOK_GET_MAILBOX_SETTINGS")
+        return { timeZone: mailboxZone };
+      if (slug !== "OUTLOOK_GET_CALENDAR_VIEW")
+        throw new Error("Expected an Outlook calendar view");
+      calendarWindow = args;
+      const overlaps =
+        Date.parse(displayText(args.start_datetime)) < Date.parse(end) &&
+        Date.parse(start) < Date.parse(displayText(args.end_datetime));
+      return {
+        value: overlaps
+          ? [
+              {
+                id: "early_appointment",
+                start: {
+                  dateTime: "2026-11-25T00:30:00",
+                  timeZone: mailboxZone,
+                },
+                end: { dateTime: "2026-11-25T00:45:00", timeZone: mailboxZone },
+              },
+            ]
+          : [],
+      };
+    });
+
+    const byDate = await f.run([
+      "outlook-calendar",
+      "list",
+      "--date",
+      "2026-11-25",
+    ]);
+
+    expect(byDate.code).toBe(0);
+    expect.soft(calendarWindow).toMatchObject({
+      start_datetime: "2026-11-24T18:00:00.000Z",
+      end_datetime: "2026-11-25T18:00:00.000Z",
+      timezone: "Asia/Bishkek",
+    });
+    expect(byDate.result.events).toMatchObject([
+      {
+        eventId: "early_appointment",
+        start: { dateTime: "2026-11-25T00:30:00+06:00" },
+        end: { dateTime: "2026-11-25T00:45:00+06:00" },
+      },
+    ]);
+  });
+
   it("finds shared free time across own calendar view and --with schedule, failing closed on incomplete data", async () => {
     let scheduleResponse: Json = {
       value: [

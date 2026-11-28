@@ -18,6 +18,7 @@ describe("connector-outlook-calendar helpers", () => {
       "America/Los_Angeles",
     );
     expect(resolveOutlookTimeZone("UTC")).toBe("UTC");
+    expect(resolveOutlookTimeZone("Asia/Almaty")).toBe("Asia/Almaty");
     expect(resolveOutlookTimeZone("America/New_York")).toBe("America/New_York");
     expect(() => resolveOutlookTimeZone("Not A Real Zone")).toThrow(
       /Unsupported Outlook time zone/,
