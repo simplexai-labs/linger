@@ -50,6 +50,12 @@ const serviceFeatureLocalModelsExternalHolders = "local_models_external_holders"
 // connection on unknown host or model properties.
 const serviceFeatureLocalModelsStorage = "local_models_storage"
 
+// serviceFeatureLocalModelsCustom in runner.welcome's service_features says
+// the Agent Service accepts custom hub models (origin, custom, verification,
+// download shard_index/shard_count, mlx engine, host.supported_formats, and
+// custom hub error codes) and execute kind local_models_custom.
+const serviceFeatureLocalModelsCustom = "local_models_custom"
+
 // serviceFeatureLocalModelUnavailable in runner.welcome's service_features
 // says the Agent Service accepts the local_model_unavailable Run failure
 // code. An older service rejects the frame, so the Daemon reports
@@ -154,6 +160,15 @@ func (d *Daemon) isLocalModelLoadedHealthy(ctx context.Context, runtimeType, mod
 	return d.localModels.IsLoadedHealthy(ctx, model)
 }
 
+// customLocalModelLibrary is an optional extension implemented by
+// *localmodels.Library for custom hub search/probe and dynamic model ID
+// reporting on custom_download.
+type customLocalModelLibrary interface {
+	ActWithResult(ctx context.Context, action localmodels.Action, deadline time.Time) (modelID string, refusal *wire.LocalModelActionRefusal, answered bool)
+	SearchCustom(ctx context.Context, input wire.LocalModelCustomSearchInput) (wire.LocalModelCustomSearchResult, error)
+	ProbeCustom(ctx context.Context, input wire.LocalModelCustomProbeInput) (wire.LocalModelCustomProbeResult, error)
+}
+
 // ensureLocalModel loads the library model a Pi Run names before the Run
 // starts, so a model a quit unloaded does not fail every Run until someone
 // loads it by hand. On failure it returns the public Run failure code.
@@ -196,6 +211,9 @@ func (d *Daemon) PublishLocalModels(snapshot wire.LocalModelsSnapshot) {
 	d.connectionMu.Unlock()
 	if stream == nil {
 		return
+	}
+	if !d.localModelsCustom.Load() {
+		snapshot = stripLocalModelsCustom(snapshot)
 	}
 	if !d.localModelsDiagnostics.Load() {
 		snapshot = downgradeLocalModelsSnapshot(snapshot)
@@ -249,11 +267,18 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 		return nil
 	}
 	action := localmodels.Action{
-		Name:        request.Action,
-		Model:       request.ModelID,
-		UnloadFirst: request.UnloadFirst,
-		Force:       request.Force != nil && *request.Force,
+		Name:           request.Action,
+		Model:          request.ModelID,
+		UnloadFirst:    request.UnloadFirst,
+		CustomDownload: request.CustomDownload,
 	}
+	if request.Force != nil {
+		action.Force = *request.Force
+	}
+	if request.ContextTokens != nil {
+		action.ContextTokens = *request.ContextTokens
+	}
+	acceptedModelID := request.ModelID
 	var refusal *wire.LocalModelActionRefusal
 	switch {
 	case request.RunnerID != d.computerID || !d.ownedBy(request.TenantID, request.OwnerActorID):
@@ -273,7 +298,11 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 	default:
 		slog.Info("local_models.command_received", "action", action.Name, "model", action.Model, "unload_first", action.UnloadFirst)
 		var answered bool
-		refusal, answered = d.localModels.Act(ctx, action, expiresAt)
+		if customLib, ok := d.localModels.(customLocalModelLibrary); ok {
+			acceptedModelID, refusal, answered = customLib.ActWithResult(ctx, action, expiresAt)
+		} else {
+			refusal, answered = d.localModels.Act(ctx, action, expiresAt)
+		}
 		if !answered {
 			// The Gateway stopped waiting at the same deadline and reports the
 			// action as unconfirmed; any answer now would be a guess.
@@ -286,10 +315,13 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 		ProtocolVersion: request.ProtocolVersion, CommandID: request.CommandID, RunnerID: request.RunnerID,
 		TenantID: request.TenantID, OwnerActorID: request.OwnerActorID, ConnectionEpoch: request.ConnectionEpoch,
 		ExpiresAt: request.ExpiresAt, Type: wire.TypeExecuted, Kind: wire.KindLocalModels,
-		Action: request.Action, ModelID: request.ModelID, Outcome: wire.OutcomeAccepted,
+		Action: request.Action, ModelID: acceptedModelID, Outcome: wire.OutcomeAccepted,
 	}
 	if refusal != nil {
 		wireRefusal := *refusal
+		if !d.localModelsCustom.Load() {
+			wireRefusal = downgradeLocalModelsCustomRefusal(wireRefusal)
+		}
 		if !d.localModelsDiagnostics.Load() {
 			wireRefusal = downgradeLocalModelActionRefusal(wireRefusal)
 		}
@@ -317,16 +349,154 @@ func (d *Daemon) handleLocalModelsCommand(ctx context.Context, stream transport.
 	})
 }
 
+func (d *Daemon) handleLocalModelsCustomCommand(ctx context.Context, stream transport.Stream, command protocol.Command) error {
+	var request wire.CapabilityLocalModelsCustom
+	if err := json.Unmarshal(command.Payload, &request); err != nil {
+		return errors.New("invalid local models custom command")
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, request.ExpiresAt)
+	if err != nil {
+		return errors.New("invalid local models custom command expiry")
+	}
+	sendFailed := func(code, message string, retryable bool) error {
+		frame := wire.CapabilityLocalModelsCustomFailed{
+			ProtocolVersion: request.ProtocolVersion,
+			CommandID:       request.CommandID,
+			RunnerID:        request.RunnerID,
+			TenantID:        request.TenantID,
+			OwnerActorID:    request.OwnerActorID,
+			ConnectionEpoch: request.ConnectionEpoch,
+			ExpiresAt:       request.ExpiresAt,
+			Type:            wire.TypeExecuted,
+			Kind:            wire.KindLocalModelsCustom,
+			Action:          request.Action,
+			Outcome:         wire.OutcomeFailed,
+			Error: wire.AgentRunnerError{
+				Code:      code,
+				Message:   message,
+				Retryable: retryable,
+			},
+		}
+		payload, marshalErr := json.Marshal(frame)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		return stream.Send(ctx, protocol.Event{
+			Type:            protocol.EventCapabilityLocalModelsCustomFailed,
+			ProtocolVersion: command.ProtocolVersion,
+			CommandID:       command.CommandID,
+			RunnerID:        command.RunnerID,
+			TenantID:        request.TenantID,
+			OwnerActorID:    request.OwnerActorID,
+			ConnectionEpoch: command.ConnectionEpoch,
+			SentAt:          time.Now().UTC(),
+			Payload:         payload,
+		})
+	}
+	switch {
+	case request.RunnerID != d.computerID || !d.ownedBy(request.TenantID, request.OwnerActorID):
+		return sendFailed("LOCAL_MODEL_ACTION_FORBIDDEN", "This Computer does not belong to the owner.", false)
+	case !expiresAt.After(time.Now()):
+		return sendFailed("LOCAL_MODELS_CUSTOM_EXPIRED", "The custom model request expired; try again.", true)
+	case d.localModels == nil:
+		return sendFailed(localmodels.CodeToolNotInstalled, "The localmodels tool is not installed on this Computer.", false)
+	}
+	customLib, ok := d.localModels.(customLocalModelLibrary)
+	if !ok {
+		return sendFailed(localmodels.CodeToolFailed, "Custom local model actions are unavailable on this Computer.", false)
+	}
+	commandCtx, cancel := context.WithDeadline(ctx, expiresAt)
+	defer cancel()
+
+	var searchResult *wire.LocalModelCustomSearchResult
+	var probeResult *wire.LocalModelCustomProbeResult
+	var actionErr error
+
+	switch request.Action {
+	case "search":
+		input := wire.LocalModelCustomSearchInput{}
+		if request.Search != nil {
+			input = *request.Search
+		}
+		res, err := customLib.SearchCustom(commandCtx, input)
+		if err != nil {
+			actionErr = err
+		} else {
+			searchResult = &res
+		}
+	case "probe":
+		if request.Probe == nil || request.Probe.Target == "" {
+			return sendFailed("INVALID_REPO_SPEC", "A custom repository target is required.", false)
+		}
+		res, err := customLib.ProbeCustom(commandCtx, *request.Probe)
+		if err != nil {
+			actionErr = err
+		} else {
+			probeResult = &res
+		}
+	default:
+		return sendFailed("INVALID_REPO_SPEC", "Unsupported custom local model action.", false)
+	}
+	if actionErr != nil {
+		var typed *localmodels.CustomHubError
+		if errors.As(actionErr, &typed) {
+			slog.Warn("local_models_custom.command_refused", "action", request.Action, "code", typed.Code)
+			return sendFailed(typed.Code, typed.Message, typed.Retryable)
+		}
+		slog.Warn("local_models_custom.command_failed", "action", request.Action)
+		return sendFailed(localmodels.CodeToolFailed, "Could not complete the custom local model request on this Computer.", true)
+	}
+	frame := wire.CapabilityLocalModelsCustomSucceeded{
+		ProtocolVersion: request.ProtocolVersion,
+		CommandID:       request.CommandID,
+		RunnerID:        request.RunnerID,
+		TenantID:        request.TenantID,
+		OwnerActorID:    request.OwnerActorID,
+		ConnectionEpoch: request.ConnectionEpoch,
+		ExpiresAt:       request.ExpiresAt,
+		Type:            wire.TypeExecuted,
+		Kind:            wire.KindLocalModelsCustom,
+		Action:          request.Action,
+		Outcome:         wire.OutcomeSucceeded,
+		SearchResult:    searchResult,
+		ProbeResult:     probeResult,
+	}
+	payload, err := json.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	return stream.Send(ctx, protocol.Event{
+		Type:            protocol.EventCapabilityLocalModelsCustomSucceeded,
+		ProtocolVersion: command.ProtocolVersion,
+		CommandID:       command.CommandID,
+		RunnerID:        command.RunnerID,
+		TenantID:        request.TenantID,
+		OwnerActorID:    request.OwnerActorID,
+		ConnectionEpoch: command.ConnectionEpoch,
+		SentAt:          time.Now().UTC(),
+		Payload:         payload,
+	})
+}
+
 // validLocalModelAction checks what the wire schema requires, so no value
 // the tool would read as an option reaches its command line.
 func validLocalModelAction(action localmodels.Action) bool {
 	switch action.Name {
 	case localmodels.ActionRefresh:
-		return action.Model == "" && len(action.UnloadFirst) == 0 && !action.Force
+		return action.Model == "" && len(action.UnloadFirst) == 0 && !action.Force && action.ContextTokens == 0 && action.CustomDownload == nil
+	case localmodels.ActionCustomDownload:
+		if action.Model != "" || len(action.UnloadFirst) != 0 || action.Force || action.ContextTokens != 0 || action.CustomDownload == nil {
+			return false
+		}
+		in := action.CustomDownload
+		return (in.Hub == "huggingface" || in.Hub == "modelscope") && in.RepoID != "" && in.VariantID != ""
+	case localmodels.ActionSmokeTest:
+		return localmodels.ValidModelID(action.Model) && len(action.UnloadFirst) == 0 && !action.Force && action.CustomDownload == nil &&
+			(action.ContextTokens == 0 || action.ContextTokens == 2048 || action.ContextTokens == 4096)
 	case localmodels.ActionDownload, localmodels.ActionCancel, localmodels.ActionUnload, localmodels.ActionRemove:
-		return localmodels.ValidModelID(action.Model) && len(action.UnloadFirst) == 0 && !action.Force
+		return localmodels.ValidModelID(action.Model) && len(action.UnloadFirst) == 0 && !action.Force && action.ContextTokens == 0 && action.CustomDownload == nil
 	case localmodels.ActionLoad:
-		if !localmodels.ValidModelID(action.Model) {
+		if !localmodels.ValidModelID(action.Model) || action.CustomDownload != nil {
 			return false
 		}
 		for _, other := range action.UnloadFirst {
@@ -427,6 +597,43 @@ func stripLocalModelsExternalHolders(snapshot wire.LocalModelsSnapshot) wire.Loc
 	return snapshot
 }
 
+// stripLocalModelsCustom removes custom hub fields, shard progress counters,
+// mlx engine values, host supported_formats, and custom error codes when
+// talking to an Agent Service that did not announce serviceFeatureLocalModelsCustom.
+func stripLocalModelsCustom(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnapshot {
+	if snapshot.Host != nil && len(snapshot.Host.SupportedFormats) > 0 {
+		hostCopy := *snapshot.Host
+		hostCopy.SupportedFormats = nil
+		snapshot.Host = &hostCopy
+	}
+	if len(snapshot.Models) == 0 {
+		return snapshot
+	}
+	models := make([]wire.LocalModel, len(snapshot.Models))
+	for i, model := range snapshot.Models {
+		model.Origin = ""
+		model.Custom = nil
+		model.Verification = nil
+		if model.Engine == "mlx" {
+			model.Engine = ""
+		}
+		if model.Download != nil && (model.Download.ShardIndex != nil || model.Download.ShardCount != nil) {
+			dlCopy := *model.Download
+			dlCopy.ShardIndex = nil
+			dlCopy.ShardCount = nil
+			model.Download = &dlCopy
+		}
+		if model.Error != nil && isCustomLocalModelErrorCode(model.Error.Code) {
+			errCopy := *model.Error
+			errCopy.Code = "UNKNOWN_ERROR"
+			model.Error = &errCopy
+		}
+		models[i] = model
+	}
+	snapshot.Models = models
+	return snapshot
+}
+
 // stripLocalModelsStorage omits host.models_dir, host.models_dir_exists, and
 // per-model storage without mutating caller-owned pointers or slices when
 // talking to an Agent Service that did not announce
@@ -485,6 +692,24 @@ func stripLocalModelsAdmissionV2(snapshot wire.LocalModelsSnapshot) wire.LocalMo
 func stripLocalModelActionRefusalAdmissionV2(refusal wire.LocalModelActionRefusal) wire.LocalModelActionRefusal {
 	refusal.ShortfallBytes = nil
 	refusal.CanForce = nil
+	return refusal
+}
+
+func isCustomLocalModelErrorCode(code string) bool {
+	switch code {
+	case "HUB_AUTH_REQUIRED", "HUB_FORBIDDEN", "HUB_REPO_NOT_FOUND",
+		"HUB_FORMAT_UNSUPPORTED", "HUB_UNREACHABLE",
+		"UNSUPPORTED_ARCHITECTURE", "CORRUPT_WEIGHTS":
+		return true
+	default:
+		return false
+	}
+}
+
+func downgradeLocalModelsCustomRefusal(refusal wire.LocalModelActionRefusal) wire.LocalModelActionRefusal {
+	if isCustomLocalModelErrorCode(refusal.Code) {
+		refusal.Code = "UNKNOWN_ERROR"
+	}
 	return refusal
 }
 

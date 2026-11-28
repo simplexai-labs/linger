@@ -127,6 +127,7 @@ const (
 	CommandCapabilityLocalModels        = wire.TypeExecute + ":" + wire.KindLocalModels
 	CommandCapabilityLocalSpeechAction  = wire.TypeExecute + ":" + wire.KindLocalSpeechAction
 	CommandCapabilityLocalAsrTranscribe = wire.TypeExecute + ":" + wire.KindLocalAsrTranscribe
+	CommandCapabilityLocalModelsCustom  = wire.TypeExecute + ":" + wire.KindLocalModelsCustom
 	CommandCapabilityModelSource        = wire.TypeExecute + ":" + wire.KindModelSource
 	CommandSessionCompact               = wire.TypeExecute + ":" + wire.KindSessionCompact
 	CommandModelInvoke                  = wire.TypeExecute + ":" + wire.KindModelInvoke
@@ -166,6 +167,8 @@ const (
 	EventCapabilityLocalSpeechActionRefused    = wire.TypeExecuted + ":" + wire.KindLocalSpeechAction + ":" + wire.OutcomeRefused
 	EventCapabilityLocalAsrTranscribeSucceeded = wire.TypeExecuted + ":" + wire.KindLocalAsrTranscribe + ":" + wire.OutcomeSucceeded
 	EventCapabilityLocalAsrTranscribeFailed    = wire.TypeExecuted + ":" + wire.KindLocalAsrTranscribe + ":" + wire.OutcomeFailed
+	EventCapabilityLocalModelsCustomSucceeded  = wire.TypeExecuted + ":" + wire.KindLocalModelsCustom + ":" + wire.OutcomeSucceeded
+	EventCapabilityLocalModelsCustomFailed     = wire.TypeExecuted + ":" + wire.KindLocalModelsCustom + ":" + wire.OutcomeFailed
 	EventCapabilityModelSourceSucceeded        = wire.TypeExecuted + ":" + wire.KindModelSource + ":" + wire.OutcomeSucceeded
 	EventCapabilityModelSourceFailed           = wire.TypeExecuted + ":" + wire.KindModelSource + ":" + wire.OutcomeFailed
 	EventSessionCompacted                      = wire.TypeExecuted + ":" + wire.KindSessionCompact

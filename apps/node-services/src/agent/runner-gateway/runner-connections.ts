@@ -36,6 +36,7 @@ import {
   FIRST_LOCAL_MODELS_CONCURRENCY_PROBE_COMPUTER_VERSION,
   FIRST_PI_SESSION_COMPACTION_COMPUTER_VERSION,
   FIRST_ANTIGRAVITY_SESSION_COMPACTION_COMPUTER_VERSION,
+  FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
   FIRST_LOCAL_VOICE_ASR_COMPUTER_VERSION,
   FIRST_SERVICE_FEATURES_COMPUTER_VERSION,
   resolveSupportedReasoningEffort,
@@ -60,7 +61,10 @@ import {
   type RunnerGatewayPrincipal,
 } from "./runner-gateway-principal.js";
 import { isLocalSkillOutcome } from "./runner-local-capabilities.js";
-import { isLocalModelsOutcome } from "./runner-local-models.js";
+import {
+  isLocalModelsCustomOutcome,
+  isLocalModelsOutcome,
+} from "./runner-local-models.js";
 import {
   isLocalAsrTranscribeOutcome,
   isLocalSpeechActionOutcome,
@@ -527,6 +531,12 @@ export class RunnerConnections {
               )
                 ? (["local_voice_asr"] as const)
                 : []),
+              ...(isComputerVersionAtLeast(
+                connection.hello.daemon_version,
+                FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION,
+              )
+                ? (["local_models_custom"] as const)
+                : []),
               // A Computer ignores a feature it does not know, so these
               // need no release gate.
               "local_model_unavailable",
@@ -829,6 +839,10 @@ export class RunnerConnections {
     }
     if (isLocalAsrTranscribeOutcome(envelope)) {
       this.owners.localSpeech().receiveTranscribeOutcome(connection, envelope);
+      return;
+    }
+    if (isLocalModelsCustomOutcome(envelope)) {
+      this.owners.localModels().receiveCustomOutcome(connection, envelope);
       return;
     }
     if (envelope.type === "prepared" && envelope.target === "provider") {

@@ -232,7 +232,18 @@ take precedence.
 - `local_models_external_holders`, `local_models_admission_v2`, and
   `local_model_loading_status` are advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
-  strips `external_holders` from `LocalModelPool` rows, strips elastic
+  strips admission and loading-status fields as described below.
+- Custom hub local models (`local_models_custom` in `runner.welcome`'s
+  `service_features`, `execute` `local_models_custom` `search`/`probe`, and
+  `local_models` `custom_download`, `smoke_test`, and `load` `force`/`context_tokens`)
+  are sent only to Computer 0.71.0 or later
+  (`FIRST_LOCAL_MODELS_CUSTOM_COMPUTER_VERSION`); older Computers answer `409`
+  `LOCAL_MODELS_CUSTOM_UNSUPPORTED`, and a Daemon talking to an older Agent
+  Service strips custom snapshot fields and downgrades new hub/verification
+  error codes. Transient hub tokens travel only inside the request/envelope and
+  are never echoed in validation errors or logged.
+- A Daemon talking to an older Agent Service strips `external_holders` from
+  `LocalModelPool` rows, strips elastic
   admission fields (`minimum_memory_bytes`, `degraded`, `requested_posture`,
   `effective_posture`, `degradation_reason`, `memory_pressure_warning`,
   `oom_retries`, `forced`, and error/refusal room fields) without

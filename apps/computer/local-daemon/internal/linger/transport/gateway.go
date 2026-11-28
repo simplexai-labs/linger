@@ -188,6 +188,7 @@ var agentShapes = map[string]func() wire.Shape{
 	"CapabilityBrowserConnect":            func() wire.Shape { return &wire.CapabilityBrowserConnect{} },
 	"CapabilityComputerPermission":        func() wire.Shape { return &wire.CapabilityComputerPermission{} },
 	"CapabilityLocalModelsExecute":        func() wire.Shape { return &wire.CapabilityLocalModelsExecute{} },
+	"CapabilityLocalModelsCustom":         func() wire.Shape { return &wire.CapabilityLocalModelsCustom{} },
 	"CapabilityLocalSpeechActionExecute":  func() wire.Shape { return &wire.CapabilityLocalSpeechActionExecute{} },
 	"CapabilityLocalAsrTranscribeExecute": func() wire.Shape { return &wire.CapabilityLocalAsrTranscribeExecute{} },
 	"CapabilityModelSource":               func() wire.Shape { return &wire.CapabilityModelSource{} },
@@ -326,7 +327,7 @@ func decodeGatewayCommand(encoded []byte) (protocol.Command, error) {
 		protocol.CommandCapabilitySkillsScan, protocol.CommandCapabilityBrowserConnect,
 		protocol.CommandCapabilityComputerPermission, protocol.CommandCapabilityLocalModels,
 		protocol.CommandCapabilityLocalSpeechAction, protocol.CommandCapabilityLocalAsrTranscribe,
-		protocol.CommandCapabilityModelSource:
+		protocol.CommandCapabilityLocalModelsCustom, protocol.CommandCapabilityModelSource:
 		// Their handlers decode the generated shape from the frame itself.
 		command.Payload = append(json.RawMessage(nil), encoded...)
 	}
@@ -502,6 +503,7 @@ func (s *gatewayStream) Send(ctx context.Context, event protocol.Event) error {
 		event.Type == protocol.EventCapabilityLocalModelsAccepted || event.Type == protocol.EventCapabilityLocalModelsRefused ||
 		event.Type == protocol.EventCapabilityLocalSpeechActionAccepted || event.Type == protocol.EventCapabilityLocalSpeechActionRefused ||
 		event.Type == protocol.EventCapabilityLocalAsrTranscribeSucceeded || event.Type == protocol.EventCapabilityLocalAsrTranscribeFailed ||
+		event.Type == protocol.EventCapabilityLocalModelsCustomSucceeded || event.Type == protocol.EventCapabilityLocalModelsCustomFailed ||
 		event.Type == protocol.EventCapabilityModelSourceSucceeded || event.Type == protocol.EventCapabilityModelSourceFailed ||
 		event.Type == protocol.EventLocalModels || event.Type == protocol.EventLocalSpeech ||
 		event.Type == protocol.EventProviderPrepared || event.Type == protocol.EventSessionCompacted ||

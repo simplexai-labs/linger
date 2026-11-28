@@ -44,8 +44,20 @@ const read = (target: string) =>
     voiceTools: unknown[];
   };
 
-// The localmodels release scripts/installs/stack.sh pins; the installer pins
-// the same one by convention.
+const EXPECTED_LOCALMODELS_VERSION = "0.1.0.dev63";
+const EXPECTED_LOCALMODELS_NPM_VERSION = "0.1.0-dev.63";
+const EXPECTED_LOCALMODELS_SOURCE_COMMIT =
+  "3af85d5feaf9f40afffb022a2fd6ad6c82d1fcb0";
+const EXPECTED_LOCALMODELS_SHA256 = {
+  "darwin-arm64":
+    "264e71b188b1320676cc3517ebcba7346e9d786d56ef6c0cc0fadca19b27385b",
+  "linux-x64":
+    "5def38ac226ffdaa4671e9164acf07e3a1f8efb1f29b68ac90806e380388c083",
+  "win32-x64":
+    "177d091d5ce253cbb0db479995b51098518a51804d7312d865ba66c6eddb4304",
+} as const;
+
+// Runtime versions remain sourced from scripts/installs/stack.sh.
 const stack = readFileSync(
   path.join(desktop, "../../scripts/installs/stack.sh"),
   "utf8",
@@ -84,11 +96,11 @@ describe("desktop distributions", () => {
         voice.map((source) => [source.target, source.file !== undefined]),
       ).toEqual([[target, true]]);
       const tool = validateToolSource(value.localmodelsTool);
-      expect(tool.url.endsWith(`/${pin("STACK_VERSION")}/${target}.tgz`)).toBe(
-        true,
-      );
+      expect(
+        tool.url.endsWith(`/${EXPECTED_LOCALMODELS_VERSION}/${target}.tgz`),
+      ).toBe(true);
       expect(value.localmodelsTool.sourceCommit).toBe(
-        pin("STACK_SOURCE_COMMIT"),
+        EXPECTED_LOCALMODELS_SOURCE_COMMIT,
       );
       // The Daemon's Go tests check these against its Runtime minimums, so
       // they must be the pinned release's, not a hand-entered copy.
@@ -98,15 +110,14 @@ describe("desktop distributions", () => {
       expect(value.localmodelsTool.runtimeBaselines).toEqual(
         runtimes("STACK_RUNTIME_BASELINES"),
       );
-      const kit = pin(`STACK_KIT_${target.replace("-", "_")}`);
-      if (kit) expect(tool.sha256).toBe(kit);
+      expect(tool.sha256).toBe(EXPECTED_LOCALMODELS_SHA256[target]);
       // The same kit as published on npm (and its China mirror), in the
       // stack's npm version; the pinned sha256 decides either way.
       const name = `localmodels-${target}`;
-      const version = pin("STACK_NPM_VERSION");
+      const version = EXPECTED_LOCALMODELS_NPM_VERSION;
       expect(tool.mirrors).toEqual([
         `https://registry.npmjs.org/@simplexai/${name}/-/${name}-${version}.tgz`,
-        `https://cdn.npmmirror.com/packages/@simplexai/${name}/${version}/${name}-${version}.tgz`,
+        `https://registry.npmmirror.com/@simplexai/${name}/-/${name}-${version}.tgz`,
       ]);
     });
 });

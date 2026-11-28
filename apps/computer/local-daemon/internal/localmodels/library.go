@@ -579,19 +579,26 @@ func (l *Library) commit(snapshot wire.LocalModelsSnapshot) wire.LocalModelsSnap
 // outcome reaches the owner through the snapshots published once the tool
 // decides.
 func (l *Library) Act(ctx context.Context, action Action, deadline time.Time) (refusal *wire.LocalModelActionRefusal, answered bool) {
+	_, refusal, answered = l.ActWithResult(ctx, action, deadline)
+	return refusal, answered
+}
+
+// ActWithResult is like Act and also returns the assigned model ID when the
+// tool decides it dynamically (such as custom_download).
+func (l *Library) ActWithResult(ctx context.Context, action Action, deadline time.Time) (modelID string, refusal *wire.LocalModelActionRefusal, answered bool) {
 	if l.tool == nil || !l.tool.installed() {
 		if action.Name == ActionRefresh {
 			l.Refresh(ctx)
 		}
-		return &wire.LocalModelActionRefusal{Code: CodeToolNotInstalled}, true
+		return action.Model, &wire.LocalModelActionRefusal{Code: CodeToolNotInstalled}, true
 	}
 	switch action.Name {
 	case ActionRefresh:
 		if snapshot := l.Refresh(ctx); !snapshot.Available {
-			return &wire.LocalModelActionRefusal{Code: snapshot.Reason.Code, Detail: snapshot.Reason.Detail}, true
+			return "", &wire.LocalModelActionRefusal{Code: snapshot.Reason.Code, Detail: snapshot.Reason.Detail}, true
 		}
-		return nil, true
-	case ActionDownload, ActionLoad:
+		return "", nil, true
+	case ActionDownload, ActionLoad, ActionSmokeTest, ActionCustomDownload:
 		l.mu.Lock()
 		known := l.current != nil
 		l.mu.Unlock()
@@ -600,13 +607,37 @@ func (l *Library) Act(ctx context.Context, action Action, deadline time.Time) (r
 			l.Refresh(ctx)
 		}
 		if action.Name == ActionLoad && l.needsUnloadBeforeLoad(ctx, action.Model) {
-			return l.unloadAndStartJob(ctx, action, deadline)
+			ref, ok := l.unloadAndStartJob(ctx, action, deadline)
+			return action.Model, ref, ok
 		}
 		return l.startJob(ctx, action, deadline)
 	case ActionUnload, ActionRemove, ActionCancel:
-		return l.runAction(ctx, action, deadline)
+		ref, ok := l.runAction(ctx, action, deadline)
+		return action.Model, ref, ok
 	}
-	return &wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "unknown local model action"}, true
+	return action.Model, &wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "unknown local model action"}, true
+}
+
+// SearchCustom runs a synchronous custom repository search via the tool.
+func (l *Library) SearchCustom(ctx context.Context, input wire.LocalModelCustomSearchInput) (wire.LocalModelCustomSearchResult, error) {
+	if l.tool == nil || !l.tool.installed() {
+		return wire.LocalModelCustomSearchResult{}, &CustomHubError{
+			Code:    CodeToolNotInstalled,
+			Message: "The localmodels tool is not installed on this Computer.",
+		}
+	}
+	return l.tool.runCustomSearch(ctx, l.environment, l.jobDirectory, input)
+}
+
+// ProbeCustom runs a synchronous zero-download repository probe via the tool.
+func (l *Library) ProbeCustom(ctx context.Context, input wire.LocalModelCustomProbeInput) (wire.LocalModelCustomProbeResult, error) {
+	if l.tool == nil || !l.tool.installed() {
+		return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+			Code:    CodeToolNotInstalled,
+			Message: "The localmodels tool is not installed on this Computer.",
+		}
+	}
+	return l.tool.runCustomProbe(ctx, l.environment, l.jobDirectory, input)
 }
 
 // runOnce runs a call that prints one JSON document and returns its stdout.
@@ -616,8 +647,8 @@ func (l *Library) Act(ctx context.Context, action Action, deadline time.Time) (r
 func (l *Library) runOnce(ctx context.Context, action Action) ([]byte, int, error) {
 	output, stderrBytes, exitCode, err := l.tool.runBuffered(ctx, l.environment, l.jobDirectory, "job", maxEventLine, l.tool.arguments(action), nil)
 	if exitCode != 0 && len(stderrBytes) > 0 {
-		// Local diagnostics only: tool prose can name local paths.
-		slog.Debug("local_models.tool_stderr", "action", action.Name, "stderr", string(stderrBytes))
+		// Local diagnostics only: redact secrets before debug logging.
+		slog.Debug("local_models.tool_stderr", "action", action.Name, "stderr", redact.Text(string(stderrBytes)))
 	}
 	return output, exitCode, err
 }
@@ -649,7 +680,7 @@ func (l *Library) runAction(ctx context.Context, action Action, deadline time.Ti
 		defer cancel()
 		stdout, exitCode, err := l.runOnce(runCtx, action)
 		refusal := documentRefusal(stdout, exitCode, err)
-		answer.give(refusal)
+		answer.give(refusal, action.Model)
 		slog.Info("local_models.action_finished", "action", action.Name, "model", action.Model,
 			"exit_code", exitCode, "refused", refusal != nil)
 		switch {
@@ -665,7 +696,8 @@ func (l *Library) runAction(ctx context.Context, action Action, deadline time.Ti
 			l.Refresh(l.ctx)
 		}
 	}()
-	return answer.await(ctx, deadline)
+	_, refusal, answered := answer.await(ctx, deadline)
+	return refusal, answered
 }
 
 // documentRefusal reads the one result or error document of a JSON call.
@@ -683,39 +715,46 @@ func documentRefusal(stdout []byte, exitCode int, err error) *wire.LocalModelAct
 	return &wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "localmodels exited without a result"}
 }
 
+type actionAnswer struct {
+	refusal *wire.LocalModelActionRefusal
+	modelID string
+}
+
 // pendingAnswer carries the tool's one answer to the requester, who waits
 // until its deadline. Whether the answer missed it is recorded, so the side
 // that produced the answer knows to make the outcome visible another way.
 type pendingAnswer struct {
-	answer chan *wire.LocalModelActionRefusal
+	answer chan actionAnswer
 	late   atomic.Bool
 }
 
 func newPendingAnswer() *pendingAnswer {
-	return &pendingAnswer{answer: make(chan *wire.LocalModelActionRefusal, 1)}
+	return &pendingAnswer{answer: make(chan actionAnswer, 1)}
 }
 
-func (p *pendingAnswer) give(refusal *wire.LocalModelActionRefusal) { p.answer <- refusal }
+func (p *pendingAnswer) give(refusal *wire.LocalModelActionRefusal, modelID string) {
+	p.answer <- actionAnswer{refusal: refusal, modelID: modelID}
+}
 
 // missed reports whether the requester stopped waiting before the answer.
 func (p *pendingAnswer) missed() bool { return p.late.Load() }
 
-func (p *pendingAnswer) await(ctx context.Context, deadline time.Time) (*wire.LocalModelActionRefusal, bool) {
+func (p *pendingAnswer) await(ctx context.Context, deadline time.Time) (string, *wire.LocalModelActionRefusal, bool) {
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
-	case refusal := <-p.answer:
-		return refusal, true
+	case res := <-p.answer:
+		return res.modelID, res.refusal, true
 	case <-timer.C:
 	case <-ctx.Done():
 	}
 	p.late.Store(true)
 	// An answer given at the same moment still counts.
 	select {
-	case refusal := <-p.answer:
-		return refusal, true
+	case res := <-p.answer:
+		return res.modelID, res.refusal, true
 	default:
-		return nil, false
+		return "", nil, false
 	}
 }
 
@@ -737,7 +776,7 @@ func (l *Library) unloadAndStartJob(ctx context.Context, action Action, deadline
 		slog.Info("local_models.action_finished", "action", ActionUnload, "model", action.Model,
 			"exit_code", exitCode, "refused", refusal != nil, "reason", "reset_before_load")
 		if refusal != nil {
-			answer.give(refusal)
+			answer.give(refusal, action.Model)
 			if answer.missed() {
 				l.Refresh(l.ctx)
 			}
@@ -745,19 +784,21 @@ func (l *Library) unloadAndStartJob(ctx context.Context, action Action, deadline
 		}
 		if l.ctx.Err() != nil {
 			refusal := closedRefusal
-			answer.give(&refusal)
+			answer.give(&refusal, action.Model)
 			return
 		}
 		l.launchJob(action, answer, true)
 	}()
-	return answer.await(ctx, deadline)
+	_, refusal, answered := answer.await(ctx, deadline)
+	return refusal, answered
 }
 
-// startJob starts a download or load and answers from its first event.
-func (l *Library) startJob(ctx context.Context, action Action, deadline time.Time) (*wire.LocalModelActionRefusal, bool) {
+// startJob starts a download, custom_download, load, or smoke_test and answers
+// from its first event.
+func (l *Library) startJob(ctx context.Context, action Action, deadline time.Time) (string, *wire.LocalModelActionRefusal, bool) {
 	if !l.track(1) {
 		refusal := closedRefusal
-		return &refusal, true
+		return action.Model, &refusal, true
 	}
 	answer := newPendingAnswer()
 	go func() {
@@ -767,23 +808,40 @@ func (l *Library) startJob(ctx context.Context, action Action, deadline time.Tim
 	return answer.await(ctx, deadline)
 }
 
-// launchJob spawns a download or load child process and supervises it, giving
-// the first refusal or acceptance to answer. When refreshOnRefusal is true (a
-// reset-unload already changed state on disk), any refusal refreshes the
-// snapshot and signals runtimeChanged so the idle state is published.
+// launchJob spawns a download, custom_download, load, or smoke_test child
+// process and supervises it, giving the first refusal or acceptance to answer.
+// When refreshOnRefusal is true (a reset-unload already changed state on disk),
+// any refusal refreshes the snapshot and signals runtimeChanged so the idle
+// state is published.
 func (l *Library) launchJob(action Action, answer *pendingAnswer, refreshOnRefusal bool) {
 	// tail and superviseJob are reserved before the job starts, so no job
 	// starts unsupervised after Close.
 	if !l.track(2) {
 		refusal := closedRefusal
-		answer.give(&refusal)
+		answer.give(&refusal, action.Model)
 		return
+	}
+	var stdinBytes []byte
+	if action.Name == ActionCustomDownload {
+		if action.CustomDownload == nil {
+			l.wg.Add(-2)
+			answer.give(&wire.LocalModelActionRefusal{Code: "MODEL_UNKNOWN", Detail: "custom download input is required"}, "")
+			return
+		}
+		encoded, err := json.Marshal(action.CustomDownload)
+		if err != nil {
+			l.wg.Add(-2)
+			answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "could not encode custom download input"}, "")
+			return
+		}
+		stdinBytes = encoded
+		defer clear(stdinBytes)
 	}
 	output, err := l.jobOutput()
 	if err != nil {
 		l.wg.Add(-2)
 		slog.Warn("local_models.job_output_failed", "error", err)
-		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"})
+		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"}, action.Model)
 		if (refreshOnRefusal || answer.missed()) && l.ctx.Err() == nil {
 			l.Refresh(l.ctx)
 			if refreshOnRefusal {
@@ -793,6 +851,9 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer, refreshOnRefus
 		return
 	}
 	cmd := l.tool.command(l.environment, action)
+	if len(stdinBytes) > 0 {
+		cmd.Stdin = bytes.NewReader(stdinBytes)
+	}
 	cmd.Stdout, cmd.Stderr = output, output
 	// Its own process group, outside any job object: the job must outlive
 	// this Daemon.
@@ -802,7 +863,7 @@ func (l *Library) launchJob(action Action, answer *pendingAnswer, refreshOnRefus
 		_ = output.Close()
 		_ = os.Remove(output.Name())
 		slog.Warn("local_models.job_start_failed", "action", action.Name, "error", err)
-		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"})
+		answer.give(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "the Computer could not start localmodels"}, action.Model)
 		if (refreshOnRefusal || answer.missed()) && l.ctx.Err() == nil {
 			l.Refresh(l.ctx)
 			if refreshOnRefusal {
@@ -898,31 +959,48 @@ func (l *Library) tail(path string, exited <-chan int, events chan<- libraryEven
 func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended <-chan int, answer *pendingAnswer, refreshOnRefusal bool) {
 	answered := false
 	accepted := false
+	jobModelID := action.Model
+	secretToken := ""
+	if action.CustomDownload != nil {
+		secretToken = action.CustomDownload.Token
+	}
 	reply := func(refusal *wire.LocalModelActionRefusal) {
 		if !answered {
+			if refusal != nil && secretToken != "" {
+				copied := *refusal
+				copied.Detail = clip(redact.TextWithSecrets(copied.Detail, secretToken), 4000)
+				refusal = &copied
+			}
 			answered, accepted = true, refusal == nil
 			// Registered before the answer: a caller that waits for the
 			// accepted job must find it running.
 			if accepted {
 				l.mu.Lock()
 				if action.Name == ActionLoad {
-					l.cancelProbeLocked(action.Model)
-					l.cancelPrefixWarmupLocked(action.Model)
+					l.cancelProbeLocked(jobModelID)
+					l.cancelPrefixWarmupLocked(jobModelID)
 					for _, unloadModel := range action.UnloadFirst {
 						l.cancelProbeLocked(unloadModel)
 						l.cancelPrefixWarmupLocked(unloadModel)
 					}
 				}
-				l.jobs[action.Model] = &job{action: action}
-				delete(l.causes, action.Model)
+				if jobModelID != "" {
+					l.jobs[jobModelID] = &job{action: action}
+					delete(l.causes, jobModelID)
+				}
 				l.mu.Unlock()
 			}
-			answer.give(refusal)
+			answer.give(refusal, jobModelID)
 		}
 	}
 	var final *libraryEvent
 	phase := ""
 	for event := range events {
+		if jobModelID == "" {
+			if candidate := event.modelID(); ValidModelID(candidate) {
+				jobModelID = candidate
+			}
+		}
 		switch event.Event {
 		case "progress":
 			reply(nil)
@@ -951,7 +1029,7 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 		return
 	}
 	if !answered {
-		slog.Warn("local_models.job_without_events", "action", action.Name, "model", action.Model, "exit_code", exitCode)
+		slog.Warn("local_models.job_without_events", "action", action.Name, "model", jobModelID, "exit_code", exitCode)
 		reply(&wire.LocalModelActionRefusal{Code: CodeToolFailed, Detail: "localmodels exited without a result"})
 	}
 	outcome := "failed"
@@ -960,11 +1038,11 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 	} else if final != nil {
 		outcome = final.Code
 	}
-	attrs := []any{"action", action.Name, "model", action.Model,
+	attrs := []any{"action", action.Name, "model", jobModelID,
 		"exit_code", exitCode, "outcome", outcome, "accepted", accepted}
 	if final != nil && final.Event == "error" && strings.TrimSpace(final.Detail) != "" {
 		// Local diagnostics only: redacted detail aids debugging gateway registration failures.
-		attrs = append(attrs, "detail", redact.Text(clip(strings.TrimSpace(final.Detail), 500)))
+		attrs = append(attrs, "detail", redact.TextWithSecrets(clip(strings.TrimSpace(final.Detail), 500), secretToken))
 	}
 	slog.Info("local_models.job_finished", attrs...)
 	if !accepted {
@@ -979,15 +1057,19 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 		return
 	}
 	l.mu.Lock()
-	delete(l.jobs, action.Model)
+	if jobModelID != "" {
+		delete(l.jobs, jobModelID)
+	}
 	rotateGatewayAddr := false
-	l.jobEnded[action.Model] = l.commits
-	if action.Name == ActionLoad && final != nil && final.Event == "result" {
-		l.touchActivityLocked(action.Model)
+	if jobModelID != "" {
+		l.jobEnded[jobModelID] = l.commits
+		if action.Name == ActionLoad && final != nil && final.Event == "result" {
+			l.touchActivityLocked(jobModelID)
+		}
 	}
 	if final != nil && final.Event == "error" {
-		if cause := final.cause(); cause != nil {
-			l.causes[action.Model] = cause
+		if cause := final.cause(); cause != nil && jobModelID != "" {
+			l.causes[jobModelID] = cause
 		} else if final.Code == "GATEWAY_REGISTRATION_FAILED" && final.Cause == "" {
 			rotateGatewayAddr = true
 		}
@@ -1094,8 +1176,8 @@ func (l *Library) publishProgressLocked() {
 	l.publish(snapshot)
 }
 
-// applyProgress moves the progress line's model into downloading or
-// loading. It reports whether the snapshot changed.
+// applyProgress moves the progress line's model into downloading, loading, or
+// running smoke_test verification. It reports whether the snapshot changed.
 func applyProgress(snapshot *wire.LocalModelsSnapshot, event libraryEvent) bool {
 	id := event.modelID()
 	for index := range snapshot.Models {
@@ -1112,9 +1194,28 @@ func applyProgress(snapshot *wire.LocalModelsSnapshot, event libraryEvent) bool 
 				rate := bytesValue(event.BytesPerSecond)
 				progress.BytesPerSecond = &rate
 			}
+			if event.ShardIndex != nil && *event.ShardIndex >= 1 {
+				idx := bytesValue(*event.ShardIndex)
+				progress.ShardIndex = &idx
+			}
+			if event.ShardCount != nil && *event.ShardCount >= 1 {
+				cnt := bytesValue(*event.ShardCount)
+				progress.ShardCount = &cnt
+			}
 			model.State, model.Download, model.Endpoint, model.ConcurrencyProbing, model.Error, model.Note = "downloading", progress, nil, nil, nil, nil
 		case "load", "warm":
 			model.State, model.Download, model.Endpoint, model.ConcurrencyProbing, model.Error, model.Note = "loading", nil, nil, nil, nil, nil
+		case "smoke_test":
+			// Smoke test stays Standby-First: never reports loaded or loading.
+			verification := &wire.LocalModelVerification{Status: "running"}
+			if event.ContextTokens != nil && *event.ContextTokens >= 1 {
+				ctxTokens := bytesValue(*event.ContextTokens)
+				verification.ContextTokens = &ctxTokens
+			} else if model.Verification != nil && model.Verification.ContextTokens != nil {
+				ctxTokens := *model.Verification.ContextTokens
+				verification.ContextTokens = &ctxTokens
+			}
+			model.Verification = verification
 		default:
 			return false
 		}
@@ -1185,7 +1286,9 @@ func (l *Library) needsRereadLocked(snapshot wire.LocalModelsSnapshot) bool {
 
 func (l *Library) hasAdoptedJobLocked(snapshot wire.LocalModelsSnapshot) bool {
 	for _, model := range snapshot.Models {
-		if model.State != "downloading" && model.State != "loading" {
+		inProgress := model.State == "downloading" || model.State == "loading" ||
+			(model.Verification != nil && model.Verification.Status == "running")
+		if !inProgress {
 			continue
 		}
 		if _, probing := l.probes[model.ID]; probing {
@@ -1500,7 +1603,10 @@ func (l *Library) signalLocked() {
 
 // stoppedDownloadCodes mark a failed row as a download that stopped, not a
 // failed load; the Web client's downloadStopped applies the same rule.
-var stoppedDownloadCodes = []string{"DOWNLOAD_FAILED", "NETWORK_UNAVAILABLE", "DISK_INSUFFICIENT"}
+var stoppedDownloadCodes = []string{
+	"DOWNLOAD_FAILED", "NETWORK_UNAVAILABLE", "DISK_INSUFFICIENT",
+	"HUB_AUTH_REQUIRED", "HUB_FORBIDDEN", "HUB_UNREACHABLE",
+}
 
 // stateDownloadStopped is loadState's name for a stopped download.
 const stateDownloadStopped = "download_stopped"
@@ -1516,13 +1622,17 @@ func loadState(row wire.LocalModel) string {
 
 // InPiCatalog reports whether the row is a model on this Computer that a Pi
 // Run may name: it has a pi_model and is loaded, loading, or downloaded and
-// loadable.
+// loadable. Standby-First custom models are exposed only when loaded or
+// verified by smoke test.
 func InPiCatalog(row wire.LocalModel) bool {
 	if row.PiModel == "" {
 		return false
 	}
 	switch loadState(row) {
 	case "idle", "loading", "loaded", "failed":
+		if row.Origin == "custom" {
+			return row.State == "loaded" || (row.Verification != nil && row.Verification.Status == "verified")
+		}
 		return true
 	}
 	return false

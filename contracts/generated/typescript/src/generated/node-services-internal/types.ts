@@ -151,6 +151,69 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-models/custom/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Search custom Hugging Face or ModelScope repositories on an owned Local Computer */
+    post: operations["searchLocalComputerCustomModels"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-models/custom/probe": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Probe a custom Hugging Face or ModelScope repository on an owned Local Computer */
+    post: operations["probeLocalComputerCustomModel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/local-models/custom/download": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start a Standby-First custom model download on an owned Local Computer */
+    post: operations["downloadLocalComputerCustomModel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/tenants/{tenantId}/owners/{ownerActorId}/local-computers/{computerId}/model-source": {
     parameters: {
       query?: never;
@@ -1556,7 +1619,7 @@ export interface components {
       items: components["schemas"]["LocalSkillCandidate"][];
     };
     /**
-     * @description refresh asks the Computer to reread its library and send a snapshot; it names no model.
+     * @description refresh asks the Computer to reread its library and send a snapshot; it names no model. custom_download starts a Standby-First custom hub download; smoke_test verifies an installed custom model in isolation.
      * @enum {string}
      */
     LocalModelActionKind:
@@ -1565,10 +1628,30 @@ export interface components {
       | "load"
       | "unload"
       | "remove"
-      | "refresh";
+      | "refresh"
+      | "smoke_test"
+      | "custom_download";
     /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
     LocalModelId: string;
-    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first and force only with load. */
+    /**
+     * @description Remote model hub hosting a custom repository.
+     * @enum {string}
+     */
+    LocalModelCustomHub: "huggingface" | "modelscope";
+    /** @description Parameters to start a Standby-First custom model download on the Computer. */
+    LocalModelCustomDownloadInput: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      revision?: string;
+      variant_id: string;
+      files?: string[];
+      mmproj?: string;
+      force_memory?: boolean;
+      replace?: boolean;
+      /** @description Transient read-only hub token; never persisted or logged. */
+      token?: string;
+    };
+    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh and custom_download; unload_first and force only with load; context_tokens with load or smoke_test. */
     LocalModelActionCommand: {
       request_id: components["schemas"]["Id"];
       action: components["schemas"]["LocalModelActionKind"];
@@ -1576,6 +1659,9 @@ export interface components {
       unload_first?: components["schemas"]["LocalModelId"][];
       /** @description Only with load. Override the memory safety guard when the Computer allows forced loading. */
       force?: boolean;
+      /** Format: int64 */
+      context_tokens?: number;
+      custom_download?: components["schemas"]["LocalModelCustomDownloadInput"];
       expires_at: components["schemas"]["Timestamp"];
     };
     /**
@@ -1602,6 +1688,13 @@ export interface components {
       | "MODEL_FILES_MISSING"
       | "GATEWAY_REGISTRATION_FAILED"
       | "CANCELLED"
+      | "HUB_AUTH_REQUIRED"
+      | "HUB_FORBIDDEN"
+      | "HUB_REPO_NOT_FOUND"
+      | "HUB_FORMAT_UNSUPPORTED"
+      | "HUB_UNREACHABLE"
+      | "UNSUPPORTED_ARCHITECTURE"
+      | "CORRUPT_WEIGHTS"
       | "UNKNOWN_ERROR"
       | "TOOL_NOT_INSTALLED"
       | "TOOL_FAILED";
@@ -1630,6 +1723,8 @@ export interface components {
       request_id: components["schemas"]["Id"];
       /** @enum {string} */
       outcome: "accepted" | "refused";
+      /** @description Assigned model ID when returned by the Computer (for example on custom_download). */
+      model_id?: components["schemas"]["LocalModelId"];
       /** @description Present only when refused. */
       refusal?: components["schemas"]["LocalModelActionRefusal"];
     };
@@ -1684,6 +1779,217 @@ export interface components {
       /** @enum {string} */
       outcome: "accepted" | "refused";
       refusal?: components["schemas"]["LocalSpeechActionRefusal"];
+    };
+    /** @enum {string} */
+    LocalModelCustomSearchHub: "all" | "huggingface" | "modelscope";
+    /** @enum {string} */
+    LocalModelCustomSearchFormat: "compatible" | "gguf" | "mlx" | "all";
+    /** @description Search or list trending custom repositories from Hugging Face or ModelScope. */
+    LocalModelCustomSearchRequest: {
+      hub?: components["schemas"]["LocalModelCustomSearchHub"];
+      query?: string;
+      format?: components["schemas"]["LocalModelCustomSearchFormat"];
+      limit?: number;
+      /** @description Transient read-only hub token; never persisted or logged. */
+      token?: string;
+    };
+    /**
+     * @description Local weight format supported by localmodels engines.
+     * @enum {string}
+     */
+    LocalModelFormat: "gguf" | "mlx";
+    /**
+     * @description Weight format detected in a remote Hugging Face or ModelScope repository.
+     * @enum {string}
+     */
+    LocalModelCustomRepoFormat: "gguf" | "mlx" | "safetensors" | "unknown";
+    /**
+     * @description Model family for brand presentation; never inferred from name.
+     * @enum {string}
+     */
+    LocalModelFamily:
+      | "qwen"
+      | "gemma"
+      | "llama"
+      | "openai"
+      | "deepseek"
+      | "mistral"
+      | "phi"
+      | "glm"
+      | "kimi"
+      | "claude"
+      | "grok"
+      | "other";
+    LocalModelCustomDefaultQuant: {
+      id: string;
+      label: string;
+      /** Format: int64 */
+      size_bytes: number;
+    };
+    LocalModelCustomSearchResultItem: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      url: string;
+      title: string;
+      owner: string;
+      format: components["schemas"]["LocalModelCustomRepoFormat"];
+      family?: components["schemas"]["LocalModelFamily"];
+      architecture?: string;
+      parameter_billions?: number;
+      /** Format: int64 */
+      context_tokens?: number;
+      /** Format: int64 */
+      downloads: number;
+      /** Format: int64 */
+      likes: number;
+      updated_at?: string;
+      description?: string;
+      license?: string;
+      gated: boolean;
+      compatible: boolean;
+      incompatibility_code?: string;
+      quant_count?: number;
+      default_quant?: components["schemas"]["LocalModelCustomDefaultQuant"];
+    };
+    LocalModelCustomSearchResponse: {
+      query: string;
+      hub: components["schemas"]["LocalModelCustomSearchHub"];
+      format: components["schemas"]["LocalModelCustomSearchFormat"];
+      /** @enum {string} */
+      platform: "linux" | "darwin" | "windows";
+      /** @enum {string} */
+      arch: "x86_64" | "arm64";
+      supported_formats: components["schemas"]["LocalModelFormat"][];
+      results: components["schemas"]["LocalModelCustomSearchResultItem"][];
+      warnings: string[];
+    };
+    /** @enum {string} */
+    LocalModelCustomProbeHub: "auto" | "huggingface" | "modelscope";
+    /** @description Zero-download metadata probe of a Hugging Face or ModelScope repository or file URL. */
+    LocalModelCustomProbeRequest: {
+      target: string;
+      hub?: components["schemas"]["LocalModelCustomProbeHub"];
+      revision?: string;
+      file_name?: string;
+      /** @description Transient read-only hub token; never persisted or logged. */
+      token?: string;
+    };
+    /** @enum {string} */
+    LocalModelCustomProbeOutcome:
+      | "ready"
+      | "gated"
+      | "incompatible"
+      | "not_found";
+    LocalModelCustomProbeRepo: {
+      hub: components["schemas"]["LocalModelCustomHub"];
+      repo_id: string;
+      revision?: string;
+      url: string;
+      title?: string;
+      owner?: string;
+      format?: components["schemas"]["LocalModelCustomRepoFormat"];
+      family?: components["schemas"]["LocalModelFamily"];
+      license?: string;
+      gated?: boolean;
+    };
+    LocalModelCustomGgufMeta: {
+      architecture?: string;
+      /** Format: int64 */
+      n_ctx_train?: number;
+      n_layer?: number;
+      moe?: boolean;
+      has_chat_template?: boolean;
+    };
+    LocalModelCustomProbeHost: {
+      /** @enum {string} */
+      platform: "linux" | "darwin" | "windows";
+      /** @enum {string} */
+      arch: "x86_64" | "arm64";
+      supported_formats: components["schemas"]["LocalModelFormat"][];
+      /** Format: int64 */
+      disk_free_bytes: number;
+      target_pool?: components["schemas"]["LocalModelPoolId"];
+      /** Format: int64 */
+      pool_total_bytes?: number;
+      /** Format: int64 */
+      pool_soft_budget_bytes?: number;
+      /** Format: int64 */
+      pool_hard_ceiling_bytes?: number;
+    };
+    LocalModelCustomMmprojCandidate: {
+      path: string;
+      /** Format: int64 */
+      size_bytes: number;
+      sha256?: string;
+      recommended: boolean;
+    };
+    LocalModelCustomQuantFile: {
+      path: string;
+      /** Format: int64 */
+      size_bytes: number;
+      sha256?: string;
+      revision?: string;
+    };
+    /** @enum {string} */
+    LocalModelCustomMemoryEstimateBasis:
+      | "gguf_header"
+      | "rough_1.2x_plus_0.8gb";
+    /** @enum {string} */
+    LocalModelCustomMemoryStatus: "comfortable" | "tight" | "exceeds";
+    LocalModelCustomQuantVariant: {
+      id: string;
+      custom_model_id: components["schemas"]["LocalModelId"];
+      label: string;
+      quant: string;
+      bits_per_weight?: number;
+      sharded: boolean;
+      shard_count: number;
+      files: components["schemas"]["LocalModelCustomQuantFile"][];
+      /** Format: int64 */
+      weights_bytes: number;
+      mmproj_file?: string;
+      /** Format: int64 */
+      mmproj_bytes: number;
+      /** Format: int64 */
+      total_download_bytes: number;
+      /** Format: int64 */
+      disk_required_bytes: number;
+      disk_ok: boolean;
+      /** Format: int64 */
+      estimated_memory_bytes: number;
+      memory_estimate_basis: components["schemas"]["LocalModelCustomMemoryEstimateBasis"];
+      memory_status: components["schemas"]["LocalModelCustomMemoryStatus"];
+      already_installed: boolean;
+    };
+    /** @enum {string} */
+    LocalModelCustomIncompatibleReason:
+      | "raw_safetensors"
+      | "mlx_unsupported"
+      | "no_runnable_files";
+    /** @description Classified zero-download probe outcome. Gated repositories return HTTP 200 with outcome gated and hub_http_status (401 or 403) so browser clients never confuse hub authentication with session expiry. */
+    LocalModelCustomProbeResponse: {
+      outcome: components["schemas"]["LocalModelCustomProbeOutcome"];
+      repo?: components["schemas"]["LocalModelCustomProbeRepo"];
+      metadata_complete?: boolean;
+      metadata_note?: string;
+      gguf_meta?: components["schemas"]["LocalModelCustomGgufMeta"];
+      host?: components["schemas"]["LocalModelCustomProbeHost"];
+      mmproj_candidates?: components["schemas"]["LocalModelCustomMmprojCandidate"][];
+      recommended_variant_id?: string;
+      selected_quant_id?: string;
+      quant_variants?: components["schemas"]["LocalModelCustomQuantVariant"][];
+      hub_http_status?: number;
+      token_provided?: boolean;
+      reason?: components["schemas"]["LocalModelCustomIncompatibleReason"];
+      suggested_search_query?: string;
+      hub?: components["schemas"]["LocalModelCustomHub"];
+      repo_id?: string;
+    };
+    /** @description Internal Agent Service command to start a custom model download. */
+    LocalModelCustomDownloadCommand: {
+      request_id: components["schemas"]["Id"];
+      expires_at: components["schemas"]["Timestamp"];
+      custom_download: components["schemas"]["LocalModelCustomDownloadInput"];
     };
     /**
      * @description Active model source mode on a Local Computer.
@@ -2589,6 +2895,108 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["LocalSpeechActionAck"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      502: components["responses"]["BadGateway"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  searchLocalComputerCustomModels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelCustomSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description Custom repository search results. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelCustomSearchResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      502: components["responses"]["BadGateway"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  probeLocalComputerCustomModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelCustomProbeRequest"];
+      };
+    };
+    responses: {
+      /** @description Zero-download custom repository probe outcome. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelCustomProbeResponse"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthenticated"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      502: components["responses"]["BadGateway"];
+      503: components["responses"]["ServiceUnavailable"];
+    };
+  };
+  downloadLocalComputerCustomModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        ownerActorId: components["parameters"]["OwnerActorId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LocalModelCustomDownloadCommand"];
+      };
+    };
+    responses: {
+      /** @description The Computer's immediate accepted or refused answer. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalModelActionAck"];
         };
       };
       400: components["responses"]["BadRequest"];

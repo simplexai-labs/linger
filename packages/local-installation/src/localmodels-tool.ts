@@ -794,7 +794,7 @@ export function localmodelsResumeModelsFile(home: string): string {
   );
 }
 const RESUME_MODELS_SCHEMA = "linger.localmodels-resume/v1";
-const LIBRARY_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/;
+const LIBRARY_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 
 /** Reports whether `id` is a valid localmodels library model identifier. */
 export function isLibraryModelId(id: unknown): id is string {
@@ -1031,13 +1031,18 @@ function isReadOnlyOrStopCommand(args: readonly string[]): boolean {
   const [group, verb] = args;
   if (group === "harness" || group === "debug") return true;
   if (group === "stack") return verb === "down" || verb === "remove";
-  if (group === "library")
+  if (group === "library") {
+    if (verb === "custom") {
+      const subverb = args[2];
+      return subverb === "search" || subverb === "probe";
+    }
     return (
       verb === "status" ||
       verb === "unload" ||
       verb === "remove" ||
       verb === "cancel"
     );
+  }
   if (group === "foundations") return verb === "stop";
   if (group === "gateway") return verb === "stop";
   if (group === "source")
@@ -1228,13 +1233,16 @@ actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools
 bifrost_action = next((a for a in actions if a["tool"] == "bifrost"), None)
 if bifrost_action is None:
     raise harness.HarnessError("Bifrost plan did not return a bifrost action")
+fetch_artifact = getattr(harness, "fetch_artifact", None)
+if fetch_artifact is None:
+    fetch_artifact = getattr(harness, "_fetch")
 archive = Path(harness.archive_files(tools_dir, artifact)[0])
 already_cached = (
     bifrost_action["action"] == "reuse"
     or (archive.is_file() and harness.digest(str(archive)) == artifact["sha256"])
 )
 if not already_cached:
-    harness._fetch(tools_dir, artifact, lambda _line: None)
+    fetch_artifact(tools_dir, artifact, lambda _line: None)
 print(json.dumps({
     "ok": True,
     "cached": already_cached,
@@ -1767,6 +1775,9 @@ const STOPPED_DOWNLOAD_ERROR_CODES = new Set([
   "DOWNLOAD_FAILED",
   "NETWORK_UNAVAILABLE",
   "DISK_INSUFFICIENT",
+  "HUB_AUTH_REQUIRED",
+  "HUB_FORBIDDEN",
+  "HUB_UNREACHABLE",
 ]);
 
 /**

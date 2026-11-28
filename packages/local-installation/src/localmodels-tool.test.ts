@@ -34,6 +34,7 @@ import {
   clearResumeLocalModels,
   configuredDevTool,
   ensureLocalmodelsTool,
+  isStoppedDownloadErrorCode,
   localmodelsBifrostAddrFile,
   localmodelsBifrostDirectory,
   localmodelsLegacyToolsMarkerFile,
@@ -1593,6 +1594,19 @@ test("stopLocalmodels and read-only commands isolate paths without allocating or
     {},
     { run: inspectRun },
   );
+  // Read-only library custom search and probe also never allocate or persist a port.
+  await runLocalmodels(
+    f.home,
+    ["library", "custom", "search", "--config-stdin", "--json"],
+    {},
+    { run: inspectRun },
+  );
+  await runLocalmodels(
+    f.home,
+    ["library", "custom", "probe", "--config-stdin", "--json"],
+    {},
+    { run: inspectRun },
+  );
   const inspectEnv = (
     inspectRun.mock.calls[0] as unknown as [
       string,
@@ -2368,7 +2382,7 @@ test("prefetchLocalmodelsBifrost runs isolated Python without allocating a Bifro
   expect(args.slice(0, 3)).toEqual(["-P", "-s", "-c"]);
   expect(args[3]).toContain("gateway_bifrost.plan_tools");
   expect(args[3]).toContain("harness.archive_files");
-  expect(args[3]).toContain("harness._fetch");
+  expect(args[3]).toContain('getattr(harness, "fetch_artifact", None)');
   expect(opts.cwd).toBe(path.join(f.directory, "modules"));
   expect(opts.env.LOCALMODELS_TOOLS_DIR).toBe(
     localmodelsToolsDirectory(f.home),
@@ -2802,7 +2816,7 @@ test.skipIf(!existsSync(pinnedDistributionFile))(
         /AttributeError|ImportError|KeyError|TypeError/,
       );
 
-      // Check 2: real harness._fetch + gateway_bifrost.plan_tools + harness.archive_files round-trip.
+      // Check 2: real harness.fetch_artifact + gateway_bifrost.plan_tools + harness.archive_files round-trip.
       const toolsDir2 = localmodelsToolsDirectory(home2);
       const stateDir2 = localmodelsStateDirectory(home2);
       const bifrostDir2 = localmodelsBifrostDirectory(home2);
@@ -2867,7 +2881,10 @@ expected_archive = Path(harness.archive_files(tools_dir, artifact)[0])
 assert expected_archive == tools_dir / ".archives" / artifact["name"], (
     f"unexpected archive path: {expected_archive}"
 )
-fetched = harness._fetch(tools_dir, artifact, lambda _line: None)
+fetch_artifact = getattr(harness, "fetch_artifact", None)
+if fetch_artifact is None:
+    fetch_artifact = getattr(harness, "_fetch")
+fetched = fetch_artifact(tools_dir, artifact, lambda _line: None)
 assert fetched == expected_archive, f"fetch returned {fetched} != {expected_archive}"
 assert expected_archive.is_file()
 assert harness.digest(str(expected_archive)) == artifact["sha256"]
@@ -2943,7 +2960,7 @@ print(json.dumps({
         path.join(toolsDir2, ".archives", syntheticArtifact.name),
       );
 
-      // Confirm Check 1's real harness._fetch created <bifrostName>.lock inside .archives/.
+      // Confirm Check 1's real harness.fetch_artifact created <bifrostName>.lock inside .archives/.
       const lockStat = await stat(
         path.join(
           localmodelsToolsDirectory(home1),
@@ -2962,7 +2979,10 @@ from localmodels import harness, hosts
 tools_dir = Path(os.path.expanduser(hosts.tools_dir()))
 artifact = json.loads(os.environ["CONTRACT_ARTIFACT_JSON"])
 expected_archive = Path(harness.archive_files(tools_dir, artifact)[0])
-fetched = harness._fetch(tools_dir, artifact, lambda _line: None)
+fetch_artifact = getattr(harness, "fetch_artifact", None)
+if fetch_artifact is None:
+    fetch_artifact = getattr(harness, "_fetch")
+fetched = fetch_artifact(tools_dir, artifact, lambda _line: None)
 assert fetched == expected_archive
 assert harness.digest(str(fetched)) == artifact["sha256"]
 assert not (tools_dir / "owned.json").exists()
@@ -3291,4 +3311,45 @@ test("falls through to the normal download path when the bundled kit archive is 
   expect(tool.moduleDir).toBe(
     path.join(f.home, "tools", "localmodels", source.sha256, "modules"),
   );
+});
+
+test("stopLocalmodels unloads loaded custom model IDs and skips custom stopped-download failures", async () => {
+  const f = await fixture();
+  const customLoaded = "custom.hf.bartowski--qwen2.5-7b-instruct-gguf:Q4_K_M";
+  const customStopped = "custom.ms.org--gated-model:Q4_K_M";
+  const seen: string[][] = [];
+  const run = vi.fn<typeof runLocalmodels>(async (_home, args) => {
+    seen.push(args);
+    if (args[0] === "library" && args[1] === "status") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          schema: "localmodels.library-status/v1",
+          models: [
+            { id: customLoaded, state: "loaded", origin: "custom" },
+            {
+              id: customStopped,
+              state: "failed",
+              origin: "custom",
+              error: { code: "HUB_AUTH_REQUIRED" },
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return { code: 0, stdout: JSON.stringify({ ok: true }), stderr: "" };
+  });
+  await stopLocalmodels(
+    f.home,
+    { signal: AbortSignal.timeout(5000) },
+    { run, installed: async () => true },
+  );
+  const unloaded = seen
+    .filter((args) => args[0] === "library" && args[1] === "unload")
+    .map((args) => args[2]);
+  expect(unloaded).toEqual([customLoaded]);
+  expect(isStoppedDownloadErrorCode("HUB_AUTH_REQUIRED")).toBe(true);
+  expect(isStoppedDownloadErrorCode("HUB_FORBIDDEN")).toBe(true);
+  expect(isStoppedDownloadErrorCode("HUB_UNREACHABLE")).toBe(true);
 });

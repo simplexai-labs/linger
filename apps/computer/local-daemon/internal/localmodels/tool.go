@@ -11,7 +11,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -25,7 +27,9 @@ import (
 
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/platform/privatefs"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/process"
+	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/provider/redact"
 	"github.com/simplexai-labs/linger/apps/computer/local-daemon/internal/workspace"
+	wire "github.com/simplexai-labs/linger/contracts-go/runnergateway"
 )
 
 const (
@@ -101,26 +105,33 @@ type Tool struct {
 }
 
 // Action is one owner-chosen library action. Model is empty only for
-// refresh; UnloadFirst and Force are only for load.
+// refresh and custom_download; UnloadFirst and Force are only for load;
+// ContextTokens is for load or smoke_test; CustomDownload is only for
+// custom_download.
 type Action struct {
-	Name        string
-	Model       string
-	UnloadFirst []string
-	Force       bool
+	Name           string
+	Model          string
+	UnloadFirst    []string
+	Force          bool
+	ContextTokens  uint64
+	CustomDownload *wire.LocalModelCustomDownloadInput
 }
 
 // Action names, as the Runner Gateway sends them.
 const (
-	ActionDownload = "download"
-	ActionCancel   = "cancel"
-	ActionLoad     = "load"
-	ActionUnload   = "unload"
-	ActionRemove   = "remove"
-	ActionRefresh  = "refresh"
+	ActionDownload       = "download"
+	ActionCancel         = "cancel"
+	ActionLoad           = "load"
+	ActionUnload         = "unload"
+	ActionRemove         = "remove"
+	ActionRefresh        = "refresh"
+	ActionSmokeTest      = "smoke_test"
+	ActionCustomDownload = "custom_download"
 )
 
 // arguments are the `library` arguments of one call. Model ids are validated
-// by the caller, so none starts with "-".
+// by the caller, so none starts with "-". Transient hub tokens are never
+// placed on argv; custom_download receives its JSON input on stdin.
 func (t Tool) arguments(action Action) []string {
 	args := []string{"-P", "-s", "-m", "localmodels", "library"}
 	switch action.Name {
@@ -128,6 +139,14 @@ func (t Tool) arguments(action Action) []string {
 		return append(args, "status", "--base-dir", t.BaseDirectory, "--json")
 	case ActionDownload:
 		return append(args, "download", action.Model, "--base-dir", t.BaseDirectory, "--jsonl")
+	case ActionCustomDownload:
+		return append(args, "custom", "download", "--config-stdin", "--base-dir", t.BaseDirectory, "--jsonl")
+	case ActionSmokeTest:
+		ctxTokens := action.ContextTokens
+		if ctxTokens == 0 {
+			ctxTokens = 4096
+		}
+		return append(args, "smoke-test", action.Model, "--ctx", strconv.FormatUint(ctxTokens, 10), "--base-dir", t.BaseDirectory, "--jsonl")
 	case ActionLoad:
 		args = append(args, "load", action.Model)
 		for _, other := range action.UnloadFirst {
@@ -135,6 +154,9 @@ func (t Tool) arguments(action Action) []string {
 		}
 		if action.Force {
 			args = append(args, "--force")
+		}
+		if action.ContextTokens > 0 {
+			args = append(args, "--ctx", strconv.FormatUint(action.ContextTokens, 10))
 		}
 		return append(args, "--base-dir", t.BaseDirectory, "--jsonl")
 	default:
@@ -432,6 +454,9 @@ func isReadOnlyOrStopSubcommand(args []string) bool {
 	case "stack":
 		return verb == "down" || verb == "remove"
 	case "library":
+		if verb == "custom" && len(sub) > 2 {
+			return sub[2] == "search" || sub[2] == "probe"
+		}
 		return verb == "status" || verb == "unload" || verb == "remove" || verb == "cancel"
 	case "speech":
 		return verb == "status" || verb == "unload" || verb == "remove" || verb == "cancel" || verb == "stop"
@@ -916,4 +941,386 @@ func (t Tool) runBuffered(
 func (t Tool) installed() bool {
 	info, err := os.Stat(t.Python)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// CustomHubError reports a structured failure from a synchronous custom hub
+// search or probe call. Message is always scrubbed of transient tokens.
+type CustomHubError struct {
+	Code      string
+	Message   string
+	Retryable bool
+}
+
+func (e *CustomHubError) Error() string {
+	if e.Message != "" {
+		return e.Code + ": " + e.Message
+	}
+	return e.Code
+}
+
+const (
+	customSearchSchema = "localmodels.library-custom-search/v1"
+	customProbeSchema  = "localmodels.library-custom-probe/v1"
+	maxCustomOutput    = 4 << 20
+)
+
+func (t Tool) runCustomSearch(
+	ctx context.Context,
+	environment map[string]string,
+	tempDir string,
+	req wire.LocalModelCustomSearchInput,
+) (wire.LocalModelCustomSearchResult, error) {
+	if !t.installed() {
+		return wire.LocalModelCustomSearchResult{}, &CustomHubError{
+			Code:    CodeToolNotInstalled,
+			Message: "The localmodels tool is not installed on this Computer.",
+		}
+	}
+	stdin, err := json.Marshal(req)
+	if err != nil {
+		return wire.LocalModelCustomSearchResult{}, &CustomHubError{
+			Code:    "INVALID_REPO_SPEC",
+			Message: "Custom model search input is invalid.",
+		}
+	}
+	defer clear(stdin)
+	args := []string{"-P", "-s", "-m", "localmodels", "library", "custom", "search", "--config-stdin", "--base-dir", t.BaseDirectory, "--json"}
+	stdout, stderrBytes, exitCode, runErr := t.runBuffered(ctx, environment, tempDir, "custom-search", maxCustomOutput, args, stdin)
+	if exitCode != 0 && len(stderrBytes) > 0 {
+		slog.Debug("local_models.tool_stderr", "action", "custom_search", "stderr", redact.TextWithSecrets(string(stderrBytes), req.Token))
+	}
+	if runErr != nil {
+		if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return wire.LocalModelCustomSearchResult{}, &CustomHubError{
+				Code:      "HUB_UNREACHABLE",
+				Message:   "Custom model search timed out on this Computer.",
+				Retryable: true,
+			}
+		}
+		return wire.LocalModelCustomSearchResult{}, &CustomHubError{
+			Code:      CodeToolFailed,
+			Message:   "Could not run custom model search on this Computer.",
+			Retryable: true,
+		}
+	}
+	doc := lastJSONDocument(stdout)
+	if exitCode != 0 {
+		return wire.LocalModelCustomSearchResult{}, parseCustomHubFailure(doc, "Custom model search failed on this Computer.", req.Token)
+	}
+	var envelope struct {
+		Schema string `json:"schema"`
+		OK     bool   `json:"ok"`
+	}
+	if len(doc) == 0 || json.Unmarshal(doc, &envelope) != nil || envelope.Schema != customSearchSchema || !envelope.OK {
+		return wire.LocalModelCustomSearchResult{}, parseCustomHubFailure(doc, "Custom model search returned an unreadable response.", req.Token)
+	}
+	var result wire.LocalModelCustomSearchResult
+	if err := json.Unmarshal(doc, &result); err != nil {
+		return wire.LocalModelCustomSearchResult{}, &CustomHubError{
+			Code:      CodeToolFailed,
+			Message:   "Custom model search returned an unreadable response.",
+			Retryable: true,
+		}
+	}
+	return sanitizeCustomSearchResult(result, req.Token), nil
+}
+
+func (t Tool) runCustomProbe(
+	ctx context.Context,
+	environment map[string]string,
+	tempDir string,
+	req wire.LocalModelCustomProbeInput,
+) (wire.LocalModelCustomProbeResult, error) {
+	if !t.installed() {
+		return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+			Code:    CodeToolNotInstalled,
+			Message: "The localmodels tool is not installed on this Computer.",
+		}
+	}
+	stdin, err := json.Marshal(req)
+	if err != nil {
+		return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+			Code:    "INVALID_REPO_SPEC",
+			Message: "Custom model probe input is invalid.",
+		}
+	}
+	defer clear(stdin)
+	args := []string{"-P", "-s", "-m", "localmodels", "library", "custom", "probe", "--config-stdin", "--base-dir", t.BaseDirectory, "--json"}
+	stdout, stderrBytes, exitCode, runErr := t.runBuffered(ctx, environment, tempDir, "custom-probe", maxCustomOutput, args, stdin)
+	if exitCode != 0 && len(stderrBytes) > 0 {
+		slog.Debug("local_models.tool_stderr", "action", "custom_probe", "stderr", redact.TextWithSecrets(string(stderrBytes), req.Token))
+	}
+	if runErr != nil {
+		if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+				Code:      "HUB_UNREACHABLE",
+				Message:   "Custom model probe timed out on this Computer.",
+				Retryable: true,
+			}
+		}
+		return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+			Code:      CodeToolFailed,
+			Message:   "Could not run custom model probe on this Computer.",
+			Retryable: true,
+		}
+	}
+	doc := lastJSONDocument(stdout)
+	if exitCode != 0 {
+		return wire.LocalModelCustomProbeResult{}, parseCustomHubFailure(doc, "Custom model probe failed on this Computer.", req.Token)
+	}
+	var envelope struct {
+		Schema string `json:"schema"`
+		OK     bool   `json:"ok"`
+	}
+	if len(doc) == 0 || json.Unmarshal(doc, &envelope) != nil || envelope.Schema != customProbeSchema || !envelope.OK {
+		return wire.LocalModelCustomProbeResult{}, parseCustomHubFailure(doc, "Custom model probe returned an unreadable response.", req.Token)
+	}
+	var result wire.LocalModelCustomProbeResult
+	if err := json.Unmarshal(doc, &result); err != nil {
+		return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+			Code:      CodeToolFailed,
+			Message:   "Custom model probe returned an unreadable response.",
+			Retryable: true,
+		}
+	}
+	return sanitizeCustomProbeResult(result, req.Token)
+}
+
+func parseCustomHubFailure(doc []byte, fallback, token string) *CustomHubError {
+	var body struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Detail  string `json:"detail"`
+	}
+	if len(doc) > 0 && json.Unmarshal(doc, &body) == nil {
+		code := strings.TrimSpace(body.Code)
+		if code == "" {
+			code = CodeToolFailed
+		}
+		rawMsg := strings.TrimSpace(body.Message)
+		if rawMsg == "" {
+			rawMsg = strings.TrimSpace(body.Detail)
+		}
+		msg := fallback
+		if rawMsg != "" {
+			msg = clip(redact.TextWithSecrets(rawMsg, token), 1000)
+		}
+		return &CustomHubError{
+			Code:      code,
+			Message:   msg,
+			Retryable: code == "HUB_UNREACHABLE" || code == "NETWORK_UNAVAILABLE" || code == CodeToolFailed,
+		}
+	}
+	return &CustomHubError{
+		Code:      CodeToolFailed,
+		Message:   fallback,
+		Retryable: true,
+	}
+}
+
+func normalizeArch(arch string) string {
+	switch arch {
+	case "amd64":
+		return "x86_64"
+	case "aarch64":
+		return "arm64"
+	default:
+		return arch
+	}
+}
+
+func sanitizeSupportedFormats(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, min(len(raw), 8))
+	for _, item := range raw {
+		if (item == "gguf" || item == "mlx") && !slices.Contains(out, item) {
+			out = append(out, item)
+			if len(out) == 8 {
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sanitizeCustomSearchResult(result wire.LocalModelCustomSearchResult, token string) wire.LocalModelCustomSearchResult {
+	result.Query = clip(redact.TextWithSecrets(strings.TrimSpace(result.Query), token), 256)
+	if !slices.Contains([]string{"all", "huggingface", "modelscope"}, result.Hub) {
+		result.Hub = "all"
+	}
+	if !slices.Contains([]string{"compatible", "gguf", "mlx", "all"}, result.Format) {
+		result.Format = "compatible"
+	}
+	if !slices.Contains([]string{"linux", "darwin", "windows"}, result.Platform) {
+		result.Platform = runtime.GOOS
+	}
+	result.Arch = normalizeArch(result.Arch)
+	if result.Arch != "x86_64" && result.Arch != "arm64" {
+		result.Arch = normalizeArch(runtime.GOARCH)
+	}
+	result.SupportedFormats = sanitizeSupportedFormats(result.SupportedFormats)
+	if result.SupportedFormats == nil {
+		result.SupportedFormats = []string{"gguf"}
+	}
+	if result.Results == nil {
+		result.Results = []wire.LocalModelCustomSearchResultItem{}
+	}
+	if len(result.Results) > 100 {
+		result.Results = result.Results[:100]
+	}
+	filtered := make([]wire.LocalModelCustomSearchResultItem, 0, len(result.Results))
+	for _, item := range result.Results {
+		if !slices.Contains([]string{"huggingface", "modelscope"}, item.Hub) {
+			continue
+		}
+		item.RepoID = clip(strings.TrimSpace(item.RepoID), 256)
+		item.URL = clip(strings.TrimSpace(item.URL), 2048)
+		item.Title = clip(strings.TrimSpace(item.Title), 200)
+		item.Owner = clip(strings.TrimSpace(item.Owner), 120)
+		if item.RepoID == "" || item.URL == "" || item.Title == "" || item.Owner == "" {
+			continue
+		}
+		if !slices.Contains([]string{"gguf", "mlx", "safetensors", "unknown"}, item.Format) {
+			item.Format = "unknown"
+		}
+		if item.Family != "" && !slices.Contains(families, item.Family) {
+			item.Family = "other"
+		}
+		item.Architecture = clip(strings.TrimSpace(item.Architecture), 64)
+		item.UpdatedAt = clip(strings.TrimSpace(item.UpdatedAt), 64)
+		item.Description = clip(redact.TextWithSecrets(strings.TrimSpace(item.Description), token), 2000)
+		item.License = clip(strings.TrimSpace(item.License), 120)
+		item.IncompatibilityCode = clip(strings.TrimSpace(item.IncompatibilityCode), 64)
+		if item.DefaultQuant != nil {
+			item.DefaultQuant.ID = clip(strings.TrimSpace(item.DefaultQuant.ID), 128)
+			item.DefaultQuant.Label = clip(strings.TrimSpace(item.DefaultQuant.Label), 128)
+			if item.DefaultQuant.ID == "" || item.DefaultQuant.Label == "" {
+				item.DefaultQuant = nil
+			}
+		}
+		filtered = append(filtered, item)
+	}
+	result.Results = filtered
+	warnings := make([]string, 0, min(len(result.Warnings), 20))
+	for _, w := range result.Warnings {
+		if len(warnings) >= 20 {
+			break
+		}
+		cleaned := clip(redact.TextWithSecrets(strings.TrimSpace(w), token), 400)
+		if cleaned != "" {
+			warnings = append(warnings, cleaned)
+		}
+	}
+	result.Warnings = warnings
+	return result
+}
+
+func sanitizeCustomProbeResult(result wire.LocalModelCustomProbeResult, token string) (wire.LocalModelCustomProbeResult, error) {
+	if !slices.Contains([]string{"ready", "gated", "incompatible", "not_found"}, result.Outcome) {
+		return wire.LocalModelCustomProbeResult{}, &CustomHubError{
+			Code:      CodeToolFailed,
+			Message:   "Custom model probe returned an unknown outcome.",
+			Retryable: true,
+		}
+	}
+	result.MetadataNote = clip(redact.TextWithSecrets(strings.TrimSpace(result.MetadataNote), token), 400)
+	result.RecommendedVariantID = clip(strings.TrimSpace(result.RecommendedVariantID), 128)
+	result.SelectedQuantID = clip(strings.TrimSpace(result.SelectedQuantID), 128)
+	result.SuggestedSearchQuery = clip(strings.TrimSpace(result.SuggestedSearchQuery), 256)
+	result.RepoID = clip(strings.TrimSpace(result.RepoID), 256)
+	if result.Hub != "" && !slices.Contains([]string{"huggingface", "modelscope"}, result.Hub) {
+		result.Hub = ""
+	}
+	if result.Reason != "" && !slices.Contains([]string{"raw_safetensors", "mlx_unsupported", "no_runnable_files"}, result.Reason) {
+		result.Reason = "no_runnable_files"
+	}
+	if result.HubHTTPStatus != nil && (*result.HubHTTPStatus < 400 || *result.HubHTTPStatus > 499) {
+		result.HubHTTPStatus = nil
+	}
+	if result.Repo != nil {
+		repo := *result.Repo
+		repo.RepoID = clip(strings.TrimSpace(repo.RepoID), 256)
+		repo.Revision = clip(strings.TrimSpace(repo.Revision), 128)
+		repo.URL = clip(strings.TrimSpace(repo.URL), 2048)
+		repo.Title = clip(strings.TrimSpace(repo.Title), 200)
+		repo.Owner = clip(strings.TrimSpace(repo.Owner), 120)
+		repo.License = clip(strings.TrimSpace(repo.License), 120)
+		if repo.Format != "" && !slices.Contains([]string{"gguf", "mlx", "safetensors", "unknown"}, repo.Format) {
+			repo.Format = "unknown"
+		}
+		if repo.Family != "" && !slices.Contains(families, repo.Family) {
+			repo.Family = "other"
+		}
+		if !slices.Contains([]string{"huggingface", "modelscope"}, repo.Hub) || repo.RepoID == "" || repo.URL == "" {
+			result.Repo = nil
+		} else {
+			result.Repo = &repo
+		}
+	}
+	if result.GgufMeta != nil {
+		meta := *result.GgufMeta
+		meta.Architecture = clip(strings.TrimSpace(meta.Architecture), 64)
+		result.GgufMeta = &meta
+	}
+	if result.Host != nil {
+		host := *result.Host
+		if !slices.Contains([]string{"linux", "darwin", "windows"}, host.Platform) {
+			host.Platform = runtime.GOOS
+		}
+		host.Arch = normalizeArch(host.Arch)
+		if host.Arch != "x86_64" && host.Arch != "arm64" {
+			host.Arch = normalizeArch(runtime.GOARCH)
+		}
+		host.SupportedFormats = sanitizeSupportedFormats(host.SupportedFormats)
+		if host.SupportedFormats == nil {
+			host.SupportedFormats = []string{"gguf"}
+		}
+		if host.TargetPool != "" {
+			if _, _, err := poolKind(host.TargetPool); err != nil {
+				host.TargetPool = ""
+			}
+		}
+		result.Host = &host
+	}
+	if len(result.MmprojCandidates) > 32 {
+		result.MmprojCandidates = result.MmprojCandidates[:32]
+	}
+	if len(result.QuantVariants) > 128 {
+		result.QuantVariants = result.QuantVariants[:128]
+	}
+	if len(result.QuantVariants) > 0 {
+		validVariants := make([]wire.LocalModelCustomQuantVariant, 0, len(result.QuantVariants))
+		for _, v := range result.QuantVariants {
+			v.ID = clip(strings.TrimSpace(v.ID), 128)
+			v.Label = clip(strings.TrimSpace(v.Label), 128)
+			v.Quant = clip(strings.TrimSpace(v.Quant), 64)
+			v.MmprojFile = clip(strings.TrimSpace(v.MmprojFile), 512)
+			if v.ID == "" || v.Label == "" || v.Quant == "" || !ValidModelID(v.CustomModelID) {
+				continue
+			}
+			if v.ShardCount < 1 {
+				v.ShardCount = 1
+			}
+			if v.Files == nil {
+				v.Files = []wire.LocalModelCustomQuantFile{}
+			}
+			if len(v.Files) > 256 {
+				v.Files = v.Files[:256]
+			}
+			if v.MemoryEstimateBasis != "gguf_header" && v.MemoryEstimateBasis != "rough_1.2x_plus_0.8gb" {
+				v.MemoryEstimateBasis = "rough_1.2x_plus_0.8gb"
+			}
+			if !slices.Contains([]string{"comfortable", "tight", "exceeds"}, v.MemoryStatus) {
+				v.MemoryStatus = "tight"
+			}
+			validVariants = append(validVariants, v)
+		}
+		result.QuantVariants = validVariants
+	}
+	return result, nil
 }
