@@ -1493,4 +1493,55 @@ describe("knowledge output budget", () => {
     }
     expect(text).toBe(first!.content);
   });
+
+  it("keeps an empty fitting page advancing past a surrogate boundary", async () => {
+    const fixtureData = await fixture();
+    const smile = String.fromCodePoint(0x1f600);
+    const markdown = `# ${"H".repeat(300)}\n\n${smile}${"y".repeat(60)}`;
+    const input: DocumentRawSourceInput = {
+      ...meetingDocument,
+      documentId: "document_9",
+      textSourceId: "version_9",
+      title: "Surrogate boundary",
+      filename: "surrogate.md",
+      markdown,
+    };
+    const source = storeDocumentSource(fixtureData.root, input);
+    const chunk = chunkSource(markdown)[0];
+    expect(chunk).toBeDefined();
+    const smileIndex = chunk!.content.indexOf(smile);
+    const result = await queryPersonalKnowledge(
+      fixtureData.root,
+      request("Surrogate"),
+      {
+        chunkSearch: {
+          search: async () => [
+            {
+              chunkId: chunk!.id,
+              mergedChunkIds: [chunk!.id],
+              score: 1,
+              sourceId: source.id,
+            },
+          ],
+        },
+      },
+    );
+    const evidenceId = result.items[0]!.evidenceId;
+    // The heading alone exceeds the minimum section share, so the fitting
+    // window is empty, and the offset sits one unit into the pair: the code
+    // unit before the window is its high surrogate.
+    const page = await readPersonalKnowledgeEvidence(
+      fixtureData.root,
+      {
+        ...identity,
+        evidence_id: evidenceId,
+        section_requests: [{ section_id: chunk!.id, offset: smileIndex + 1 }],
+      },
+      { outputBudgetChars: 260 },
+    );
+    const section = page.sections[0]!;
+    expect(section.content.length).toBeGreaterThan(0);
+    expect(section.offset).toBe(smileIndex + 1);
+    expect(section.nextOffset).toBe(section.offset + section.content.length);
+  });
 });
