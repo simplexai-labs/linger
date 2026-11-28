@@ -337,6 +337,7 @@ describe("RunnerGateway model invocation", () => {
         input: "Notes",
         output_schema: { type: "object" },
         session_key: "permission-review:abc",
+        wake_local_model: false,
         timeout_ms: 60_000,
         max_output_chars: 24_000,
       });
@@ -1139,6 +1140,142 @@ describe("RunnerGateway model invocation", () => {
       await expect(pending).resolves.toMatchObject({ outcome: "completed" });
     } finally {
       older.connection.disconnect();
+    }
+  });
+
+  it("sets wake_local_model by call kind and sends it only to Computers at or above 0.69.0", async () => {
+    const current = await connect({
+      ...invokingHello(),
+      daemon_version: "0.69.0",
+    });
+    try {
+      const bg = current.gateway.invokeModel(
+        "runner-local",
+        request({ queue: queued("wiki") }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(current.peer)).toHaveLength(1),
+      );
+      expect(sentInvocations(current.peer)[0]!.wake_local_model).toBe(false);
+      await invoked(current.connection, sentInvocations(current.peer)[0]!);
+      await expect(bg).resolves.toMatchObject({ outcome: "completed" });
+
+      const interactive = current.gateway.invokeModel(
+        "runner-local",
+        request({ queue: queued("approval") }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(current.peer)).toHaveLength(2),
+      );
+      expect(sentInvocations(current.peer)[1]!.wake_local_model).toBe(true);
+      await invoked(current.connection, sentInvocations(current.peer)[1]!);
+      await expect(interactive).resolves.toMatchObject({
+        outcome: "completed",
+      });
+    } finally {
+      current.connection.disconnect();
+    }
+
+    const older = await connect({
+      ...invokingHello(),
+      daemon_version: "0.68.0",
+    });
+    try {
+      const pending = older.gateway.invokeModel(
+        "runner-local",
+        request({ queue: queued("memory") }),
+      );
+      await vi.waitFor(() =>
+        expect(sentInvocations(older.peer)).toHaveLength(1),
+      );
+      expect(sentInvocations(older.peer)[0]!.wake_local_model).toBeUndefined();
+      await invoked(older.connection, sentInvocations(older.peer)[0]!);
+      await expect(pending).resolves.toMatchObject({ outcome: "completed" });
+    } finally {
+      older.connection.disconnect();
+    }
+  });
+
+  it("grants extra cold-load wait grace to interactive Pi calls targeting a standby local model", async () => {
+    const standbyPiModel = "localmodels-library/qwen3-4b/Qwen3-4B-Q4_K_M";
+    const { gateway, peer, connection } = await connect(
+      {
+        ...invokingHello(),
+        daemon_version: "0.69.0",
+        runtimes: ["pi"],
+        runtime_diagnostics: runtimeDiagnostics({ ready: ["pi"], link: "api" }),
+      },
+      defaultAgentPlacement({
+        agentId: "agent-another-me",
+        runtime: { type: "pi" },
+      }),
+    );
+    try {
+      await connection.receive({
+        type: "runner.local_models",
+        protocol_version: "2",
+        runner_id: "runner-local",
+        sent_at: "2026-11-25T10:00:00.000Z",
+        revision: 1,
+        local_models: {
+          available: true,
+          observed_at: "2026-11-25T10:00:00.000Z",
+          tool_version: "0.9.0",
+          pools: [],
+          models: [
+            {
+              id: "qwen3-4b:Q4_K_M",
+              name: "Qwen3 4B",
+              description: "",
+              quant: "Q4_K_M",
+              vision: false,
+              fit: "unified",
+              pool: "unified",
+              state: "idle",
+              pi_model: standbyPiModel,
+              download_bytes: 1,
+              memory_bytes: 1,
+              context_tokens: 32768,
+              recommended: true,
+              availability: { downloadable: true },
+            },
+          ],
+        },
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = gateway.invokeModel(
+          "runner-local",
+          request({
+            runtimeType: "pi",
+            model: standbyPiModel,
+            timeoutMs: 15_000,
+            queue: queued("approval"),
+          }),
+        );
+        await vi.waitFor(() => expect(sentInvocations(peer)).toHaveLength(1));
+        expect(sentInvocations(peer)[0]!.wake_local_model).toBe(true);
+
+        // Past the default timeout + 30s reply grace (45s), still waiting inside the +120s cold-load grace.
+        let settled = false;
+        void pending.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        await vi.advanceTimersByTimeAsync(90_000);
+        expect(settled).toBe(false);
+
+        await invoked(connection, sentInvocations(peer)[0]!);
+        await expect(pending).resolves.toMatchObject({ outcome: "completed" });
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      connection.disconnect();
     }
   });
 

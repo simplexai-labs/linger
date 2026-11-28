@@ -1253,6 +1253,10 @@ export interface ModelInvoke {
    * Names the session a structured call belongs to. A Daemon answers the Codex calls of one session in one resident thread whose base instructions are the call's instructions, so only the input is new to the provider; while that thread answers another call, and for Claude, the call runs on its own. Either way the result is the same.
    */
   session_key?: string;
+  /**
+   * Whether the Computer may load an unloaded local model to answer this call. Omitted defaults to true for backward compatibility; sent only to a Computer release that decodes it.
+   */
+  wake_local_model?: boolean;
 }
 export interface ModelInvokeFile {
   path: string;

@@ -43,6 +43,13 @@ const (
 	// firstReadTimeout bounds the status read a Run waits for when the
 	// Library has none yet.
 	firstReadTimeout = 5 * time.Second
+	// defaultIdleUnloadTTL is how long a loaded local model may sit unused
+	// before the idle sweeper unloads it with `library unload`, never
+	// `stack down`; localmodels stops Bifrost only once it serves nothing.
+	defaultIdleUnloadTTL = 15 * time.Minute
+	// defaultIdleSweepInterval bounds how often the idle sweeper checks for
+	// loaded models past their idle TTL.
+	defaultIdleSweepInterval = 30 * time.Second
 )
 
 // Options configures a Library.
@@ -80,6 +87,15 @@ type Options struct {
 	EnsureLoadTimeout time.Duration
 	// WarmupPrefix runs post-load static prefix warm-up for loaded PolyStrata models.
 	WarmupPrefix func(ctx context.Context, target PrefixWarmupTarget) (bool, error)
+	// IdleUnloadTTL is how long a loaded model may sit unused before automatic
+	// unload. Zero uses defaultIdleUnloadTTL (15m); a negative duration disables
+	// idle auto-unload.
+	IdleUnloadTTL time.Duration
+	// IdleSweepInterval controls how often the idle sweeper ticks. Zero uses
+	// defaultIdleSweepInterval (30s).
+	IdleSweepInterval time.Duration
+	// Now overrides the clock; nil uses time.Now.
+	Now func() time.Time
 }
 
 // Library runs the localmodels tool for one Computer.
@@ -115,6 +131,8 @@ type Library struct {
 	ensurePiTimeout       time.Duration
 	ensurePiRetryInterval time.Duration
 	ensureLoadTimeout     time.Duration
+	idleUnloadTTL         time.Duration
+	idleSweepInterval     time.Duration
 	now                   func() time.Time
 	healthCheck           func(ctx context.Context, healthURL string) bool
 	ctx                   context.Context
@@ -174,12 +192,24 @@ type Library struct {
 	jobEnded map[string]uint64
 	// ensures serializes EnsureLoaded by model ID.
 	ensures map[string]*ensureLoad
+	// activity tracks active use leases and last-used timestamps by model ID
+	// for idle auto-unload.
+	activity map[string]*modelActivity
+	// unloading tracks model IDs currently being unloaded by the idle sweeper
+	// so EnsureLoaded and IsLoadedHealthy never take the cached-loaded fast path
+	// against a model server that is shutting down.
+	unloading map[string]struct{}
 	// settleOnce starts the one installer lock probe; settledCh closes when
 	// it ends.
 	settleOnce         sync.Once
 	settledCh          chan struct{}
 	installerLockWait  time.Duration
 	installerLockRetry time.Duration
+}
+
+type modelActivity struct {
+	activeLeases int
+	lastUsedAt   time.Time
 }
 
 type job struct {
@@ -189,6 +219,21 @@ type job struct {
 // New returns a Library. Close stops its supervision; jobs keep running.
 func New(options Options) *Library {
 	ctx, stop := context.WithCancel(context.Background())
+	idleUnloadTTL := defaultIdleUnloadTTL
+	switch {
+	case options.IdleUnloadTTL < 0:
+		idleUnloadTTL = 0
+	case options.IdleUnloadTTL > 0:
+		idleUnloadTTL = options.IdleUnloadTTL
+	}
+	idleSweepInterval := options.IdleSweepInterval
+	if idleSweepInterval <= 0 {
+		idleSweepInterval = defaultIdleSweepInterval
+	}
+	nowFunc := options.Now
+	if nowFunc == nil {
+		nowFunc = time.Now
+	}
 	library := &Library{
 		tool: options.Tool, environment: options.Environment, jobDirectory: options.JobDirectory,
 		harnessDirectory: options.HarnessDirectory, nodePath: options.NodePath,
@@ -197,11 +242,13 @@ func New(options Options) *Library {
 		ensurePiTimeout: options.EnsurePiTimeout, ensurePiRetryInterval: options.EnsurePiRetryInterval,
 		ensureLoadTimeout: options.EnsureLoadTimeout,
 		warmupPrefix:      options.WarmupPrefix,
-		now:               time.Now, healthCheck: gatewayAnswers, ctx: ctx, stop: stop, jobs: make(map[string]*job), probes: make(map[string]*activeProbe), probeUnknown: make(map[string]probeFingerprint),
+		idleUnloadTTL:     idleUnloadTTL, idleSweepInterval: idleSweepInterval,
+		now: nowFunc, healthCheck: gatewayAnswers, ctx: ctx, stop: stop, jobs: make(map[string]*job), probes: make(map[string]*activeProbe), probeUnknown: make(map[string]probeFingerprint),
 		prefixWarmups: make(map[string]*activePrefixWarmup), prefixWarmed: make(map[string]prefixWarmupFingerprint),
 		causes:            make(map[string]*wire.LocalModelError),
 		installerLockWait: defaultInstallerLockWait, installerLockRetry: defaultInstallerLockRetry, settledCh: make(chan struct{}),
 		changed: make(chan struct{}), jobEnded: make(map[string]uint64), ensures: make(map[string]*ensureLoad),
+		activity: make(map[string]*modelActivity), unloading: make(map[string]struct{}),
 	}
 	probeCacheDir := options.ProbeCacheDirectory
 	if probeCacheDir == "" && options.JobDirectory != "" {
@@ -245,6 +292,12 @@ func New(options Options) *Library {
 	if library.jobDirectory != "" {
 		// Output files of jobs a previous Daemon started are no longer read.
 		_ = os.RemoveAll(library.jobDirectory)
+	}
+	if library.tool != nil && library.idleUnloadTTL > 0 && library.track(1) {
+		go func() {
+			defer library.wg.Done()
+			library.runIdleSweeper()
+		}()
 	}
 	return library
 }
@@ -403,6 +456,7 @@ func (l *Library) Refresh(ctx context.Context) wire.LocalModelsSnapshot {
 		// the remembered entries meanwhile.
 		catalogChanged = (l.catalog == nil && catalog != "") || (l.catalog != nil && *l.catalog != catalog) || l.unreadable
 		l.catalog = &catalog
+		l.syncLoadedActivityLocked(snapshot)
 	}
 	l.unreadable = !snapshot.Available
 	l.mu.Unlock()
@@ -894,6 +948,9 @@ func (l *Library) superviseJob(action Action, events <-chan libraryEvent, ended 
 	delete(l.jobs, action.Model)
 	rotateGatewayAddr := false
 	l.jobEnded[action.Model] = l.commits
+	if action.Name == ActionLoad && final != nil && final.Event == "result" {
+		l.touchActivityLocked(action.Model)
+	}
 	if final != nil && final.Event == "error" {
 		if cause := final.cause(); cause != nil {
 			l.causes[action.Model] = cause
@@ -1160,6 +1217,7 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 	read := l.current != nil
 	known := read && l.current.Available
 	cached := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel })
+	unloading := cached != nil && l.isUnloadingLocked(cached.ID)
 	l.mu.Unlock()
 	if known && cached == nil {
 		// pi_model is present while the model is on the Computer, and the
@@ -1167,7 +1225,7 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		return nil
 	}
 	if l.settled() {
-		if known && cached.State == "loaded" && l.cachedLoadedHealthy(ctx, *cached) {
+		if known && !unloading && cached.State == "loaded" && l.cachedLoadedHealthy(ctx, *cached) && l.touchActivityIfNotUnloading(cached.ID) {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -1216,11 +1274,14 @@ func (l *Library) EnsureLoaded(ctx context.Context, piModel string) error {
 		return nil
 	}
 	row := snapshot.Models[index]
-	if row.State == "loaded" && l.localGatewayHealthy(ctx) {
+	l.mu.Lock()
+	unloading = l.isUnloadingLocked(row.ID)
+	l.mu.Unlock()
+	if !unloading && row.State == "loaded" && l.localGatewayHealthy(ctx) && l.touchActivityIfNotUnloading(row.ID) {
 		return nil
 	}
 	state := loadState(row)
-	if state == "loaded" {
+	if !unloading && state == "loaded" {
 		// The model server answered status, but its local gateway did not;
 		// treat it as failed so ensureByID resets and reloads it cleanly.
 		state = "failed"
@@ -1272,12 +1333,16 @@ func (l *Library) ensureByID(ctx context.Context, id, state string, waitedFrom t
 	l.mu.Unlock()
 	if state == "loaded" {
 		if l.localGatewayHealthy(ctx) {
+			l.touchActivity(id)
 			return nil
 		}
 		state = "failed"
 	}
 	slog.Info(event, "phase", "started", "model", id, "state", state)
 	err := l.load(ctx, id, state)
+	if err == nil {
+		l.touchActivity(id)
+	}
 	// Only an outcome of the load itself is shared with queued callers; a
 	// caller whose budget ran out left the load running.
 	if ctx.Err() == nil && loadCodeOf(err) != CodeLoadTimeout {
@@ -1463,4 +1528,277 @@ func loadCodeOf(err error) string {
 		return loadErr.Code
 	}
 	return ""
+}
+
+// AcquireUse holds an active use lease for the local library model whose
+// pi_model is piModel, preventing idle auto-unload while a Run or model_invoke
+// uses it. An empty piModel leases every loaded library model, because a Pi
+// call that names no model answers with whichever one is loaded. The returned
+// release function is idempotent and updates lastUsedAt when the final active
+// lease for a model is released.
+func (l *Library) AcquireUse(piModel string) func() {
+	l.mu.Lock()
+	var ids []string
+	if piModel == "" {
+		if l.current != nil {
+			for _, model := range l.current.Models {
+				if model.State == "loaded" {
+					ids = append(ids, model.ID)
+				}
+			}
+		}
+	} else if row := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel }); row != nil {
+		ids = []string{row.ID}
+	}
+	for _, id := range ids {
+		act := l.activity[id]
+		if act == nil {
+			act = &modelActivity{}
+			l.activity[id] = act
+		}
+		act.activeLeases++
+	}
+	l.mu.Unlock()
+	if len(ids) == 0 {
+		return func() {}
+	}
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			for _, id := range ids {
+				current := l.activity[id]
+				if current == nil {
+					continue
+				}
+				if current.activeLeases > 0 {
+					current.activeLeases--
+				}
+				if current.activeLeases == 0 {
+					current.lastUsedAt = l.now()
+				}
+			}
+		})
+	}
+}
+
+// IsStandbyModel reports whether piModel names a known local library model
+// that is not currently loaded (for example idle on standby, loading, or
+// failed). Models outside the library return false.
+func (l *Library) IsStandbyModel(piModel string) bool {
+	if piModel == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.current == nil || !l.current.Available {
+		return false
+	}
+	row := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel })
+	return row != nil && (row.State != "loaded" || l.isUnloadingLocked(row.ID))
+}
+
+func (l *Library) isUnloadingLocked(id string) bool {
+	_, ok := l.unloading[id]
+	return ok
+}
+
+// IsLoadedHealthy reports whether piModel can answer without loading a standby
+// local model: true for models outside the library or when the library cannot
+// be read, true when the library model is loaded and healthy, and false when
+// the library model is unloaded or unhealthy. Never starts a load.
+func (l *Library) IsLoadedHealthy(ctx context.Context, piModel string) bool {
+	if piModel == "" || l.tool == nil || !l.tool.installed() {
+		return true
+	}
+	l.mu.Lock()
+	read := l.current != nil
+	l.mu.Unlock()
+	if !read {
+		readCtx, cancel := context.WithTimeout(ctx, firstReadTimeout)
+		l.Refresh(readCtx)
+		cancel()
+	}
+	l.mu.Lock()
+	if l.current == nil || !l.current.Available {
+		l.mu.Unlock()
+		return true
+	}
+	row := l.rowLocked(func(model wire.LocalModel) bool { return model.PiModel == piModel })
+	unloading := row != nil && l.isUnloadingLocked(row.ID)
+	l.mu.Unlock()
+	if row == nil {
+		return true
+	}
+	if unloading || row.State != "loaded" {
+		return false
+	}
+	return l.cachedLoadedHealthy(ctx, *row)
+}
+
+func (l *Library) touchActivity(id string) {
+	l.mu.Lock()
+	l.touchActivityLocked(id)
+	l.mu.Unlock()
+}
+
+func (l *Library) touchActivityIfNotUnloading(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.isUnloadingLocked(id) {
+		return false
+	}
+	l.touchActivityLocked(id)
+	return true
+}
+
+func (l *Library) touchActivityLocked(id string) {
+	act := l.activity[id]
+	if act == nil {
+		act = &modelActivity{}
+		l.activity[id] = act
+	}
+	act.lastUsedAt = l.now()
+}
+
+// syncLoadedActivityLocked initializes lastUsedAt for models already loaded on
+// startup or loaded externally so reconnects never immediately unload them,
+// and drops stale timestamps for models no longer loaded without active leases.
+func (l *Library) syncLoadedActivityLocked(snapshot wire.LocalModelsSnapshot) {
+	now := l.now()
+	loaded := make(map[string]struct{})
+	for _, model := range snapshot.Models {
+		if model.State != "loaded" {
+			continue
+		}
+		loaded[model.ID] = struct{}{}
+		act := l.activity[model.ID]
+		if act == nil {
+			l.activity[model.ID] = &modelActivity{lastUsedAt: now}
+		} else if act.lastUsedAt.IsZero() && act.activeLeases == 0 {
+			act.lastUsedAt = now
+		}
+	}
+	for id, act := range l.activity {
+		if _, stillLoaded := loaded[id]; !stillLoaded && act.activeLeases == 0 {
+			delete(l.activity, id)
+		}
+	}
+}
+
+func (l *Library) runIdleSweeper() {
+	ticker := time.NewTicker(l.idleSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		case <-ticker.C:
+			l.sweepIdleModels()
+		}
+	}
+}
+
+func (l *Library) sweepIdleModels() {
+	if l.tool == nil || !l.tool.installed() || l.idleUnloadTTL <= 0 {
+		return
+	}
+	type candidate struct {
+		id     string
+		ensure *ensureLoad
+	}
+	l.mu.Lock()
+	if l.closed || l.current == nil || !l.current.Available {
+		l.mu.Unlock()
+		return
+	}
+	now := l.now()
+	var candidates []candidate
+	for _, model := range l.current.Models {
+		if model.State != "loaded" {
+			continue
+		}
+		if _, running := l.jobs[model.ID]; running {
+			continue
+		}
+		if _, probing := l.probes[model.ID]; probing {
+			continue
+		}
+		if _, warming := l.prefixWarmups[model.ID]; warming {
+			continue
+		}
+		act := l.activity[model.ID]
+		if act == nil || act.activeLeases > 0 || act.lastUsedAt.IsZero() || now.Sub(act.lastUsedAt) < l.idleUnloadTTL {
+			continue
+		}
+		ensure := l.ensures[model.ID]
+		if ensure == nil {
+			ensure = &ensureLoad{turn: make(chan struct{}, 1)}
+			l.ensures[model.ID] = ensure
+		}
+		candidates = append(candidates, candidate{id: model.ID, ensure: ensure})
+	}
+	l.mu.Unlock()
+
+	for _, item := range candidates {
+		if l.ctx.Err() != nil {
+			return
+		}
+		// Never block waiting on an incoming JIT EnsureLoaded.
+		select {
+		case item.ensure.turn <- struct{}{}:
+		default:
+			continue
+		}
+		l.idleUnloadOne(item.id, item.ensure)
+	}
+}
+
+func (l *Library) idleUnloadOne(id string, ensure *ensureLoad) {
+	defer func() { <-ensure.turn }()
+	l.mu.Lock()
+	if l.closed || l.current == nil || !l.current.Available {
+		l.mu.Unlock()
+		return
+	}
+	row := l.rowLocked(func(model wire.LocalModel) bool { return model.ID == id })
+	_, running := l.jobs[id]
+	_, probing := l.probes[id]
+	_, warming := l.prefixWarmups[id]
+	act := l.activity[id]
+	if row == nil || row.State != "loaded" || running || probing || warming || act == nil || act.activeLeases > 0 || act.lastUsedAt.IsZero() {
+		l.mu.Unlock()
+		return
+	}
+	idleFor := l.now().Sub(act.lastUsedAt)
+	if idleFor < l.idleUnloadTTL {
+		l.mu.Unlock()
+		return
+	}
+	l.cancelPrefixWarmupLocked(id)
+	l.unloading[id] = struct{}{}
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		delete(l.unloading, id)
+		l.mu.Unlock()
+	}()
+
+	unloadCtx, cancel := context.WithTimeout(l.ctx, l.actionTimeout)
+	stdout, exitCode, err := l.runOnce(unloadCtx, Action{Name: ActionUnload, Model: id})
+	cancel()
+	if l.ctx.Err() != nil {
+		return
+	}
+	refusal := documentRefusal(stdout, exitCode, err)
+	if refusal != nil {
+		slog.Warn("local_models.idle_unload_failed", "model", id, "code", refusal.Code, "exit_code", exitCode)
+		l.Refresh(l.ctx)
+		return
+	}
+	l.Refresh(l.ctx)
+	l.runtimeChanged()
+	slog.Info("local_models.idle_unloaded", "model", id, "idle_seconds", int64(idleFor.Seconds()))
 }

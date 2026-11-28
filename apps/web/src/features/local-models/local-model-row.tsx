@@ -490,7 +490,7 @@ export function ModelRow({
     idle: model.note
       ? t(m.noRoomYet)
       : usedNames.length
-        ? t(m.loadToAnswer)
+        ? t(m.standbyAutoLoad)
         : null,
     loaded: [placeTitle(view, model.pool, t), loadedMemoryCopy(model, t)]
       .filter(Boolean)

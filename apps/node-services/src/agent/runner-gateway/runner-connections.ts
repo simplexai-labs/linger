@@ -26,6 +26,7 @@ import {
   MINIMUM_CURRENT_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_CANCEL_COMPUTER_VERSION,
   FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION,
+  FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION,
   FIRST_PI_MODEL_INVOKE_COMPUTER_VERSION,
   FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION,
   FIRST_BYOK_ENDPOINT_COMPUTER_VERSION,
@@ -966,6 +967,22 @@ export class RunnerConnections {
       isComputerVersionAtLeast(
         connection.hello.daemon_version,
         FIRST_MODEL_INVOKE_MODEL_COMPUTER_VERSION,
+      )
+    );
+  }
+
+  /** Whether the Computer on this connection decodes `wake_local_model` on model_invoke. */
+  supportsModelInvokeWakeLocalModel(
+    runnerId: string,
+    connectionEpoch: number,
+  ): boolean {
+    const connection = this.#connections.get(runnerId);
+    return (
+      isServingConnection(connection) &&
+      connection.connectionEpoch === connectionEpoch &&
+      isComputerVersionAtLeast(
+        connection.hello.daemon_version,
+        FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION,
       )
     );
   }

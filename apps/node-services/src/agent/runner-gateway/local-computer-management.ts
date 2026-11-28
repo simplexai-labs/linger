@@ -109,6 +109,10 @@ export const FIRST_ANTIGRAVITY_MODEL_INVOKE_COMPUTER_VERSION = "0.67.0";
 // handles `runner.local_speech`, `execute:local_speech_action`, and
 // `execute:local_asr_transcribe`.
 export const FIRST_LOCAL_VOICE_ASR_COMPUTER_VERSION = "0.68.0";
+// The first release that decodes `wake_local_model` on `execute`
+// `model_invoke`. An older Computer rejects the unknown field and closes the
+// connection, so the field is omitted for it.
+export const FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION = "0.69.0";
 
 const COMPUTER_RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 

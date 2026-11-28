@@ -2935,6 +2935,7 @@ type ModelInvoke struct {
 	Kind            string            `json:"kind"`
 	MaxOutputChars  *uint64           `json:"max_output_chars,omitempty"`
 	SessionKey      string            `json:"session_key,omitempty"`
+	WakeLocalModel  *bool             `json:"wake_local_model,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a ModelInvoke.

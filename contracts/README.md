@@ -136,6 +136,10 @@ Progress and outcomes travel back only as snapshots:
    it). During rolling deploys, roll out TeamHub accepting `"antigravity"`
    before the Agent Service advertises `antigravity_usage_provider`, so older
    TeamHub instances do not skip `"antigravity"` usage entries.
+   `execute` `model_invoke` carries optional `wake_local_model` (default `true`
+   when omitted; sent only to Computer 0.69.0 and later,
+   `FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION`) so passive
+   background maintenance calls do not wake standby local models.
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last

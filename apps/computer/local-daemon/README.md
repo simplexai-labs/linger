@@ -394,6 +394,21 @@ downloaded model that Run's Agent names.
   rereads the status first so pool use, placement, and unloaded models appear
   atomically before publishing. Later lines of the phase update that snapshot
   without another read.
+- Idle auto-unload and standby guards. `Library` automatically unloads idle
+  loaded models after 15 minutes (`defaultIdleUnloadTTL`). It tracks active
+  Run, `model_invoke`, and Pi session-compaction use leases (`AcquireUse`; a
+  Pi call that names no model leases every loaded library model, since Pi
+  answers it with whichever one is loaded) and
+  `lastUsedAt` (updated on lease release, load completion, and startup `Refresh`
+  of already loaded models). A tracked sweeper goroutine ticks every 30 seconds
+  and unloads any idle loaded model (`ActionUnload`, never `stack down`;
+  localmodels stops Bifrost only once it serves nothing, and the next load
+  starts it again) after
+  acquiring its per-model `ensure.turn` non-blockingly so it never races an
+  incoming JIT `EnsureLoaded`. `provider.prepare` returns `not_eligible`
+  immediately for standby Pi local models instead of spawning Pi, and
+  `model_invoke` with `wake_local_model: false` checks `IsLoadedHealthy` and
+  answers `unavailable` without waking a standby model.
 - Error causes. `library status` keeps only a failed row's `code` and
   `detail`; the `cause` and `path` of a `GATEWAY_REGISTRATION_FAILED` reach
   the Daemon only on the job's error line (`GATEWAY_HOME_NOT_PRIVATE`: the

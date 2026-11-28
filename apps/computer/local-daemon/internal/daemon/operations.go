@@ -27,7 +27,15 @@ func (d *Daemon) awaitOperation(ctx context.Context, command protocol.Command, s
 func (d *Daemon) finishOperation(ctx context.Context, command protocol.Command, spec provider.OperationSpec, result provider.Result) {
 	d.activeMu.Lock()
 	active := d.activeOperations[command.OperationID]
+	var releaseLocalModel func()
+	if active != nil {
+		releaseLocalModel = active.releaseLocalModel
+		active.releaseLocalModel = nil
+	}
 	d.activeMu.Unlock()
+	if releaseLocalModel != nil {
+		defer releaseLocalModel()
+	}
 	reason := ""
 	if active != nil {
 		active.inputMu.Lock()

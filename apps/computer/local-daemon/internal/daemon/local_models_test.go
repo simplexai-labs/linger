@@ -17,12 +17,16 @@ import (
 )
 
 type fakeLocalModels struct {
-	mu         sync.Mutex
-	actions    []localmodels.Action
-	refusal    *wire.LocalModelActionRefusal
-	unanswered bool
-	ensured    []string
-	ensureErr  error
+	mu            sync.Mutex
+	actions       []localmodels.Action
+	refusal       *wire.LocalModelActionRefusal
+	unanswered    bool
+	ensured       []string
+	ensureErr     error
+	standby       map[string]bool
+	loadedHealthy map[string]bool
+	activeLeases  map[string]int
+	leaseReleases int
 }
 
 func (f *fakeLocalModels) Act(_ context.Context, action localmodels.Action, _ time.Time) (*wire.LocalModelActionRefusal, bool) {
@@ -41,6 +45,43 @@ func (f *fakeLocalModels) EnsureLoaded(_ context.Context, piModel string) error 
 	defer f.mu.Unlock()
 	f.ensured = append(f.ensured, piModel)
 	return f.ensureErr
+}
+
+func (f *fakeLocalModels) IsStandbyModel(piModel string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.standby[piModel]
+}
+
+func (f *fakeLocalModels) IsLoadedHealthy(_ context.Context, piModel string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.loadedHealthy == nil {
+		return !f.standby[piModel]
+	}
+	healthy, ok := f.loadedHealthy[piModel]
+	if !ok {
+		return true
+	}
+	return healthy
+}
+
+func (f *fakeLocalModels) AcquireUse(piModel string) func() {
+	f.mu.Lock()
+	if f.activeLeases == nil {
+		f.activeLeases = make(map[string]int)
+	}
+	f.activeLeases[piModel]++
+	f.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			f.mu.Lock()
+			f.activeLeases[piModel]--
+			f.leaseReleases++
+			f.mu.Unlock()
+		})
+	}
 }
 
 func TestLocalModelsCommandAnswersAcceptedOrRefused(t *testing.T) {

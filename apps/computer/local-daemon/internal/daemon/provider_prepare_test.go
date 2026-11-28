@@ -397,3 +397,41 @@ func TestProviderPrepareJoinedStartDoesNotBlockReceiveLoop(t *testing.T) {
 		t.Fatalf("executions=%d, want one prepare then one start", len(got))
 	}
 }
+
+type piPrepareResolver struct {
+	model string
+}
+
+func (r piPrepareResolver) Resolve(context.Context, protocol.Command, json.RawMessage) (provider.OperationSpec, error) {
+	return provider.OperationSpec{
+		OperationKind:           "run.start",
+		Provider:                "pi",
+		Model:                   r.model,
+		CreateProviderSessionID: "pi-session-1",
+		WorkingDirectory:        "/tmp",
+	}, nil
+}
+
+func TestProviderPrepareSkipsStandbyLocalPiModelWithoutSpawning(t *testing.T) {
+	backend := &providerPrepareBackend{}
+	d, stream := providerPrepareFixture(t, backend)
+	d.operationResolver = piPrepareResolver{model: localRunModel}
+	d.localModels = &fakeLocalModels{standby: map[string]bool{localRunModel: true}}
+
+	command := providerPrepareCommand("prepare-standby-pi")
+	command.RuntimeType = "pi"
+	command.Payload = mustJSON(map[string]any{
+		"prepare_id": "prepare-standby-pi",
+		"runtime":    map[string]any{"type": "pi", "model": localRunModel},
+	})
+	if err := d.handleProviderPrepare(context.Background(), stream, command); err != nil {
+		t.Fatal(err)
+	}
+	payload := waitForProviderPrepared(t, stream, "prepare-standby-pi")
+	if payload["outcome"] != "not_eligible" || payload["reason"] != "Local model is on standby" {
+		t.Fatalf("payload=%v, want not_eligible with standby reason", payload)
+	}
+	if got := len(backend.executions()); got != 0 {
+		t.Fatalf("provider executions=%d, want none", got)
+	}
+}

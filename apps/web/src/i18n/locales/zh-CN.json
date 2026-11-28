@@ -1217,7 +1217,7 @@
     "statusAvailable": "未下载",
     "statusDownloading": "下载中",
     "statusFailed": "加载失败",
-    "statusIdle": "已下载",
+    "statusIdle": "待机",
     "statusLoaded": "已加载",
     "statusLoading": "加载中",
     "statusProbingConcurrency": "正在检测最大并发",
@@ -1245,7 +1245,7 @@
     "variantLabelWithEngine": "{quant} · {engine}",
     "variantOptionDetail": "{label} · {detail}",
     "noRoomYet": "内存暂时不够加载",
-    "loadToAnswer": "加载后才能回复",
+    "standbyAutoLoad": "自动加载",
     "usedByNames": "{names} 正在使用",
     "actionDownload": "下载",
     "actionResumeDownload": "继续下载",
@@ -1295,8 +1295,8 @@
     "memoryOn": "{size}（{place}）",
     "runtimeMemory": "运行时内存",
     "diskSpace": "磁盘空间",
-    "idleUsedWarning": {
-      "other": "{names} 在使用这个模型，加载后才能回复。"
+    "standbyAutoLoadNote": {
+      "other": "{names} 在使用这个模型。已卸载以节省内存，下次发消息时若内存足够会自动加载。"
     },
     "needsFreeMemory": "需 {size} 可用内存",
     "noAgentYet": "暂无 Agent",
@@ -1312,7 +1312,7 @@
     "systemAndEngineSize": "系统与引擎 · {size}",
     "hardware": "硬件",
     "affectedUnload": {
-      "other": "{names} 在使用这个模型，重新加载前无法回复。"
+      "other": "{names} 在使用这个模型。卸载后会进入待机以立即释放内存，下次发消息时若内存足够会自动加载。"
     },
     "affectedRemove": {
       "other": "{names} 在使用这个模型，换用其他模型前无法回复。"
@@ -1333,11 +1333,11 @@
     "unloadNotEnough": "卸载这里的模型也腾不出足够内存，请选择更小的模型。",
     "otherAppsOnPool": "其他应用占用了 {size}（{pool}）。请关闭不需要的应用，然后点击“重新检测内存”，腾出还差的内存。",
     "selectMore": "至少再选 {size} 的模型卸载，才能加载 {name}。",
-    "affectedUntilReload": "{names} 在模型重新加载前无法回复。",
+    "affectedUntilReload": "{names} 的模型将进入待机，内存足够后下次发消息时自动加载。",
     "switchOnceLoaded": "加载完成后把 {agents} 切换到 {model}",
     "unloadTitle": "卸载 {name}？",
-    "unloadDescription": "将释放 {size} 内存。模型文件仍保留在磁盘上，之后可以再次加载。",
-    "unloadDescriptionPool": "将释放 {size} 内存（{pool}）。模型文件仍保留在磁盘上，之后可以再次加载。",
+    "unloadDescription": "将立即释放 {size} 内存并进入待机。模型文件仍保留在磁盘上，需要时自动加载。",
+    "unloadDescriptionPool": "将立即释放 {size} 内存（{pool}）并进入待机。模型文件仍保留在磁盘上，需要时自动加载。",
     "removeTitle": "移除 {name}？",
     "removeDescription": "将删除模型文件，在 {computer} 上释放 {size} 磁盘空间。之后可以重新下载。",
     "removeDescriptionLoaded": "将卸载模型并删除文件，在 {computer} 上释放 {size} 磁盘空间。之后可以重新下载。",

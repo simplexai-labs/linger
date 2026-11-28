@@ -333,7 +333,7 @@ export function ModelFacts({
   const reclaimable = memoryReclaimable(view, model);
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
-  const idleUsedWarning =
+  const standbyUsedNote =
     status === "idle" && !model.note && usedNames.length > 0;
   const unassigned = assignableAgents.filter(
     (agent) => !isAgentUsingModel(entry, agent, computerId),
@@ -483,9 +483,9 @@ export function ModelFacts({
           </p>
         </div>
       ) : null}
-      {idleUsedWarning ? (
-        <FormFeedback tone="warning">
-          {t(m.idleUsedWarning, {
+      {standbyUsedNote ? (
+        <FormFeedback tone="info">
+          {t(m.standbyAutoLoadNote, {
             count: usedNames.length,
             names: joinList(usedNames, t),
           })}

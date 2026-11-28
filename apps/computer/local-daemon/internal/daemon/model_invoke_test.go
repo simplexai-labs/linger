@@ -847,3 +847,74 @@ func TestModelInvokeAntigravityEffortValidationAndClamping(t *testing.T) {
 		t.Fatalf("invalid effort payload = %v, want failed", payload)
 	}
 }
+
+func TestModelInvokeWakeLocalModelFalseSkipsStandbyWithoutWaking(t *testing.T) {
+	invoker := newFakeModelInvoker()
+	d, stream := modelInvokeFixture(t, invoker)
+	library := &fakeLocalModels{
+		standby:       map[string]bool{localRunModel: true},
+		loadedHealthy: map[string]bool{localRunModel: false},
+	}
+	d.localModels = library
+
+	command := modelInvokeCommand("invoke-bg-standby", map[string]any{
+		"model":            localRunModel,
+		"wake_local_model": false,
+	})
+	command.RuntimeType = "pi"
+	if err := d.handleModelInvoke(context.Background(), stream, command); err != nil {
+		t.Fatal(err)
+	}
+	payload := waitForModelInvoked(t, stream, "invoke-bg-standby")
+	if payload["outcome"] != "unavailable" || payload["reason"] != "Local model is on standby" {
+		t.Fatalf("payload = %v, want unavailable standby", payload)
+	}
+	if len(library.ensured) != 0 {
+		t.Fatalf("wake_local_model=false called EnsureLoaded: %v", library.ensured)
+	}
+	if invoker.calls() != 0 {
+		t.Fatalf("invoker calls = %d, want 0", invoker.calls())
+	}
+	d.WaitForOperations()
+	library.mu.Lock()
+	standbyActive := library.activeLeases[localRunModel]
+	standbyReleases := library.leaseReleases
+	library.mu.Unlock()
+	if standbyActive != 0 || standbyReleases != 1 {
+		t.Fatalf("after standby refusal: active=%d releases=%d, want 0 and 1", standbyActive, standbyReleases)
+	}
+
+	// Once loaded and healthy, wake_local_model=false runs and holds a lease without calling EnsureLoaded.
+	library.standby[localRunModel] = false
+	library.loadedHealthy[localRunModel] = true
+	loadedCommand := modelInvokeCommand("invoke-bg-loaded", map[string]any{
+		"model":            localRunModel,
+		"wake_local_model": false,
+	})
+	loadedCommand.RuntimeType = "pi"
+	if err := d.handleModelInvoke(context.Background(), stream, loadedCommand); err != nil {
+		t.Fatal(err)
+	}
+	<-invoker.started
+	library.mu.Lock()
+	activeWhileRunning := library.activeLeases[localRunModel]
+	library.mu.Unlock()
+	if activeWhileRunning != 1 {
+		t.Fatalf("active lease count during invoke = %d, want 1", activeWhileRunning)
+	}
+	close(invoker.release)
+	if payload := waitForModelInvoked(t, stream, "invoke-bg-loaded"); payload["outcome"] != "completed" {
+		t.Fatalf("loaded bg payload = %v", payload)
+	}
+	d.WaitForOperations()
+	library.mu.Lock()
+	activeAfter := library.activeLeases[localRunModel]
+	releases := library.leaseReleases
+	library.mu.Unlock()
+	if activeAfter != 0 || releases != standbyReleases+1 {
+		t.Fatalf("after invoke: active=%d releases=%d, want 0 and %d", activeAfter, releases, standbyReleases+1)
+	}
+	if len(library.ensured) != 0 {
+		t.Fatalf("wake_local_model=false called EnsureLoaded: %v", library.ensured)
+	}
+}

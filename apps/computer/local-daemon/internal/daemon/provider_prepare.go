@@ -190,6 +190,10 @@ func (d *Daemon) executeProviderPrepare(ctx context.Context, command protocol.Co
 	if spec.Provider != command.RuntimeType || spec.OperationKind != "run.start" || !resumable {
 		return "not_eligible", "Provider session is not resumable for provider preparation"
 	}
+	if command.RuntimeType == "pi" && (d.isLocalModelStandby(spec.Provider, spec.Model) ||
+		(spec.Model == "" && d.modelInvokeUnready != nil && d.modelInvokeUnready("pi"))) {
+		return "not_eligible", "Local model is on standby"
+	}
 	result, err := d.executor.PrepareProvider(ctx, spec)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {

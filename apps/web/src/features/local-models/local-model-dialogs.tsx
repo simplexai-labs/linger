@@ -29,19 +29,19 @@ import {
   type ModelEntry,
 } from "./local-models-rules";
 
-/** The amber notice naming the Agents that stop answering. */
+/** Notice naming the Agents that use this model when unloading or removing it. */
 function AffectedAgents({
   kind,
   names,
 }: {
-  /** What ends the wait: loading the model again, or choosing another one. */
+  /** Unloading moves Agents to standby; removing requires choosing another model. */
   kind: "remove" | "unload";
   names: readonly string[];
 }) {
   const t = useT();
   const count = names.length;
   return count ? (
-    <FormFeedback tone="warning">
+    <FormFeedback tone={kind === "unload" ? "info" : "warning"}>
       {t(kind === "unload" ? m.affectedUnload : m.affectedRemove, {
         count,
         names: joinList(names, t),
@@ -303,7 +303,7 @@ export function MakeRoomDialog({
           </FormFeedback>
         ) : null}
         {affected.length ? (
-          <FormFeedback tone="warning">
+          <FormFeedback tone="info">
             {t(m.affectedUntilReload, { names: joinList(affected, t) })}
           </FormFeedback>
         ) : null}
@@ -331,7 +331,7 @@ export function MakeRoomDialog({
   );
 }
 
-/** Unloading a model an Agent uses stops that Agent, so it asks first. */
+/** Unloading frees memory immediately and puts the model on standby. */
 export function UnloadModelDialog({
   assignableAgents = [],
   disabled,

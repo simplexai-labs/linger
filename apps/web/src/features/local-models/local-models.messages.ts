@@ -94,7 +94,7 @@ export const localModelsMessages = defineMessages("localModels", {
   statusAvailable: "Not downloaded",
   statusDownloading: "Downloading",
   statusFailed: "Couldn't load",
-  statusIdle: "Downloaded",
+  statusIdle: "Standby",
   statusLoaded: "Loaded",
   statusLoading: "Loading",
   statusProbingConcurrency: "Probing max concurrency",
@@ -123,7 +123,7 @@ export const localModelsMessages = defineMessages("localModels", {
   variantLabelWithEngine: "{quant} · {engine}",
   variantOptionDetail: "{label} · {detail}",
   noRoomYet: "no room to load yet",
-  loadToAnswer: "load to answer",
+  standbyAutoLoad: "loads automatically",
   usedByNames: "Used by {names}",
   actionDownload: "Download",
   actionResumeDownload: "Resume download",
@@ -176,9 +176,10 @@ export const localModelsMessages = defineMessages("localModels", {
   memoryOn: "{size} on {place}",
   runtimeMemory: "Runtime memory",
   diskSpace: "Disk space",
-  idleUsedWarning: {
-    one: "{names} uses this model. Load it so it can answer.",
-    other: "{names} use this model. Load it so they can answer.",
+  standbyAutoLoadNote: {
+    one: "{names} uses this model. Unloaded to save memory; loads automatically on next message when memory is free.",
+    other:
+      "{names} use this model. Unloaded to save memory; loads automatically on next message when memory is free.",
   },
   needsFreeMemory: "Needs {size} free",
   noAgentYet: "No Agent yet",
@@ -196,8 +197,9 @@ export const localModelsMessages = defineMessages("localModels", {
 
   // Confirmations.
   affectedUnload: {
-    one: "{names} uses this model and can't answer until it is loaded again.",
-    other: "{names} use this model and can't answer until it is loaded again.",
+    one: "{names} uses this model. Unloading moves it to standby to free memory now; it loads automatically on next message when memory is free.",
+    other:
+      "{names} use this model. Unloading moves it to standby to free memory now; it loads automatically on next message when memory is free.",
   },
   affectedRemove: {
     one: "{names} uses this model and can't answer until you choose another model for it.",
@@ -228,13 +230,13 @@ export const localModelsMessages = defineMessages("localModels", {
     "Other apps are using {size} on {pool}. Close unnecessary apps and click Recheck memory to free the remaining room.",
   selectMore: "Select at least {size} more to unload before loading {name}.",
   affectedUntilReload:
-    "{names} can't answer until their model is loaded again.",
+    "{names} will move to standby and load on next message once memory is free.",
   switchOnceLoaded: "Switch {agents} to {model} once loaded",
   unloadTitle: "Unload {name}?",
   unloadDescription:
-    "Frees {size} of memory. It stays on disk, so you can load it again later.",
+    "Frees {size} of memory now and puts the model on standby. It stays on disk and loads automatically when needed.",
   unloadDescriptionPool:
-    "Frees {size} of {pool}. It stays on disk, so you can load it again later.",
+    "Frees {size} of {pool} now and puts the model on standby. It stays on disk and loads automatically when needed.",
   removeTitle: "Remove {name}?",
   removeDescription:
     "Deletes its files and frees {size} of disk on {computer}. You can download it again later.",

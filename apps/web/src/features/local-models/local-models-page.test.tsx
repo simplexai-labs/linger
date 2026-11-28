@@ -288,7 +288,7 @@ describe("LocalModelsPage", () => {
 
     expect(statuses()).toEqual([
       "Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB",
-      "Gemma 3 27B: Downloaded",
+      "Gemma 3 27B: Standby",
       "GPT-OSS 20B: 12.1 GB",
       "Gemma 3 4B: 3.3 GB",
       "Llama 3.3 70B: 42.5 GB · runs slower",
@@ -477,7 +477,7 @@ describe("LocalModelsPage", () => {
     );
     await waitFor(() =>
       expect(statuses()).toContain(
-        "GPT-OSS 20B: Downloaded · no room to load yet",
+        "GPT-OSS 20B: Standby · no room to load yet",
       ),
     );
   });
@@ -757,7 +757,7 @@ describe("LocalModelsPage", () => {
     });
     expect(gptOss).toBeChecked();
     expect(dialog).toHaveTextContent(
-      "Another Me can't answer until their model is loaded again.",
+      "Another Me will move to standby and load on next message once memory is free.",
     );
 
     fireEvent.click(gptOss);
@@ -905,7 +905,7 @@ describe("LocalModelsPage", () => {
       name: "Unload Qwen3 Coder 30B?",
     });
     expect(dialog).toHaveTextContent(
-      "Research agent, Code reviewer use this model and can't answer until it is loaded again.",
+      "Research agent, Code reviewer use this model. Unloading moves it to standby to free memory now; it loads automatically on next message when memory is free.",
     );
     expect(fixture.actions).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Unload" }));
@@ -1149,7 +1149,7 @@ describe("LocalModelsPage", () => {
       withModel(labView(), "qwen3-coder-30b:Q4_K_M", { state: "idle" }),
     );
     await waitFor(() =>
-      expect(statusOf("Qwen3 Coder 30B")).toMatch(/^Downloaded/),
+      expect(statusOf("Qwen3 Coder 30B")).toMatch(/^Standby/),
     );
     expect(
       screen.getByRole("button", { name: "Load Qwen3 Coder 30B" }),
@@ -1171,7 +1171,7 @@ describe("LocalModelsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Gemma 3 27B: There isn't enough free memory to load it. Close memory-heavy apps or unload another model, then recheck memory.",
     );
-    expect(statusOf("Gemma 3 27B")).toMatch(/^Downloaded/);
+    expect(statusOf("Gemma 3 27B")).toMatch(/^Standby/);
     expect(
       screen.getByRole("button", { name: "Load Gemma 3 27B" }),
     ).toBeEnabled();
@@ -2913,7 +2913,7 @@ describe("Model source", () => {
       within(dialog).getByRole("checkbox", { name: /GPT-OSS 20B/ }),
     ).toBeChecked();
     expect(dialog).toHaveTextContent(
-      "Another Me can't answer until their model is loaded again.",
+      "Another Me will move to standby and load on next message once memory is free.",
     );
     expect(
       within(dialog).getByRole("button", { name: "Unload and load" }),
@@ -2953,7 +2953,7 @@ describe("Model source", () => {
         "Enough memory is free now (36.9 GB available).",
       ),
     );
-    expect(dialog).not.toHaveTextContent("Another Me can't answer");
+    expect(dialog).not.toHaveTextContent("Another Me will move to standby");
     fireEvent.click(within(dialog).getByRole("button", { name: "Load" }));
     await waitFor(() =>
       expect(fixture.actions).toEqual([
@@ -3478,12 +3478,12 @@ describe("Model source", () => {
       screen.queryByRole("button", { name: "Retry Broken 6B" }),
     ).toBeNull();
 
-    expect(statusOf("Idle Used 8B")).toBe("Downloaded · load to answer");
+    expect(statusOf("Idle Used 8B")).toBe("Standby · loads automatically");
     fireEvent.click(screen.getByRole("button", { name: "Idle Used 8B" }));
     expect(
       screen.getByRole("region", { name: "Idle Used 8B details" }),
     ).toHaveTextContent(
-      "Research agent uses this model. Load it so it can answer.",
+      "Research agent uses this model. Unloaded to save memory; loads automatically on next message when memory is free.",
     );
 
     // Details modal includes Other apps in the legend when external apps hold memory.
@@ -4477,7 +4477,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(statuses()).toEqual([
       "Inkling 2 Mini: 16.5 GB",
       "Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB",
-      "Gemma 3 27B: Downloaded",
+      "Gemma 3 27B: Standby",
       "GPT-OSS 20B: 12.1 GB",
       "Gemma 3 4B: 3.3 GB",
       "Llama 3.3 70B: 42.5 GB · runs slower",

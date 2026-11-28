@@ -86,6 +86,43 @@ type LocalModelLibrary interface {
 	// piModel when it is not loaded, and waits for it. It returns nil when
 	// piModel names no library model.
 	EnsureLoaded(ctx context.Context, piModel string) error
+	// IsStandbyModel reports whether piModel names a known local library model
+	// that is currently unloaded or otherwise not loaded.
+	IsStandbyModel(piModel string) bool
+	// IsLoadedHealthy reports whether piModel can answer without waking a
+	// standby local model.
+	IsLoadedHealthy(ctx context.Context, piModel string) bool
+	// AcquireUse holds an active use lease for piModel until the returned
+	// release callback runs, preventing idle auto-unload while work runs.
+	AcquireUse(piModel string) func()
+}
+
+// acquireLocalModelUse holds an active use lease on a Pi local model while a
+// Run or model_invoke executes. A Pi call that names no model holds every
+// loaded library model, since Pi answers it with whichever one is loaded.
+func (d *Daemon) acquireLocalModelUse(runtimeType, model string) func() {
+	if d.localModels == nil || runtimeType != "pi" {
+		return func() {}
+	}
+	return d.localModels.AcquireUse(model)
+}
+
+// isLocalModelStandby reports whether a Pi Runtime request targets a known
+// standby local library model that is not loaded.
+func (d *Daemon) isLocalModelStandby(runtimeType, model string) bool {
+	if d.localModels == nil || runtimeType != "pi" || model == "" {
+		return false
+	}
+	return d.localModels.IsStandbyModel(model)
+}
+
+// isLocalModelLoadedHealthy reports whether a Pi Runtime model_invoke with
+// wake_local_model=false can run without loading a standby local model.
+func (d *Daemon) isLocalModelLoadedHealthy(ctx context.Context, runtimeType, model string) bool {
+	if d.localModels == nil || runtimeType != "pi" || model == "" {
+		return true
+	}
+	return d.localModels.IsLoadedHealthy(ctx, model)
 }
 
 // ensureLocalModel loads the library model a Pi Run names before the Run

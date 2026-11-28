@@ -262,6 +262,17 @@ take precedence.
   connection. Background calls resolve the placed Agent's configured model on
   its Runtime and fall back to the target Runtime's catalog default on
   cross-Runtime fallback or when unconfigured.
+- Local-model wake control on `execute` `model_invoke` (`wake_local_model`) is
+  sent only to Computer 0.69.0 or later
+  (`FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION`), because an older
+  Computer rejects unknown envelope fields and closes the connection.
+  Background maintenance calls set `wake_local_model: false` so they do not
+  wake standby local models (the Daemon answers `unavailable`, which reuses the
+  scheduler's retry-without-attempt-penalty deferral up to its offline wait
+  limit rather than waking the model), while interactive calls set
+  `wake_local_model: true` and receive extra cold-load wait grace
+  (`MODEL_INVOKE_LOCAL_LOAD_GRACE_MS`) when targeting an unloaded local Pi
+  model.
 - `previous_session` on `operation.start` goes only to Computer 0.63.0 or later
   (`FIRST_PREVIOUS_SESSION_COMPUTER_VERSION`), because older Computers reject
   unknown envelope fields and close the connection. On `session_not_found` or

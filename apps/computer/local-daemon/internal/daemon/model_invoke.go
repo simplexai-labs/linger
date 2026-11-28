@@ -54,6 +54,11 @@ type modelInvokeRequest struct {
 	TimeoutMS       int64                      `json:"timeout_ms"`
 	MaxOutputChars  int                        `json:"max_output_chars"`
 	SessionKey      string                     `json:"session_key"`
+	WakeLocalModel  *bool                      `json:"wake_local_model,omitempty"`
+}
+
+func (r modelInvokeRequest) wakeLocalModel() bool {
+	return r.WakeLocalModel == nil || *r.WakeLocalModel
 }
 
 // handleModelInvoke admits one model call and runs it off the receive loop.
@@ -117,6 +122,9 @@ func (d *Daemon) modelInvokeBlocked(command protocol.Command, request modelInvok
 		return provider.ModelInvokeResult{Outcome: provider.ModelInvokeRuntimeUnavailable, Reason: "Model invocation is unavailable"}
 	}
 	if request.Model == "" && d.modelInvokeUnready != nil && d.modelInvokeUnready(command.RuntimeType) {
+		if !request.wakeLocalModel() {
+			return provider.ModelInvokeResult{Outcome: provider.ModelInvokeUnavailable, Reason: "Local model is on standby"}
+		}
 		// Pi lists the Computer's downloaded local models so a Run or model
 		// call that names one can load it, but a legacy call that names no
 		// model cannot run when none is loaded.
@@ -159,19 +167,27 @@ func invalidModelInvokeRequest(request modelInvokeRequest) string {
 func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, command protocol.Command, request modelInvokeRequest, entry *modelInvoke, receivedAt time.Time) {
 	slog.Info("runner.model.invoke", "phase", "started", "invoke_id", entry.id)
 	var result provider.ModelInvokeResult
-	if failureCode, err := d.ensureModelGateway(ctx, command.RuntimeType, false); err != nil {
+	wake := request.wakeLocalModel()
+	if !wake {
+		// Take the use lease before checking health so an idle sweeper tick
+		// cannot start unloading the model between IsLoadedHealthy and Invoke.
+		releaseLocalModel := d.acquireLocalModelUse(command.RuntimeType, request.Model)
+		if !d.isLocalModelLoadedHealthy(ctx, command.RuntimeType, request.Model) {
+			releaseLocalModel()
+			result = provider.ModelInvokeResult{Outcome: provider.ModelInvokeUnavailable, Reason: "Local model is on standby"}
+		} else if failureCode, err := d.ensureModelGateway(ctx, command.RuntimeType, false); err != nil {
+			releaseLocalModel()
+			result = modelGatewayInvokeFailure(ctx, failureCode, err)
+		} else {
+			result = d.invokeModelWithLease(ctx, command, request, entry, releaseLocalModel)
+		}
+	} else if failureCode, err := d.ensureModelGateway(ctx, command.RuntimeType, false); err != nil {
 		result = modelGatewayInvokeFailure(ctx, failureCode, err)
 	} else if failureCode, err := d.ensureLocalModel(ctx, command.RuntimeType, request.Model); err != nil {
 		result = localModelInvokeFailure(ctx, failureCode, err)
 	} else {
-		effort := d.normalizeModelInvokeEffort(command.RuntimeType, request.Model, request.ReasoningEffort)
-		result = d.modelInvoker.Invoke(ctx, provider.ModelInvokeRequest{
-			RuntimeType: command.RuntimeType, Model: request.Model, Mode: request.Mode, ReasoningEffort: effort,
-			Instructions: request.Instructions, Input: request.Input, OutputSchema: request.OutputSchema,
-			WorkspaceFiles: request.WorkspaceFiles, Timeout: time.Duration(request.TimeoutMS) * time.Millisecond,
-			SessionKey: request.SessionKey, MaxOutputChars: request.MaxOutputChars,
-		})
-		result = d.networkUnavailableModelInvoke(ctx, entry.id, command.RuntimeType, request.Model, result)
+		releaseLocalModel := d.acquireLocalModelUse(command.RuntimeType, request.Model)
+		result = d.invokeModelWithLease(ctx, command, request, entry, releaseLocalModel)
 	}
 	entry.cancel()
 	d.modelInvokeMu.Lock()
@@ -182,6 +198,18 @@ func (d *Daemon) runModelInvoke(ctx context.Context, stream transport.Stream, co
 	if err := d.sendModelInvoked(context.WithoutCancel(ctx), stream, command, entry.id, result, time.Since(receivedAt)); err != nil {
 		slog.Debug("runner.model.invoke receipt unavailable", "invoke_id", entry.id)
 	}
+}
+
+func (d *Daemon) invokeModelWithLease(ctx context.Context, command protocol.Command, request modelInvokeRequest, entry *modelInvoke, releaseLocalModel func()) provider.ModelInvokeResult {
+	defer releaseLocalModel()
+	effort := d.normalizeModelInvokeEffort(command.RuntimeType, request.Model, request.ReasoningEffort)
+	result := d.modelInvoker.Invoke(ctx, provider.ModelInvokeRequest{
+		RuntimeType: command.RuntimeType, Model: request.Model, Mode: request.Mode, ReasoningEffort: effort,
+		Instructions: request.Instructions, Input: request.Input, OutputSchema: request.OutputSchema,
+		WorkspaceFiles: request.WorkspaceFiles, Timeout: time.Duration(request.TimeoutMS) * time.Millisecond,
+		SessionKey: request.SessionKey, MaxOutputChars: request.MaxOutputChars,
+	})
+	return d.networkUnavailableModelInvoke(ctx, entry.id, command.RuntimeType, request.Model, result)
 }
 
 // localModelInvokeFailure answers a Pi model call whose library model could

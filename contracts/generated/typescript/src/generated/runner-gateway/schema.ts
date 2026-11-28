@@ -5599,6 +5599,11 @@ export const runnerGatewayEnvelopeSchema = {
           minLength: 1,
           maxLength: 200,
         },
+        wake_local_model: {
+          description:
+            "Whether the Computer may load an unloaded local model to answer this call. Omitted defaults to true for backward compatibility; sent only to a Computer release that decodes it.",
+          type: "boolean",
+        },
       },
     },
     ModelInvokeFile: {

@@ -75,6 +75,16 @@ func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Co
 		failureCode, err = d.ensureLocalModel(ctx, spec.Provider, spec.Model)
 		modelLoadFailed = err != nil && failureCode != ""
 		localModelMs = time.Since(localModelStartedAt).Milliseconds()
+		if err == nil {
+			releaseLocalModel := d.acquireLocalModelUse(spec.Provider, spec.Model)
+			d.activeMu.Lock()
+			if active := d.activeOperations[command.OperationID]; active != nil {
+				active.releaseLocalModel = releaseLocalModel
+			} else {
+				releaseLocalModel()
+			}
+			d.activeMu.Unlock()
+		}
 	}
 	joinProvider := func() {
 		joinStartedAt := time.Now()
