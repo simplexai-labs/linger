@@ -4,7 +4,9 @@ export function formatBytes(bytes: number) {
   const units = ["KB", "MB", "GB"];
   let value = bytes / 1024;
   let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
+  // One decimal place can carry a size that sits just under the next unit up to
+  // 1024, so the unit is chosen from the rounded value it will print.
+  while (Number(value.toFixed(1)) >= 1024 && unit < units.length - 1) {
     value /= 1024;
     unit += 1;
   }

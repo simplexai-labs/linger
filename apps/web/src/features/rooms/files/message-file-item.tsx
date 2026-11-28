@@ -1,3 +1,4 @@
+import { formatBytes } from "@/lib/format-bytes";
 import type { ReactNode } from "react";
 
 import type { TeamHubMessageArtifactTreeSegment } from "@/features/teamhub/teamhub-types";
@@ -103,10 +104,4 @@ export function artifactTreeDetail(
     t(chatMessages.folderCount, { count: segment.directory_count }),
     formatBytes(segment.total_bytes),
   ].join(" · ");
-}
-
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

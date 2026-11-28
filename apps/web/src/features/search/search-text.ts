@@ -49,15 +49,14 @@ export function relativeTimeLabel(
   const elapsed = Math.max(0, now - time);
   const minute = 60_000;
   if (elapsed < minute) return t(m.ageNow);
-  if (elapsed < 60 * minute) {
-    return t(m.ageMinutes, { value: Math.round(elapsed / minute) });
-  }
-  if (elapsed < 24 * 60 * minute) {
-    return t(m.ageHours, { value: Math.round(elapsed / (60 * minute)) });
-  }
-  if (elapsed < 7 * 24 * 60 * minute) {
-    return t(m.ageDays, { value: Math.round(elapsed / (24 * 60 * minute)) });
-  }
+  // A rounded value may reach the next unit ("60m" at 59.6 minutes), so the
+  // unit is chosen from the rounded value, not from the raw elapsed time.
+  const minutes = Math.round(elapsed / minute);
+  if (minutes < 60) return t(m.ageMinutes, { value: minutes });
+  const hours = Math.round(elapsed / (60 * minute));
+  if (hours < 24) return t(m.ageHours, { value: hours });
+  const days = Math.round(elapsed / (24 * 60 * minute));
+  if (days < 7) return t(m.ageDays, { value: days });
   return new Date(time).toLocaleDateString(formatLocale(), {
     day: "numeric",
     month: "short",

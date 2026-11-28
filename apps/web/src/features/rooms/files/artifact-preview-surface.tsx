@@ -1,4 +1,5 @@
 /* oxlint-disable react-doctor/no-create-object-url-without-revoke -- Preview URLs are revoked on normal cleanup and late-response races; download URLs are revoked immediately after the browser receives the click. */
+import { formatBytes } from "@/lib/format-bytes";
 import {
   ArrowExpand01Icon,
   ArrowShrink02Icon,
@@ -439,14 +440,4 @@ function PreviewFallback({
       </div>
     </div>
   );
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

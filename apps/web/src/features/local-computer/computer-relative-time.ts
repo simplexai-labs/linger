@@ -19,16 +19,16 @@ function relativeFormat(locale: string) {
 export function relativeTime(value: string, translation?: Translation) {
   const format = relativeFormat(formatLocale(translation?.language ?? "en"));
   const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1_000);
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["day", 86_400],
-    ["hour", 3_600],
-    ["minute", 60],
-  ];
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size)
-      return format.format(Math.round(seconds / size), unit);
-  }
-  return translation
-    ? translation.t(commonMessages.justNow)
-    : commonMessages.justNow.source;
+  if (Math.abs(seconds) < 60)
+    return translation
+      ? translation.t(commonMessages.justNow)
+      : commonMessages.justNow.source;
+  // A rounded value may reach the next unit ("24 hours ago" at 23.6 hours,
+  // where a day reads "yesterday"), so each unit is chosen from its rounded
+  // value rather than from the raw elapsed time.
+  const minutes = Math.round(seconds / 60);
+  if (Math.abs(minutes) < 60) return format.format(minutes, "minute");
+  const hours = Math.round(seconds / 3_600);
+  if (Math.abs(hours) < 24) return format.format(hours, "hour");
+  return format.format(Math.round(seconds / 86_400), "day");
 }

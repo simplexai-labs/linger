@@ -960,7 +960,7 @@ describe("Room Message timeline cards", () => {
     expect(runs[0]).toHaveTextContent("Please handle this here");
     // A person's own files line up on their side, with the bubble.
     expect(runs[1]).toHaveClass("justify-end");
-    expect(screen.getByText("PDF · 3.0 MB")).toBeVisible();
+    expect(screen.getByText("PDF · 3 MB")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Preview notes.pdf" }));
     expect(onOpenArtifact).toHaveBeenCalledWith(attachment.document);
     // An unavailable upload stays, greyed and without its action.
