@@ -1233,13 +1233,16 @@ actions, _ = gateway_bifrost.plan_tools({}, sys.platform, arch, False, str(tools
 bifrost_action = next((a for a in actions if a["tool"] == "bifrost"), None)
 if bifrost_action is None:
     raise harness.HarnessError("Bifrost plan did not return a bifrost action")
+fetch_artifact = getattr(harness, "fetch_artifact", None)
+if fetch_artifact is None:
+    fetch_artifact = getattr(harness, "_fetch")
 archive = Path(harness.archive_files(tools_dir, artifact)[0])
 already_cached = (
     bifrost_action["action"] == "reuse"
     or (archive.is_file() and harness.digest(str(archive)) == artifact["sha256"])
 )
 if not already_cached:
-    harness._fetch(tools_dir, artifact, lambda _line: None)
+    fetch_artifact(tools_dir, artifact, lambda _line: None)
 print(json.dumps({
     "ok": True,
     "cached": already_cached,

@@ -2382,7 +2382,7 @@ test("prefetchLocalmodelsBifrost runs isolated Python without allocating a Bifro
   expect(args.slice(0, 3)).toEqual(["-P", "-s", "-c"]);
   expect(args[3]).toContain("gateway_bifrost.plan_tools");
   expect(args[3]).toContain("harness.archive_files");
-  expect(args[3]).toContain("harness._fetch");
+  expect(args[3]).toContain('getattr(harness, "fetch_artifact", None)');
   expect(opts.cwd).toBe(path.join(f.directory, "modules"));
   expect(opts.env.LOCALMODELS_TOOLS_DIR).toBe(
     localmodelsToolsDirectory(f.home),
@@ -2816,7 +2816,7 @@ test.skipIf(!existsSync(pinnedDistributionFile))(
         /AttributeError|ImportError|KeyError|TypeError/,
       );
 
-      // Check 2: real harness._fetch + gateway_bifrost.plan_tools + harness.archive_files round-trip.
+      // Check 2: real harness.fetch_artifact + gateway_bifrost.plan_tools + harness.archive_files round-trip.
       const toolsDir2 = localmodelsToolsDirectory(home2);
       const stateDir2 = localmodelsStateDirectory(home2);
       const bifrostDir2 = localmodelsBifrostDirectory(home2);
@@ -2881,7 +2881,10 @@ expected_archive = Path(harness.archive_files(tools_dir, artifact)[0])
 assert expected_archive == tools_dir / ".archives" / artifact["name"], (
     f"unexpected archive path: {expected_archive}"
 )
-fetched = harness._fetch(tools_dir, artifact, lambda _line: None)
+fetch_artifact = getattr(harness, "fetch_artifact", None)
+if fetch_artifact is None:
+    fetch_artifact = getattr(harness, "_fetch")
+fetched = fetch_artifact(tools_dir, artifact, lambda _line: None)
 assert fetched == expected_archive, f"fetch returned {fetched} != {expected_archive}"
 assert expected_archive.is_file()
 assert harness.digest(str(expected_archive)) == artifact["sha256"]
@@ -2957,7 +2960,7 @@ print(json.dumps({
         path.join(toolsDir2, ".archives", syntheticArtifact.name),
       );
 
-      // Confirm Check 1's real harness._fetch created <bifrostName>.lock inside .archives/.
+      // Confirm Check 1's real harness.fetch_artifact created <bifrostName>.lock inside .archives/.
       const lockStat = await stat(
         path.join(
           localmodelsToolsDirectory(home1),
@@ -2976,7 +2979,10 @@ from localmodels import harness, hosts
 tools_dir = Path(os.path.expanduser(hosts.tools_dir()))
 artifact = json.loads(os.environ["CONTRACT_ARTIFACT_JSON"])
 expected_archive = Path(harness.archive_files(tools_dir, artifact)[0])
-fetched = harness._fetch(tools_dir, artifact, lambda _line: None)
+fetch_artifact = getattr(harness, "fetch_artifact", None)
+if fetch_artifact is None:
+    fetch_artifact = getattr(harness, "_fetch")
+fetched = fetch_artifact(tools_dir, artifact, lambda _line: None)
 assert fetched == expected_archive
 assert harness.digest(str(fetched)) == artifact["sha256"]
 assert not (tools_dir / "owned.json").exists()

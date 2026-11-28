@@ -42,6 +42,14 @@ const actionRefusals: Record<
   LOCAL_MODEL_NO_ROOM: m.refusalNoRoom,
   LOCAL_MODEL_PLATFORM_UNSUPPORTED: m.refusalPlatformUnsupported,
   LOCAL_MODEL_RUNTIME_DEPENDENCY_MISSING: m.refusalRuntimeDependencyMissing,
+  LOCAL_MODELS_CUSTOM_UNSUPPORTED: m.refusalActionFailed,
+  LOCAL_MODEL_HUB_AUTH_REQUIRED: m.refusalForbidden,
+  LOCAL_MODEL_HUB_FORBIDDEN: m.refusalForbidden,
+  LOCAL_MODEL_HUB_REPO_NOT_FOUND: m.refusalModelUnknown,
+  LOCAL_MODEL_HUB_FORMAT_UNSUPPORTED: m.refusalPlatformUnsupported,
+  LOCAL_MODEL_HUB_UNREACHABLE: m.refusalActionFailed,
+  LOCAL_MODEL_UNSUPPORTED_ARCHITECTURE: m.refusalPlatformUnsupported,
+  LOCAL_MODEL_CORRUPT_WEIGHTS: m.refusalActionFailed,
   LOCAL_MODEL_UNKNOWN: m.refusalModelUnknown,
   LOCAL_MODELS_SERVICE_UNAVAILABLE: m.refusalServiceUnavailable,
   LOCAL_MODELS_UNAVAILABLE: m.refusalToolsUnavailable,
@@ -67,6 +75,11 @@ const modelErrors: Record<Schemas["LocalModelErrorCode"], Message<string>> = {
   DRIVER_UPDATE_REQUIRED: m.errorDriverUpdateRequired,
   ENGINE_START_FAILED: m.errorEngineStartFailed,
   GATEWAY_REGISTRATION_FAILED: m.errorGatewayRegistrationFailed,
+  HUB_AUTH_REQUIRED: m.errorUnknownError,
+  HUB_FORBIDDEN: m.errorUnknownError,
+  HUB_REPO_NOT_FOUND: m.errorModelUnknown,
+  HUB_FORMAT_UNSUPPORTED: m.refusalPlatformUnsupported,
+  HUB_UNREACHABLE: m.errorNetworkUnavailable,
   GPU_UNSUPPORTED: m.errorGpuUnsupported,
   HEALTH_CHECK_FAILED: m.errorHealthCheckFailed,
   INVALID_STATE: m.errorInvalidState,
@@ -79,6 +92,8 @@ const modelErrors: Record<Schemas["LocalModelErrorCode"], Message<string>> = {
   OUT_OF_MEMORY: m.errorOutOfMemory,
   PLATFORM_UNSUPPORTED: m.refusalPlatformUnsupported,
   RUNTIME_DEPENDENCY_MISSING: m.errorRuntimeDependencyMissing,
+  UNSUPPORTED_ARCHITECTURE: m.refusalPlatformUnsupported,
+  CORRUPT_WEIGHTS: m.errorChecksumMismatch,
   UNKNOWN_ERROR: m.errorUnknownError,
 };
 
@@ -115,6 +130,13 @@ const modelErrorsShort: Record<
   OUT_OF_MEMORY: m.shortOutOfMemory,
   PLATFORM_UNSUPPORTED: m.shortNotForComputer,
   RUNTIME_DEPENDENCY_MISSING: m.shortRuntimeDependencyMissing,
+  HUB_AUTH_REQUIRED: m.shortUnknownError,
+  HUB_FORBIDDEN: m.shortUnknownError,
+  HUB_REPO_NOT_FOUND: m.shortModelUnknown,
+  HUB_FORMAT_UNSUPPORTED: m.shortNotForComputer,
+  HUB_UNREACHABLE: m.shortNetworkUnavailable,
+  UNSUPPORTED_ARCHITECTURE: m.shortNotForComputer,
+  CORRUPT_WEIGHTS: m.shortUnknownError,
   UNKNOWN_ERROR: m.shortUnknownError,
 };
 
@@ -590,6 +612,7 @@ export function architectureCopy(
 /** Inference engine names read the same in every language. */
 const engineBadgeLabels: Record<Schemas["LocalModelEngine"], string> = {
   "llama.cpp": "llama.cpp",
+  mlx: "MLX",
   polystrata: "PolyStrata",
   strata: "Strata",
 };

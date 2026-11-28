@@ -647,7 +647,7 @@ func (a *App) writeLocalModelsRefusal(c *gin.Context, code httpapi.LocalModelsEr
 		}
 		if refusal.Pool != "" && localModelPoolIDPattern.MatchString(refusal.Pool) {
 			pool := refusal.Pool
-			body.Pool = (*httpapi.LocalModelPoolId)(&pool)
+			body.Pool = &pool
 		}
 	}
 	c.JSON(status, httpapi.LocalModelsErrorResponse{Error: body})
