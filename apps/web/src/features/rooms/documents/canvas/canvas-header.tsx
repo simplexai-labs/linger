@@ -272,7 +272,13 @@ function CanvasField({
         focused.current = true;
       }}
       onKeyDown={(event) => {
-        if (event.key === "Enter" && !event.nativeEvent.isComposing)
+        // Enter while an input method is composing picks a candidate; it
+        // must not save the draft.
+        if (
+          event.key === "Enter" &&
+          !event.nativeEvent.isComposing &&
+          event.keyCode !== 229
+        )
           event.currentTarget.blur();
       }}
       placeholder={editable ? placeholder : t(canvasMessages.none)}

@@ -411,6 +411,17 @@ describe("AnotherMe sources setup card", () => {
     fireEvent.keyDown(input, { key: "Enter" });
   }
 
+  it("keeps an Enter that picks an input method candidate from adding the link", async () => {
+    renderCard(setupCard(sourcesForm));
+    const input = await screen.findByRole("textbox", { name: "Paste a link" });
+    fireEvent.change(input, { target: { value: "https://jenny.example" } });
+    // Browsers report the Enter that picks a candidate as the 229 key code.
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(screen.queryByText("jenny.example")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("jenny.example")).toBeVisible();
+  });
+
   it("adds valid links and rejects invalid, duplicate and extra ones", async () => {
     const { onDecision } = renderCard(setupCard(sourcesForm));
     await screen.findByRole("textbox", { name: "Paste a link" });

@@ -158,10 +158,13 @@ export function RecordingAskBox({
     setQuestion("");
   };
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter while an input method is composing picks a candidate; browsers
+    // report it either as isComposing or as the 229 key code.
     if (
       event.key !== "Enter" ||
       event.shiftKey ||
-      event.nativeEvent.isComposing
+      event.nativeEvent.isComposing ||
+      event.keyCode === 229
     )
       return;
     event.preventDefault();

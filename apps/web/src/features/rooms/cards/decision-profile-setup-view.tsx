@@ -586,7 +586,13 @@ function ProfileSetupSources(props: Props) {
                   setInputError(null);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                  // Enter while an input method is composing picks a
+                  // candidate; it must not add the draft.
+                  if (
+                    event.key !== "Enter" ||
+                    event.nativeEvent.isComposing ||
+                    event.keyCode === 229
+                  )
                     return;
                   event.preventDefault();
                   addLink();

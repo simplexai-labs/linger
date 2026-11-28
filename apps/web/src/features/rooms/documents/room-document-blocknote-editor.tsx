@@ -452,7 +452,11 @@ export function RoomDocumentBlockNoteEditor({
           !event.ctrlKey &&
           !event.metaKey &&
           !event.altKey &&
+          // Safari reports the Enter that picks an input method candidate
+          // after compositionend as the 229 key code; this capture handler
+          // runs before ProseMirror's own guard sees the event.
           !event.nativeEvent.isComposing &&
+          event.keyCode !== 229 &&
           editor.domElement?.getAttribute("aria-expanded") !== "true" &&
           continueTableCellList(editor)
         ) {

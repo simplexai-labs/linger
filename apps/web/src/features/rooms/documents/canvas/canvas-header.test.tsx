@@ -134,6 +134,21 @@ describe("CanvasHeader", () => {
     expect(editor.updateBlock).not.toHaveBeenCalled();
   });
 
+  it("keeps an Enter that picks an input method candidate from saving the field", () => {
+    const { editor } = fakeEditor("canvas: gmail\nsubject: Pricing");
+    render(<Harness editor={editor} />);
+    const subject = screen.getByLabelText("Subject");
+    fireEvent.focus(subject);
+    fireEvent.change(subject, { target: { value: "Pricing follow-up" } });
+    // Browsers report the Enter that picks a candidate as the 229 key code.
+    const blur = vi.spyOn(subject, "blur");
+    fireEvent.keyDown(subject, { key: "Enter", keyCode: 229 });
+    expect(blur).not.toHaveBeenCalled();
+    fireEvent.keyDown(subject, { key: "Enter" });
+    expect(blur).toHaveBeenCalledTimes(1);
+    expect(editor.updateBlock).not.toHaveBeenCalled();
+  });
+
   it("links the delivered draft and is read-only without edit access", () => {
     const { editor } = fakeEditor(
       "canvas: gmail\nsubject: Pricing\nstatus: draft\nlink: https://mail.google.com/mail/#drafts",

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import { RecordingAnswers } from "./recording-questions";
+import { RecordingAnswers, RecordingAskBox } from "./recording-questions";
 
 it("reveals a new question and its answer without pulling a reader away from history", () => {
   const props = {
@@ -55,4 +55,16 @@ it("reveals a new question and its answer without pulling a reader away from his
     <RecordingAnswers {...props} items={[answer, { ...answer, id: "q2" }]} />,
   );
   expect(list.scrollTop).toBe(100);
+});
+
+it("keeps an Enter that picks an input method candidate from sending the question", () => {
+  const onAsk = vi.fn();
+  render(<RecordingAskBox busy={false} onAsk={onAsk} />);
+  const box = screen.getByLabelText("Ask about this recording");
+  fireEvent.change(box, { target: { value: "what happened" } });
+  // Browsers report the Enter that picks a candidate as the 229 key code.
+  fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+  expect(onAsk).not.toHaveBeenCalled();
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onAsk).toHaveBeenCalledWith("what happened");
 });
