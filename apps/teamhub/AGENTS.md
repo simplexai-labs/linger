@@ -274,6 +274,9 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   through that `replace`.
 - Commit a persisted collaboration fact and its Room Event in the same transaction.
 - PostgreSQL is recovery authority; SSE is a low-latency wake signal.
+- Realtime subscribers may close while a full queue disconnects them;
+  concurrent shutdown must not block delivery to other Topics. The Done
+  signal marks closure, while the Events channel stays open.
 - PostgreSQL is also the recovery authority for Agent Runtime configuration,
   Execution Context, accepted input, Inbox cursor, Local Run, RuntimeSession,
   Runtime status coordination, and Local Computer state. Expose

@@ -261,9 +261,11 @@ func (s *Subscription) Done() <-chan struct{} { return s.done }
 
 // Close unregisters the subscription and closes Done; it is safe to call repeatedly.
 func (s *Subscription) Close() {
+	// Publishers hold broker.mu before closeLocked enters once; shutdown must
+	// acquire them in the same order to avoid blocking all Topic delivery.
+	s.broker.mu.Lock()
+	defer s.broker.mu.Unlock()
 	s.once.Do(func() {
-		s.broker.mu.Lock()
-		defer s.broker.mu.Unlock()
 		if subscriptions := s.broker.topics[s.topic]; subscriptions != nil {
 			delete(subscriptions, s.id)
 			if len(subscriptions) == 0 {
