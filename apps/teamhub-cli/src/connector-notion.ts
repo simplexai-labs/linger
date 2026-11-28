@@ -376,7 +376,7 @@ async function executeNotion(
   if (action === "append") {
     const blocks = input._blocks as Json[];
     if (!blocks.length) usage("Provide at least one content block.");
-    await runtime.call(
+    const appended = await runtime.call(
       "NOTION_ADD_MULTIPLE_PAGE_CONTENT",
       {
         parent_block_id: input.pageId,
@@ -391,7 +391,11 @@ async function executeNotion(
         acknowledged: true,
         page_id: after.page_id,
         url: after.url,
-        verified: after.complete === true,
+        verified:
+          Array.isArray(appended.results) &&
+          appended.results.length === blocks.length &&
+          after.complete === true &&
+          after.markdown !== before.markdown,
         blockCount: blocks.length,
         warnings: after.warnings,
       },

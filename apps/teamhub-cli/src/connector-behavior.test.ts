@@ -403,6 +403,60 @@ describe("reviewed Connector command boundaries", () => {
       f.calls.filter((x) => x.url.endsWith("/account")).at(-1)!.body.account,
     ).toBe("connection_gmail");
   });
+  it("marks a Notion append verified only when blocks and a changed page are confirmed", async () => {
+    const pageId = "12345678-1234-1234-1234-123456789abc";
+    const block = {
+      object: "block",
+      type: "paragraph",
+      paragraph: { rich_text: [] },
+    };
+    let writes = 0;
+    let saved = false;
+    const f = await fixture(
+      "notion",
+      (slug) => {
+        if (slug === "NOTION_RETRIEVE_PAGE")
+          return {
+            object: "page",
+            id: pageId,
+            url: "https://www.notion.so/Example-12345678123412341234123456789abc",
+            properties: {
+              title: { type: "title", title: [{ plain_text: "Example" }] },
+            },
+          };
+        if (slug === "NOTION_GET_PAGE_MARKDOWN")
+          return {
+            object: "page_markdown",
+            markdown: saved ? "Earlier\n\nAdded" : "Earlier",
+            truncated: false,
+            unknown_block_ids: [],
+          };
+        expect(slug).toBe("NOTION_ADD_MULTIPLE_PAGE_CONTENT");
+        writes++;
+        if (writes === 1) return { object: "list", results: [] };
+        saved = true;
+        return { object: "list", results: [{ ...block, id: "block_added" }] };
+      },
+      {},
+      (endpoint) =>
+        endpoint.endsWith("/apps/notion-body")
+          ? { markdown: "Added", blocks: [block] }
+          : undefined,
+    );
+    const command = ["notion", "append", pageId, "--content", "Added"];
+    const unchanged = await f.run(command);
+    expect(unchanged).toMatchObject({
+      code: 0,
+      result: { result: { acknowledged: true, verified: false } },
+    });
+    const appended = await f.run(command);
+    expect(appended).toMatchObject({
+      code: 0,
+      result: { result: { acknowledged: true, verified: true } },
+    });
+    expect(writes).toBe(2);
+  });
+
   it("sends Slack Markdown with a channel ID without discovery", async () => {
     const f = await fixture("slack", (slug, args) => {
       expect(slug).toBe("SLACK_SEND_MESSAGE");
