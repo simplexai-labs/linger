@@ -24,6 +24,7 @@ export function JumpToLatestButton({
       aria-label={t(chatMessages.jumpToLatest)}
       className="app-floating-enter absolute bottom-3 left-1/2 z-10 inline-flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-agent-working={agentWorking}
+      data-jump-to-latest=""
       onClick={onClick}
       type="button"
     >

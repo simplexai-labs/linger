@@ -2011,25 +2011,67 @@ a[href][aria-disabled="true"],
   max-width: calc(var(--chat-card-width) - 2 * var(--chat-bubble-padding-x));
 }
 
-/* On narrow screens a card takes the whole lane beside the avatar, and the
-   Message actions move up onto the author line instead of reserving room. */
+/* On narrow screens every Message takes the full lane beside the avatar, and
+   its actions move onto the author line (or a matching top strip on rows
+   without a header) instead of reserving horizontal room. */
 @media (max-width: 767px) {
-  .room-message-card.has-wide-card[data-current-actor] > .room-message-content {
+  .room-message-card[data-current-actor] {
+    --message-actions-room: 0px;
+  }
+
+  .room-message-card.message-row[data-current-actor] > .room-message-content {
+    position: relative;
     width: calc(100% - 44px);
+  }
+
+  .room-message-card.has-wide-card[data-current-actor] > .room-message-content {
     max-width: calc(100% - 44px);
   }
 
-  .room-message-card.has-wide-card .room-message-body-main {
+  .room-message-card .room-message-body-main {
     flex: 1 1 auto;
   }
 
-  .room-message-card.has-wide-card
-    .room-message-body-line
+  .room-message-card :is(.room-message-body-line, .room-message-bubble) {
+    position: static;
+  }
+
+  .room-message-card[data-current-actor="false"] .room-message-header {
+    padding-right: 84px;
+  }
+
+  .room-message-card[data-current-actor="true"][data-group-start]
+    > .room-message-content,
+  .room-message-card.message-row[data-group-start="false"]
+    > .room-message-content,
+  .room-message-card[data-current-actor="true"][data-group-start="true"]
+    > .room-message-avatar {
+    padding-top: 32px;
+  }
+
+  .room-message-card.message-row[data-current-actor]
+    :is(.room-message-body-line, .room-message-bubble)
     > .message-row-actions {
-    top: -28px;
+    top: 0;
     right: 0;
     left: auto;
     margin: 0;
+    transform: none;
+  }
+
+  .room-message-card.message-row:is(
+      [data-group-start="false"],
+      [data-current-actor="true"]
+    )
+    :is(.room-message-body-line, .room-message-bubble)
+    > .message-row-actions {
+    top: -12px;
+  }
+}
+
+@media (max-width: 767px) and (pointer: coarse) {
+  .room-message-card[data-current-actor="false"] .room-message-header {
+    padding-right: 132px;
   }
 }
 
@@ -4300,9 +4342,34 @@ button.question-choice:focus-visible {
     padding-right: 0;
   }
 
-  .message-composer-editor {
+  .message-composer-editor,
+  .ui-field-control,
+  .ui-field-control input,
+  .global-search-input {
     font-size: 16px;
   }
+
+  :is(.room-chat-column, .room-thread-panel) {
+    --streaming-dock-lift: 2.75rem;
+  }
+}
+
+/* Lift floating chat controls clear of the streaming status dock. */
+.room-composer-dock:has([data-streaming-status-dock])
+  [data-background-tasks-pill] {
+  bottom: calc(0.5rem + var(--streaming-dock-lift, 2rem));
+}
+
+:is(.room-chat-column, .room-thread-panel):has([data-streaming-status-dock])
+  [data-jump-to-latest] {
+  bottom: calc(0.75rem + var(--streaming-dock-lift, 2rem));
+}
+
+:is(.room-chat-column, .room-thread-panel):has(
+    [data-streaming-status-dock]
+  ):has([data-background-tasks-pill])
+  [data-jump-to-latest] {
+  bottom: calc(2.75rem + var(--streaming-dock-lift, 2rem));
 }
 
 @media (pointer: coarse) {

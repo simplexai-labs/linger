@@ -1079,6 +1079,7 @@ function AgentStreamingStatusDockBody({
     <div className="relative h-0">
       <div
         className="room-readable absolute inset-x-0 bottom-1 bg-app-surface"
+        data-streaming-status-dock=""
         data-testid="agent-streaming-status-dock"
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget))

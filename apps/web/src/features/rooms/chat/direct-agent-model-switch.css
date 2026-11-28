@@ -1,12 +1,14 @@
 .agent-model-switch {
   position: relative;
   display: flex;
+  min-width: 0;
   align-items: center;
 }
 
 .agent-model-switch-trigger {
   display: inline-flex;
-  max-width: 220px;
+  min-width: 0;
+  max-width: min(220px, 100%);
   align-items: center;
   height: 28px;
   padding: 0 6px;

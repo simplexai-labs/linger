@@ -90,6 +90,12 @@
   list-style-type: decimal;
 }
 
+@media (max-width: 767px) {
+  .message-markdown ol {
+    margin-left: 24px;
+  }
+}
+
 .message-markdown li {
   margin: 0;
   line-height: 1.5;

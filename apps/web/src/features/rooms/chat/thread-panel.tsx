@@ -324,7 +324,7 @@ function ThreadPanelContent({
   return (
     <aside
       aria-label={t(chatMessages.messageThread)}
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col app-work-surface"
+      className="room-thread-panel flex h-full min-h-0 w-full min-w-0 flex-1 flex-col app-work-surface"
     >
       <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
         {t(chatMessages.thread)}

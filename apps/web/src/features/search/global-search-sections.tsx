@@ -95,7 +95,7 @@ export function GlobalSearchField({
           aria-controls="global-search-results"
           aria-expanded={rowCount > 0}
           aria-label={t(m.inputLabel)}
-          className="ml-1 h-full min-w-0 flex-1 bg-transparent text-sm text-app-ink outline-none placeholder:text-app-placeholder"
+          className="global-search-input ml-1 h-full min-w-0 flex-1 bg-transparent text-sm text-app-ink outline-none placeholder:text-app-placeholder"
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={onInputKeyDown}
           placeholder={placeholder}
