@@ -62,9 +62,15 @@ async function readClaims(directory, identity) {
     try {
       process.kill(Number(match[1]), 0);
     } catch (error) {
-      if (error.code !== "ESRCH") throw error;
-      await rm(claim, { recursive: true, force: true });
-      continue;
+      if (error.code === "ESRCH") {
+        await rm(claim, { recursive: true, force: true });
+        continue;
+      }
+      // EPERM still means the process exists: on a shared tools root, another
+      // user's install may hold the lock, and a foreign-UID PID cannot be
+      // signalled for the check. Treat the claim as a live contender and keep
+      // waiting for its ticket instead of failing every operation here.
+      if (error.code !== "EPERM") throw error;
     }
     let ticket;
     try {
