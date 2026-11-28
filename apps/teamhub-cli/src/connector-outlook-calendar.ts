@@ -1015,7 +1015,7 @@ export async function executeOutlookCalendar(
 
     const fromStr = displayText(from);
     const toStr = displayText(to);
-    const responseZone = zone ?? "UTC";
+    // UTC responses preserve the instant of each occurrence of a repeated hour.
 
     const raw =
       input.query !== undefined
@@ -1030,7 +1030,7 @@ export async function executeOutlookCalendar(
               expand_recurring_events: true,
               filter: `start/dateTime lt '${utc(Date.parse(toStr))}' and end/dateTime gt '${utc(Date.parse(fromStr))}' and contains(subject,'${displayText(input.query).replaceAll("'", "''")}') and isCancelled eq false`,
               orderby: ["start/dateTime asc"],
-              timezone: responseZone,
+              timezone: "UTC",
             }),
           )
         : await runtime.call(
@@ -1044,7 +1044,7 @@ export async function executeOutlookCalendar(
               top: input.limit,
               page_token: state.token,
               orderby: "start/dateTime asc",
-              timezone: responseZone,
+              timezone: "UTC",
             }),
           );
 

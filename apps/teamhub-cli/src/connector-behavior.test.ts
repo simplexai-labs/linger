@@ -2735,7 +2735,7 @@ describe("outlook-calendar connector", () => {
           end_datetime: "2026-11-21T16:00:00.000Z",
           top: 20,
           orderby: "start/dateTime asc",
-          timezone: "Asia/Shanghai",
+          timezone: "UTC",
         });
         return {
           value: [
@@ -2745,12 +2745,12 @@ describe("outlook-calendar connector", () => {
               showAs: "busy",
               isCancelled: false,
               start: {
-                dateTime: "2026-11-21T09:30:00.0000000",
-                timeZone: "China Standard Time",
+                dateTime: "2026-11-21T01:30:00.0000000",
+                timeZone: "UTC",
               },
               end: {
-                dateTime: "2026-11-21T10:00:00.0000000",
-                timeZone: "China Standard Time",
+                dateTime: "2026-11-21T02:00:00.0000000",
+                timeZone: "UTC",
               },
               organizer: { emailAddress: { address: "owner@example.test" } },
             },
@@ -2821,12 +2821,12 @@ describe("outlook-calendar connector", () => {
         title: "Morning standup",
         status: "busy",
         start: {
-          dateTime: "2026-11-21T09:30:00+08:00",
-          timeZone: "Asia/Shanghai",
+          dateTime: "2026-11-21T01:30:00Z",
+          timeZone: "UTC",
         },
         end: {
-          dateTime: "2026-11-21T10:00:00+08:00",
-          timeZone: "Asia/Shanghai",
+          dateTime: "2026-11-21T02:00:00Z",
+          timeZone: "UTC",
         },
         organizerEmail: "owner@example.test",
       },
@@ -2852,6 +2852,81 @@ describe("outlook-calendar connector", () => {
       title: "O'Reilly review",
     });
   });
+
+  it.each(["calendar view", "keyword search"])(
+    "keeps Outlook times in order across a repeated hour in %s",
+    async (mode) => {
+      const f = await fixture("outlook", (slug, args) => {
+        if (slug === "OUTLOOK_GET_MAILBOX_SETTINGS")
+          return { timeZone: "Eastern Standard Time" };
+        expect(slug).toBe(
+          mode === "calendar view"
+            ? "OUTLOOK_GET_CALENDAR_VIEW"
+            : "OUTLOOK_LIST_EVENTS",
+        );
+        if (mode === "calendar view") {
+          expect(args.start_datetime).toBe("2026-11-01T04:00:00.000Z");
+          expect(args.end_datetime).toBe("2026-11-02T05:00:00.000Z");
+        } else {
+          expect(args.filter).toContain(
+            "start/dateTime lt '2026-11-02T05:00:00Z' and end/dateTime gt '2026-11-01T04:00:00Z'",
+          );
+        }
+        const utcResponse = args.timezone === "UTC";
+        const timeZone = utcResponse ? "UTC" : "Eastern Standard Time";
+        if (args.page_token === "next") {
+          expect(utcResponse).toBe(true);
+          return {
+            value: [
+              {
+                id: "all-day",
+                isAllDay: true,
+                start: { dateTime: "2026-11-01T00:00:00", timeZone },
+                end: { dateTime: "2026-11-02T00:00:00", timeZone },
+              },
+            ],
+          };
+        }
+        return {
+          value: [
+            {
+              id: "crosses-fold",
+              start: {
+                dateTime: utcResponse
+                  ? "2026-11-01T05:45:00"
+                  : "2026-11-01T01:45:00",
+                timeZone,
+              },
+              end: {
+                dateTime: utcResponse
+                  ? "2026-11-01T06:15:00"
+                  : "2026-11-01T01:15:00",
+                timeZone,
+              },
+            },
+          ],
+          next_page_token: "next",
+        };
+      });
+      const args = ["outlook-calendar", "list", "--date", "2026-11-01"];
+      if (mode === "keyword search") args.push("--query", "Review");
+      const first = await f.run(args);
+      expect(first.code).toBe(0);
+      const event = first.result.events[0];
+      expect(
+        Date.parse(event.end.dateTime) - Date.parse(event.start.dateTime),
+      ).toBe(30 * 60_000);
+      expect(event.start.dateTime).toBe("2026-11-01T05:45:00Z");
+      expect(event.end.dateTime).toBe("2026-11-01T06:15:00Z");
+      const next = await f.run([...args, "--cursor", first.result.nextCursor]);
+      expect(next.code).toBe(0);
+      expect(next.result.events[0]).toMatchObject({
+        eventId: "all-day",
+        start: { date: "2026-11-01" },
+        end: { date: "2026-11-02" },
+      });
+    },
+  );
 
   it("finds shared free time across own calendar view and --with schedule, failing closed on incomplete data", async () => {
     let scheduleResponse: Json = {

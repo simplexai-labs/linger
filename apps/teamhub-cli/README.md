@@ -85,6 +85,11 @@ Connected application commands may have their own file options. For those option
 ## Connected applications
 
 Nine applications have dedicated commands: Gmail, Outlook (mail via `teamhub outlook` and calendar via `teamhub outlook-calendar`), Feishu Mail (`teamhub feishu-mail`), Slack, Google Calendar, Notion, Google Drive, Figma and GitHub. `teamhub gmail --help` and `teamhub outlook-calendar --help` discover them offline, and each command keeps its own help, examples and Composio support boundary.
+
+Outlook Calendar date queries use the mailbox time zone or the supplied
+IANA zone to select the day. The list command requests event timestamps in UTC
+to preserve meeting order during daylight saving time changes.
+
 Choose an account with `--account <connection ID|full label>`; labels match case-insensitively, connection IDs exactly. A connection ID that no longer matches a delegated account returns `account_ambiguous` with the delegated candidates instead of switching accounts. Without a delegation, the command posts an authorization card in an allowed chat that names the requested label and exits with `authorization_required`; the Agent ends its turn, and the card's result wakes it to run the original command again.
 Mail `--markdown` is converted to HTML by TeamHub; only `--attach` adds attachments.
 
