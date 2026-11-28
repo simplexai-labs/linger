@@ -404,12 +404,18 @@ it("inspects with GPU sharing unless sharing was explicitly declined", async () 
     stdout: JSON.stringify(upstream()),
     stderr: "",
   }));
+  // Each check also reads the picker's list (library status, stack
+  // hardware); only the setup inspect calls are compared here.
+  const inspects = () =>
+    localmodels.mock.calls
+      .map((call) => call[1])
+      .filter((args) => args[0] === "setup" && args[1] === "inspect");
   await inspectWithoutDaemon({ localmodels, shareGpu: false });
-  expect(localmodels.mock.calls[0]?.[1]).not.toContain("--share-gpu");
+  expect(inspects()[0]).not.toContain("--share-gpu");
   await inspectWithoutDaemon({ localmodels, shareGpu: true });
-  expect(localmodels.mock.calls[1]?.[1]).toContain("--share-gpu");
+  expect(inspects()[1]).toContain("--share-gpu");
   await inspectWithoutDaemon({ localmodels });
-  expect(localmodels.mock.calls[2]?.[1]).toContain("--share-gpu");
+  expect(inspects()[2]).toContain("--share-gpu");
 });
 
 it("checks the installation target while keeping tool state in the existing home", async () => {

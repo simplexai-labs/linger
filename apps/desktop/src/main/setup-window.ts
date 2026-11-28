@@ -21,6 +21,11 @@ import codexSvg from "../../resources/harnesses/codex.svg";
 import piSvg from "../../resources/harnesses/pi.svg";
 // The installer's welcome scene, so setup looks like the installer.
 import scenePng from "../../../linger-installer/public/onboarding/welcome-scene.png";
+// OpenAI's Codex mark for the Codex runtime row, unchanged from the official
+// Codex app (Codex.dmg from https://developers.openai.com/codex/app,
+// webview/assets/codex-app-ga-logo.png). Codex and its logo are trademarks of
+// OpenAI, shown only to name the product.
+import codexPng from "../../resources/brand/codex.png";
 // The SPA's typeface, so the setup page reads like the app it opens.
 import geistWoff2 from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2";
 import { localizePage } from "../i18n/page.js";
@@ -43,6 +48,7 @@ import type { DriverUpdaterHost } from "./driver-updater.js";
 import type { EnrollmentModule } from "./enrollment.js";
 import type { LanguageModule } from "./language.js";
 import type { LocalServerModule } from "./local-server.js";
+import { MODEL_LOGOS } from "./model-logos.js";
 import {
   SETTINGS_URL,
   type MacPermissions,
@@ -96,6 +102,7 @@ export class SetupWindowModule implements Module {
   readonly #options: SetupWindowOptions;
   #ctx: ModuleContext | undefined;
   #window: BrowserWindow | undefined;
+  #windowShown = false;
   #signedIn = false;
   // The runtime's sign-in was waiting on the browser.
   #runtimeSigningIn = false;
@@ -118,7 +125,6 @@ export class SetupWindowModule implements Module {
     this.#account = new SetupAccount({
       read: () => local.account(),
       clipboard,
-      showFile: (file) => shell.showItemInFolder(file),
     });
     const pages = this.#session();
     pages.protocol.handle("app", (request) => this.#serve(request));
@@ -193,6 +199,7 @@ export class SetupWindowModule implements Module {
     for (const off of this.#unsubscribe.splice(0)) off();
     this.#window?.destroy();
     this.#window = undefined;
+    this.#windowShown = false;
   }
 
   visible(): boolean {
@@ -222,7 +229,7 @@ export class SetupWindowModule implements Module {
       fullscreenable: false,
       show: false,
       title: this.#t(dialogMessages.setupTitle),
-      backgroundColor: "#ffffff",
+      backgroundColor: "#fbfbf9",
       icon: nativeImage.createFromBuffer(Buffer.from(iconPng)),
       ...(process.platform === "darwin"
         ? {
@@ -243,6 +250,12 @@ export class SetupWindowModule implements Module {
     contents.on("will-navigate", (event) => event.preventDefault());
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     contents.on("will-attach-webview", (event) => event.preventDefault());
+    this.#windowShown = false;
+    window.on("show", () => {
+      if (this.#window !== window || this.#windowShown) return;
+      this.#windowShown = true;
+      this.#push();
+    });
     window.once("ready-to-show", () => window.show());
     // Back from System Settings, a driver updater, or freeing disk space:
     // show what changed there.
@@ -252,7 +265,10 @@ export class SetupWindowModule implements Module {
       this.#maybeRefreshLocationSpaceOnFocus();
     });
     window.on("closed", () => {
-      if (this.#window === window) this.#window = undefined;
+      if (this.#window === window) {
+        this.#window = undefined;
+        this.#windowShown = false;
+      }
       this.#account?.hide();
       // Idle background pre-staging and Bifrost pre-fetch stop when setup
       // closes before Install is started.
@@ -316,17 +332,78 @@ export class SetupWindowModule implements Module {
         return;
       case "local.start": {
         const local = ctx.get<LocalServerModule>("LocalServer");
-        const plan = {
+        const request = {
           runtime: command.byok
             ? command.byok.runtime
             : (command.runtime ?? "recommended"),
           ...(command.byok ? { byok: command.byok } : {}),
           ...(command.keys ? { keys: command.keys } : {}),
+          ...(command.model ? { localModel: command.model } : {}),
         } as const;
+        // Nothing signed in for a subscription: the page keeps Install off
+        // until one is, so this only answers a stale page.
+        if (
+          request.runtime === "subscription" &&
+          !local.setupRuntimes().signedIn().length
+        )
+          throw new Error("Sign in to Claude Code or Codex first.");
         // The page follows progress through state; a failure shows there too.
-        void local.begin(plan).catch(() => undefined);
+        void local.beginSetup(request).catch(() => undefined);
         return;
       }
+      case "local.runtimes.check":
+        await ctx.get<LocalServerModule>("LocalServer").setupRuntimes().check();
+        return;
+      case "local.runtime.install":
+        // Followed through state, like an installation.
+        void ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .install(command.runtime);
+        return;
+      case "local.runtime.signin":
+        void ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .signIn(command.runtime, command.device === true);
+        return;
+      case "local.runtime.code":
+        ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .code(command.runtime, command.code);
+        return;
+      case "local.runtime.cancel":
+        ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .cancel(command.runtime);
+        return;
+      case "local.runtime.open":
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .openPage(command.runtime);
+        return;
+      case "local.runtime.copy": {
+        // Copied from what the row shows, never from the page.
+        const text = ctx
+          .get<LocalServerModule>("LocalServer")
+          .setupRuntimes()
+          .signInLink(command.runtime, command.what);
+        if (!text) throw new Error("Nothing to copy");
+        clipboard.writeText(text);
+        return;
+      }
+      case "local.leave-local":
+        await ctx.get<LocalServerModule>("LocalServer").leaveLocalModel();
+        return;
+      case "local.model.check":
+        // The answer arrives through state as modelCheck.
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .checkModel(command.model);
+        return;
       case "local.byok.check":
         await ctx.get<LocalServerModule>("LocalServer").checkByok(command.byok);
         return;
@@ -386,10 +463,16 @@ export class SetupWindowModule implements Module {
         await this.#account?.show(command.on);
         return;
       case "local.account.copy":
-        await this.#account?.copy();
+        if (command.what === "email") await this.#account?.copyEmail();
+        else await this.#account?.copy();
         return;
-      case "local.account.reveal":
-        this.#account?.reveal();
+      case "local.account.password":
+        // The server takes it first, then local-account.json; a shown
+        // password shows the new one.
+        await ctx
+          .get<LocalServerModule>("LocalServer")
+          .changePassword(command.password);
+        await this.#account?.refresh();
         return;
       case "signin.open":
         windows.show();
@@ -478,6 +561,12 @@ export class SetupWindowModule implements Module {
       localServer: localServerState(
         ctx.get<LocalServerModule>("LocalServer"),
         this.#account?.view(),
+      ),
+      windowShown: Boolean(
+        this.#windowShown ||
+        (this.#window &&
+          !this.#window.isDestroyed() &&
+          this.#window.isVisible()),
       ),
       ...(this.#diagnostics ? { diagnostics: this.#diagnostics } : {}),
       ...(this.#options.driverUpdater
@@ -582,6 +671,10 @@ export class SetupWindowModule implements Module {
       return new Response(Buffer.from(logoPng), {
         headers: { "content-type": "image/png" },
       });
+    if (url.pathname === "/codex.png")
+      return new Response(Buffer.from(codexPng), {
+        headers: { "content-type": "image/png" },
+      });
     if (url.pathname === "/geist.woff2")
       return new Response(Buffer.from(geistWoff2), {
         headers: { "content-type": "font/woff2" },
@@ -590,6 +683,13 @@ export class SetupWindowModule implements Module {
     if (harnessSvg)
       return new Response(Buffer.from(harnessSvg), {
         headers: { "content-type": "image/svg+xml" },
+      });
+    const modelLogo = Object.hasOwn(MODEL_LOGOS, url.pathname)
+      ? MODEL_LOGOS[url.pathname]
+      : undefined;
+    if (modelLogo)
+      return new Response(Buffer.from(modelLogo.bytes), {
+        headers: { "content-type": modelLogo.type },
       });
     // In the language of the moment it opens; the Web client, where the
     // language is chosen, is not on screen while setup is.
@@ -626,9 +726,13 @@ const localServerState = (
     signIn,
     byokCheck,
     byokModels,
+    modelCheck,
     legacyBackup,
     refusal,
     failure,
+    runtimes,
+    backgroundModel,
+    source,
   } = local.status();
   const home = os.homedir();
   const shown = (folder: string) =>
@@ -658,9 +762,13 @@ const localServerState = (
     ...(signIn ? { signIn } : {}),
     ...(byokCheck ? { byokCheck } : {}),
     ...(byokModels ? { byokModels } : {}),
+    ...(modelCheck ? { modelCheck } : {}),
     ...(legacyBackup ? { legacyBackup: shown(legacyBackup) } : {}),
     ...(refusal ? { refusal } : {}),
     ...(failure ? { failure } : {}),
     ...(account ? { account } : {}),
+    ...(runtimes ? { runtimes } : {}),
+    ...(backgroundModel ? { backgroundModel } : {}),
+    ...(source ? { source } : {}),
   };
 };

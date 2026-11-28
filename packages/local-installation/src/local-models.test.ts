@@ -129,6 +129,84 @@ test("delegates planning and review without pinning a model, decision or GPU", a
   expect(f.call.mock.calls.some((c) => c[1][1] === "apply")).toBe(false);
   await expectPrivate(path.join(f.home, "runtime/localmodels/plan.json"));
 });
+test("plans exactly the model picked in setup and keeps it through approval", async () => {
+  const f = await fixture();
+  const planner: { quant?: string } = {};
+  const call = vi.fn<typeof runLocalmodels>(async (home, args, options) => {
+    if (args[0] === "stack" && args[1] === "plan") {
+      const llm = args.indexOf("--llm");
+      await writeFile(
+        args[args.indexOf("--out") + 1]!,
+        JSON.stringify({
+          schema: "localmodels.stack-plan/v1",
+          plan_id: f.id,
+          llm: {
+            model: {
+              id: args[llm + 1],
+              quant: planner.quant ?? args[args.indexOf("--quant") + 1],
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      return { code: 0, stdout: "{}", stderr: "" };
+    }
+    return f.call(home, args, options);
+  });
+  const picked = { ...f.options, localModel: "qwen3.6-35b-a3b:UD-IQ4_XS" };
+  await prepareLocalModels(f.instance, picked, { localmodels: call });
+  const plans = () => call.mock.calls.filter((c) => c[1][1] === "plan");
+  const plan = plans()[0]![1];
+  expect(plan.slice(2, 6)).toEqual([
+    "--llm",
+    "qwen3.6-35b-a3b",
+    "--quant",
+    "UD-IQ4_XS",
+  ]);
+  const inputs = JSON.parse(
+    await readFile(
+      path.join(f.home, "runtime/localmodels/plan-inputs.json"),
+      "utf8",
+    ),
+  );
+  expect(inputs.llm).toBe("qwen3.6-35b-a3b:UD-IQ4_XS");
+  // The approval retry carries the same pick and applies the saved plan.
+  await prepareLocalModels(
+    f.instance,
+    { ...picked, localModelsApproval: f.id },
+    { localmodels: call },
+  );
+  expect(plans()).toHaveLength(1);
+  expect(call.mock.calls.some((c) => c[1][1] === "apply")).toBe(true);
+  // The same pick again keeps the plan; another pick plans again.
+  await prepareLocalModels(f.instance, picked, { localmodels: call });
+  expect(plans()).toHaveLength(1);
+  await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModel: "inkling-2-mini:UD-Q4_K_M" },
+    { localmodels: call },
+  );
+  expect(plans()).toHaveLength(2);
+  expect(plans()[1]![1]).toContain("inkling-2-mini");
+  // A planner that swaps in another quant is refused before saving its plan.
+  planner.quant = "UD-IQ3_XXS";
+  const before = await readFile(
+    path.join(f.home, "runtime/localmodels/plan.json"),
+    "utf8",
+  );
+  const swapped = await prepareLocalModels(
+    f.instance,
+    { ...f.options, localModel: "ornith-1.5-9b:Q4_K_M" },
+    { localmodels: call },
+  );
+  expect(swapped).toMatchObject({
+    code: 4,
+    details: { code: "LOCAL_MODELS_UNAVAILABLE" },
+  });
+  expect(
+    await readFile(path.join(f.home, "runtime/localmodels/plan.json"), "utf8"),
+  ).toBe(before);
+});
 test("asks review and binding for English messages", async () => {
   const f = await fixture();
   await prepareLocalModels(f.instance, f.options, { localmodels: f.call });

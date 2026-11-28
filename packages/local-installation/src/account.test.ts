@@ -88,7 +88,7 @@ it("creates the owner through stdin, confirms login and logs out before reusing 
     created = true;
   });
   const result = await ensureLocalAccount(f.instance, f.signal, owner);
-  expect(result.email).toBe("owner@linger.local");
+  expect(result.email).toBe("admin@gmail.com");
   expect(result.file).toBe(f.file);
   const saved = JSON.parse(await readFile(f.file, "utf8"));
   expect(saved.password.length).toBeGreaterThanOrEqual(24);

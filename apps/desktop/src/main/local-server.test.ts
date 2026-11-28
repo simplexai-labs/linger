@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -46,6 +47,7 @@ import {
   LocalServerModule,
   MIN_MACOS,
   anotherMeMissing,
+  changeOwnerPassword,
   checkLocation,
   computerNotOnline,
   followHttps,
@@ -58,6 +60,8 @@ import {
   parseSetCookie,
   pollDelayMs,
   LocalServerUnverifiedError,
+  setupModelOptions,
+  PasswordChangeError,
   proveLocalServer,
   runChild,
   RUNTIME_LOOKUP_HINT_MS,
@@ -68,6 +72,7 @@ import {
   type LocalServerIdentity,
   type LocalServerOptions,
 } from "./local-server.js";
+import type { SetupCommandRunner } from "./setup-sources.js";
 import { localIdentityProof } from "@linger/local-installation/account";
 import { tarCommand } from "@linger/local-installation/archive";
 import * as fsRetry from "@linger/local-installation/fs-retry";
@@ -164,6 +169,11 @@ if (args.includes("--migrate")) {
   process.exit(0);
 }
 if (args.includes("--check-byok")) {
+  const byok = JSON.parse(fs.readFileSync(0, "utf8") || "{}");
+  if (byok.modelId === "unreachable") {
+    process.stdout.write(JSON.stringify({ ok: false, code: "BYOK_UNREACHABLE", message: "Could not reach https://byok.example/v1/responses (URLError)." }) + "\n");
+    process.exit(1);
+  }
   fs.mkdirSync(path.join(home, "installer"), { recursive: true });
   fs.writeFileSync(
     path.join(home, "installer", "byok-env.json"),
@@ -289,7 +299,13 @@ if (args.includes("--prefetch-bifrost")) {
     ...(lowMemory ? { basis: "capacity", memory: { ramAvailableBytes: 2899102924, ramRequiredBytes: 13689304433 } } : {}),
   };
   const finalEstimate = oldDriver || portBlocked ? { model: "", downloadBytes: null, diskBytes: null, memoryBytes: null } : estimate;
-  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate }, recommendation }) + "\n");
+  // The model library's name for the plan, when a test asks for one.
+  const libraryFile = path.join(target, "library-model");
+  const libraryModel = fs.existsSync(libraryFile) ? fs.readFileSync(libraryFile, "utf8").trim() : undefined;
+  // The picker's models, when a test lists some.
+  const modelsFile = path.join(target, "library-models");
+  const models = fs.existsSync(modelsFile) ? JSON.parse(fs.readFileSync(modelsFile, "utf8")) : undefined;
+  process.stdout.write(JSON.stringify({ hardware, localModels: { ...local, reasons, estimate: finalEstimate, ...(libraryModel ? { libraryModel } : {}), ...(models ? { models, totalMemoryBytes: 68719476736, availableMemoryBytes: 41231686041 } : {}) }, recommendation }) + "\n");
   process.exit(0);
 } else {
 fs.mkdirSync(path.join(home, "installer"), { recursive: true });
@@ -1207,6 +1223,71 @@ describe("LocalServerModule", () => {
       runtime: "codex",
       state: "signed_in",
     });
+    await f.host.stop("quit");
+  });
+
+  it("retries sign-in polling on transient 504 and TimeoutError responses without aborting installation", async () => {
+    const api = installerApi();
+    api.runtime.setupChoice = "codex";
+    api.runtime.login = { state: "idle" };
+    let pollCount = 0;
+    const baseHandle = api.handle;
+    const flakyApi: typeof api = {
+      ...api,
+      handle: async (url, init) => {
+        if (url.pathname === "/api/runtime-login" && init?.method === "GET") {
+          pollCount += 1;
+          if (pollCount === 1) {
+            return Response.json(
+              {
+                code: "RUNTIME_LOGIN_TIMEOUT",
+                message:
+                  "Checking the AI runtime sign-in status timed out. Retry shortly.",
+              },
+              { status: 504 },
+            );
+          }
+          if (pollCount === 2) {
+            throw new DOMException(
+              "The operation was aborted due to timeout",
+              "TimeoutError",
+            );
+          }
+          if (pollCount === 3) {
+            throw Object.assign(new Error("headers timeout"), {
+              code: "UND_ERR_HEADERS_TIMEOUT",
+            });
+          }
+          api.runtime.login = { state: "ready" };
+        }
+        return baseHandle(url, init);
+      },
+    };
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), signInPollMs: 5 }),
+      {},
+      checkout,
+      flakyApi,
+    );
+    const warn = vi.spyOn(f.host.ctx.log, "warn");
+    await f.host.start();
+    await f.module.begin();
+    expect(pollCount).toBeGreaterThanOrEqual(4);
+    expect(f.module.status().phase).toBe("ready");
+    expect(warn).toHaveBeenCalledWith(
+      "local_server.runtime_login_poll_failed",
+      expect.objectContaining({
+        runtime: "codex",
+        status: 504,
+        code: "RUNTIME_LOGIN_TIMEOUT",
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "local_server.runtime_login_poll_failed",
+      expect.objectContaining({
+        runtime: "codex",
+      }),
+    );
     await f.host.stop("quit");
   });
 
@@ -2627,6 +2708,20 @@ describe("LocalServerModule", () => {
     expect(seenByok.ANTHROPIC_BASE_URL).not.toBe(
       "https://shell-profile.example",
     );
+    // A failed check keeps its code for the page's short line.
+    await installFixture.module.checkByok({
+      runtime: "codex",
+      baseUrl: "https://byok.example",
+      path: "/v1",
+      endpoint: "/responses",
+      modelId: "unreachable",
+      protocol: "openai-responses",
+    });
+    expect(installFixture.module.status().byokCheck).toEqual({
+      state: "failed",
+      code: "BYOK_UNREACHABLE",
+      message: "Could not reach https://byok.example/v1/responses (URLError).",
+    });
 
     await installFixture.module.begin();
     const seenServer = JSON.parse(
@@ -2680,28 +2775,6 @@ describe("LocalServerModule", () => {
       "https://shell-profile.example",
     );
     await resumeFixture.host.stop("quit");
-  });
-
-  it("marks checked Inkling 2 Mini models with featuredInkling using the shared matcher", async () => {
-    const f = fixture({ checkout: "/src" }, {}, (home) => {
-      mkdirSync(home, { recursive: true });
-      writeFileSync(
-        path.join(home, "inspect-model"),
-        "thinkingmachines/Inkling-2-Mini",
-      );
-    });
-    await f.host.start();
-    f.module.inspect();
-    await waitForInstaller(() =>
-      expect(f.module.status().localModels).toMatchObject({
-        state: "checked",
-        eligible: true,
-        model: {
-          name: "thinkingmachines/Inkling-2-Mini",
-          featuredInkling: true,
-        },
-      }),
-    );
   });
 
   it("forwards validated CUDA driver versions without leaking tool prose", async () => {
@@ -8137,6 +8210,129 @@ describe("signInWithPassword", () => {
   });
 });
 
+// A TeamHub with KEY whose owner signs in with `current`; the password
+// change answers with `change`.
+const passwordTeamhub = (
+  current: string,
+  change: () => Response = () => new Response(null, { status: 204 }),
+) =>
+  vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const body = init?.body ? (JSON.parse(String(init.body)) as never) : {};
+    switch (url.pathname) {
+      case "/v0/local/identity":
+        return Response.json({
+          proof: localIdentityProof(
+            KEY,
+            (body as { nonce: string }).nonce,
+            WEB_ORIGIN,
+          ).toString("base64url"),
+        });
+      case "/v0/auth/login":
+        return (body as { password: string }).password === current
+          ? new Response("{}", {
+              headers: {
+                "set-cookie":
+                  "linger_session=change; Path=/; HttpOnly; SameSite=Lax",
+              },
+            })
+          : new Response("{}", { status: 401 });
+      case "/v0/account/password":
+        return change();
+      default:
+        return new Response(null, { status: 204 });
+    }
+  });
+
+describe("changeOwnerPassword", () => {
+  it("changes it in a session of its own, then logs that session out", async () => {
+    const fetcher = passwordTeamhub("old password 1");
+    await changeOwnerPassword(
+      server(WEB_ORIGIN),
+      "owner@linger.local",
+      "old password 1",
+      "new password 2",
+      fetcher as typeof fetch,
+    );
+    const calls = fetcher.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      headers: init?.headers as Record<string, string>,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    }));
+    expect(calls.map((call) => call.url)).toEqual([
+      `${TEAMHUB}/v0/local/identity`,
+      `${TEAMHUB}/v0/auth/login`,
+      `${TEAMHUB}/v0/account/password`,
+      `${TEAMHUB}/v0/auth/logout`,
+    ]);
+    expect(calls[2]).toMatchObject({
+      headers: { cookie: "linger_session=change", origin: WEB_ORIGIN },
+      body: {
+        current_password: "old password 1",
+        new_password: "new password 2",
+      },
+    });
+    expect(calls[3]!.headers).toMatchObject({
+      cookie: "linger_session=change",
+    });
+  });
+
+  it.each([
+    [
+      400,
+      { error: { code: "INVALID_CURRENT_PASSWORD" } },
+      "The saved password no longer works. Log in with your email and password.",
+    ],
+    [
+      400,
+      { error: { code: "INVALID_REQUEST" } },
+      "Use 8–256 characters without control characters.",
+    ],
+    [
+      429,
+      { error: { code: "RATE_LIMITED" } },
+      "Too many password changes. Try again in a few minutes.",
+    ],
+    [500, {}, "Couldn't change the password (500)."],
+  ])(
+    "says what to do when TeamHub answers %i",
+    async (status, body, message) => {
+      const fetcher = passwordTeamhub("old password 1", () =>
+        Response.json(body, { status }),
+      );
+      const failure = changeOwnerPassword(
+        server(WEB_ORIGIN),
+        "owner@linger.local",
+        "old password 1",
+        "new password 2",
+        fetcher as typeof fetch,
+      );
+      await expect(failure).rejects.toEqual(
+        new PasswordChangeError(status, message),
+      );
+      // The session opened for it is still logged out.
+      expect(String(fetcher.mock.calls.at(-1)![0])).toBe(
+        `${TEAMHUB}/v0/auth/logout`,
+      );
+    },
+  );
+
+  it("never sends either password to a server that does not prove itself", async () => {
+    const fetcher = teamhub(() => Response.json({ proof: "A".repeat(43) }));
+    await expect(
+      changeOwnerPassword(
+        server(WEB_ORIGIN),
+        "owner@linger.local",
+        "old password 1",
+        "new password 2",
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toBeInstanceOf(LocalServerUnverifiedError);
+    expect(sentPassword(fetcher, "old password 1")).toBe(false);
+    expect(sentPassword(fetcher, "new password 2")).toBe(false);
+  });
+});
+
 describe("signInFailure", () => {
   it("says what to do by status and error kind, not by message", () => {
     expect(signInFailure(new SignInRejectedError(401))).toBe(
@@ -8607,6 +8803,109 @@ describe("LocalServerModule owner account", () => {
       await f.host.stop("quit");
     }
   });
+
+  it("changes the password on the server, then in the account file, and signs in again", async () => {
+    const fetcher = passwordTeamhub(OWNER.password);
+    const f = fixture(
+      { fetch: fetcher as typeof fetch },
+      enrolled,
+      installed(OWNER),
+    );
+    const info = vi.spyOn(silentLog, "info");
+    const warn = vi.spyOn(silentLog, "warn");
+    await f.host.start();
+    try {
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await f.module.changePassword("my new password 3");
+      const file = path.join(
+        f.home,
+        "instances",
+        LOCAL_INSTANCE,
+        "local-account.json",
+      );
+      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+        ...OWNER,
+        password: "my new password 3",
+      });
+      if (process.platform !== "win32")
+        expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(f.signIn).toHaveBeenLastCalledWith(
+        server(ORIGIN),
+        OWNER.email,
+        "my new password 3",
+      );
+      expect(info).toHaveBeenCalledWith("local_server.password_changed");
+      const logged = JSON.stringify([info.mock.calls, warn.mock.calls]);
+      expect(logged).not.toContain(OWNER.password);
+      expect(logged).not.toContain("my new password 3");
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("leaves the account file alone when the server refuses the change", async () => {
+    const fetcher = passwordTeamhub(OWNER.password, () =>
+      Response.json(
+        { error: { code: "INVALID_CURRENT_PASSWORD" } },
+        { status: 400 },
+      ),
+    );
+    const f = fixture(
+      { fetch: fetcher as typeof fetch },
+      enrolled,
+      installed(OWNER),
+    );
+    const warn = vi.spyOn(silentLog, "warn");
+    await f.host.start();
+    try {
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("ready"),
+      );
+      await expect(
+        f.module.changePassword("my new password 3"),
+      ).rejects.toThrow(
+        "The saved password no longer works. Log in with your email and password.",
+      );
+      expect((await f.module.account()).password).toBe(OWNER.password);
+      expect(f.signIn).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith("local_server.password_change_failed", {
+        status: 400,
+      });
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain(OWNER.password);
+      expect(logged).not.toContain("my new password 3");
+    } finally {
+      warn.mockRestore();
+      await f.host.stop("quit");
+    }
+  });
+
+  it("changes nothing while the services are not running", async () => {
+    const fetcher = passwordTeamhub(OWNER.password);
+    const f = fixture({ fetch: fetcher as typeof fetch }, enrolled, (home) => {
+      installed(OWNER)(home);
+      writeFileSync(path.join(home, "resume-fails"), "");
+    });
+    await f.host.start();
+    try {
+      await waitForInstaller(() =>
+        expect(f.module.status().phase).toBe("failed"),
+      );
+      await expect(
+        f.module.changePassword("my new password 3"),
+      ).rejects.toThrow(
+        "This window is not showing the Linger on this computer.",
+      );
+      expect(sentPassword(fetcher, OWNER.password)).toBe(false);
+      expect(sentPassword(fetcher, "my new password 3")).toBe(false);
+    } finally {
+      await f.host.stop("quit");
+    }
+  });
 });
 
 describe("legacyMigrationResult", () => {
@@ -8890,9 +9189,10 @@ describe("InstallerApi polling", () => {
         new AbortController().signal,
         () => {},
       ),
-    ).rejects.toThrow(
-      "Couldn't read the installation progress. Try again to reconnect to the running installation.",
-    );
+    ).rejects.toMatchObject({
+      message: "Couldn't reconnect to the installation.",
+      code: "installer_unreachable",
+    });
     expect(fake.created).toHaveLength(1);
   });
 
@@ -9885,5 +10185,432 @@ describe("LocalServerModule background pre-staging, Bifrost pre-fetch, and early
     } finally {
       await fSignIn.host.stop("quit");
     }
+  });
+});
+
+// The installer's headless setup commands, answered from `answers` by their
+// first argument; each call is kept.
+const setupCommands = (
+  answers: Record<string, Record<string, unknown>[]> = {},
+  onCall: (args: readonly string[]) => void = () => undefined,
+) => {
+  const calls: { args: string[] }[] = [];
+  const run: SetupCommandRunner = async (args, options) => {
+    calls.push({ args: [...args] });
+    onCall(args);
+    for (const line of answers[args[0]!] ?? []) options.onLine(line);
+    return {
+      write: () => undefined,
+      stop: () => undefined,
+      done: Promise.resolve(0),
+    };
+  };
+  return { run, calls };
+};
+
+const SIGNED_IN_BOTH = {
+  "--runtime-status": [
+    {
+      runtimes: [
+        { runtime: "codex", installed: true, signedIn: true },
+        { runtime: "claude", installed: true, signedIn: true },
+        { runtime: "pi", installed: false, signedIn: false },
+      ],
+    },
+  ],
+};
+
+describe("LocalServerModule setup sources", () => {
+  it("installs a subscription with Codex by default and links Claude Code", async () => {
+    const commands = setupCommands(SIGNED_IN_BOTH);
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "codex",
+      origin: "http://localhost:3000",
+    });
+    api.runtime.setupChoice = "codex";
+    api.runtime.environment = { LINGER_CODEX_PATH: "/opt/codex/codex" };
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      checkout,
+      api,
+    );
+    await f.host.start();
+    expect(f.module.status().runtimes).toBeUndefined();
+    await f.module.setupRuntimes().check();
+    expect(f.module.status().runtimes?.map((row) => row.signedIn)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    await f.module.beginSetup({ runtime: "subscription" });
+    expect(f.api.created).toEqual([
+      {
+        instance: LOCAL_INSTANCE,
+        setupChoice: "codex",
+        linkedRuntimes: ["claude"],
+      },
+    ]);
+    // The installer creates the owner with its generated sign-in, as
+    // Quick Install does.
+    expect(
+      commands.calls.map((call) => call.args[0]).filter(Boolean),
+    ).not.toContain("--owner-account");
+    expect(f.module.status().phase).toBe("ready");
+    expect(f.host.ctx.config.get().preferredRuntime).toBe("codex");
+    await f.host.stop("quit");
+  });
+
+  it("refuses a subscription with nothing signed in", async () => {
+    const commands = setupCommands({
+      "--runtime-status": [
+        {
+          runtimes: [
+            { runtime: "codex", installed: false, signedIn: false },
+            { runtime: "claude", installed: true, signedIn: false },
+            { runtime: "pi", installed: true, signedIn: false },
+          ],
+        },
+      ],
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      checkout,
+    );
+    await f.host.start();
+    await f.module.setupRuntimes().check();
+    await expect(
+      f.module.beginSetup({ runtime: "subscription" }),
+    ).rejects.toThrow("Sign in to Claude Code or Codex first.");
+    expect(f.api.created).toEqual([]);
+    await f.host.stop("quit");
+  });
+
+  it("installs BYOK on Pi without downloading a local model", async () => {
+    const commands = setupCommands({
+      "--download-local-model": [{ outcome: { state: "done" } }],
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      (home) => {
+        checkout(home);
+        writeFileSync(path.join(home, "library-model"), "qwen3-8b:Q4_K_M");
+      },
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        model: { name: "qwen3-8b", library: "qwen3-8b:Q4_K_M" },
+      }),
+    );
+    const byok = {
+      baseUrl: "https://byok.example",
+      path: "/v1",
+      endpoint: "/chat/completions",
+      protocol: "openai-chat" as const,
+      modelId: "m",
+      runtime: "pi" as const,
+    };
+    await f.module.beginSetup({ runtime: "pi", byok });
+    expect(
+      commands.calls.filter(
+        (call) => call.args[0] === "--download-local-model",
+      ),
+    ).toEqual([]);
+    expect(f.module.status().backgroundModel).toBeUndefined();
+    expect(f.api.created).toEqual([
+      expect.objectContaining({ setupChoice: "pi", byok }),
+    ]);
+    expect(f.api.created[0]).not.toHaveProperty("localModel");
+    await f.host.stop("quit");
+  });
+
+  const PICKER_MODELS = [
+    {
+      library: "inkling-2-mini:UD-Q4_K_M",
+      name: "Inkling 2 Mini",
+      publisher: "Thinking Machines",
+      quant: "UD-Q4_K_M",
+      family: "other",
+      featured: true,
+      sourceOrg: "thinkingmachines",
+      quality: 54,
+      decodeTokS: 63.2,
+      downloadBytes: 17252349088,
+      memoryBytes: 26164568756,
+      fits: true,
+      recommended: true,
+      role: "smartest",
+    },
+    {
+      library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      name: "Inkling 2 Mini",
+      quant: "UD-IQ3_XXS",
+      downloadBytes: 12305115264,
+      memoryBytes: 24005334676,
+      fits: true,
+      role: "fastest",
+    },
+    {
+      library: "qwen3.8-flash-next-iq2xs:GSQ-RCO-IQ2_XS",
+      name: "Qwen3.8 Flash Next",
+      quant: "GSQ-RCO-IQ2_XS",
+      family: "qwen",
+      downloadBytes: 68933635968,
+      memoryBytes: 73749164887,
+      fits: false,
+      tooLarge: true,
+      needsMemoryBytes: 69513662903,
+    },
+    // Malformed rows never reach the page.
+    {
+      library: "../escape:x",
+      name: "Bad",
+      quant: "x",
+      downloadBytes: 1,
+      memoryBytes: 1,
+      fits: true,
+    },
+    { library: "ok:Q4", name: "No sizes", quant: "Q4", fits: true },
+  ];
+  const withPicker = (home: string) => {
+    checkout(home);
+    writeFileSync(path.join(home, "library-model"), "inkling-2-mini:UD-Q4_K_M");
+    writeFileSync(
+      path.join(home, "library-models"),
+      JSON.stringify(PICKER_MODELS),
+    );
+  };
+
+  it("keeps a model's publisher organization only when it is a plain slug", () => {
+    const row = {
+      library: "ling-lite:Q4_K_M",
+      name: "Ling Lite",
+      quant: "Q4_K_M",
+      downloadBytes: 1,
+      memoryBytes: 1,
+      fits: true,
+    };
+    expect(
+      setupModelOptions([
+        { ...row, sourceOrg: "inclusionai" },
+        { ...row, sourceOrg: "../model-logo" },
+        { ...row, sourceOrg: "Inclusion AI" },
+        { ...row, sourceOrg: 7 },
+      ]).map((option) => option.sourceOrg),
+    ).toEqual(["inclusionai", undefined, undefined, undefined]);
+  });
+
+  it("lists the kit's models, prices a pick and installs exactly that model", async () => {
+    const commands = setupCommands({
+      "--check-local-model": [
+        {
+          library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+          fits: true,
+          memoryBytes: 24e9,
+          downloadBytes: 12.3e9,
+          diskBytes: 12.5e9,
+          diskFreeBytes: 400e9,
+        },
+      ],
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "local-models",
+      origin: "http://localhost:3000",
+    });
+    api.runtime.setupChoice = "local-models";
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+        totalMemoryBytes: 68719476736,
+        availableMemoryBytes: 41231686041,
+      }),
+    );
+    const check = f.module.status().localModels;
+    const listed = check.state === "checked" ? check.models : undefined;
+    expect(listed).toEqual(PICKER_MODELS.slice(0, 3));
+    await f.module.checkModel("inkling-2-mini-iq3xxs:UD-IQ3_XXS");
+    expect(commands.calls).toContainEqual({
+      args: ["--check-local-model", "inkling-2-mini-iq3xxs:UD-IQ3_XXS"],
+    });
+    expect(f.module.status().modelCheck).toEqual({
+      library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      state: "checked",
+      fits: true,
+      memoryBytes: 24e9,
+      downloadBytes: 12.3e9,
+      diskBytes: 12.5e9,
+      diskFreeBytes: 400e9,
+    });
+    // Only a model the check listed is priced.
+    await expect(f.module.checkModel("other:Q4")).rejects.toThrow(
+      "Pick a model this computer offers.",
+    );
+    await f.module.beginSetup({
+      runtime: "local",
+      localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+    });
+    expect(f.api.created).toEqual([
+      expect.objectContaining({
+        setupChoice: "local-models",
+        localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      }),
+    ]);
+    await f.host.stop("quit");
+  });
+
+  it("holds the install when the disk has no room for the picked model", async () => {
+    const commands = setupCommands({
+      "--check-local-model": [
+        {
+          library: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+          fits: true,
+          diskBytes: 9e15,
+        },
+      ],
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "local-models",
+      origin: "http://localhost:3000",
+    });
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+      }),
+    );
+    await f.module.checkModel("inkling-2-mini-iq3xxs:UD-IQ3_XXS");
+    await expect(
+      f.module.beginSetup({
+        runtime: "local",
+        localModel: "inkling-2-mini-iq3xxs:UD-IQ3_XXS",
+      }),
+    ).rejects.toThrow(/Needs \d+ GB free/);
+    expect(f.api.created).toEqual([]);
+    await f.host.stop("quit");
+  });
+
+  it("reports a pick the kit refuses, and keeps an unlisted model out of the install", async () => {
+    const commands = setupCommands({
+      "--check-local-model": [
+        {
+          library: "inkling-2-mini:UD-Q4_K_M",
+          fits: false,
+          code: "MEMORY_INSUFFICIENT",
+        },
+      ],
+    });
+    const api = installerApi([], {
+      state: "succeeded",
+      setupChoice: "local-models",
+      origin: "http://localhost:3000",
+    });
+    api.runtime.setupChoice = "local-models";
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      withPicker,
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({
+        state: "checked",
+      }),
+    );
+    await f.module.checkModel("inkling-2-mini:UD-Q4_K_M");
+    expect(f.module.status().modelCheck).toEqual({
+      library: "inkling-2-mini:UD-Q4_K_M",
+      state: "checked",
+      fits: false,
+      code: "MEMORY_INSUFFICIENT",
+    });
+    await f.module.beginSetup({ runtime: "local", localModel: "other:Q4" });
+    expect(f.api.created[0]).not.toHaveProperty("localModel");
+    await f.host.stop("quit");
+  });
+
+  it("leaves the local model's install for another source and keeps downloading it", async () => {
+    const commands = setupCommands({
+      "--download-local-model": [
+        { event: "progress", phase: "download", completed: 4, total: 10 },
+      ],
+    });
+    // The local model's job, still downloading.
+    const api = installerApi(
+      [
+        {
+          id: "job",
+          instance: LOCAL_INSTANCE,
+          setupChoice: "local-models",
+          state: "running",
+          stage: "runtime",
+          createdAt: "2026-11-03T00:00:00Z",
+          stages: [],
+        },
+      ],
+      DONE,
+      undefined,
+      Array.from({ length: 10_000 }, () => ({
+        state: "running",
+        stage: "runtime",
+      })),
+    );
+    const f = fixture(
+      (home) => ({ ...withCheckout(home), setupCommand: commands.run }),
+      {},
+      (home) => {
+        checkout(home);
+        writeFileSync(path.join(home, "library-model"), "qwen3-8b:Q4_K_M");
+      },
+      api,
+    );
+    await f.host.start();
+    f.module.inspect();
+    await waitForInstaller(() =>
+      expect(f.module.status().localModels).toMatchObject({ state: "checked" }),
+    );
+    const install = f.module.beginSetup({ runtime: "local" });
+    await waitForInstaller(() =>
+      expect(f.module.status()).toMatchObject({
+        phase: "installing",
+        step: "services",
+        source: "local",
+      }),
+    );
+    await f.module.leaveLocalModel();
+    await install;
+    expect(f.api.canceled).toEqual(["job"]);
+    expect(f.module.status()).toMatchObject({ phase: "idle" });
+    expect(f.module.status().source).toBeUndefined();
+    expect(f.module.status().backgroundModel).toMatchObject({
+      model: "qwen3-8b:Q4_K_M",
+      completed: 4,
+      total: 10,
+    });
+    await f.host.stop("quit");
   });
 });

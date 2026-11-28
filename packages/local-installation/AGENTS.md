@@ -358,6 +358,36 @@ earlier release left stopped, which the new kit cannot bring back as saved,
 never locks the person out. On cold resume, a saved `local`
 source preserves local mode and prepares its runtime instead of letting an older
 `setup-choice.json` overwrite `model-source.json` back to `subscription`.
+`linked-runtimes.json` (`setup-selection.ts`) lists the subscription
+runtimes (`codex`, `claude`) a setup signed in beside its `codex` or `claude`
+choice; a job that names a choice rewrites it (none leaves only the choice),
+and `inspectRuntimeDescriptors` reports those that are installed after the
+chosen one, so the Computer runs either while the choice stays the default.
+A new instance's owner is `DEFAULT_OWNER_EMAIL` (`admin@gmail.com`,
+`account.ts`) with a generated password unless the caller names others;
+`ensureLocalAccount` leaves an existing `local-account.json` as it is, so an
+upgrade keeps its sign-in. `writeLocalLoginPassword` replaces only the
+password there after TeamHub accepted a change (same checks as a read,
+written beside the file and renamed over it, owner-only). A plan whose model
+names a quantization carries `libraryModel` (`<id>:<quant>`,
+`LIBRARY_MODEL_ID`), which setup downloads on in the background when the
+person leaves the local model's installation for another source.
+`inspectSetup` also lists every model the kit's catalog offers there
+(`listSetupModels`, `setup-models.ts`) as `models` with `totalMemoryBytes`,
+for the setup page's model picker: `library status --json` gives each model,
+its download, memory and whether it fits (or needs more memory, or can never
+fit), and `stack hardware --json` (which takes no GPU-sharing flag; its
+estimates are for the model alone) gives the kit's quality score, the
+estimated decode speed and its `smartest`/`fastest` picks. A score of 0 means
+unscored and is left out. A failing library report leaves the list empty
+(the page keeps the planned model alone) and a failing hardware report
+leaves it without estimates; neither fails the inspection. `checkSetupModel`
+prices one picked model for this computer with `stack plan --llm <id>
+--quant <q> --decision none --defer-services --offline` (and the GPU-sharing
+flag), into a temporary file: whether it fits, else the kit's refusal code
+(such as `MEMORY_INSUFFICIENT` or `DISK_INSUFFICIENT`), `PLAN_FAILED` when it
+names none, or `MODEL_SUBSTITUTED` when the plan picked another model; and
+its memory, download and disk needs.
 Deployments, that check and the quit-time stop share one lock per home
 (`withLocalModelsLock`); the check waits up to 180 s for it, past the stop's
 150 s hard exit, then reports `LOCAL_MODELS_RECOVERY_REQUIRED` (or

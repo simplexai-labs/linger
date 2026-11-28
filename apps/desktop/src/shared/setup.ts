@@ -2,7 +2,6 @@
 // The setup window walks a new install through server, sign-in, connecting
 // this computer and the system permissions it needs.
 
-import { INKLING_2_MINI_ANNOUNCEMENT_URL } from "@linger/service-kit/featured-models";
 import {
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
@@ -70,6 +69,8 @@ export interface SetupLocalServer {
   // The latest BYOK endpoint test and model listing asked for on the page.
   readonly byokCheck?: SetupByokCheck;
   readonly byokModels?: SetupByokModels;
+  // The latest picked local model priced again on this computer.
+  readonly modelCheck?: SetupModelCheck;
   // Once installed: the owner account, for signing in again after logging
   // out.
   readonly account?: SetupLocalAccount;
@@ -81,8 +82,18 @@ export interface SetupLocalServer {
   readonly refusal?: WindowsPrivateRefusal;
   // While failed for a reason the page words itself: checking the AI
   // runtime did not finish in time, or the installer stopped answering
-  // while it ran.
-  readonly failure?: "runtime_lookup_timed_out" | "runtime_lookup_unreachable";
+  // while it ran or while the job ran.
+  readonly failure?:
+    | "runtime_lookup_timed_out"
+    | "runtime_lookup_unreachable"
+    | "installer_unreachable";
+  // Step 2's subscription runtimes, once first checked.
+  readonly runtimes?: readonly SetupRuntimeRow[];
+  // The local model downloading in the background after the person left
+  // its installation's wait for another source.
+  readonly backgroundModel?: SetupBackgroundModel;
+  // While installing or failed: the source being installed.
+  readonly source?: "local" | "subscription" | "byok";
 }
 
 export type SetupByokProtocol =
@@ -117,7 +128,13 @@ export type SetupByokCheck =
       readonly modelId: string;
       readonly contextWindow: number;
     }
-  | { readonly state: "failed"; readonly message: string };
+  | {
+      readonly state: "failed";
+      readonly message: string;
+      // The check's own code (BYOK_UNREACHABLE, BYOK_AUTH_FAILED...), when
+      // it gave one.
+      readonly code?: string;
+    };
 
 export interface SetupByokModel {
   readonly id: string;
@@ -150,6 +167,8 @@ export type SetupLocalStep =
   | "connect"
   | "agents";
 
+export type SetupSignInReason = "unavailable" | "timed_out" | "ended";
+
 // The runtime the installer set up has no sign-in on this computer. The
 // person signs in on the vendor's page (url, entering deviceCode there) or
 // in a terminal; Claude Code's page shows a code to paste back
@@ -167,7 +186,7 @@ export interface SetupRuntimeSignIn {
   readonly acceptsCode?: boolean;
   // Why it failed, worded by the page: unavailable, timed_out or ended.
   // message is the installer's English, for anything else.
-  readonly reason?: "unavailable" | "timed_out" | "ended";
+  readonly reason?: SetupSignInReason;
   readonly message?: string;
   // No browser opened on url; the page offers it to copy.
   readonly browserFailed?: boolean;
@@ -196,13 +215,95 @@ export interface SetupReason {
   readonly driverVersion?: string;
 }
 
+// The model sources step 2 of setup offers before anything is installed.
+export type SetupRuntimeName = "codex" | "claude" | "pi";
+
+// One runtime row. installed/signedIn are what the computer has now;
+// state is what setup is doing with it.
+export interface SetupRuntimeRow {
+  readonly runtime: SetupRuntimeName;
+  readonly installed: boolean;
+  // Pi has no sign-in of its own and is never signed in.
+  readonly signedIn: boolean;
+  readonly version?: string;
+  readonly state: "checking" | "idle" | "installing" | "signing_in";
+  // While installing: the bytes so far and in all.
+  readonly install?: { readonly completed: number; readonly total?: number };
+  // While signing in: the vendor's page and what it asks for.
+  readonly signIn?: {
+    readonly url?: string;
+    readonly deviceCode?: string;
+    readonly acceptsCode?: boolean;
+    readonly browserFailed?: boolean;
+  };
+  // The last install or sign-in that failed, and the installer's words.
+  readonly failed?: "install" | "signin";
+  readonly reason?: SetupSignInReason;
+  readonly message?: string;
+}
+
+export interface SetupBackgroundModel {
+  readonly model: string;
+  readonly state: "downloading" | "done" | "failed";
+  readonly phase?: "download" | "verify";
+  readonly completed: number;
+  readonly total?: number;
+  readonly bytesPerSecond?: number;
+  // A failure's code from the model library, and its words.
+  readonly code?: string;
+  readonly message?: string;
+}
+
+// One model the picker offers, from the localmodels kit's own data: the
+// library report (name, publisher, sizes, whether it fits) and the hardware
+// report's estimates for this computer (quality score, decode speed).
+export interface SetupModelOption {
+  readonly library: string;
+  readonly name: string;
+  readonly publisher?: string;
+  readonly quant: string;
+  // The kit's model family, for its icon; the featured release has its own.
+  readonly family?: string;
+  readonly featured?: true;
+  // The Hugging Face organization it comes from, for a publisher's logo.
+  readonly sourceOrg?: string;
+  readonly quality?: number;
+  readonly decodeTokS?: number;
+  readonly downloadBytes: number;
+  readonly memoryBytes: number;
+  readonly fits: boolean;
+  // For one that does not fit: the memory it needs, and whether it can
+  // never fit this computer rather than not fitting the memory free now.
+  readonly needsMemoryBytes?: number;
+  readonly tooLarge?: true;
+  readonly recommended?: true;
+  readonly role?: "smartest" | "fastest";
+}
+
+// The picked model priced again with an offline install plan
+// (installer.js --check-local-model), so memory and disk are checked for
+// the model Install will download.
+export type SetupModelCheck =
+  | { readonly library: string; readonly state: "checking" }
+  | {
+      readonly library: string;
+      readonly state: "checked";
+      readonly fits: boolean;
+      // The kit's code when it does not fit (MEMORY_INSUFFICIENT,
+      // DISK_INSUFFICIENT, MODEL_SUBSTITUTED, PLAN_FAILED).
+      readonly code?: string;
+      readonly memoryBytes?: number;
+      readonly downloadBytes?: number;
+      readonly diskBytes?: number;
+      readonly diskFreeBytes?: number;
+    };
+
 export interface SetupDetectedRuntime {
   readonly runtime: "codex" | "claude" | "pi";
   readonly installed: boolean;
   readonly authenticated: boolean;
   readonly ready: boolean;
 }
-
 export type SetupLocalModelsCheck =
   | { readonly state: "unchecked" | "unavailable" }
   // While the check first downloads the localmodels tool: its bytes.
@@ -227,8 +328,16 @@ export type SetupLocalModelsCheck =
         readonly downloadBytes: number | null;
         readonly diskBytes: number | null;
         readonly memoryBytes: number | null;
-        readonly featuredInkling?: true;
+        // The model library's name for it (<id>:<quant>).
+        readonly library?: string;
       };
+      // Every model the localmodels catalog offers here, fitting or not,
+      // for the model picker; absent when the kit could not list them.
+      readonly models?: readonly SetupModelOption[];
+      // This computer's memory, for the picker's memory bar.
+      readonly totalMemoryBytes?: number;
+      // Memory free right now, so the bar can show what the system holds.
+      readonly availableMemoryBytes?: number;
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries. The
       // page words each code itself.
@@ -247,7 +356,10 @@ export type SetupLocalRuntime =
   | "codex"
   | "claude"
   | "pi"
-  | "local";
+  | "local"
+  // The subscription runtimes signed in on the page: Codex by default when
+  // both are, Claude Code also configured.
+  | "subscription";
 
 // Provider keys typed on the page: a key replaces the saved one, ""
 // removes it and an absent provider keeps it.
@@ -291,6 +403,9 @@ export interface SetupState {
   readonly openAtLogin: boolean;
   readonly folders: readonly SetupFolder[];
   readonly localServer: SetupLocalServer;
+  // Whether the setup window has been shown; the welcome intro waits for this
+  // so slow startup does not consume the intro before the user sees it.
+  readonly windowShown?: boolean;
   // The diagnostics zip last saved from this window, or why it failed.
   readonly diagnostics?: { readonly file?: string; readonly error?: string };
   // Send Diagnostics, present only while a diagnostics server is set up.
@@ -310,18 +425,13 @@ export interface SetupState {
 // Exact HTTPS URLs that the sandboxed setup page may ask the main process to
 // open in the system browser. Any other URL is rejected at the IPC boundary.
 export const SETUP_EXTERNAL_URLS = [
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
 ] as const;
 
 export type SetupExternalUrl = (typeof SETUP_EXTERNAL_URLS)[number];
 
-export {
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
-  NVIDIA_DRIVER_DOWNLOAD_URL,
-  NVIDIA_DRIVER_GUIDE_URL,
-};
+export { NVIDIA_DRIVER_DOWNLOAD_URL, NVIDIA_DRIVER_GUIDE_URL };
 
 export type SetupCommand =
   | { readonly op: "server.set"; readonly serverUrl: string }
@@ -337,7 +447,37 @@ export type SetupCommand =
       readonly runtime?: SetupLocalRuntime;
       readonly byok?: SetupByokConfig;
       readonly keys?: SetupProviderKeys;
+      // The local model picked on the page (`<catalog id>:<quant>`).
+      readonly model?: string;
     }
+  // Prices a picked local model again; the answer is state's modelCheck.
+  | { readonly op: "local.model.check"; readonly model: string }
+  // Step 2's subscription runtimes: read them again, install one, start its
+  // sign-in (device: Codex's device-code login), give Claude Code the code
+  // its page showed, stop an install or sign-in, open its page again or
+  // copy its link or code.
+  | { readonly op: "local.runtimes.check" }
+  | { readonly op: "local.runtime.install"; readonly runtime: SetupRuntimeName }
+  | {
+      readonly op: "local.runtime.signin";
+      readonly runtime: "codex" | "claude";
+      readonly device?: true;
+    }
+  | {
+      readonly op: "local.runtime.code";
+      readonly runtime: "codex" | "claude";
+      readonly code: string;
+    }
+  | { readonly op: "local.runtime.cancel"; readonly runtime: SetupRuntimeName }
+  | { readonly op: "local.runtime.open"; readonly runtime: "codex" | "claude" }
+  | {
+      readonly op: "local.runtime.copy";
+      readonly runtime: "codex" | "claude";
+      readonly what: "url" | "code";
+    }
+  // From the local model's wait: stop that installation for another source;
+  // the model downloads on in the background.
+  | { readonly op: "local.leave-local" }
   // Tests the BYOK endpoint with one request, or lists its models.
   | {
       readonly op: "local.byok.check";
@@ -374,10 +514,11 @@ export type SetupCommand =
       readonly byok: SetupByokConfig;
     }
   // The finished install's account: show or hide the password, copy it to
-  // the clipboard, or show its file in the file manager.
+  // the clipboard, or change the password (8-256 characters without control characters, as the server
+  // and local-account.json take it).
   | { readonly op: "local.account.show"; readonly on: boolean }
-  | { readonly op: "local.account.copy" }
-  | { readonly op: "local.account.reveal" }
+  | { readonly op: "local.account.copy"; readonly what?: "email" | "password" }
+  | { readonly op: "local.account.password"; readonly password: string }
   | { readonly op: "signin.open" }
   | { readonly op: "computer.connect" }
   | { readonly op: "notifications.test" }
@@ -401,7 +542,6 @@ export type SetupCommand =
     };
 
 export interface LingerSetupApi {
-  readonly featuredAnnouncementUrl: SetupExternalUrl;
   readonly nvidiaDriverDownloadUrl: SetupExternalUrl;
   readonly nvidiaDriverGuideUrl: SetupExternalUrl;
   minDriverForCuda(requiredCuda: string | undefined): string | undefined;

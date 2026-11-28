@@ -1,8 +1,10 @@
-import { INKLING_2_MINI_HF_URL } from "@linger/service-kit/featured-models";
+import {
+  INKLING_2_MINI_ANNOUNCEMENT_URL,
+  INKLING_2_MINI_HF_URL,
+} from "@linger/service-kit/featured-models";
 import { describe, expect, it } from "vitest";
 
 import {
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
   SETUP_EXTERNAL_URLS,
@@ -78,9 +80,6 @@ describe("parseSetupCommand", () => {
     });
     expect(parseSetupCommand({ op: "local.account.copy" })).toEqual({
       op: "local.account.copy",
-    });
-    expect(parseSetupCommand({ op: "local.account.reveal" })).toEqual({
-      op: "local.account.reveal",
     });
     expect(
       parseSetupCommand({ op: "local.signin.switch", runtime: "claude" }),
@@ -268,10 +267,8 @@ describe("parseSetupCommand", () => {
     expect(() =>
       parseSetupCommand({ op: "local.signin.start", device: false }),
     ).toThrow();
-    // The account file is the installation's own; the page never names one.
-    expect(() =>
-      parseSetupCommand({ op: "local.account.reveal", file: "/etc/passwd" }),
-    ).toThrow();
+    // Setup no longer opens the account file's location.
+    expect(() => parseSetupCommand({ op: "local.account.reveal" })).toThrow();
     expect(() => parseSetupCommand({ op: "local.account.show" })).toThrow();
     // Task access modes were removed with the runtime host.
     expect(() =>
@@ -292,6 +289,7 @@ describe("parseSetupCommand", () => {
 
     for (const url of [
       INKLING_2_MINI_HF_URL,
+      INKLING_2_MINI_ANNOUNCEMENT_URL,
       "https://evil.example.com/",
       "http://thinkingmachines.ai/news/inkling-2-mini/",
       `${INKLING_2_MINI_ANNOUNCEMENT_URL}?ref=test`,
@@ -332,5 +330,74 @@ describe("parseSetupCommand", () => {
         requiredCuda: "13.0; rm -rf /",
       }),
     ).toThrow();
+  });
+
+  it("accepts the setup sources' commands", () => {
+    expect(
+      parseSetupCommand({ op: "local.start", runtime: "subscription" }),
+    ).toEqual({ op: "local.start", runtime: "subscription" });
+    // BYOK and a subscription no longer take the local model along.
+    expect(() =>
+      parseSetupCommand({
+        op: "local.start",
+        runtime: "subscription",
+        background: true,
+      }),
+    ).toThrow();
+    for (const command of [
+      { op: "local.runtimes.check" },
+      { op: "local.runtime.install", runtime: "pi" },
+      { op: "local.runtime.signin", runtime: "codex", device: true },
+      { op: "local.runtime.code", runtime: "claude", code: "abc#def" },
+      { op: "local.runtime.cancel", runtime: "claude" },
+      { op: "local.runtime.open", runtime: "codex" },
+      { op: "local.runtime.copy", runtime: "codex", what: "code" },
+      { op: "local.leave-local" },
+      { op: "local.model.check", model: "inkling-2-mini:UD-Q4_K_M" },
+      {
+        op: "local.start",
+        runtime: "local",
+        model: "qwen3.6-35b-a3b:UD-IQ4_XS",
+      },
+    ])
+      expect(parseSetupCommand(command)).toEqual(command);
+    for (const model of ["--llm", "../x:y", "a", `a:${"b".repeat(200)}`])
+      expect(() =>
+        parseSetupCommand({ op: "local.model.check", model }),
+      ).toThrow();
+    for (const command of [
+      { op: "local.runtime.install", runtime: "bash" },
+      // Pi has no sign-in of its own.
+      { op: "local.runtime.signin", runtime: "pi" },
+      { op: "local.runtime.code", runtime: "claude", code: " " },
+      // Setup creates the owner account itself; the page never picks one.
+      {
+        op: "local.start",
+        account: { email: "me@example.com", password: "my own pass 1" },
+      },
+    ])
+      expect(() => parseSetupCommand(command)).toThrow();
+  });
+
+  it("takes a new owner password the server would", () => {
+    for (const password of ["a-new-pass", "x".repeat(256), "spaces are ok 1"])
+      expect(
+        parseSetupCommand({ op: "local.account.password", password }),
+      ).toEqual({ op: "local.account.password", password });
+    for (const command of [
+      { op: "local.account.password", password: "1234567" },
+      { op: "local.account.password", password: "x".repeat(257) },
+      { op: "local.account.password", password: "has\nnewline" },
+      { op: "local.account.password", password: "tab\there!!" },
+      { op: "local.account.password", password: "del\u007fchar" },
+      { op: "local.account.password" },
+      { op: "local.account.password", password: 12345678 },
+      {
+        op: "local.account.password",
+        password: "a-new-pass",
+        email: "me@example.com",
+      },
+    ])
+      expect(() => parseSetupCommand(command)).toThrow();
   });
 });

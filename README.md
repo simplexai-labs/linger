@@ -155,8 +155,10 @@ No second time needed. Name the kind and it changes whether you are told; name t
 > [open an issue](https://github.com/simplexai-labs/linger/issues).
 
 For one person on one computer. Choose your platform below. The app
-opens Linger, connects this computer and runs its agents. **Quick Install** on its
-setup screen sets up a Linger server on this computer too.
+opens Linger, connects this computer and runs its agents. Its two-step setup
+(choose a model source, then Install) sets up a Linger server on this computer
+too; the ready screen keeps its sign-in details folded away, where you can
+copy them or change the password.
 
 | Platform                                                                                       | Package                                                                                            |
 | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |

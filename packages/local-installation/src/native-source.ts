@@ -84,6 +84,7 @@ import {
   writeGpuSharing,
   validateSetupChoice,
   writeSetupChoice,
+  writeLinkedRuntimes,
 } from "./setup-selection.js";
 import {
   hasPendingLibraryModelsToRestore,
@@ -1026,6 +1027,15 @@ async function runNativeSource(
       const restoredSubscription =
         saved?.mode === "subscription" ? saved : undefined;
       await writeSetupChoice(current, choice);
+      // A setup that names its choice also names every runtime linked
+      // beside it; none leaves only the choice.
+      if (options.setupChoice)
+        await writeLinkedRuntimes(
+          current,
+          (options.linkedRuntimes ?? []).filter(
+            (runtime) => runtime !== choice,
+          ),
+        );
       if (options.shareGpu !== undefined)
         await writeGpuSharing(current, options.shareGpu);
       if (options.runtimeModel)
@@ -1278,6 +1288,9 @@ async function runNativeSource(
                     shareGpu: options.shareGpu,
                     signal,
                     onEvent: emit,
+                    ...(options.localModel
+                      ? { localModel: options.localModel }
+                      : {}),
                     localModelsApproval: options.localModelsApproval,
                     localModelsReplan: options.localModelsReplan,
                   });

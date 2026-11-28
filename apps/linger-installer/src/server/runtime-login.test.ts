@@ -504,7 +504,7 @@ it("returns ready immediately when daemon reports CC Switch Codex ready without 
   await expect(access(marker)).rejects.toThrow();
 });
 
-it("polls runtime inspection once per status check using a 15s timeout", async () => {
+it("polls runtime inspection once per status check using a 45s timeout", async () => {
   const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
   clean.push(async () => timeoutSpy.mockRestore());
   const inspect = vi.fn(async () => ({
@@ -538,5 +538,141 @@ it("polls runtime inspection once per status check using a 15s timeout", async (
   };
   expect(await manager.status(input)).toEqual({ state: "idle" });
   expect(inspect).toHaveBeenCalledTimes(1);
-  expect(timeoutSpy).toHaveBeenCalledWith(15000);
+  expect(timeoutSpy).toHaveBeenCalledWith(45000);
 });
+
+it(
+  "keeps an active sign-in session alive across transient poll probe failures and rethrows when idle",
+  { timeout: 15000 },
+  async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "runtime-transient-poll-"));
+    clean.push(() => rm(home, { recursive: true, force: true }));
+    const exe = path.join(home, "codex");
+    await writeFile(
+      exe,
+      `console.log('https://auth.openai.com/codex/device');console.log('WXYZ-9876');setTimeout(()=>process.exit(0),10000);`,
+    );
+    let failProbe = true;
+    let ready = false;
+    const manager = new RuntimeLoginManager(async () => {
+      if (failProbe) {
+        throw new DOMException(
+          "The operation was aborted due to timeout",
+          "TimeoutError",
+        );
+      }
+      return {
+        runtime: "codex" as const,
+        executable: exe,
+        installed: true,
+        ready,
+        loginCommand: "unused",
+        descriptor: {
+          runtime: "codex" as const,
+          executable: exe,
+          argvPrefix: [],
+          installed: true,
+          authenticated: ready,
+          authMode: ready ? "authenticated" : null,
+          loginCommand: {
+            executable: process.execPath,
+            args: [exe, "login"],
+            env: {},
+          },
+          deviceLoginCommand: {
+            executable: process.execPath,
+            args: [exe, "login", "--device-auth"],
+            env: {},
+          },
+        },
+      };
+    }, "linux");
+    clean.push(async () => manager.close());
+    const input = {
+      instance: "default",
+      home,
+      root: home,
+      runtime: "codex" as const,
+    };
+    // Without an active session, status() still surfaces the probe error.
+    await expect(manager.status(input)).rejects.toThrow(/timeout/i);
+    failProbe = false;
+    await manager.start(input);
+    await expect
+      .poll(async () => (await manager.status(input)).deviceCode, {
+        timeout: 5000,
+      })
+      .toBe("WXYZ-9876");
+    // A transient probe failure during an active session preserves URL + code.
+    failProbe = true;
+    expect(await manager.status(input)).toEqual({
+      state: "waiting_user",
+      url: "https://auth.openai.com/codex/device",
+      deviceCode: "WXYZ-9876",
+      acceptsCode: false,
+    });
+    // Once the probe recovers with ready=true, status() completes cleanly.
+    failProbe = false;
+    ready = true;
+    expect(await manager.status(input)).toEqual({ state: "ready" });
+  },
+);
+
+it(
+  "extracts device codes with ANSI sequences, CRLF, and optional Code prefix without capturing secrets",
+  { timeout: 15000 },
+  async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "runtime-device-code-"));
+    clean.push(() => rm(home, { recursive: true, force: true }));
+    const exe = path.join(home, "codex");
+    await writeFile(
+      exe,
+      `process.stdout.write('Open https://auth.openai.com/codex/device\\r\\n\\u001b[1mCode: QWER-5678\\u001b[0m\\r\\nsecret-lowercase\\r\\nSECRET-NEVER-RETURN\\r\\n');setTimeout(()=>process.exit(0),10000);`,
+    );
+    const manager = new RuntimeLoginManager(
+      async () => ({
+        runtime: "codex" as const,
+        executable: exe,
+        installed: true,
+        ready: false,
+        loginCommand: "unused",
+        descriptor: {
+          runtime: "codex" as const,
+          executable: exe,
+          argvPrefix: [],
+          installed: true,
+          authenticated: false,
+          authMode: null,
+          loginCommand: {
+            executable: process.execPath,
+            args: [exe, "login"],
+            env: {},
+          },
+          deviceLoginCommand: {
+            executable: process.execPath,
+            args: [exe, "login", "--device-auth"],
+            env: {},
+          },
+        },
+      }),
+      "linux",
+    );
+    clean.push(async () => manager.close());
+    const input = {
+      instance: "default",
+      home,
+      root: home,
+      runtime: "codex" as const,
+    };
+    await manager.start(input, undefined, "device");
+    await expect
+      .poll(async () => (await manager.status(input)).deviceCode, {
+        timeout: 5000,
+      })
+      .toBe("QWER-5678");
+    const snap = await manager.status(input);
+    expect(snap.url).toBe("https://auth.openai.com/codex/device");
+    expect(JSON.stringify(snap)).not.toContain("SECRET-NEVER-RETURN");
+    expect(JSON.stringify(snap)).not.toContain("secret-lowercase");
+  },
+);

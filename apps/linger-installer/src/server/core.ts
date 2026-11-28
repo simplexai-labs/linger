@@ -22,7 +22,10 @@ import {
   loadInstance,
   withInstanceLock,
 } from "@linger/local-installation/instance";
-import { readLocalLogin } from "@linger/local-installation/account";
+import {
+  DEFAULT_OWNER_EMAIL,
+  readLocalLogin,
+} from "@linger/local-installation/account";
 import { inspectComputer } from "@linger/local-installation/computer";
 import type { components } from "@linger/wire-contracts/linger-installer/types";
 import { publicComputer } from "./public.js";
@@ -172,7 +175,7 @@ export function coreAdapter(
     ): Promise<components["schemas"]["InstallerConfig"]> {
       const value = await instance(name);
       let accountExists = false,
-        email = "owner@linger.local";
+        email = DEFAULT_OWNER_EMAIL;
       if (value)
         try {
           const login = await readLocalLogin(value);

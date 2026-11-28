@@ -36,12 +36,15 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { RunInstallation } from "./jobs.js";
-import { startInstallerServer } from "./server.js";
+import { startInstallerServer, type ServerOptions } from "./server.js";
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
-async function setup(run?: RunInstallation) {
+async function setup(
+  run?: RunInstallation,
+  extraDependencies?: ServerOptions["dependencies"],
+) {
   const home = await mkdtemp(path.join(tmpdir(), "installer-api-"));
   cleanup.push(() => rm(home, { recursive: true, force: true }));
   await mkdir(path.join(home, "web"));
@@ -67,6 +70,7 @@ async function setup(run?: RunInstallation) {
           message: "Sign in to the runtime.",
         };
       },
+      ...extraDependencies,
     },
   });
   cleanup.push(server.close);
@@ -92,7 +96,7 @@ test("config exposes defaults and validates input before starting work", async (
   const { api, calls } = await setup();
   const config = await (await api("/api/config")).json();
   expect(config.instance).toBe("default");
-  expect(config.email).toBe("owner@linger.local");
+  expect(config.email).toBe("admin@gmail.com");
   expect(config).not.toHaveProperty("password");
   expect(
     (await api("/api/jobs", "POST", { instance: "../../escape" })).status,
@@ -360,4 +364,39 @@ test("accepts complete compatible-model input and rejects partial or mixed field
     expect(
       (await api("/api/runtime-login", "POST", { ...input, ...change })).status,
     ).toBe(400);
+});
+
+test("runtime login probe timeout returns 504 RUNTIME_LOGIN_TIMEOUT instead of 400 INVALID_REQUEST", async () => {
+  const errors: unknown[] = [
+    new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError",
+    ),
+    Object.assign(new Error("probe timed out"), { code: "COMMAND_TIMEOUT" }),
+    new Error("Invalid authorization code or inactive login"),
+  ];
+  let index = 0;
+  const { api } = await setup(undefined, {
+    runtimeLogin: async () => {
+      throw errors[index++];
+    },
+  });
+  for (const route of [
+    "/api/runtime-login?instance=default",
+    "/api/runtime-login?instance=default",
+  ]) {
+    const response = await api(route);
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({
+      code: "RUNTIME_LOGIN_TIMEOUT",
+      message:
+        "Checking the AI runtime sign-in status timed out. Retry shortly.",
+    });
+  }
+  const invalid = await api("/api/runtime-login", "POST", {
+    instance: "default",
+    code: "ABCD",
+  });
+  expect(invalid.status).toBe(400);
+  expect((await invalid.json()).code).toBe("INVALID_REQUEST");
 });

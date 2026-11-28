@@ -31,6 +31,14 @@ export function parseInstallerArguments(args: string[]) {
     stop?: boolean;
     stopLocalModels?: boolean;
     prepareVoiceTools?: boolean;
+    // Setup commands the desktop runs before anything is installed.
+    runtimeStatus?: boolean;
+    prepareRuntime?: string;
+    runtimeLogin?: string;
+    deviceLogin?: boolean;
+    browserLogin?: boolean;
+    downloadModel?: string;
+    checkModel?: string;
   } = {
     home: lingerHome(),
   };
@@ -84,6 +92,18 @@ export function parseInstallerArguments(args: string[]) {
       options.externalComputer = true;
       continue;
     }
+    if (flag === "--runtime-status") {
+      options.runtimeStatus = true;
+      continue;
+    }
+    if (flag === "--device-login") {
+      options.deviceLogin = true;
+      continue;
+    }
+    if (flag === "--browser-login") {
+      options.browserLogin = true;
+      continue;
+    }
     if (
       ![
         "--home",
@@ -91,6 +111,10 @@ export function parseInstallerArguments(args: string[]) {
         "--source-repo",
         "--instance",
         "--inspect-target",
+        "--prepare-runtime",
+        "--runtime-login",
+        "--download-local-model",
+        "--check-local-model",
       ].includes(flag ?? "")
     )
       throw new Error("Invalid installer option.");
@@ -101,7 +125,23 @@ export function parseInstallerArguments(args: string[]) {
     else if (flag === "--inspect-target")
       options.inspectTarget = path.resolve(value);
     else if (flag === "--source-repo") options.sourceRepo = path.resolve(value);
-    else if (flag === "--instance") {
+    else if (flag === "--prepare-runtime" || flag === "--runtime-login") {
+      if (!["codex", "claude", "pi"].includes(value))
+        throw new Error("Invalid runtime.");
+      if (flag === "--prepare-runtime") options.prepareRuntime = value;
+      else options.runtimeLogin = value;
+    } else if (
+      flag === "--download-local-model" ||
+      flag === "--check-local-model"
+    ) {
+      if (
+        value.length > 200 ||
+        !/^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/.test(value)
+      )
+        throw new Error("Invalid local model.");
+      if (flag === "--check-local-model") options.checkModel = value;
+      else options.downloadModel = value;
+    } else if (flag === "--instance") {
       if (!/^[a-z][a-z0-9-]{0,39}$/.test(value))
         throw new Error("Invalid instance name.");
       options.instanceName = value;
@@ -121,9 +161,16 @@ export function parseInstallerArguments(args: string[]) {
     !options.migrate &&
     !options.stop &&
     !options.stopLocalModels &&
-    !options.prepareVoiceTools
+    !options.prepareVoiceTools &&
+    !setupCommand(options)
   )
     throw new Error("The installer needs a source checkout (--source-repo).");
+  if (options.deviceLogin && options.runtimeLogin !== "codex")
+    throw new Error("A device login needs --runtime-login codex.");
+  if (options.browserLogin && options.runtimeLogin !== "codex")
+    throw new Error("A browser login needs --runtime-login codex.");
+  if (options.deviceLogin && options.browserLogin)
+    throw new Error("Choose either --device-login or --browser-login.");
   if (options.inspectTarget && !options.inspect)
     throw new Error("An inspection target requires --inspect.");
   if (options.abortOnStdinClose && !options.prefetchBifrost)
@@ -137,6 +184,22 @@ export function parseInstallerArguments(args: string[]) {
   if (options.prepareVoiceTools && !options.instanceName)
     throw new Error("Voice tools preparation needs an instance.");
   return options;
+}
+// The setup commands the desktop runs before anything is installed.
+function setupCommand(options: {
+  runtimeStatus?: boolean;
+  prepareRuntime?: string;
+  runtimeLogin?: string;
+  downloadModel?: string;
+  checkModel?: string;
+}): boolean {
+  return Boolean(
+    options.runtimeStatus ||
+    options.prepareRuntime ||
+    options.runtimeLogin ||
+    options.downloadModel ||
+    options.checkModel,
+  );
 }
 // The desktop client shows this line, so it carries the real cause; only an
 // access error points at permissions.
@@ -518,6 +581,75 @@ async function prepareVoiceTools(
   }
   process.exit(0);
 }
+// Headless setup commands for the desktop setup page, before anything is
+// installed: JSON lines on stdout, codes on stdin only. SIGTERM stops a
+// runtime install, sign-in or model download.
+async function runSetupCommand(
+  options: ReturnType<typeof parseInstallerArguments>,
+) {
+  const commands = await import("./server/setup-commands.js");
+  const controller = new AbortController();
+  process.once("SIGTERM", () => controller.abort());
+  const write = (line: Record<string, unknown>) =>
+    process.stdout.write(`${JSON.stringify(line)}\n`);
+  const finish = (line: Record<string, unknown>, code: number) =>
+    process.stdout.write(`${JSON.stringify(line)}\n`, () => process.exit(code));
+  try {
+    if (options.runtimeStatus) {
+      finish(await commands.runtimeStatus(options.home), 0);
+    } else if (options.prepareRuntime) {
+      const outcome = await commands.prepareSetupRuntime(
+        options.home,
+        commands.setupRuntime(options.prepareRuntime),
+        { signal: controller.signal, write },
+      );
+      finish({ outcome }, outcome.installed ? 0 : 1);
+    } else if (options.runtimeLogin) {
+      const { createInterface } = await import("node:readline");
+      const method = options.deviceLogin
+        ? ("device" as const)
+        : options.browserLogin
+          ? ("browser" as const)
+          : undefined;
+      await commands.setupRuntimeLogin(
+        options.home,
+        commands.setupRuntime(options.runtimeLogin),
+        {
+          signal: controller.signal,
+          write,
+          codes: createInterface({ input: process.stdin }),
+          ...(method ? { method } : {}),
+        },
+      );
+      finish({ ended: true }, 0);
+    } else if (options.checkModel) {
+      const check = await commands.checkLocalModel(
+        options.home,
+        commands.libraryModel(options.checkModel),
+        { signal: controller.signal },
+      );
+      finish({ ...check }, 0);
+    } else if (options.downloadModel) {
+      const outcome = await commands.downloadLocalModel(
+        options.home,
+        commands.libraryModel(options.downloadModel),
+        { signal: controller.signal, write },
+      );
+      finish({ outcome }, outcome.state === "done" ? 0 : 1);
+    }
+  } catch (error) {
+    finish(
+      {
+        error: controller.signal.aborted
+          ? "Stopped."
+          : error instanceof Error
+            ? error.message.slice(0, 600)
+            : String(error),
+      },
+      controller.signal.aborted ? 130 : 1,
+    );
+  }
+}
 async function serve(options: ReturnType<typeof parseInstallerArguments>) {
   const { createVoiceToolsBackgroundLauncher } =
     await import("@linger/local-installation/native-source");
@@ -590,13 +722,15 @@ if (
   // warning on stderr would read as the reason a start failed. A skipped
   // instance is refused with its own error when a mode opens it.
   let skipped: LegacyInstanceSkipped[] = [];
+  // Setup commands run before an installation and need no migration.
   if (
     options &&
     !options.inspect &&
     !options.prefetchBifrost &&
     !options.stop &&
     !options.stopLocalModels &&
-    !options.prepareVoiceTools
+    !options.prepareVoiceTools &&
+    !setupCommand(options)
   )
     await import("@linger/local-installation/legacy-migration")
       .then(async ({ migrateLegacyInstallation }) => {
@@ -617,6 +751,7 @@ if (
       process.exit(0),
     );
   else if (options?.userKeys) await userKeys(options);
+  else if (options && setupCommand(options)) await runSetupCommand(options);
   else if (options?.byokCommand)
     await byokEndpointCommand(options, options.byokCommand);
   else if (options?.prefetchBifrost) await prefetchBifrost(options);

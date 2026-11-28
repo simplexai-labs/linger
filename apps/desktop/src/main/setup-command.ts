@@ -41,6 +41,23 @@ const byokConfig = z
 
 const externalUrl = z.enum(SETUP_EXTERNAL_URLS);
 
+// A local model the page picked, `<catalog id>:<quant>` as localmodels
+// names it; LocalServer also requires it to be one the check listed.
+const localModel = z
+  .string()
+  .max(200)
+  .regex(/^[a-z0-9][a-z0-9._-]*:[A-Za-z0-9._-]+$/, "Invalid model");
+
+const setupRuntime = z.enum(["claude", "codex", "pi"]);
+const signInRuntime = z.enum(["claude", "codex"]);
+
+// A new owner password, as local-account.json and the server take it.
+const ownerPassword = z
+  .string()
+  .min(8)
+  .max(256)
+  .regex(/^\P{Cc}*$/u, "Invalid password");
+
 const setupCommand = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("server.set"), serverUrl: z.string().max(2048) })
@@ -62,7 +79,7 @@ const setupCommand = z.discriminatedUnion("op", [
     .object({
       op: z.literal("local.start"),
       runtime: z
-        .enum(["recommended", "codex", "claude", "pi", "local"])
+        .enum(["recommended", "codex", "claude", "pi", "local", "subscription"])
         .optional(),
       byok: byokConfig.optional(),
       keys: z
@@ -71,8 +88,42 @@ const setupCommand = z.discriminatedUnion("op", [
         })
         .strict()
         .optional(),
+      model: localModel.optional(),
     })
     .strict(),
+  z.object({ op: z.literal("local.model.check"), model: localModel }).strict(),
+  z.object({ op: z.literal("local.runtimes.check") }).strict(),
+  z
+    .object({ op: z.literal("local.runtime.install"), runtime: setupRuntime })
+    .strict(),
+  z
+    .object({
+      op: z.literal("local.runtime.signin"),
+      runtime: signInRuntime,
+      device: z.literal(true).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("local.runtime.code"),
+      runtime: signInRuntime,
+      code: z.string().trim().min(1).max(4096),
+    })
+    .strict(),
+  z
+    .object({ op: z.literal("local.runtime.cancel"), runtime: setupRuntime })
+    .strict(),
+  z
+    .object({ op: z.literal("local.runtime.open"), runtime: signInRuntime })
+    .strict(),
+  z
+    .object({
+      op: z.literal("local.runtime.copy"),
+      runtime: signInRuntime,
+      what: z.enum(["url", "code"]),
+    })
+    .strict(),
+  z.object({ op: z.literal("local.leave-local") }).strict(),
   z
     .object({
       op: z.literal("local.byok.check"),
@@ -116,8 +167,18 @@ const setupCommand = z.discriminatedUnion("op", [
     })
     .strict(),
   z.object({ op: z.literal("local.account.show"), on: z.boolean() }).strict(),
-  z.object({ op: z.literal("local.account.copy") }).strict(),
-  z.object({ op: z.literal("local.account.reveal") }).strict(),
+  z
+    .object({
+      op: z.literal("local.account.copy"),
+      what: z.enum(["email", "password"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("local.account.password"),
+      password: ownerPassword,
+    })
+    .strict(),
   z.object({ op: z.literal("signin.open") }).strict(),
   z.object({ op: z.literal("computer.connect") }).strict(),
   z.object({ op: z.literal("notifications.test") }).strict(),

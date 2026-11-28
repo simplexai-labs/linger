@@ -19,11 +19,9 @@ const setupAccount = (read = vi.fn(async () => ACCOUNT)) => {
       text = "";
     }),
   };
-  const showFile = vi.fn();
   return {
-    account: new SetupAccount({ read, clipboard, showFile }),
+    account: new SetupAccount({ read, clipboard }),
     clipboard,
-    showFile,
     read,
   };
 };
@@ -62,6 +60,15 @@ describe("SetupAccount", () => {
     expect(read).toHaveBeenCalledTimes(3);
   });
 
+  it("copies the email as it is, with no clearing timer", async () => {
+    vi.useFakeTimers();
+    const { account, clipboard } = setupAccount();
+    await account.copyEmail();
+    expect(clipboard.writeText).toHaveBeenCalledWith(ACCOUNT.email);
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_MS);
+    expect(clipboard.clear).not.toHaveBeenCalled();
+  });
+
   it("hides the password again when the setup window closes", async () => {
     const { account } = setupAccount();
     await account.refresh();
@@ -72,13 +79,11 @@ describe("SetupAccount", () => {
     expect(account.view()).toEqual({ email: ACCOUNT.email });
   });
 
-  it("copies the password and reveals the file without the page", async () => {
-    const { account, clipboard, showFile } = setupAccount();
+  it("copies the password without showing it on the page", async () => {
+    const { account, clipboard } = setupAccount();
     await account.refresh();
     await account.copy();
-    account.reveal();
     expect(clipboard.writeText).toHaveBeenCalledWith(ACCOUNT.password);
-    expect(showFile).toHaveBeenCalledWith(ACCOUNT.file);
     expect(account.view()).not.toHaveProperty("password");
   });
 
@@ -116,7 +121,7 @@ describe("SetupAccount", () => {
   });
 
   it("says why the file could not be read and offers nothing else", async () => {
-    const { account, clipboard, showFile } = setupAccount(
+    const { account, clipboard } = setupAccount(
       vi.fn(async () => {
         throw new Error("The local account file must be private");
       }),
@@ -124,12 +129,10 @@ describe("SetupAccount", () => {
     await account.refresh();
     await account.show(true);
     await account.copy();
-    account.reveal();
     expect(account.view()).toEqual({
       error: "The local account file must be private",
     });
     expect(clipboard.writeText).not.toHaveBeenCalled();
-    expect(showFile).not.toHaveBeenCalled();
   });
 
   it("hides a shown password once the file stops reading", async () => {

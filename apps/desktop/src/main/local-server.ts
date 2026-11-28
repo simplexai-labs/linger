@@ -34,6 +34,7 @@ import {
   proveLocalIdentity,
   readLocalIdentity,
   readLocalLogin,
+  writeLocalLoginPassword,
 } from "@linger/local-installation/account";
 import {
   extractArchiveFallback,
@@ -58,6 +59,7 @@ import {
 } from "@linger/local-installation/source-checkout";
 import type { LegacyInstanceSkipped } from "@linger/local-installation/legacy-migration";
 import {
+  LIBRARY_MODEL_ID,
   type SetupChoice,
   type SetupMemory,
   setupChoices,
@@ -80,7 +82,6 @@ import {
   teamhubBinaryStampsFile,
 } from "@linger/local-installation/teamhub-binaries";
 import { redact } from "@linger/local-installation/redaction";
-import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import {
   windowsPrivateLocation,
   windowsPrivateRefusal,
@@ -110,18 +111,27 @@ import type {
   WorkspaceGrantsModule,
 } from "./workspace-grants.js";
 import {
+  BackgroundModel,
+  SetupRuntimes,
+  type SetupCommandRunner,
+} from "./setup-sources.js";
+import {
   installerKeyChanges,
   savedProviderKeys,
   type ProviderKeyChanges,
 } from "./provider-keys.js";
 import type {
+  SetupBackgroundModel,
   SetupByokCheck,
   SetupByokConfig,
   SetupByokEndpoint,
   SetupByokModels,
   SetupByokProtocol,
   SetupDetectedRuntime,
+  SetupModelCheck,
+  SetupModelOption,
   SetupReason,
+  SetupRuntimeRow,
 } from "../shared/setup.js";
 
 // The pinned linger source this build installs, written by the release build:
@@ -152,6 +162,9 @@ export interface LocalModel {
   readonly downloadBytes: number | null;
   readonly diskBytes: number | null;
   readonly memoryBytes: number | null;
+  // The model as the model library names it (<id>:<quant>), which a
+  // background download fetches.
+  readonly library?: string;
 }
 
 // What the installer found on this computer, for the optional local model.
@@ -176,6 +189,11 @@ export type LocalModelsCheck =
       readonly gpu?: string;
       // Present when eligible or when a blocked-now report included a plan.
       readonly model?: LocalModel;
+      // Every model the localmodels catalog offers here, for the picker.
+      readonly models?: readonly SetupModelOption[];
+      readonly totalMemoryBytes?: number;
+      // The memory free now; the rest is held by the system and other apps.
+      readonly availableMemoryBytes?: number;
       // The localmodels tool's code for why not, or, when eligible, for
       // what could still stop the install, with the counts it carries.
       readonly reasons?: readonly SetupReason[];
@@ -204,6 +222,21 @@ export interface LocalServerPlan {
   readonly byok?: SetupByokConfig;
   // Provider keys edited on the page, saved before the installer runs.
   readonly keys?: ProviderKeyChanges;
+  // Other subscription runtimes signed in here that the installation also
+  // configures beside the one it runs by default (codex or claude only).
+  readonly linkedRuntimes?: readonly ("codex" | "claude")[];
+  // The local model picked on the page (`<catalog id>:<quant>`); the local
+  // runtime installs exactly it.
+  readonly localModel?: string;
+}
+
+// What setup's Install asks for: a plan, or "subscription" for the runtimes
+// signed in on the page (Codex by default when both are, the other linked).
+export interface LocalServerRequest extends Omit<
+  LocalServerPlan,
+  "runtime" | "linkedRuntimes"
+> {
+  readonly runtime: LocalServerPlan["runtime"] | "subscription";
 }
 
 export const QUICK_INSTALL: LocalServerPlan = {
@@ -320,11 +353,13 @@ export interface RuntimeSignIn {
 export type RuntimeLoginReason = "unavailable" | "timed_out" | "ended";
 
 // Why an installation stopped, for failures the setup page words itself:
-// the runtime lookup outlasted RUNTIME_LOOKUP_LIMIT_MS, or the installer
-// stopped answering while it ran.
+// the runtime lookup outlasted RUNTIME_LOOKUP_LIMIT_MS, the installer
+// stopped answering while that lookup ran, or it stopped answering while
+// the job ran.
 export type LocalServerFailure =
   | "runtime_lookup_timed_out"
-  | "runtime_lookup_unreachable";
+  | "runtime_lookup_unreachable"
+  | "installer_unreachable";
 
 // What a running step still waits on once it has taken a while; the page
 // says so, since the bar does not move meanwhile.
@@ -367,6 +402,8 @@ export interface LocalServerStatus {
   readonly signIn?: RuntimeSignIn;
   readonly byokCheck?: SetupByokCheck;
   readonly byokModels?: SetupByokModels;
+  // The latest picked local model priced again on this computer.
+  readonly modelCheck?: SetupModelCheck;
   // Where this installation moved the data of the earlier Simplex app,
   // which it could not upgrade.
   readonly legacyBackup?: string;
@@ -377,6 +414,13 @@ export interface LocalServerStatus {
   readonly failure?: LocalServerFailure;
   // While ready after a degraded resume where local models could not be restored.
   readonly localModelsDegraded?: LocalModelsDegradedStatus;
+  // Setup's subscription runtimes, once first checked: each one's install
+  // and sign-in on this computer and what setup is doing with it.
+  readonly runtimes?: readonly SetupRuntimeRow[];
+  // The local model downloading while another source runs.
+  readonly backgroundModel?: SetupBackgroundModel;
+  // While an installation runs or after it failed: the source it installs.
+  readonly source?: "local" | "subscription" | "byok";
 }
 
 export interface LocalModelsDegradedStatus {
@@ -467,6 +511,9 @@ export interface LocalServerOptions {
   // WATCH_MS and UNREACHABLE_GRACE_MS by default.
   readonly watchMs?: number;
   readonly unreachableGraceMs?: number;
+  // Runs the installer's headless setup commands; spawns installer.js by
+  // default.
+  readonly setupCommand?: SetupCommandRunner;
 }
 
 // The starter Room the server makes for a new owner, with their Agents.
@@ -637,6 +684,10 @@ export class LocalServerModule implements Module {
   #signIn: RuntimeSignIn | undefined;
   #byokCheck: SetupByokCheck | undefined;
   #byokModels: SetupByokModels | undefined;
+  #modelCheck: SetupModelCheck | undefined;
+  // The local model picked on the page, for the download that goes on
+  // after the person leaves its installation's wait.
+  #pickedModel: string | undefined;
   #legacyBackup: string | undefined;
   // The installer that runs the sign-in, and what the person asked for
   // while the step waits.
@@ -652,10 +703,28 @@ export class LocalServerModule implements Module {
     | { readonly at: number; readonly ok: Promise<boolean> }
     | undefined;
   #serverOk: boolean | undefined;
+  readonly #runtimes: SetupRuntimes;
+  readonly #background: BackgroundModel;
+  readonly #run: SetupCommandRunner;
+  // The running installation's own stop, and what it installs.
+  #installAbort: AbortController | undefined;
+  #source: LocalServerStatus["source"];
+  #installer: InstallerApi | undefined;
 
   constructor(options: LocalServerOptions) {
     this.#options = options;
     this.#home = options.home;
+    const changed = () => this.#ctx?.bus.emit("local-server.changed");
+    const run: SetupCommandRunner = (args, runOptions) =>
+      (options.setupCommand ?? this.#setupCommand)(args, runOptions);
+    this.#runtimes = new SetupRuntimes({
+      run,
+      changed,
+      ...(options.openExternal ? { openExternal: options.openExternal } : {}),
+      ...(options.platform ? { platform: options.platform } : {}),
+    });
+    this.#background = new BackgroundModel({ run, changed });
+    this.#run = run;
   }
 
   async start(ctx: ModuleContext): Promise<void> {
@@ -756,9 +825,12 @@ export class LocalServerModule implements Module {
     this.#offDaemonConnection?.();
     this.#offComputerChanged?.();
     // The installer manager keeps running a started installation; it exits
-    // by itself once idle.
+    // by itself once idle. Setup's own runtime installs and sign-ins stop,
+    // and so does a background model download (Settings › Models resumes it).
     this.#cancelPrestage("stopped");
     this.#cancelBifrostPrefetch("stopped");
+    this.#runtimes.stopAll();
+    this.#background.stop();
     this.#abort.abort();
     if (this.#busyCount > 0) {
       this.#busyCount = 0;
@@ -1061,6 +1133,8 @@ export class LocalServerModule implements Module {
       this.#location ?? this.#home,
       LOCAL_INSTANCE,
     );
+    const runtimes = this.#runtimes.rows();
+    const backgroundModel = this.#background.state();
     return {
       available,
       phase: this.#phase,
@@ -1096,11 +1170,18 @@ export class LocalServerModule implements Module {
       ...(this.#signIn ? { signIn: this.#signIn } : {}),
       ...(this.#byokCheck ? { byokCheck: this.#byokCheck } : {}),
       ...(this.#byokModels ? { byokModels: this.#byokModels } : {}),
+      ...(this.#modelCheck ? { modelCheck: this.#modelCheck } : {}),
       ...(this.#legacyBackup ? { legacyBackup: this.#legacyBackup } : {}),
       ...(this.#refusal ? { refusal: this.#refusal } : {}),
       ...(this.#failure ? { failure: this.#failure } : {}),
       ...(this.#localModelsDegraded
         ? { localModelsDegraded: this.#localModelsDegraded }
+        : {}),
+      ...(runtimes ? { runtimes } : {}),
+      ...(backgroundModel ? { backgroundModel } : {}),
+      ...(this.#source &&
+      (this.#phase === "installing" || this.#phase === "failed")
+        ? { source: this.#source }
         : {}),
     };
   }
@@ -1147,6 +1228,158 @@ export class LocalServerModule implements Module {
       return undefined;
     }
   }
+
+  // Setup's Install: resolves a subscription to the runtimes signed in on
+  // the page. BYOK and a subscription download no local model; the Local
+  // models page adds one later.
+  beginSetup(request: LocalServerRequest): Promise<void> {
+    if (this.#running) return this.#running;
+    const { runtime, localModel, ...rest } = request;
+    // Only a model the check listed; the installer validates it again.
+    const listed =
+      this.#check.state === "checked" &&
+      this.#check.models?.some((model) => model.library === localModel)
+        ? localModel
+        : undefined;
+    if (listed) this.#pickedModel = listed;
+    let plan: LocalServerPlan;
+    if (runtime === "subscription") {
+      const signedIn = this.#runtimes.signedIn();
+      if (!signedIn[0])
+        return Promise.reject(
+          new Error("Sign in to Claude Code or Codex first."),
+        );
+      plan = {
+        ...rest,
+        runtime: signedIn[0],
+        ...(signedIn.length > 1 ? { linkedRuntimes: signedIn.slice(1) } : {}),
+      };
+    } else
+      plan = {
+        ...rest,
+        runtime,
+        ...(runtime === "local" && listed ? { localModel: listed } : {}),
+      };
+    return this.begin(plan);
+  }
+
+  // The disk a model picked in setup takes: its check's estimate, else
+  // its download size from the list.
+  #modelDiskBytes(plan: LocalServerPlan): number | undefined {
+    const library = plan.runtime === "local" ? plan.localModel : undefined;
+    if (!library) return undefined;
+    const priced = this.#modelCheck;
+    if (priced?.library === library && priced.state === "checked")
+      if (priced.diskBytes) return priced.diskBytes;
+    return this.#check.state === "checked"
+      ? this.#check.models?.find((option) => option.library === library)
+          ?.downloadBytes
+      : undefined;
+  }
+
+  // Setup's subscription runtimes: their install and sign-in.
+  setupRuntimes(): SetupRuntimes {
+    return this.#runtimes;
+  }
+
+  // The local model left from its installation's wait, downloading into
+  // the model library while another source installs; Settings › Models
+  // offers it once done.
+  #downloadInBackground(): void {
+    const library =
+      this.#pickedModel ??
+      (this.#check.state === "checked"
+        ? this.#check.model?.library
+        : undefined);
+    if (library) void this.#background.start(library);
+  }
+
+  // Leaves the local model's installation for another source, from its
+  // wait: the installer stops its job (the bytes downloaded so far stay),
+  // the model downloads on in the background, and setup is back at
+  // choosing, for the page to show the other source's settings.
+  async leaveLocalModel(): Promise<void> {
+    const running = this.#running;
+    if (!running || this.#source !== "local") return;
+    this.#installAbort?.abort();
+    await running.catch(() => undefined);
+    try {
+      await this.#installer?.cancelActive();
+    } catch (error) {
+      // The next Install names another choice, which replaces the job too.
+      this.#ctx?.log.warn("local_server.leave_local_cancel_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    this.#endSignIn();
+    this.#source = undefined;
+    this.#set("idle", "");
+    this.#downloadInBackground();
+  }
+
+  // Runs one of the installer's headless setup commands against the
+  // install location; each stdout line is one JSON value. Never logs its
+  // output: a sign-in prints the vendor's codes.
+  #setupCommand: SetupCommandRunner = async (args, options) => {
+    const home = this.#location ?? this.#home;
+    const node = options.pinnedNode
+      ? await this.#ensureNode(this.#abort.signal)
+      : process.execPath;
+    const env = options.inspect ? await this.#inspectEnv() : this.#daemonEnv();
+    const proxyEnv = await this.#systemProxyEnv();
+    const child = spawn(
+      node,
+      [
+        ...linuxNodeFdHygieneArgs(this.#options.platform),
+        this.#installerScript(),
+        "--home",
+        home,
+        ...args,
+      ],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        env: {
+          ...env,
+          ...proxyEnv,
+          ELECTRON_RUN_AS_NODE: "1",
+          LINGER_HOME: home,
+        },
+      },
+    );
+    child.stderr.resume();
+    child.stdin.on("error", () => undefined);
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      if (!line.trim()) return;
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (value && typeof value === "object" && !Array.isArray(value))
+        options.onLine(value as Record<string, unknown>);
+    });
+    const done = new Promise<number>((resolve) => {
+      child.once("error", (error) => {
+        this.#ctx?.log.warn("local_server.setup_command_failed", {
+          command: args[0],
+          error: error.message,
+        });
+        resolve(1);
+      });
+      child.once("close", (code) => resolve(code ?? 1));
+    });
+    return {
+      write: (line) => {
+        if (child.stdin.writable) child.stdin.write(`${line}\n`);
+      },
+      stop: () => {
+        if (child.exitCode === null) child.kill("SIGTERM");
+      },
+      done,
+    };
+  };
 
   // Installs into a folder the person picked, once it can hold Linger; null
   // goes back to the default.
@@ -1350,7 +1583,72 @@ export class LocalServerModule implements Module {
         : {
             state: "failed",
             message: byokFailure(out, "Could not test the BYOK endpoint."),
+            ...(typeof out.code === "string" && out.code
+              ? { code: out.code }
+              : {}),
           };
+  }
+
+  // Prices the local model picked on the page with the install's own plan,
+  // offline (installer.js --check-local-model), so memory and disk are
+  // checked for the model Install downloads. A newer pick replaces an older
+  // one's answer.
+  async checkModel(library: string): Promise<void> {
+    if (
+      this.#check.state !== "checked" ||
+      !this.#check.models?.some((model) => model.library === library)
+    )
+      throw new Error("Pick a model this computer offers.");
+    this.#pickedModel = library;
+    this.#modelCheck = { library, state: "checking" };
+    this.#ctx?.bus.emit("local-server.changed");
+    let answer: Record<string, unknown> = {};
+    try {
+      const child = await this.#run(["--check-local-model", library], {
+        inspect: true,
+        onLine: (line) => {
+          if (line.library === library) answer = line;
+        },
+      });
+      // A plan answers in seconds; a stuck one leaves the install to decide.
+      const timer = setTimeout(() => child.stop(), 90_000);
+      await child.done.finally(() => clearTimeout(timer));
+    } catch (error) {
+      this.#ctx?.log.warn("local_server.model_check_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (this.#modelCheck?.library !== library) return;
+    const count = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : undefined;
+    const code =
+      typeof answer.code === "string" && /^[A-Z0-9_]{1,60}$/.test(answer.code)
+        ? answer.code
+        : undefined;
+    const numbers = {
+      memoryBytes: count(answer.memoryBytes),
+      downloadBytes: count(answer.downloadBytes),
+      diskBytes: count(answer.diskBytes),
+      diskFreeBytes: count(answer.diskFreeBytes),
+    };
+    this.#modelCheck = {
+      library,
+      state: "checked",
+      // No answer: the install's own plan decides, as before the picker.
+      fits: answer.fits === true || answer.fits === undefined,
+      ...(answer.fits === false ? { code: code ?? "PLAN_FAILED" } : {}),
+      ...Object.fromEntries(
+        Object.entries(numbers).filter(([, value]) => value !== undefined),
+      ),
+    };
+    this.#ctx?.log.info("local_server.model_checked", {
+      library,
+      fits: this.#modelCheck.fits,
+      ...(code ? { code } : {}),
+    });
+    this.#ctx?.bus.emit("local-server.changed");
   }
 
   // Lists the models the endpoint serves at its base URL + path + /models,
@@ -1532,6 +1830,10 @@ export class LocalServerModule implements Module {
       localModels?: {
         eligible?: unknown;
         state?: unknown;
+        libraryModel?: unknown;
+        models?: unknown;
+        totalMemoryBytes?: unknown;
+        availableMemoryBytes?: unknown;
         memory?: Record<string, unknown>;
         reasons?: unknown;
         estimate?: {
@@ -1616,6 +1918,7 @@ export class LocalServerModule implements Module {
         ? `${code}: ${message}`
         : `${code}`,
     );
+    const models = setupModelOptions(report.localModels.models);
     const pick = report.recommendation;
     // The local model is recommended only with a model the page can show.
     const recommendation =
@@ -1674,14 +1977,25 @@ export class LocalServerModule implements Module {
               downloadBytes: bytes(estimate?.downloadBytes),
               diskBytes: bytes(estimate?.diskBytes),
               memoryBytes: bytes(estimate?.memoryBytes),
-              ...(isInkling2MiniModelId(name)
-                ? { featuredInkling: true as const }
+              ...(typeof report.localModels.libraryModel === "string" &&
+              LIBRARY_MODEL_ID.test(report.localModels.libraryModel)
+                ? { library: report.localModels.libraryModel }
                 : {}),
             },
           }
         : {}),
       ...(reasons.length ? { reasons } : {}),
       ...(recommendation ? { recommendation } : {}),
+      ...(models.length ? { models } : {}),
+      ...(bytes(report.localModels.totalMemoryBytes) !== null
+        ? { totalMemoryBytes: report.localModels.totalMemoryBytes as number }
+        : {}),
+      ...(bytes(report.localModels.availableMemoryBytes) !== null
+        ? {
+            availableMemoryBytes: report.localModels
+              .availableMemoryBytes as number,
+          }
+        : {}),
       ...(runtimes.length ? { runtimes } : {}),
     };
     return { check, reasonLog };
@@ -2108,7 +2422,9 @@ export class LocalServerModule implements Module {
     const status = this.status();
     if (!status.available)
       throw new Error("Running Linger on this computer is not supported here");
-    const signal = this.#abort.signal;
+    const installAbort = new AbortController();
+    this.#installAbort = installAbort;
+    const signal = AbortSignal.any([this.#abort.signal, installAbort.signal]);
     const home = this.#location ?? this.#home;
     const resolvedHome = path.resolve(home);
     // In-flight inspection downloads the localmodels kit into the default
@@ -2127,6 +2443,13 @@ export class LocalServerModule implements Module {
       plan.runtime !== "recommended"
     )
       this.#cancelBifrostPrefetch("subscription_runtime");
+    this.#source = plan.byok
+      ? "byok"
+      : plan.runtime === "local"
+        ? "local"
+        : plan.runtime === "codex" || plan.runtime === "claude"
+          ? "subscription"
+          : undefined;
     this.#attempt += 1;
     this.#acquireBusy();
     try {
@@ -2164,7 +2487,8 @@ export class LocalServerModule implements Module {
           : undefined;
       const error = await checkLocation(
         home,
-        this.#freeBytes() + (model?.diskBytes ?? 0),
+        this.#freeBytes() +
+          (this.#modelDiskBytes(plan) ?? model?.diskBytes ?? 0),
       );
       if (error) throw new Error(`${home}: ${error}`);
       // On Windows, pre-check both the install home and the Computer daemon
@@ -2218,6 +2542,7 @@ export class LocalServerModule implements Module {
       const installer = await this.#timed("installer_launch", () =>
         this.#launchInstaller(node, home, repo, signal),
       );
+      this.#installer = installer;
       let prewarmedOrigin: string | undefined;
       const prewarm = (origin: string): void => {
         if (prewarmedOrigin && sameOrigin(prewarmedOrigin, origin)) return;
@@ -2414,6 +2739,7 @@ export class LocalServerModule implements Module {
       );
       throw error;
     } finally {
+      if (this.#installAbort === installAbort) this.#installAbort = undefined;
       this.#releaseBusy();
     }
   }
@@ -2462,7 +2788,32 @@ export class LocalServerModule implements Module {
         signal.throwIfAborted();
         if (this.#switchByok) return { byok: this.#switchByok };
         if (this.#switchTo) return this.#switchTo;
-        const login = await installer.runtimeLogin();
+        let login: RuntimeLogin;
+        try {
+          login = await installer.runtimeLogin();
+        } catch (error) {
+          if (signal.aborted || !isTransientRuntimeLoginPollError(error))
+            throw error;
+          const details = error as { status?: unknown; code?: unknown };
+          this.#ctx?.log.warn("local_server.runtime_login_poll_failed", {
+            runtime,
+            ...(typeof details.status === "number"
+              ? { status: details.status }
+              : {}),
+            ...(typeof details.code === "string" ? { code: details.code } : {}),
+            error: error instanceof Error ? error.message : String(error),
+          });
+          const woken = new Promise<void>((resolve) => {
+            this.#signInWake = resolve;
+          });
+          await Promise.race([
+            woken,
+            delay(this.#options.signInPollMs ?? SIGN_IN_POLL_MS, undefined, {
+              signal,
+            }),
+          ]);
+          continue;
+        }
         if (login.state === "ready") {
           if (this.#signIn) {
             this.#ctx?.log.info("local_server.runtime_signed_in", { runtime });
@@ -2601,6 +2952,51 @@ export class LocalServerModule implements Module {
       );
     } catch (error) {
       throw new Error(signInFailure(error), { cause: error });
+    }
+  }
+
+  // Changes the owner's password from the ready screen: TeamHub takes it
+  // first (checking the current one from local-account.json), then the file
+  // does, so the desktop keeps signing in; the window signs in again since
+  // TeamHub ended its session. Neither password is kept or logged.
+  async changePassword(next: string): Promise<void> {
+    const record = await this.#windowRecord();
+    if (!record)
+      throw new Error(
+        "This window is not showing the Linger on this computer.",
+      );
+    const account = await this.account();
+    try {
+      await changeOwnerPassword(
+        await this.#serverIdentity(record.home, record.origin),
+        account.email,
+        account.password,
+        next,
+        this.#options.fetch,
+      );
+    } catch (error) {
+      this.#ctx?.log.warn("local_server.password_change_failed", {
+        ...(error instanceof PasswordChangeError
+          ? { status: error.status }
+          : error instanceof SignInRejectedError
+            ? { status: error.status, step: "sign_in" }
+            : { reason: unverifiedReason(error) }),
+      });
+      if (error instanceof PasswordChangeError) throw error;
+      throw new Error(signInFailure(error), { cause: error });
+    }
+    await writeLocalLoginPassword(
+      { root: path.join(record.home, "instances", LOCAL_INSTANCE) },
+      next,
+    );
+    this.#ctx?.log.info("local_server.password_changed");
+    try {
+      await this.#signInAs(record.home, record.origin, account.email, next);
+    } catch (error) {
+      throw new Error(
+        `The password was changed, but signing in again failed: ${signInFailure(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -5266,6 +5662,7 @@ export const anotherMeMissing = (
 interface Job {
   readonly runtime?: InstanceRuntime;
   readonly setupChoice?: string;
+  readonly localModel?: string;
   readonly id: string;
   readonly instance: string;
   readonly state: string;
@@ -5521,6 +5918,7 @@ export const RUNTIME_LOOKUP_HINT_MS = 15_000;
 const FAILURES: ReadonlySet<string> = new Set<LocalServerFailure>([
   "runtime_lookup_timed_out",
   "runtime_lookup_unreachable",
+  "installer_unreachable",
 ]);
 const localServerFailure = (code: unknown): LocalServerFailure | undefined =>
   typeof code === "string" && FAILURES.has(code)
@@ -5672,10 +6070,20 @@ export class InstallerApi {
                 () => "codex",
               )
             : plan.runtime;
+      const linkedRuntimes =
+        setupChoice === "codex" || setupChoice === "claude"
+          ? (plan.linkedRuntimes ?? []).filter(
+              (runtime) => runtime !== setupChoice,
+            )
+          : [];
       job = await this.#json<Job>("/api/jobs", {
         instance: LOCAL_INSTANCE,
         ...(setupChoice ? { setupChoice } : {}),
+        ...(setupChoice === "local-models" && plan.localModel
+          ? { localModel: plan.localModel }
+          : {}),
         ...(plan.byok ? { byok: plan.byok } : {}),
+        ...(linkedRuntimes.length ? { linkedRuntimes } : {}),
       });
     }
     // The person chose the local model after seeing what it needs, so its
@@ -5820,6 +6228,19 @@ export class InstallerApi {
     }
   }
 
+  // Stops the desktop installation's job still running or waiting, as
+  // when setup leaves the local model for another source.
+  async cancelActive(): Promise<void> {
+    const { items } = await this.#json<{ items: Job[] }>("/api/jobs");
+    for (const job of items)
+      if (
+        job.instance === LOCAL_INSTANCE &&
+        !job.preparation &&
+        ["queued", "running", "waiting_user"].includes(job.state)
+      )
+        await this.#json(`/api/jobs/${encodeURIComponent(job.id)}/cancel`, {});
+  }
+
   // Reads the job again. The read is idempotent, so a dropped connection is
   // retried for a while: the job keeps running in the installer either way.
   async #poll(
@@ -5844,9 +6265,11 @@ export class InstallerApi {
         });
         since ??= Date.now();
         if (Date.now() - since >= this.#reconnect.windowMs)
-          throw new Error(
-            "Couldn't read the installation progress. Try again to reconnect to the running installation.",
-            { cause: error },
+          throw Object.assign(
+            new Error("Couldn't reconnect to the installation.", {
+              cause: error,
+            }),
+            { code: "installer_unreachable" },
           );
         onReconnect();
         await delay(wait, undefined, { signal });
@@ -5977,15 +6400,51 @@ export class InstallerApi {
     const response = await this.#call(pathname, body, method, signal);
     if (!response.ok) {
       const error = (await response.json().catch(() => null)) as {
+        code?: string;
         message?: string;
       } | null;
-      throw new Error(
-        error?.message || `The installer request failed (${response.status})`,
+      throw Object.assign(
+        new Error(
+          error?.message || `The installer request failed (${response.status})`,
+        ),
+        {
+          status: response.status,
+          ...(typeof error?.code === "string" && error.code
+            ? { code: error.code }
+            : {}),
+        },
       );
     }
     return (await response.json()) as T;
   }
 }
+
+const isTransientRuntimeLoginPollError = (error: unknown): boolean => {
+  if (transientCode(error)) return true;
+  let current: unknown = error;
+  for (
+    let depth = 0;
+    depth < 4 && current && typeof current === "object";
+    depth++
+  ) {
+    const value = current as {
+      name?: unknown;
+      code?: unknown;
+      status?: unknown;
+      cause?: unknown;
+    };
+    if (
+      value.name === "TimeoutError" ||
+      value.code === "COMMAND_TIMEOUT" ||
+      value.code === "RUNTIME_LOGIN_TIMEOUT" ||
+      value.status === 503 ||
+      value.status === 504
+    )
+      return true;
+    current = value.cause;
+  }
+  return false;
+};
 
 interface InstanceRuntime {
   readonly setupChoice?: string;
@@ -6042,12 +6501,68 @@ const recommended = (report: { recommendation?: string }) =>
 // Whether the job installs what the plan asks for. The installer picks for
 // "recommended", which never deploys the local model (see `recommended`).
 // A job that names no choice used the saved one and is followed as before.
+// A local model picked on the page must be the one the job installs.
 const runsPlan = (job: Job, plan: LocalServerPlan): boolean =>
   !job.setupChoice ||
   (plan.runtime === "recommended"
     ? job.setupChoice !== "local-models"
     : job.setupChoice ===
-      (plan.runtime === "local" ? "local-models" : plan.runtime));
+        (plan.runtime === "local" ? "local-models" : plan.runtime) &&
+      (plan.runtime !== "local" ||
+        !plan.localModel ||
+        job.localModel === plan.localModel));
+
+// The picker's models from the installer's report, each checked; one that
+// is malformed is left out rather than failing the check.
+export function setupModelOptions(value: unknown): SetupModelOption[] {
+  if (!Array.isArray(value)) return [];
+  const count = (entry: unknown): entry is number =>
+    typeof entry === "number" && Number.isFinite(entry) && entry >= 0;
+  const label = (entry: unknown, max: number): entry is string =>
+    typeof entry === "string" && entry.length > 0 && entry.length <= max;
+  return value.slice(0, 200).flatMap((raw): SetupModelOption[] => {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    if (
+      !label(row.library, 200) ||
+      !LIBRARY_MODEL_ID.test(row.library) ||
+      !label(row.name, 120) ||
+      !label(row.quant, 60) ||
+      !count(row.downloadBytes) ||
+      !count(row.memoryBytes) ||
+      typeof row.fits !== "boolean"
+    )
+      return [];
+    return [
+      {
+        library: row.library,
+        name: row.name,
+        quant: row.quant,
+        ...(label(row.publisher, 80) ? { publisher: row.publisher } : {}),
+        ...(label(row.family, 20) && /^[a-z0-9_-]+$/.test(row.family)
+          ? { family: row.family }
+          : {}),
+        ...(row.featured === true ? { featured: true as const } : {}),
+        ...(label(row.sourceOrg, 96) &&
+        /^[a-z0-9][a-z0-9._-]*$/.test(row.sourceOrg)
+          ? { sourceOrg: row.sourceOrg }
+          : {}),
+        ...(count(row.quality) ? { quality: row.quality } : {}),
+        ...(count(row.decodeTokS) ? { decodeTokS: row.decodeTokS } : {}),
+        downloadBytes: row.downloadBytes,
+        memoryBytes: row.memoryBytes,
+        fits: row.fits,
+        ...(count(row.needsMemoryBytes)
+          ? { needsMemoryBytes: row.needsMemoryBytes }
+          : {}),
+        ...(row.tooLarge === true ? { tooLarge: true as const } : {}),
+        ...(row.recommended === true ? { recommended: true as const } : {}),
+        ...(row.role === "smartest" || row.role === "fastest"
+          ? { role: row.role }
+          : {}),
+      },
+    ];
+  });
+}
 
 export interface SetCookie {
   readonly name: string;
@@ -6239,6 +6754,92 @@ export const signInWithPassword = async (
     .filter((cookie) => cookie !== undefined);
   if (!cookies.length) throw new Error("Signing in to Linger failed");
   for (const cookie of cookies) await setCookie(cookie);
+};
+
+// A password change TeamHub refused, with what the person can do about it.
+export class PasswordChangeError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "PasswordChangeError";
+    this.status = status;
+  }
+}
+
+// Changes the owner's password on the installed server: once the server
+// proved it is this installation's TeamHub, a sign-in with the current
+// password opens a session of its own (the app's web session is left
+// alone), that session changes the password (POST /v0/account/password,
+// which revokes every other session) and then logs out. Both passwords go
+// only to TeamHub's own loopback port.
+export const changeOwnerPassword = async (
+  server: LocalServerIdentity,
+  email: string,
+  current: string,
+  next: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> => {
+  await proveLocalServer(server, fetcher);
+  const post = (route: string, body?: unknown, cookie?: string) =>
+    fetcher(new URL(route, server.teamhub), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        origin: server.origin,
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(cookie ? { cookie } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+  const login = await post("/v0/auth/login", {
+    identifier: email,
+    password: current,
+  });
+  await login.body?.cancel();
+  if (!login.ok) throw new SignInRejectedError(login.status);
+  const cookie = login.headers
+    .getSetCookie()
+    .flatMap((header) => {
+      const entry = parseSetCookie(header);
+      return entry?.value ? [`${entry.name}=${entry.value}`] : [];
+    })
+    .join("; ");
+  if (!cookie) throw new Error("Signing in to Linger failed");
+  try {
+    const answer = await post(
+      "/v0/account/password",
+      { current_password: current, new_password: next },
+      cookie,
+    );
+    if (answer.status === 204) return;
+    let code: unknown;
+    try {
+      code = ((await answer.json()) as { error?: { code?: unknown } })?.error
+        ?.code;
+    } catch {
+      code = undefined;
+    }
+    throw new PasswordChangeError(
+      answer.status,
+      answer.status === 400 && code === "INVALID_CURRENT_PASSWORD"
+        ? "The saved password no longer works. Log in with your email and password."
+        : answer.status === 400
+          ? "Use 8–256 characters without control characters."
+          : answer.status === 429
+            ? "Too many password changes. Try again in a few minutes."
+            : answer.status === 401
+              ? "The saved password no longer works. Log in with your email and password."
+              : `Couldn't change the password (${answer.status}).`,
+    );
+  } finally {
+    // The session opened for the change is not kept.
+    await post("/v0/auth/logout", undefined, cookie)
+      .then((response) => response.body?.cancel())
+      .catch(() => undefined);
+  }
 };
 
 // Release assets redirect to a CDN; the digest, not the host, is what is

@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isInkling2MiniModelId } from "@linger/service-kit/featured-models";
 import { minNvidiaDriverForCuda } from "@linger/service-kit/nvidia-driver";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,13 +10,14 @@ import type { Language } from "../i18n/language.js";
 import zhCN from "../i18n/locales/zh-CN.json" with { type: "json" };
 import { localizePage } from "../i18n/page.js";
 import {
-  INKLING_2_MINI_ANNOUNCEMENT_URL,
   NVIDIA_DRIVER_DOWNLOAD_URL,
   NVIDIA_DRIVER_GUIDE_URL,
   type SetupCommand,
   type SetupLocalAccount,
   type SetupLocalModelsCheck,
+  type SetupModelOption,
   type SetupReason,
+  type SetupRuntimeRow,
   type SetupState,
 } from "../shared/setup.js";
 
@@ -70,6 +70,8 @@ const openPage = async (
   initial: SetupState = state("installing"),
   step = "installing",
   language: Language = "en",
+  // How long the welcome's intro plays; none unless a test watches it.
+  introMs = 0,
 ) => {
   stopPage();
   const intervals: ReturnType<typeof setInterval>[] = [];
@@ -88,15 +90,18 @@ const openPage = async (
   const run = vi.fn(async (command: SetupCommand) => {
     if (command.op === "local.account.show")
       current = state("ready", {
-        email: "owner@linger.local",
+        email: "admin@gmail.com",
         ...(command.on ? { password: PASSWORD } : {}),
       });
     return current;
   });
+  // jsdom has no layout, so it has no scrollIntoView; a failed install
+  // reveals its actions with it on the next frame.
+  Element.prototype.scrollIntoView ??= () => {};
   Object.assign(window, {
     matchMedia: () => ({ matches: true }),
     lingerSetup: {
-      featuredAnnouncementUrl: INKLING_2_MINI_ANNOUNCEMENT_URL,
+      introMs,
       nvidiaDriverDownloadUrl: NVIDIA_DRIVER_DOWNLOAD_URL,
       nvidiaDriverGuideUrl: NVIDIA_DRIVER_GUIDE_URL,
       minDriverForCuda: minNvidiaDriverForCuda,
@@ -136,29 +141,37 @@ const $ = (id: string) => document.getElementById(id)!;
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  for (const key of Object.keys(document.body.dataset))
+    delete document.body.dataset[key];
 });
 
 describe("setup page finish screen", () => {
   it("shows the account email with the password masked", async () => {
     const { push } = await openPage();
-    push(state("ready", { email: "owner@linger.local" }));
+    push(state("ready", { email: "admin@gmail.com" }));
     expect(
       document.querySelector('section[data-step="ready"].active'),
     ).not.toBeNull();
+    // Folded away until asked for.
     expect($("account").hidden).toBe(false);
-    expect($("account-email").textContent).toBe("owner@linger.local");
+    expect($("account-body").hidden).toBe(true);
+    expect($("account-toggle").getAttribute("aria-expanded")).toBe("false");
+    expect($("account-toggle").textContent?.trim()).toBe("Sign-in details");
+    $("account-toggle").click();
+    expect($("account-body").hidden).toBe(false);
+    expect($("account-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect($("account-email").textContent).toBe("admin@gmail.com");
     expect($("account-password").textContent).toBe("•".repeat(12));
     expect($("account").textContent).not.toContain(PASSWORD);
     expect($("account-show").textContent).toBe("Show");
     expect($("account-copy").textContent).toBe("Copy");
-    expect($("account-reveal").textContent?.trim()).toBe(
-      "Open account file location",
-    );
+    expect(document.getElementById("account-reveal")).toBeNull();
   });
 
   it("shows the password only after Show and hides it again", async () => {
     const { push, run } = await openPage();
-    push(state("ready", { email: "owner@linger.local" }));
+    push(state("ready", { email: "admin@gmail.com" }));
+    $("account-toggle").click();
     $("account-show").click();
     await vi.waitFor(() =>
       expect($("account-password").textContent).toBe(PASSWORD),
@@ -175,18 +188,47 @@ describe("setup page finish screen", () => {
     });
   });
 
-  it("asks the main process to copy the password and reveal the file", async () => {
+  it("folds the details away again with the password hidden", async () => {
     const { push, run } = await openPage();
-    push(state("ready", { email: "owner@linger.local" }));
+    push(state("ready", { email: "admin@gmail.com" }));
+    $("account-toggle").click();
+    $("account-show").click();
+    await vi.waitFor(() =>
+      expect($("account-password").textContent).toBe(PASSWORD),
+    );
+    $("account-toggle").click();
+    expect($("account-body").hidden).toBe(true);
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenLastCalledWith({
+        op: "local.account.show",
+        on: false,
+      }),
+    );
+    $("account-toggle").click();
+    expect($("account-password").textContent).toBe("•".repeat(12));
+  });
+
+  it("asks the main process to copy the password and the email", async () => {
+    const { push, run } = await openPage();
+    push(state("ready", { email: "admin@gmail.com" }));
+    $("account-toggle").click();
     $("account-copy").click();
     await vi.waitFor(() =>
       expect($("account-copy").textContent).toBe("Copied"),
     );
-    expect(run).toHaveBeenCalledWith({ op: "local.account.copy" });
-    $("account-reveal").click();
+    expect(run).toHaveBeenCalledWith({
+      op: "local.account.copy",
+      what: "password",
+    });
+    $("account-copy-email").click();
     await vi.waitFor(() =>
-      expect(run).toHaveBeenCalledWith({ op: "local.account.reveal" }),
+      expect($("account-copy-email").textContent).toBe("Copied"),
     );
+    expect(run).toHaveBeenCalledWith({
+      op: "local.account.copy",
+      what: "email",
+    });
+    expect(document.getElementById("account-reveal")).toBeNull();
   });
 
   it("says why the account cannot be shown", async () => {
@@ -247,85 +289,448 @@ const held: SetupLocalModelsCheck = {
   reasons: [reason({ code: "free-memory-required" })],
   recommendation: "codex",
 };
-const welcome = (localModels: SetupLocalModelsCheck): SetupState => {
+const welcome = (
+  localModels: SetupLocalModelsCheck,
+  localServer: Partial<SetupState["localServer"]> = {},
+): SetupState => {
   const base = state("idle");
-  return { ...base, localServer: { ...base.localServer, localModels } };
+  return {
+    ...base,
+    localServer: { ...base.localServer, localModels, ...localServer },
+  };
 };
 const installed = (run: ReturnType<typeof vi.fn>) =>
   run.mock.calls
     .map(([command]) => command as SetupCommand)
     .filter((command) => command.op === "local.start");
+// What the computer has of each subscription runtime.
+const row = (
+  runtime: SetupRuntimeRow["runtime"],
+  fields: Partial<SetupRuntimeRow> = {},
+): SetupRuntimeRow => ({
+  runtime,
+  installed: false,
+  signedIn: false,
+  state: "idle",
+  ...fields,
+});
+const rows = (
+  claude: Partial<SetupRuntimeRow> = {},
+  codex: Partial<SetupRuntimeRow> = {},
+  pi: Partial<SetupRuntimeRow> = {},
+) => [row("claude", claude), row("codex", codex), row("pi", pi)];
+const card = (value: string) =>
+  document.querySelector<HTMLButtonElement>(
+    `.source-card[data-value="${value}"]`,
+  )!;
+const runtimeRow = (runtime: string) =>
+  document.querySelector<HTMLElement>(
+    `.choice.runtime[data-runtime="${runtime}"]`,
+  )!;
+const inRow = (runtime: string, selector: string) =>
+  runtimeRow(runtime).querySelector<HTMLElement>(selector)!;
+const stage = () =>
+  document.querySelector<HTMLElement>('section[data-step="welcome"]')!.dataset
+    .stage;
+// Picks a source on step 1 and goes on to its settings.
+const open = (value: string) => {
+  card(value).click();
+  $("source-continue").click();
+};
+const button = (id: string) => $(id) as HTMLButtonElement;
 
-describe("setup page Quick Install recommendation", () => {
-  it("installs the local model with Pi when the localmodels tool recommends it", async () => {
-    const { run } = await openPage(welcome(capable), "welcome");
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Local model + Pi",
+describe("setup page two-step welcome", () => {
+  it("names Claude Code and Codex with their vendors' marks", async () => {
+    await openPage(welcome({ state: "checking" }), "welcome");
+    expect(inRow("claude", ".tile svg.brand path").getAttribute("fill")).toBe(
+      "#D97757",
     );
+    expect(inRow("codex", ".tile img.brand").getAttribute("src")).toBe(
+      "codex.png",
+    );
+  });
+
+  it("keeps body unready until the first render so scene and topbar never flash first", async () => {
+    stopPage();
+    expect(rawPage).toMatch(
+      /body:not\(\[data-ready\]\)\s*\{\s*background:\s*#fbfbf9;/,
+    );
+    expect(rawPage).toMatch(
+      /body:not\(\[data-ready\]\)\s*\.scene,\s*body:not\(\[data-ready\]\)\s*\.topbar\s*\{\s*display:\s*none;/,
+    );
+    const page = localizePage(rawPage, messagesRuntime, setupMessages, "en");
+    const [, body] = /<body[^>]*>([\s\S]*)<\/body>/.exec(page)!;
+    const [, script] = /<script>([\s\S]*)<\/script>/.exec(body!)!;
+    document.body.innerHTML = body!.replace(/<script>[\s\S]*<\/script>/, "");
+    let resolveState!: (next: SetupState) => void;
+    let listener: ((next: SetupState) => void) | undefined;
+    Object.assign(window, {
+      matchMedia: () => ({ matches: true }),
+      lingerSetup: {
+        introMs: 80,
+        nvidiaDriverDownloadUrl: NVIDIA_DRIVER_DOWNLOAD_URL,
+        nvidiaDriverGuideUrl: NVIDIA_DRIVER_GUIDE_URL,
+        minDriverForCuda: minNvidiaDriverForCuda,
+        getState: () =>
+          new Promise<SetupState>((resolve) => {
+            resolveState = resolve;
+          }),
+        onState: (callback: (next: SetupState) => void) => {
+          listener = callback;
+          return () => {};
+        },
+        run: vi.fn(async () => welcome({ state: "checking" })),
+      },
+    });
+    const intervals: ReturnType<typeof setInterval>[] = [];
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    stopPage = () => {
+      intervals.forEach(clearInterval);
+      timeouts.forEach(clearTimeout);
+    };
+    new Function("setInterval", "setTimeout", script!)(
+      (...args: Parameters<typeof setInterval>) => {
+        const id = setInterval(...args);
+        intervals.push(id);
+        return id;
+      },
+      (...args: Parameters<typeof setTimeout>) => {
+        const id = setTimeout(...args);
+        timeouts.push(id);
+        return id;
+      },
+    );
+    expect(document.body.dataset.ready).toBeUndefined();
+    expect(document.body.dataset.look).toBeUndefined();
+
+    resolveState({ ...welcome({ state: "checking" }), windowShown: false });
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('section[data-step="welcome"].active'),
+      ).not.toBeNull(),
+    );
+    expect(document.body.dataset.ready).toBe("true");
+    expect(document.body.dataset.look).toBe("wizard");
+    expect(document.body.dataset.chrome).toBe("off");
+
+    // Non-wizard steps keep data-ready="true" without data-look="wizard" so
+    // scene and topbar display normally.
+    document.querySelector<HTMLElement>('[data-go="server"]')?.click();
+    listener!({
+      ...welcome({ state: "checking" }),
+      signedIn: true,
+      enrolled: false,
+    });
+    expect(document.body.dataset.ready).toBe("true");
+    expect(document.body.dataset.look).toBeUndefined();
+  });
+
+  it("holds the welcome intro until windowShown becomes true, then starts INTRO_MS and hands off", async () => {
+    expect(rawPage).toMatch(
+      /\.intro\[data-intro="waiting"\]\s*\{\s*opacity:\s*0;/,
+    );
+    const { push } = await openPage(
+      { ...welcome({ state: "checking" }), windowShown: false },
+      "welcome",
+      "en",
+      80,
+    );
+    expect(stage()).toBe("intro");
+    expect($("welcome-checking").hidden).toBe(false);
+    expect($("welcome-checking").dataset.intro).toBe("waiting");
+    expect($("intro-title").textContent).toBe("Welcome to Linger");
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    expect(stage()).toBe("intro");
+    expect($("welcome-checking").dataset.intro).toBe("waiting");
+    push({ ...welcome({ state: "checking" }), windowShown: true });
+    expect(stage()).toBe("intro");
+    expect($("welcome-checking").dataset.intro).toBe("playing");
+    await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 2000 });
+    expect($("welcome-checking").dataset.intro).toBeUndefined();
+  });
+
+  it("holds the welcome intro while hidden and starts once document visibility becomes visible", async () => {
+    const original = Object.getOwnPropertyDescriptor(
+      document,
+      "visibilityState",
+    );
+    let visibility: DocumentVisibilityState = "hidden";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      await openPage(
+        { ...welcome({ state: "checking" }), windowShown: true },
+        "welcome",
+        "en",
+        80,
+      );
+      expect(stage()).toBe("intro");
+      await new Promise((resolve) => setTimeout(resolve, 140));
+      expect(stage()).toBe("intro");
+      visibility = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(stage()).toBe("intro");
+      await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 2000 });
+    } finally {
+      if (original)
+        Object.defineProperty(document, "visibilityState", original);
+      else delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+
+  it("plays the welcome, then offers the three sources while the check still runs", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+      "en",
+      // Long enough to look at the intro on a busy machine.
+      1500,
+    );
+    expect(stage()).toBe("intro");
+    // The orb and a welcome: no words about the check.
+    expect($("welcome-checking").hidden).toBe(false);
+    expect($("intro-title").textContent).toBe("Welcome to Linger");
+    const shown = () =>
+      $("welcome-checking")
+        .textContent!.replace($("intro-title").textContent!, "")
+        .trim();
+    expect(shown()).toBe("");
+    expect(document.getElementById("checking-skip")).toBeNull();
+    expect(document.body.textContent).not.toContain("Choose now");
+    expect($("welcome-checking").getAttribute("aria-label")).toBe(
+      "Getting ready",
+    );
+    expect($("stage-bar").hidden).toBe(true);
+    expect($("local-setup").hidden).toBe(true);
+    expect($("step-label").textContent).toBe("");
+    // The runtime rows are read once, for step 2.
+    expect(run).toHaveBeenCalledWith({ op: "local.runtimes.check" });
+    // The intro hands off by itself; the check is still running.
+    await vi.waitFor(() => expect(stage()).toBe("choose"), { timeout: 5000 });
+    expect($("step-label").textContent).toBe("Step 1 of 2");
+    // No step marks in the corner; the step is read out, not drawn.
+    expect(document.querySelector("#pips, .pips")).toBeNull();
+    expect($("welcome-checking").hidden).toBe(true);
+    expect($("source-grid").hidden).toBe(false);
+    // The local model can be picked and says, quietly, that it is checked.
+    expect(card("local").disabled).toBe(false);
+    expect(card("local").dataset.pending).toBe("true");
+    expect($("source-local-about").textContent).toBe("Checking this computer…");
+    expect(card("byok").disabled).toBe(false);
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    expect($("plan-why").hidden).toBe(true);
+    expect(card("local").querySelector(".spinner")).toBeNull();
+    // The first run downloads the localmodels tool; no word of it.
+    push(
+      welcome({
+        state: "checking",
+        download: { completed: 12 * 1024 ** 2, total: 69 * 1024 ** 2 },
+      }),
+    );
+    expect(document.body.textContent).not.toContain("setup tools");
+    expect($("source-local-about").textContent).toBe("Checking this computer…");
+    // The answer settles the advice once, onto the local model.
+    push(welcome(capable));
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").dataset.pending).toBe("false");
+    expect(card("local").tabIndex).toBe(0);
+    expect(card("subscription").tabIndex).toBe(-1);
+    // A title and one short line per card; no badges, no subtitle.
+    expect(document.querySelector(".source-rec, .source-pill")).toBeNull();
+    expect(
+      document.querySelector(
+        '[data-step="welcome"] :is(.eyebrow:not(.behind), .lead)',
+      ),
+    ).toBeNull();
+    expect($("source-local-about").textContent).toBe("On this computer");
+    expect($("source-byok-about").textContent).toBe("Your API key");
+    expect($("source-sub-about").textContent).toBe("ChatGPT or Claude plan");
+    expect($("source-continue").hidden).toBe(false);
+    expect($("local-install").hidden).toBe(true);
+    expect($("plan-line").textContent).toBe("");
+    // Step 1 offers no way off to a team server.
+    expect(document.getElementById("team")).toBeNull();
+    expect(
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          '[data-step="welcome"] [data-go="server"]',
+        ),
+      ].filter((el) => !el.closest("[hidden]")),
+    ).toEqual([]);
+    expect(document.body.textContent).not.toContain("team server");
+    // Settled: a later sign-in does not move it again.
+    push(
+      welcome(capable, {
+        runtimes: rows({}, { installed: true, signedIn: true }),
+      }),
+    );
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
+    expect(installed(run)).toEqual([]);
+  });
+
+  it("never moves a card the person picked when the check answers", async () => {
+    const { push } = await openPage(welcome({ state: "checking" }), "welcome");
+    expect(stage()).toBe("choose");
+    card("byok").click();
+    push(welcome(capable));
+    expect(card("byok").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("goes on to the local model while it is checked, and fills its card in", async () => {
+    const { run, push } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
+    );
+    open("local");
+    expect(stage()).toBe("settings");
+    expect($("welcome-title").textContent).toBe("Local model");
+    // The card's outline, quietly shimmering; nothing to change or install.
+    expect($("local-row").dataset.pending).toBe("true");
+    expect($("local-row").getAttribute("aria-busy")).toBe("true");
+    expect($("local-model-name").textContent).toBe("");
+    expect($("local-model-sub").textContent).toBe("Checking this computer…");
+    expect($("local-model-why-row").hidden).toBe(true);
+    expect(button("model-change").disabled).toBe(true);
+    expect(button("local-install").disabled).toBe(true);
+    push(welcome(capable));
+    expect($("local-row").dataset.pending).toBe("false");
+    expect($("local-model-name").textContent).toBe("qwen3-8b");
+    expect(button("local-install").disabled).toBe(false);
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "local" }),
+    );
+  });
+
+  it("keeps Continue off a local model the check turned down", async () => {
+    const { push } = await openPage(welcome({ state: "checking" }), "welcome");
+    card("local").click();
+    expect(button("source-continue").disabled).toBe(false);
+    push(welcome(small));
+    // The pick stays where the person put it, and says why it can't go on.
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").disabled).toBe(true);
+    expect($("source-local-about").textContent).toBe("Not available here");
     expect($("plan-why").hidden).toBe(false);
-    expect($("plan-why").textContent).toBe(
-      "qwen3-8b · fits RTX 4090 · 64 GB memory · 6 GB download",
+    expect(button("source-continue").disabled).toBe(true);
+    card("subscription").click();
+    expect(button("source-continue").disabled).toBe(false);
+  });
+
+  it("says briefly when the check failed, and the other sources still work", async () => {
+    const { push, run } = await openPage(
+      welcome({ state: "checking" }),
+      "welcome",
     );
-    expect($("local-install-label").textContent).toBe("Quick Install");
+    push(
+      welcome(
+        { state: "unavailable" },
+        { runtimes: rows({}, { installed: true, signedIn: true }) },
+      ),
+    );
+    expect(card("local").disabled).toBe(true);
+    expect(card("local").dataset.pending).toBe("false");
+    expect($("plan-why").textContent).toBe("Couldn't check this computer.");
+    expect(card("byok").disabled).toBe(false);
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    open("subscription");
     $("local-install").click();
     await vi.waitFor(() =>
-      expect(installed(run)).toEqual([{ op: "local.start", runtime: "local" }]),
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
     );
   });
 
-  it("installs the tool's runtime and says why there is no local model", async () => {
-    const { run } = await openPage(welcome(small), "welcome");
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Codex",
+  it("lets BYOK and a subscription go on while the check runs", async () => {
+    const { run } = await openPage(
+      welcome(
+        { state: "checking" },
+        { runtimes: rows({}, { installed: true, signedIn: true }) },
+      ),
+      "welcome",
     );
-    expect($("plan-why").textContent).toBe(
-      "No local model fits this computer.",
-    );
-    expect($("local-row").hidden).toBe(true);
+    open("subscription");
+    expect(stage()).toBe("settings");
+    expect(button("local-install").disabled).toBe(false);
     $("local-install").click();
     await vi.waitFor(() =>
-      expect(installed(run)).toEqual([{ op: "local.start", runtime: "codex" }]),
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
     );
+    expect(installed(run)[0]).not.toHaveProperty("model");
   });
 
-  it("holds a local model that needs free memory and checks again on request", async () => {
-    const { run } = await openPage(welcome(held), "welcome");
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Codex",
-    );
-    expect($("plan-why").textContent).toBe(
-      "Local model on hold: Not enough free memory. Close other apps.",
-    );
-    expect($("local-recheck").hidden).toBe(false);
-    $("local-customize").click();
-    // Subscription is active by default when the local model is on hold;
-    // selecting Local model reveals the held card and disables Install.
-    expect($("subscription-row").hidden).toBe(false);
-    expect($("local-row").hidden).toBe(true);
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="local"]',
-      )!
-      .click();
+  it("installs the local model with Pi from its settings", async () => {
+    const { run } = await openPage(welcome(capable), "welcome");
+    $("source-continue").click();
+    expect(stage()).toBe("settings");
+    expect($("step-label").textContent).toBe("Step 2 of 2");
+    expect($("welcome-title").textContent).toBe("Local model");
     expect($("local-row").hidden).toBe(false);
     expect($("subscription-row").hidden).toBe(true);
     expect($("byok-row").hidden).toBe(true);
     expect($("local-model-name").textContent).toBe("qwen3-8b");
-    expect($("local-sub").textContent).toBe(
-      "On hold: close other programs, then Check again.",
+    expect($("plan-line").textContent).toBe("");
+    expect(button("local-install").disabled).toBe(false);
+    $("local-install").click();
+    await vi.waitFor(() => expect(installed(run)).toHaveLength(1));
+    const [command] = installed(run);
+    expect(command).toMatchObject({ op: "local.start", runtime: "local" });
+    // The installation makes its own sign-in account, as before.
+    expect(command).not.toHaveProperty("account");
+    expect(command).not.toHaveProperty("keys");
+  });
+
+  it("goes back to the sources with Back or Escape, and on with Enter", async () => {
+    await openPage(welcome(capable), "welcome");
+    open("subscription");
+    expect(stage()).toBe("settings");
+    expect($("welcome-title").textContent).toBe("Subscription");
+    $("source-back").click();
+    expect(stage()).toBe("choose");
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    card("subscription").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
     );
-    expect(($("local-model") as HTMLButtonElement).disabled).toBe(true);
-    expect($("local-model").getAttribute("aria-checked")).toBe("false");
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
+    card("local").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    expect(stage()).toBe("settings");
+    expect($("welcome-title").textContent).toBe("Local model");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(stage()).toBe("choose");
+  });
+
+  it("picks the subscription when a runtime is signed in already", async () => {
+    await openPage(
+      welcome(capable, {
+        runtimes: rows({}, { installed: true, signedIn: true }),
+      }),
+      "welcome",
+    );
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    expect($("source-sub-about").textContent).toBe("ChatGPT or Claude plan");
+  });
+
+  it("holds a local model that needs free memory and checks again on request", async () => {
+    const { run } = await openPage(welcome(held), "welcome");
+    expect(card("local").disabled).toBe(true);
+    expect($("source-local-about").textContent).toBe("On hold");
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    expect($("plan-why").textContent).toBe(
+      "On hold: Not enough free memory. Close other apps.",
+    );
+    expect($("local-recheck").hidden).toBe(false);
     $("local-recheck").click();
     await vi.waitFor(() =>
       expect(run).toHaveBeenCalledWith({ op: "local.recheck" }),
     );
-    $("local-customize").click();
-    $("local-install").click();
-    await vi.waitFor(() =>
-      expect(installed(run)).toEqual([{ op: "local.start", runtime: "codex" }]),
-    );
+    // The held reason stays on step 1.
+    $("source-continue").click();
+    expect($("plan-why").hidden).toBe(true);
+    expect($("local-recheck").hidden).toBe(true);
   });
 
   it("says how much memory a held local model needs and how much is free", async () => {
@@ -339,14 +744,6 @@ describe("setup page Quick Install recommendation", () => {
       },
       reasons,
     });
-    const customizeLocal = () => {
-      $("local-customize").click();
-      document
-        .querySelector<HTMLButtonElement>(
-          '[data-plan="source"] [data-value="local"]',
-        )!
-        .click();
-    };
     // The GPU and the RAM each name what is free and what the install needs.
     await openPage(
       welcome(
@@ -366,43 +763,22 @@ describe("setup page Quick Install recommendation", () => {
       ),
       "welcome",
     );
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Codex",
-    );
     expect($("plan-why").textContent).toBe(
-      "Local model on hold: Other programs are using GPU 1's memory (3.0 GB free, 9.0 GB needed). Close apps using the GPU. Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
+      "On hold: Other programs are using GPU 1's memory (3.0 GB free, 9.0 GB needed). Close apps using the GPU. Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
     );
-    expect($("local-recheck").hidden).toBe(false);
-    customizeLocal();
-    expect($("local-sub").textContent).toBe(
-      "On hold: GPU 1 has 3.0 GB free, needs 9.0 GB",
-    );
+    expect($("source-local-about").textContent).toBe("On hold");
     expect(document.body.textContent).not.toContain(TOOL_WORDS);
-    // A tool that counts only the plan's memory: the RAM counts from it.
-    await openPage(
-      welcome(withCounts([reason({ code: "free-memory-required" })])),
-      "welcome",
-    );
-    expect($("plan-why").textContent).toBe(
-      "Local model on hold: Not enough free memory (2.7 GB free, 12.7 GB needed). Close other apps.",
-    );
-    customizeLocal();
-    expect($("local-sub").textContent).toBe(
-      "On hold: 2.7 GB of memory free, needs 12.7 GB",
-    );
   });
 
   it("holds local models without a plan for gateway-port-in-use and harness-unavailable and offers Check again", async () => {
-    for (const [code, expectWhy, expectSub] of [
+    for (const [code, expectWhy] of [
       [
         "gateway-port-in-use",
         "Another program is using the local model gateway port.",
-        "On hold: free the gateway port, then Check again.",
       ],
       [
         "harness-unavailable",
         "The Pi runtime required for local models isn't ready right now. Check your connection or permissions.",
-        "On hold: prepare the Pi runtime, then Check again.",
       ],
     ] as const) {
       const blockedWithoutPlan: SetupLocalModelsCheck = {
@@ -415,22 +791,9 @@ describe("setup page Quick Install recommendation", () => {
         recommendation: "codex",
       };
       const { run } = await openPage(welcome(blockedWithoutPlan), "welcome");
-      expect($("plan-why").textContent).toBe(
-        `Local model on hold: ${expectWhy}`,
-      );
-      expect($("plan-why").textContent).not.toContain("memory is free");
-      expect($("local-recheck").hidden).toBe(false);
-      $("local-customize").click();
-      document
-        .querySelector<HTMLButtonElement>(
-          '[data-plan="source"] [data-value="local"]',
-        )!
-        .click();
-      expect($("local-model").hidden).toBe(false);
-      expect($("local-model-name").textContent).toBe("Local model on hold");
-      expect($("local-model-needs").textContent).toBe(expectWhy);
-      expect($("local-sub").textContent).toBe(expectSub);
-      expect(($("local-model") as HTMLButtonElement).disabled).toBe(true);
+      expect($("plan-why").textContent).toBe(`On hold: ${expectWhy}`);
+      expect($("source-local-about").textContent).toBe("On hold");
+      expect(card("local").disabled).toBe(true);
       $("local-recheck").click();
       await vi.waitFor(() =>
         expect(run).toHaveBeenCalledWith({ op: "local.recheck" }),
@@ -439,7 +802,7 @@ describe("setup page Quick Install recommendation", () => {
     }
   });
 
-  it("holds local models without a plan for blocked-now CUDA driver blockers without duplicating Check again", async () => {
+  it("holds local models for blocked-now CUDA driver blockers without duplicating Check again", async () => {
     const blockedCuda: SetupLocalModelsCheck = {
       state: "checked",
       eligible: false,
@@ -458,11 +821,12 @@ describe("setup page Quick Install recommendation", () => {
     };
     const { run } = await openPage(welcome(blockedCuda), "welcome");
     expect($("plan-why").textContent).toBe(
-      "Local model on hold: Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
+      "On hold: Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
     );
     expect(
       $("plan-why").textContent?.match(/choose Check again/g),
     ).toHaveLength(1);
+    expect($("source-local-about").textContent).toBe("On hold");
     expect($("local-recheck").hidden).toBe(false);
     expect($("local-driver-action").hidden).toBe(false);
     expect($("local-driver-action").textContent).toBe("Download NVIDIA driver");
@@ -481,21 +845,6 @@ describe("setup page Quick Install recommendation", () => {
         url: NVIDIA_DRIVER_GUIDE_URL,
       }),
     );
-    $("local-customize").click();
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="local"]',
-      )!
-      .click();
-    expect($("local-model").hidden).toBe(false);
-    expect($("local-model-name").textContent).toBe("Local model on hold");
-    expect($("local-sub").textContent).toBe(
-      "On hold: update your NVIDIA driver, then Check again.",
-    );
-    expect($("local-model-needs").textContent).toBe(
-      "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
-    );
-    expect(($("local-model") as HTMLButtonElement).disabled).toBe(true);
     $("local-recheck").click();
     await vi.waitFor(() =>
       expect(run).toHaveBeenCalledWith({ op: "local.recheck" }),
@@ -507,11 +856,11 @@ describe("setup page Quick Install recommendation", () => {
     const cases: [SetupLocalModelsCheck, string][] = [
       [
         { ...held, reasons: [reason({ code: "gpu-sharing-required" })] },
-        "Local model on hold: Another app is using the GPU.",
+        "On hold: Another app is using the GPU.",
       ],
       [
         { ...held, reasons: [reason({ code: "plan-unavailable" })] },
-        "Local model on hold: Another app is using the memory it needs. Quit it.",
+        "On hold: Another app is using the memory it needs. Quit it.",
       ],
       [
         { ...small, reasons: [reason({ code: "gpu-ownership-unknown" })] },
@@ -608,70 +957,16 @@ describe("setup page Quick Install recommendation", () => {
   });
 
   it("shows the Local model card disabled with the reason when none can run", async () => {
-    await openPage(
-      welcome({
-        ...small,
-        reasons: [reason({ code: "gpu-ownership-unknown" })],
-      }),
-      "welcome",
-    );
-    $("local-customize").click();
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="local"]',
-      )!
-      .click();
-    expect($("local-row").hidden).toBe(false);
-    expect($("local-model").hidden).toBe(false);
-    expect(($("local-model") as HTMLButtonElement).disabled).toBe(true);
-    expect($("local-model").getAttribute("aria-checked")).toBe("false");
-    expect($("local-model-name").textContent).toBe(
-      "Not available on this computer",
-    );
-    expect($("local-model-needs").textContent).toBe(
-      "Couldn't check which apps are using the GPU. Close GPU apps.",
-    );
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    expect(document.body.textContent).not.toContain(TOOL_WORDS);
-  });
-
-  it("explains an outdated NVIDIA driver and lets the user check again", async () => {
-    const { run } = await openPage(
-      welcome({
-        ...small,
-        reasons: [
-          reason({
-            code: "cuda-driver-update-required",
-            detectedCudaVersion: "12.1",
-            requiredCudaVersion: "12.4",
-            driverVersion: "535.98",
-          }),
-        ],
-      }),
-      "welcome",
-    );
+    await openPage(welcome(small), "welcome");
+    expect(card("local").disabled).toBe(true);
+    expect($("source-local-about").textContent).toBe("Not available here");
     expect($("plan-why").textContent).toBe(
-      "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
+      "No local model fits this computer.",
     );
-    expect($("local-recheck").hidden).toBe(false);
-    $("local-customize").click();
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="local"]',
-      )!
-      .click();
-    expect($("local-model-name").textContent).toBe(
-      "Not available on this computer",
-    );
-    expect($("local-model-needs").textContent).toBe(
-      "Your NVIDIA driver supports CUDA 12.1, but local models require NVIDIA driver 550+ (CUDA 12.4). Update your NVIDIA graphics driver (no CUDA Toolkit needed), then choose Check again.",
-    );
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    $("local-recheck").click();
-    await vi.waitFor(() =>
-      expect(run).toHaveBeenCalledWith({ op: "local.recheck" }),
-    );
-    expect(document.body.textContent).not.toContain(TOOL_WORDS);
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    await openPage(welcome({ state: "unavailable" }), "welcome");
+    expect($("plan-why").textContent).toBe("Couldn't check this computer.");
+    expect(card("local").disabled).toBe(true);
   });
 
   it("offers Open NVIDIA App on Windows when detected and names the required driver branch", async () => {
@@ -704,146 +999,384 @@ describe("setup page Quick Install recommendation", () => {
     );
   });
 
-  it("says the stack's memory covers the model and its services", async () => {
+  it("keeps step 2 to the source and where it installs: no More options or app keys", async () => {
     await openPage(welcome(capable), "welcome");
-    $("local-customize").click();
-    expect($("local-model-needs").textContent).toBe(
-      "6 GB download · 8 GB disk · 12 GB memory with its services",
-    );
+    $("source-continue").click();
+    expect(document.getElementById("local-customize")).toBeNull();
+    expect(document.getElementById("local-options")).toBeNull();
+    expect(document.getElementById("key-composio")).toBeNull();
+    expect($("location-row").hidden).toBe(false);
+    expect($("location-path").textContent).toBe("~/.simplexai");
+    expect($("location-reset").hidden).toBe(true);
+    expect(document.body.textContent).not.toContain("More options");
+    expect(document.body.textContent).not.toContain("Private to this computer");
   });
 
-  it("lets the installer pick when this computer could not be checked", async () => {
+  it("holds Install on a location without room and offers the defaults", async () => {
+    const base = welcome(capable);
     const { run } = await openPage(
-      welcome({ state: "unavailable" }),
+      {
+        ...base,
+        localServer: {
+          ...base.localServer,
+          location: {
+            path: "D:\\Linger",
+            custom: true,
+            error: "Not enough free space on this drive.",
+          },
+        },
+      },
       "welcome",
     );
-    expect($("plan-summary").textContent).toBe("Best Harness");
-    expect($("plan-why").textContent).toBe(
-      "Couldn't check this computer for a local model.",
+    $("source-continue").click();
+    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    // The row says what stops Install.
+    expect($("location-row").dataset.warn).toBe("true");
+    expect($("location-change").hidden).toBe(false);
+    expect($("location-sub").textContent).toBe(
+      "Not enough free space on this drive.",
     );
-    $("local-install").click();
+    expect($("location-reset").hidden).toBe(false);
+    $("location-reset").click();
     await vi.waitFor(() =>
-      expect(installed(run)).toEqual([
-        { op: "local.start", runtime: "recommended" },
-      ]),
+      expect(run).toHaveBeenCalledWith({ op: "local.location.reset" }),
     );
   });
+});
 
-  it("says what Quick Install waits for until the check ends", async () => {
-    const { push } = await openPage(welcome({ state: "checking" }), "welcome");
-    const button = $("local-install") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    expect($("local-install-label").textContent).toBe(
-      "Checking this computer…",
+describe("setup page subscription runtimes", () => {
+  it("enables Install only once Claude Code or Codex is signed in", async () => {
+    const { run, push } = await openPage(
+      welcome(small, { runtimes: rows({}, {}, {}) }),
+      "welcome",
     );
-    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
-    expect($("plan-summary").textContent).toBe(
-      "Finding the best setup for this computer",
-    );
-    // The first run downloads the localmodels tool before checking.
+    open("subscription");
+    // Claude Code and Codex only; Pi installs by itself when it is needed.
+    expect(
+      [...document.querySelectorAll<HTMLElement>(".choice.runtime")].map(
+        (el) => el.dataset.runtime,
+      ),
+    ).toEqual(["claude", "codex"]);
+    // A name and one status line each: no plans, versions or roles.
+    for (const runtime of ["claude", "codex"])
+      expect(inRow(runtime, "[data-runtime-sub]").textContent).toBe(
+        "Not installed",
+      );
+    expect(inRow("claude", "[data-runtime-install]").hidden).toBe(false);
+    expect(inRow("claude", "[data-runtime-signin]").hidden).toBe(true);
+    expect(button("local-install").disabled).toBe(true);
+    expect($("plan-line").textContent).toBe("Sign in to one to continue");
+    // Pi alone is not enough, and is not shown.
+    push(welcome(small, { runtimes: rows({}, {}, { installed: true }) }));
+    expect(button("local-install").disabled).toBe(true);
+    // Installed but not signed in: Sign in.
     push(
-      welcome({
-        state: "checking",
-        download: { completed: 12 * 1024 ** 2, total: 69 * 1024 ** 2 },
+      welcome(small, {
+        runtimes: rows({ installed: true, version: "2.1.0" }, {}, {}),
       }),
     );
-    expect($("local-install-label").textContent).toBe(
-      "Downloading setup tools…",
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      "Not signed in",
     );
-    expect($("plan-why").textContent).toBe("12 MB of 69 MB · 57 MB left");
-    expect($("plan-why").hidden).toBe(false);
-    push(welcome(capable));
-    expect(button.disabled).toBe(false);
-    expect(button.getAttribute("aria-busy")).toBe("false");
-    expect($("local-install-label").textContent).toBe("Quick Install");
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Local model + Pi",
+    expect(inRow("claude", "[data-runtime-signin]").hidden).toBe(false);
+    expect(button("local-install").disabled).toBe(true);
+    push(
+      welcome(small, {
+        runtimes: rows({ installed: true, signedIn: true }, {}, {}),
+      }),
+    );
+    // Signed in says so under the name; the tick only marks it.
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe("Signed in");
+    expect(inRow("claude", "[data-runtime-done]").hidden).toBe(false);
+    expect(inRow("claude", "[data-runtime-done]").textContent).toBe("");
+    expect(button("local-install").disabled).toBe(false);
+    expect($("plan-line").textContent).toBe("");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({
+        op: "local.start",
+        runtime: "subscription",
+      }),
     );
   });
 
-  it("follows the tool's pick when Auto was chosen during the check", async () => {
+  it("installs a runtime with progress and can cancel it", async () => {
     const { run, push } = await openPage(
-      welcome({ state: "checking" }),
+      welcome(small, { runtimes: rows() }),
       "welcome",
     );
-    $("local-customize").click();
-    const source = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="source"] [data-value="${value}"]`,
-      )!;
-    const option = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="runtime"] [data-value="${value}"]`,
-      )!;
-    option("recommended").click();
-    push(welcome(capable));
-    expect(source("local").getAttribute("aria-checked")).toBe("true");
-    expect($("local-row").hidden).toBe(false);
-    expect($("subscription-row").hidden).toBe(true);
-    expect($("byok-row").hidden).toBe(true);
-    expect($("local-model").getAttribute("aria-checked")).toBe("true");
-    $("local-install").click();
+    open("subscription");
+    inRow("codex", "[data-runtime-install]").click();
     await vi.waitFor(() =>
-      expect(installed(run)).toEqual([{ op: "local.start", runtime: "local" }]),
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.install",
+        runtime: "codex",
+      }),
+    );
+    push(
+      welcome(small, {
+        runtimes: rows(
+          {},
+          { state: "installing", install: { completed: 40, total: 100 } },
+        ),
+      }),
+    );
+    const progress = inRow("codex", ".runtime-progress");
+    expect(progress.hidden).toBe(false);
+    expect(progress.getAttribute("aria-valuenow")).toBe("40");
+    expect(progress.querySelector(".pct")!.textContent).toBe("40%");
+    expect(progress.getAttribute("aria-label")).toBe("Installing Codex");
+    expect(inRow("codex", "[data-runtime-install]").hidden).toBe(true);
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe("Installing");
+    // One at a time: Install waits for it.
+    expect(button("local-install").disabled).toBe(true);
+    expect($("plan-line").textContent).toBe("Waiting for Codex…");
+    inRow("codex", "[data-runtime-cancel]").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.cancel",
+        runtime: "codex",
+      }),
+    );
+    // A failed install says so and offers Try again.
+    push(
+      welcome(small, {
+        runtimes: rows({}, { failed: "install", message: "npm exited 1" }),
+      }),
+    );
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(
+      "npm exited 1",
+    );
+    expect(inRow("codex", "[data-runtime-sub]").dataset.warn).toBe("true");
+    expect(inRow("codex", "[data-runtime-install]").textContent).toBe(
+      "Try Again",
     );
   });
 
-  it("marks the recommendation under Customize and keeps model sources mutually exclusive", async () => {
-    const { run } = await openPage(welcome(capable), "welcome");
-    $("local-customize").click();
-    const source = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="source"] [data-value="${value}"]`,
-      )!;
-    const option = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="runtime"] [data-value="${value}"]`,
-      )!;
-    expect(source("local").dataset.recommended).toBe("true");
-    expect(source("local").getAttribute("aria-checked")).toBe("true");
-    expect(source("subscription").dataset.recommended).toBe("false");
-    expect($("local-row").hidden).toBe(false);
-    expect($("subscription-row").hidden).toBe(true);
-    expect($("byok-row").hidden).toBe(true);
-    expect($("local-sub").textContent).toContain(
-      "Recommended for this computer",
+  it("signs in in the browser, with the link, code and cancel at hand", async () => {
+    const { run, push } = await openPage(
+      welcome(small, {
+        runtimes: rows({ installed: true }, { installed: true }),
+      }),
+      "welcome",
     );
-    expect($("local-model").getAttribute("aria-checked")).toBe("true");
-    source("subscription").click();
-    expect($("local-row").hidden).toBe(true);
-    expect($("subscription-row").hidden).toBe(false);
-    expect($("byok-row").hidden).toBe(true);
-    option("claude").click();
-    expect($("local-install-label").textContent).toBe("Install");
-    $("local-install").click();
+    open("subscription");
+    inRow("claude", "[data-runtime-signin]").click();
     await vi.waitFor(() =>
-      expect(installed(run)).toEqual([
-        { op: "local.start", runtime: "claude" },
-      ]),
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.signin",
+        runtime: "claude",
+      }),
     );
-    $("local-customize").click();
-    expect($("local-install-label").textContent).toBe("Quick Install");
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Local model + Pi",
+    push(
+      welcome(small, {
+        runtimes: rows(
+          {
+            installed: true,
+            state: "signing_in",
+            signIn: { url: "https://claude.ai/oauth", acceptsCode: true },
+          },
+          { installed: true },
+        ),
+      }),
+    );
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      "Signing in…",
+    );
+    expect(inRow("claude", ".runtime-wait").hidden).toBe(false);
+    expect(inRow("claude", "[data-runtime-cancel]").hidden).toBe(false);
+    expect(inRow("claude", "[data-runtime-extra]").hidden).toBe(false);
+    expect(inRow("claude", "[data-runtime-paste]").hidden).toBe(false);
+    inRow("claude", "[data-runtime-open]").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.open",
+        runtime: "claude",
+      }),
+    );
+    inRow("claude", '[data-runtime-copy="url"]').click();
+    await vi.waitFor(() =>
+      expect(inRow("claude", '[data-runtime-copy="url"]').textContent).toBe(
+        "Copied",
+      ),
+    );
+    expect(run).toHaveBeenCalledWith({
+      op: "local.runtime.copy",
+      runtime: "claude",
+      what: "url",
+    });
+    const input = inRow("claude", "[data-runtime-input]") as HTMLInputElement;
+    input.value = " code-from-page ";
+    inRow("claude", "[data-runtime-paste]").dispatchEvent(
+      new Event("submit", { cancelable: true }),
+    );
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.code",
+        runtime: "claude",
+        code: "code-from-page",
+      }),
+    );
+    expect(input.value).toBe("");
+    // Codex: a device code for another device.
+    inRow("codex", "[data-runtime-signin]").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.signin",
+        runtime: "codex",
+      }),
+    );
+    // One command at a time: the next waits for this one's reply.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    push(
+      welcome(small, {
+        runtimes: rows(
+          { installed: true },
+          {
+            installed: true,
+            state: "signing_in",
+            signIn: { url: "https://auth.openai.com/codex/device" },
+          },
+        ),
+      }),
+    );
+    inRow("codex", "[data-runtime-device]").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.signin",
+        runtime: "codex",
+        device: true,
+      }),
+    );
+    push(
+      welcome(small, {
+        runtimes: rows(
+          { installed: true },
+          {
+            installed: true,
+            state: "signing_in",
+            signIn: {
+              url: "https://auth.openai.com/codex/device",
+              deviceCode: "ABCD-1234",
+            },
+          },
+        ),
+      }),
+    );
+    expect(inRow("codex", "[data-runtime-code]").hidden).toBe(false);
+    expect(inRow("codex", "[data-runtime-code-value]").textContent).toBe(
+      "ABCD-1234",
+    );
+    expect(inRow("codex", "[data-runtime-device]").hidden).toBe(true);
+    inRow("codex", "[data-runtime-cancel]").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({
+        op: "local.runtime.cancel",
+        runtime: "codex",
+      }),
     );
   });
 
+  it("maps sign-in failure reasons through localized copy and falls back to message", async () => {
+    const { push } = await openPage(
+      welcome(small, {
+        runtimes: rows(
+          {
+            installed: true,
+            failed: "signin",
+            reason: "timed_out",
+            message: "The operation was aborted due to timeout",
+          },
+          {
+            installed: true,
+            failed: "signin",
+            message: "Custom failure detail",
+          },
+        ),
+      }),
+      "welcome",
+    );
+    open("subscription");
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      setupMessages.signInTimedOut.source,
+    );
+    expect(inRow("claude", "[data-runtime-sub]").dataset.warn).toBe("true");
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(
+      "Custom failure detail",
+    );
+    push(
+      welcome(small, {
+        runtimes: rows(
+          {
+            installed: true,
+            failed: "signin",
+            reason: "ended",
+            message: "Raw ended text",
+          },
+          {
+            installed: true,
+            failed: "signin",
+            reason: "unavailable",
+            message: "Raw unavailable text",
+          },
+        ),
+      }),
+    );
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      setupMessages.signInEnded.source,
+    );
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(
+      setupMessages.signInUnavailable.source,
+    );
+  });
+
+  it("sets up both when both are signed in, Codex first", async () => {
+    const { run } = await openPage(
+      welcome(small, {
+        runtimes: rows(
+          { installed: true, signedIn: true },
+          { installed: true, signedIn: true },
+          {},
+        ),
+      }),
+      "welcome",
+    );
+    open("subscription");
+    expect(document.querySelector(".runtime-rec")).toBeNull();
+    expect($("plan-line").textContent).toBe("Codex is the default");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
+    );
+  });
+
+  it("offers no local model download beside a subscription", async () => {
+    const { run } = await openPage(
+      welcome(capable, {
+        runtimes: rows({}, { installed: true, signedIn: true }),
+      }),
+      "welcome",
+    );
+    open("subscription");
+    expect(document.getElementById("background-row")).toBeNull();
+    expect(document.getElementById("background-model")).toBeNull();
+    expect(document.body.textContent).not.toContain("Also download");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
+    );
+    expect(installed(run)[0]).not.toHaveProperty("background");
+    expect(installed(run)[0]).not.toHaveProperty("model");
+  });
+});
+
+describe("setup page BYOK", () => {
   // Types into a field as a person does.
   const type = (id: string, value: string) => {
     const input = $(id) as HTMLInputElement;
     input.value = value;
     input.dispatchEvent(new Event("input"));
   };
-  const pick = (comboId: string, value: string) => {
-    (
-      $(comboId).parentElement!.querySelector(".cb-caret") as HTMLButtonElement
-    ).click();
-    $(`${comboId}-menu`)
-      .querySelector<HTMLButtonElement>(`[data-value="${value}"]`)!
-      .click();
-  };
-  const words = (id: string) => $(id).textContent!.replace(/\s+/g, " ").trim();
   const withLocal = (
     base: SetupState,
     localServer: Partial<SetupState["localServer"]>,
@@ -852,185 +1385,172 @@ describe("setup page Quick Install recommendation", () => {
     localServer: { ...base.localServer, ...localServer },
   });
 
-  const selectProvider = (selectId: string, value: string) => {
-    const select = $(selectId) as HTMLSelectElement;
-    select.value = value;
-    select.dispatchEvent(new Event("change"));
-  };
+  // Answers Install's quiet test with this, and everything else as before.
+  const answering = (
+    run: ReturnType<typeof vi.fn>,
+    base: SetupState,
+    byokCheck: () => Promise<SetupState["localServer"]["byokCheck"]>,
+  ) =>
+    run.mockImplementation(async (command: SetupCommand) =>
+      command.op === "local.byok.check"
+        ? withLocal(base, { byokCheck: await byokCheck() })
+        : base,
+    );
+  const ops = (run: ReturnType<typeof vi.fn>) =>
+    run.mock.calls.map(([command]) => (command as SetupCommand).op);
 
-  it("defaults API Key to OpenRouter with collapsed Advanced options, supports presets, refresh, Test and secret scrubbing", async () => {
-    const { run } = await openPage(welcome(small), "welcome");
-    $("local-customize").click();
-    const byokSource = document.querySelector<HTMLButtonElement>(
-      '[data-plan="source"] [data-value="byok"]',
-    )!;
-    expect(byokSource.getAttribute("aria-describedby")).toBe("byok-tip-text");
-    expect($("byok-tip-text").textContent).toContain("OpenRouter");
-    byokSource.click();
+  it("asks only for an address, a key and a model, and tests them quietly on Install", async () => {
+    const { run } = await openPage(welcome(capable), "welcome");
+    open("byok");
+    expect($("welcome-title").textContent).toBe("BYOK");
     expect($("byok-row").hidden).toBe(false);
     expect($("local-row").hidden).toBe(true);
     expect($("subscription-row").hidden).toBe(true);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    // OpenRouter preset is selected by default and Advanced options start folded.
-    const provider = $("byok-provider") as HTMLSelectElement;
-    const advanced = $("byok-advanced") as HTMLDetailsElement;
-    const path = $("byok-path") as HTMLInputElement;
-    const endpoint = $("byok-endpoint") as HTMLInputElement;
-    expect(provider.value).toBe("openrouter");
-    expect(advanced.open).toBe(false);
-    expect(($("byok-url") as HTMLInputElement).value).toBe(
-      "https://openrouter.ai/api",
-    );
-    expect(path.value).toBe("/v1");
-    expect(endpoint.value).toBe("/chat/completions");
+    // Three fields, and no path, endpoint, model list, Test or hints.
+    expect(
+      [...$("byok-fields").querySelectorAll("input")].map((input) => input.id),
+    ).toEqual(["byok-url", "byok-key", "byok-model"]);
+    for (const id of ["byok-path", "byok-endpoint", "byok-list", "byok-test"])
+      expect(document.getElementById(id)).toBeNull();
     expect($("byok-status").hidden).toBe(true);
-    expect($("byok-adv-url").textContent).toBe(
-      "Sends OpenAI Chat Completions requests to https://openrouter.ai/api/v1/chat/completions",
-    );
+    expect(button("local-install").disabled).toBe(true);
+    type("byok-url", "https://open.bigmodel.cn/api/paas/v4/");
+    type("byok-key", " sk-top-secret ");
+    expect(button("local-install").disabled).toBe(true);
+    type("byok-model", "glm-4.6");
+    expect(button("local-install").disabled).toBe(false);
+    expect($("plan-line").textContent).toBe("");
+    expect(document.getElementById("background-model")).toBeNull();
 
-    // Selecting Zhipu GLM fills its base URL, path, and endpoint in one step.
-    selectProvider("byok-provider", "zhipu");
-    expect(($("byok-url") as HTMLInputElement).value).toBe(
-      "https://open.bigmodel.cn",
+    let answer!: (check: SetupState["localServer"]["byokCheck"]) => void;
+    answering(
+      run,
+      welcome(capable),
+      () => new Promise((resolve) => (answer = resolve)),
     );
-    expect(path.value).toBe("/api/paas/v4");
-    expect(endpoint.value).toBe("/chat/completions");
-    expect($("byok-adv-url").textContent).toBe(
-      "Sends OpenAI Chat Completions requests to https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    );
-    // Power users can still override the AI engine inside Advanced options.
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-byok="runtime"] [data-value="codex"]',
-      )!
-      .click();
-    type("byok-key", "sk-top-secret");
-
-    // Refresh lists the endpoint's models and opens them.
-    expect(($("byok-test") as HTMLButtonElement).disabled).toBe(true);
-    run.mockImplementationOnce(async () =>
-      withLocal(welcome(small), {
-        byokModels: {
-          state: "ready",
-          url: "https://open.bigmodel.cn/api/paas/v4/models",
-          models: [
-            { id: "glm-4.6", contextWindow: 204_800 },
-            { id: "glm-4.5-air" },
-          ],
-        },
-      }),
-    );
-    $("byok-list").click();
-    const endpointOf = {
-      baseUrl: "https://open.bigmodel.cn",
-      path: "/api/paas/v4",
+    $("local-install").click();
+    // An address with a path is used as typed, with Pi's own format.
+    const config = {
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      path: "",
       endpoint: "/chat/completions",
       protocol: "openai-chat",
       apiKey: "sk-top-secret",
+      modelId: "glm-4.6",
+      runtime: "pi",
     };
-    expect(run).toHaveBeenCalledWith({
-      op: "local.byok.models",
-      byok: endpointOf,
-    });
-    await vi.waitFor(() => expect($("byok-model-menu").hidden).toBe(false));
-    expect(words("byok-model-menu")).toContain(
-      "2 models from https://open.bigmodel.cn/api/paas/v4/models",
-    );
-    expect(words("byok-model-menu")).toContain("glm-4.6 200k context");
-    $("byok-model-menu")
-      .querySelector<HTMLButtonElement>('[data-value="glm-4.6"]')!
-      .click();
-    expect(($("byok-model") as HTMLInputElement).value).toBe("glm-4.6");
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
-    expect($("plan-summary").textContent).toBe("API Key · Zhipu GLM · glm-4.6");
-
-    // Test sends one request and floats the outcome under the button.
-    run.mockImplementationOnce(async () =>
-      withLocal(welcome(small), {
-        byokCheck: {
-          state: "ready",
-          protocol: "openai-chat",
-          url: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-          modelId: "glm-4.6",
-          contextWindow: 204_800,
-        },
-      }),
-    );
-    $("byok-test").click();
-    const config = { ...endpointOf, modelId: "glm-4.6", runtime: "codex" };
     expect(run).toHaveBeenCalledWith({ op: "local.byok.check", byok: config });
-    await vi.waitFor(() => expect($("byok-toast").hidden).toBe(false));
-    expect($("byok-toast").dataset.tone).toBe("ok");
-    expect(words("byok-toast")).toBe(
-      "Connected glm-4.6 · 200k context · OpenAI Chat Completionshttps://open.bigmodel.cn/api/paas/v4/chat/completions",
+    await vi.waitFor(() =>
+      expect($("local-install-label").textContent).toBe("Checking…"),
     );
-
-    $("local-install").click();
+    expect(button("local-install").disabled).toBe(true);
+    answer({
+      state: "ready",
+      protocol: "openai-chat",
+      url: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      modelId: "glm-4.6",
+      contextWindow: 204_800,
+    });
     await vi.waitFor(() => {
-      expect(installed(run)).toEqual([
-        { op: "local.start", runtime: "codex", byok: config },
-      ]);
+      expect(installed(run)).toHaveLength(1);
       expect(($("byok-key") as HTMLInputElement).value).toBe("");
+    });
+    // A passing test says nothing; Install goes on.
+    expect($("byok-status").hidden).toBe(true);
+    expect(ops(run).indexOf("local.byok.check")).toBeLessThan(
+      ops(run).indexOf("local.start"),
+    );
+    expect(installed(run)[0]).toEqual({
+      op: "local.start",
+      runtime: "pi",
+      byok: config,
     });
   });
 
-  it("reveals Base URL for custom endpoints, sends a pasted full address as is, and keeps a failed test until the fields change", async () => {
+  it("keeps the usual defaults for a bare host or a whole request address, and shows only a failed test", async () => {
     const { run } = await openPage(welcome(small), "welcome");
-    $("local-customize").click();
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="byok"]',
-      )!
-      .click();
-    selectProvider("byok-provider", "custom");
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-byok="runtime"] [data-value="claude"]',
-      )!
-      .click();
-    type("byok-url", "https://llm.example.com/gateway");
-    pick("byok-path", "");
-    pick("byok-endpoint", "");
-    expect(($("byok-path") as HTMLInputElement).value).toBe("");
-    // No known ending: the Claude Code engine's own format.
-    expect($("byok-status").hidden).toBe(false);
-    expect($("byok-status").textContent).toBe(
-      "Sends Anthropic Messages (the Claude Code format) requests to https://llm.example.com/gateway",
-    );
-    type("byok-path", "a//b");
-    expect($("byok-status").dataset.tone).toBe("err");
-    expect(($("byok-list") as HTMLButtonElement).disabled).toBe(true);
-    type("byok-path", "");
-    type("byok-model", "claude-sonnet-4-6");
-
-    run.mockImplementationOnce(async () =>
-      withLocal(welcome(small), {
-        byokCheck: {
-          state: "failed",
-          message:
-            "Nothing answered at https://llm.example.com/gateway (HTTP 404).",
-        },
-      }),
-    );
-    $("byok-test").click();
+    open("byok");
+    type("byok-url", "https://llm.example.com");
+    type("byok-model", "glm-4.6");
+    answering(run, welcome(small), async () => ({
+      state: "failed",
+      message: "Nothing answered at https://llm.example.com/v1 (HTTP 404).",
+    }));
+    $("local-install").click();
+    // A bare host gets /v1 and Pi's format.
     expect(run).toHaveBeenCalledWith({
       op: "local.byok.check",
       byok: {
-        baseUrl: "https://llm.example.com/gateway",
-        path: "",
-        endpoint: "",
-        protocol: "anthropic",
-        modelId: "claude-sonnet-4-6",
-        runtime: "claude",
+        baseUrl: "https://llm.example.com",
+        path: "/v1",
+        endpoint: "/chat/completions",
+        protocol: "openai-chat",
+        modelId: "glm-4.6",
+        runtime: "pi",
       },
     });
-    await vi.waitFor(() => expect($("byok-toast").hidden).toBe(false));
-    expect($("byok-toast").dataset.tone).toBe("err");
-    expect(words("byok-toast")).toBe(
-      "Couldn't connect Nothing answered at https://llm.example.com/gateway (HTTP 404).",
+    await vi.waitFor(() => expect($("byok-status").hidden).toBe(false));
+    expect($("byok-status").textContent).toBe(
+      "Nothing answered at https://llm.example.com/v1 (HTTP 404).",
     );
-    type("byok-model", "claude-opus-4-1");
-    expect($("byok-toast").hidden).toBe(true);
+    expect($("byok-status").getAttribute("role")).toBe("alert");
+    expect(installed(run)).toEqual([]);
+    expect($("local-install-label").textContent).toBe("Install");
+    expect(button("local-install").disabled).toBe(false);
+    // The error goes once the fields change.
+    type("byok-model", "glm-4.5-air");
+    expect($("byok-status").hidden).toBe(true);
+
+    // An ending that names a format picks it.
+    type("byok-url", "https://api.anthropic.com/v1/messages");
+    answering(run, welcome(small), async () => ({
+      state: "ready",
+      protocol: "anthropic",
+      url: "https://api.anthropic.com/v1/messages",
+      modelId: "glm-4.5-air",
+      contextWindow: 131_072,
+    }));
+    $("local-install").click();
+    await vi.waitFor(() => expect(installed(run)).toHaveLength(1));
+    expect(installed(run)[0]).toMatchObject({
+      runtime: "pi",
+      byok: {
+        baseUrl: "https://api.anthropic.com/v1",
+        path: "",
+        endpoint: "/messages",
+        protocol: "anthropic",
+        modelId: "glm-4.5-air",
+      },
+    });
+  });
+
+  it("says a usual BYOK failure in a few words", async () => {
+    const { run } = await openPage(welcome(small), "welcome");
+    open("byok");
+    type("byok-url", "http://127.0.0.1:8090/v1");
+    type("byok-model", "glm-4.6");
+    for (const [code, shown] of [
+      ["BYOK_UNREACHABLE", "Couldn't reach this URL."],
+      ["BYOK_CHECK_TIMEOUT", "Couldn't reach this URL."],
+      ["BYOK_AUTH_FAILED", "This API key was refused."],
+      ["BYOK_NOT_FOUND", "This model wasn't found at this URL."],
+      ["BYOK_UPSTREAM_REJECTED", "The endpoint refused the test request."],
+      // Anything else keeps the check's own words.
+      ["BYOK_INVALID_CONFIG", "An HTTPS endpoint needs an API key."],
+    ]) {
+      answering(run, welcome(small), async () => ({
+        state: "failed",
+        code,
+        message:
+          code === "BYOK_INVALID_CONFIG"
+            ? "An HTTPS endpoint needs an API key."
+            : "Could not reach http://127.0.0.1:8090/v1/chat/completions (URLError).",
+      }));
+      $("local-install").click();
+      await vi.waitFor(() => expect($("byok-status").textContent).toBe(shown));
+      type("byok-model", "glm-4.6");
+    }
+    expect(installed(run)).toEqual([]);
   });
 
   it("offers the same BYOK fields inside the runtime sign-in dialog", async () => {
@@ -1051,8 +1571,6 @@ describe("setup page Quick Install recommendation", () => {
     expect(($("signin-byok-endpoint") as HTMLInputElement).value).toBe(
       "/messages",
     );
-    expect($("signin-byok-list")).not.toBeNull();
-    expect($("signin-byok-test")).not.toBeNull();
     type("signin-byok-url", "https://api.anthropic.com");
     type("signin-byok-key", "sk-ant-fallback");
     type("signin-byok-model", "claude-sonnet-4-6");
@@ -1075,173 +1593,214 @@ describe("setup page Quick Install recommendation", () => {
     );
     expect(($("signin-byok-key") as HTMLInputElement).value).toBe("");
   });
+});
 
-  it("unblocks Install for BYOK as soon as fields are valid even while capability check or tool download runs", async () => {
-    const { run, push } = await openPage(
-      welcome({ state: "checking" }),
-      "welcome",
-    );
-    const button = $("local-install") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.dataset.busy).toBe("true");
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
-
-    $("local-customize").click();
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="byok"]',
-      )!
-      .click();
-    // Before required fields are entered, Install shows plain text (no spinner) and stays disabled.
-    expect(button.disabled).toBe(true);
-    expect(button.dataset.busy).toBe("false");
-    expect(button.getAttribute("aria-busy")).toBe("false");
-    expect($("local-install-label").textContent).toBe("Install");
-    expect($("local-install-label").querySelector(".spinner")).toBeNull();
-
-    // Tool download progress arrives while the user enters BYOK fields.
-    push(
-      welcome({
-        state: "checking",
-        download: { completed: 8 * 1024 ** 2, total: 64 * 1024 ** 2 },
-      }),
-    );
-    selectProvider("byok-provider", "custom");
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-byok="runtime"] [data-value="codex"]',
-      )!
-      .click();
-    type("byok-url", "https://api.example.com");
-    expect(button.disabled).toBe(true);
-    expect($("local-install-label").querySelector(".spinner")).toBeNull();
-
-    type("byok-model", "gpt-5.4");
-    expect(button.disabled).toBe(false);
-    expect(button.dataset.busy).toBe("false");
-    expect(button.getAttribute("aria-busy")).toBe("false");
-    expect($("local-install-label").textContent).toBe("Install");
-    expect($("local-install-label").querySelector(".spinner")).toBeNull();
-
-    button.click();
-    await vi.waitFor(() =>
-      expect(installed(run)).toEqual([
-        {
-          op: "local.start",
-          runtime: "codex",
-          byok: {
-            runtime: "codex",
-            baseUrl: "https://api.example.com",
-            path: "/v1",
-            endpoint: "/responses",
-            protocol: "openai-responses",
-            modelId: "gpt-5.4",
-          },
+describe("setup page leaving the local model's wait", () => {
+  const downloading = (): SetupState => {
+    const base = state("installing");
+    return {
+      ...base,
+      localServer: {
+        ...base.localServer,
+        source: "local",
+        localModels: capable,
+        transfer: {
+          label: "Downloading the local model…",
+          completed: 2 * GB,
+          total: 6 * GB,
         },
-      ]),
+      },
+    };
+  };
+
+  it("offers another source while the model downloads, and keeps the model coming", async () => {
+    const { run, push } = await openPage(downloading());
+    expect($("local-model-leave").hidden).toBe(false);
+    // Not without a download under way.
+    push(state("installing"));
+    expect($("local-model-leave").hidden).toBe(true);
+    push(downloading());
+    const behind = welcome(capable, {
+      runtimes: rows({}, { installed: true, signedIn: true }),
+      backgroundModel: {
+        model: "qwen3-8b",
+        state: "downloading",
+        completed: 42,
+        total: 100,
+      },
+    });
+    run.mockImplementationOnce(async () => behind);
+    document.querySelector<HTMLButtonElement>('[data-leave="choose"]')!.click();
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('section[data-step="welcome"].active'),
+      ).not.toBeNull(),
+    );
+    expect(run).toHaveBeenCalledWith({ op: "local.leave-local" });
+    // Back on step 1, the model still coming in its card.
+    expect(stage()).toBe("choose");
+    expect(card("local").disabled).toBe(true);
+    expect($("source-local-about").textContent).toBe("Downloading · 42%");
+    // The advice moves off the local model it left, without a shimmer.
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
+    expect(card("local").dataset.pending).toBe("false");
+    open("subscription");
+    expect(stage()).toBe("settings");
+    expect($("welcome-title").textContent).toBe("Subscription");
+    expect($("model-behind").hidden).toBe(false);
+    expect($("model-behind-text").textContent).toBe("Local model 42%");
+    expect($("local-install-label").textContent).toBe("Continue setup");
+    expect($("plan-line").textContent).toBe("");
+    $("source-back").click();
+    expect(card("local").disabled).toBe(true);
+    expect($("source-local-about").textContent).toBe("Downloading · 42%");
+    open("subscription");
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({ runtime: "subscription" }),
     );
   });
 
-  it("keeps BYOK selection and fields intact when a late capability check finishes", async () => {
-    for (const lateResult of [capable, small]) {
-      const { run, push } = await openPage(
-        welcome({ state: "checking" }),
-        "welcome",
-      );
-      $("local-customize").click();
-      document
-        .querySelector<HTMLButtonElement>(
-          '[data-plan="source"] [data-value="byok"]',
-        )!
-        .click();
-      document
-        .querySelector<HTMLButtonElement>(
-          '[data-byok="runtime"] [data-value="pi"]',
-        )!
-        .click();
-      type("byok-url", "https://llm.example.com");
-      type("byok-key", "sk-keep-me");
-      type("byok-model", "qwen3-coder");
-
-      push(welcome(lateResult));
-
-      expect(
-        document
-          .querySelector('[data-plan="source"] [data-value="byok"]')!
-          .getAttribute("aria-checked"),
-      ).toBe("true");
-      expect($("byok-row").hidden).toBe(false);
-      expect(($("byok-url") as HTMLInputElement).value).toBe(
-        "https://llm.example.com",
-      );
-      expect(($("byok-key") as HTMLInputElement).value).toBe("sk-keep-me");
-      expect(($("byok-model") as HTMLInputElement).value).toBe("qwen3-coder");
-      expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
-
-      $("local-install").click();
-      await vi.waitFor(() =>
-        expect(installed(run)).toEqual([
-          {
-            op: "local.start",
-            runtime: "pi",
-            byok: {
-              runtime: "pi",
-              baseUrl: "https://llm.example.com",
-              path: "/v1",
-              endpoint: "/chat/completions",
-              protocol: "openai-chat",
-              apiKey: "sk-keep-me",
-              modelId: "qwen3-coder",
-            },
-          },
-        ]),
-      );
-    }
+  it("says where a failed switch went wrong", async () => {
+    const { run } = await openPage(downloading());
+    run.mockRejectedValueOnce(new Error("The installer stopped answering."));
+    document.querySelector<HTMLButtonElement>('[data-leave="choose"]')!.click();
+    await vi.waitFor(() =>
+      expect($("leave-error").textContent).toBe(
+        "The installer stopped answering.",
+      ),
+    );
+    expect(
+      document.querySelector('section[data-step="installing"].active'),
+    ).not.toBeNull();
   });
 
-  it("re-disables Install with spinner when switching off BYOK while capability check is still running", async () => {
-    await openPage(welcome({ state: "checking" }), "welcome");
-    const button = $("local-install") as HTMLButtonElement;
-    const source = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="source"] [data-value="${value}"]`,
-      )!;
-    const runtime = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="runtime"] [data-value="${value}"]`,
-      )!;
+  it("keeps the install line to the install while the model downloads", async () => {
+    const base = state("installing");
+    const background = {
+      model: "qwen3-8b",
+      state: "downloading" as const,
+      completed: 1,
+      total: 2,
+    };
+    const { push } = await openPage({
+      ...base,
+      localServer: { ...base.localServer, backgroundModel: background },
+    });
+    expect($("installing-step").textContent).toBe("Setting up your workspace");
+    const ready = state("ready", { email: "admin@gmail.com" });
+    push({
+      ...ready,
+      localServer: { ...ready.localServer, backgroundModel: background },
+    });
+    expect(document.getElementById("ready-lead")).toBeNull();
+  });
+});
 
-    $("local-customize").click();
-    source("byok").click();
-    type("byok-url", "https://api.example.com");
-    type("byok-model", "claude-sonnet-4-6");
-    expect(button.disabled).toBe(false);
+describe("setup page sign-in account", () => {
+  const typeIn = (id: string, value: string) => {
+    const input = $(id) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event("input"));
+  };
+  const submit = () =>
+    $("account-change").dispatchEvent(
+      new Event("submit", { cancelable: true }),
+    );
+  const passwordChanges = (run: ReturnType<typeof vi.fn>) =>
+    run.mock.calls
+      .map(([command]) => command as SetupCommand)
+      .filter((command) => command.op === "local.account.password");
 
-    source("local").click();
-    expect(button.disabled).toBe(true);
-    expect(button.dataset.busy).toBe("true");
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+  it("never asks for an account before Install", async () => {
+    const { run } = await openPage(welcome(capable), "welcome");
+    $("source-continue").click();
+    for (const id of [
+      "credentials-row",
+      "credentials-sheet",
+      "credentials-edit",
+    ])
+      expect(document.getElementById(id)).toBeNull();
+    $("local-install").click();
+    await vi.waitFor(() => expect(installed(run)).toHaveLength(1));
+    expect(installed(run)[0]).not.toHaveProperty("account");
+  });
 
-    source("byok").click();
-    expect(button.disabled).toBe(false);
+  it("changes the password on the ready screen, checked like the server checks it", async () => {
+    const { run, push } = await openPage();
+    push(state("ready", { email: "admin@gmail.com" }));
+    $("account-toggle").click();
+    expect($("account-change").hidden).toBe(true);
+    expect($("account-change-open").textContent).toBe("Change password");
+    $("account-change-open").click();
+    expect($("account-change").hidden).toBe(false);
+    expect($("account-note").hidden).toBe(true);
+    const input = $("account-new-password") as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    expect(input.type).toBe("password");
+    $("account-new-show").click();
+    expect(input.type).toBe("text");
+    expect($("account-new-show").textContent).toBe("Hide");
+    $("account-new-show").click();
+    expect(input.type).toBe("password");
 
-    source("subscription").click();
-    runtime("recommended").click();
-    expect(button.disabled).toBe(true);
-    expect(button.dataset.busy).toBe("true");
-    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+    for (const [value, problem] of [
+      ["short", "Use at least 8 characters."],
+      ["x".repeat(257), "Use at most 256 characters."],
+      ["tab\there-is-bad", "The password can't contain control characters."],
+    ] as const) {
+      typeIn("account-new-password", value);
+      submit();
+      expect($("account-new-error").textContent).toBe(problem);
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+    }
+    expect(passwordChanges(run)).toEqual([]);
+    typeIn("account-new-password", "a-new-long-password");
+    // A problem fixed clears as the person types.
+    expect($("account-new-error").textContent).toBe("");
+    submit();
+    await vi.waitFor(() => expect($("account-change").hidden).toBe(true));
+    expect(passwordChanges(run)).toEqual([
+      { op: "local.account.password", password: "a-new-long-password" },
+    ]);
+    expect(input.value).toBe("");
+    expect($("account-note").hidden).toBe(false);
+    // The page never prints the new password.
+    expect(document.body.textContent).not.toContain("a-new-long-password");
+  });
 
-    source("byok").click();
-    expect(button.disabled).toBe(false);
-
-    // Clicking "Use defaults" closes Customize and waits for the check again.
-    $("local-customize").click();
-    expect(button.disabled).toBe(true);
-    expect(button.dataset.busy).toBe("true");
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    expect($("local-install-label").querySelector(".spinner")).not.toBeNull();
+  it("says why a new password was refused and keeps it to try again", async () => {
+    const { run, push } = await openPage();
+    push(state("ready", { email: "admin@gmail.com" }));
+    $("account-toggle").click();
+    $("account-change-open").click();
+    typeIn("account-new-password", "a-new-long-password");
+    run.mockRejectedValueOnce(
+      new Error(
+        "Error invoking remote method 'setup:run': Error: Too many password changes. Try again in a few minutes.",
+      ),
+    );
+    submit();
+    await vi.waitFor(() =>
+      expect($("account-new-error").textContent).toBe(
+        "Too many password changes. Try again in a few minutes.",
+      ),
+    );
+    expect($("account-change").hidden).toBe(false);
+    expect(($("account-new-password") as HTMLInputElement).value).toBe(
+      "a-new-long-password",
+    );
+    expect(button("account-new-save").disabled).toBe(false);
+    // Escape and Cancel both leave the password as it was.
+    $("account-new-password").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect($("account-change").hidden).toBe(true);
+    $("account-change-open").click();
+    expect(($("account-new-password") as HTMLInputElement).value).toBe("");
+    $("account-new-cancel").click();
+    expect($("account-change").hidden).toBe(true);
+    expect(passwordChanges(run)).toHaveLength(1);
   });
 });
 
@@ -1263,91 +1822,154 @@ describe("setup page permissions", () => {
   });
 });
 
-describe("setup page download progress", () => {
-  const installing = (transfer?: SetupState["localServer"]["transfer"]) => {
-    const base = state("installing");
-    return {
-      ...base,
-      localServer: { ...base.localServer, ...(transfer ? { transfer } : {}) },
-    };
-  };
-
-  it("shows how much of the local model is left, the rate and the time", async () => {
-    const { push } = await openPage(installing());
-    expect($("installing-transfer").hidden).toBe(true);
-    push(
-      installing({
-        label: "Downloading the local model…",
-        completed: 12 * GB,
-        total: 31 * GB,
-        bytesPerSecond: 50 * 1024 ** 2,
-      }),
-    );
-    expect($("installing-transfer").hidden).toBe(false);
-    expect($("installing-transfer-label").textContent).toBe(
-      "Downloading the local model…",
-    );
-    expect($("installing-transfer-bytes").textContent).toBe(
-      "12.0 GB of 31.0 GB · 19.0 GB left · 50 MB/s · about 6 min left",
-    );
-    push(installing());
-    expect($("installing-transfer").hidden).toBe(true);
-  });
-
-  it("says only the file's bytes when the tool counts one file", async () => {
-    await openPage(
-      installing({
-        label: "Downloading the local model…",
-        completed: 3 * GB,
-        total: 4 * GB,
-        bytesPerSecond: 50 * 1024 ** 2,
-        partial: true,
-      }),
-    );
-    expect($("installing-transfer-bytes").textContent).toBe(
-      "This file: 3.0 GB of 4.0 GB · 50 MB/s",
-    );
-  });
-});
-
-describe("setup page slow runtime lookup", () => {
+describe("setup page installing", () => {
+  // A failure scrolls its actions into view, which jsdom lacks.
   beforeEach(() => {
     Element.prototype.scrollIntoView = () => {};
   });
   const withLocal = (
     phase: SetupState["localServer"]["phase"],
-    fields: Partial<SetupState["localServer"]>,
+    fields: Partial<SetupState["localServer"]> = {},
   ): SetupState => {
     const base = state(phase);
     return { ...base, localServer: { ...base.localServer, ...fields } };
   };
 
-  it("says what the bar waits on while the installer checks the runtime", async () => {
-    const { push } = await openPage(withLocal("installing", {}));
-    expect($("installing-waiting").hidden).toBe(true);
+  it("shows one bar and one line that changes with the step", async () => {
+    const { push } = await openPage(withLocal("installing"));
+    const section = document.querySelector('[data-step="installing"]')!;
+    // No checklist, timings or second line.
+    expect(section.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
+    for (const id of [
+      "installing-checks",
+      "installing-transfer",
+      "installing-waiting",
+      "installing-plan",
+    ])
+      expect(document.getElementById(id)).toBeNull();
+    expect($("installing-step").textContent).toBe("Setting up your workspace");
+    expect($("installing-count").textContent).toMatch(/^\d+%$/u);
+    push(withLocal("installing", { step: "agents" }));
+    expect($("installing-step").textContent).toBe("Waking up your agents");
+    // The runtime lookup says what the bar waits on, in the same line.
     push(withLocal("installing", { waiting: "runtime" }));
-    expect($("installing-waiting").hidden).toBe(false);
-    expect($("installing-waiting").textContent).toBe(
-      "Checking the AI runtime on this computer. On some computers this takes a few minutes; the bar moves on once it finishes.",
-    );
-    push(withLocal("installing", {}));
-    expect($("installing-waiting").hidden).toBe(true);
+    expect($("installing-step").textContent).toBe("Checking the AI runtime…");
+    expect($("installing-actions").hidden).toBe(true);
   });
 
-  it("words a runtime lookup that did not finish, with Try Again", async () => {
-    await openPage(
+  it("draws Linger's mark, its trace following the bar and stopping grey on a failure", async () => {
+    const { push } = await openPage(withLocal("installing", { progress: 0.4 }));
+    // Every mark is the favicon's wedge and dot, the same on every source.
+    expect($("logo-wedge").getAttribute("d")).toMatch(/^M316\.285,237\.609c/u);
+    expect($("logo-dot").getAttribute("d")).toMatch(/^M642,366c/u);
+    const fills = [...document.querySelectorAll(".source-card .mk-fill")];
+    expect(fills).toHaveLength(3);
+    for (const fill of fills)
+      expect(fill.getAttribute("href")).toBe("#logo-wedge");
+    expect(document.querySelectorAll(".orb")).toHaveLength(0);
+    const mark = $("sc-mark");
+    // The page's own .scene (the old top-bar art) is hidden in the wizard;
+    // the install mark must not share that class.
+    expect(mark.matches(".scene")).toBe(false);
+    const trace = mark.querySelector<SVGPathElement>(".mk-trace")!;
+    const traced = () => 100 - Number(trace.style.strokeDashoffset);
+    const bar = () => Number($("installing-bar").getAttribute("aria-valuenow"));
+    expect(bar()).toBeGreaterThanOrEqual(40);
+    expect(traced()).toBe(bar());
+    expect(mark.classList.contains("off")).toBe(false);
+    push(withLocal("installing", { progress: 0.7 }));
+    expect(bar()).toBeGreaterThanOrEqual(70);
+    expect(traced()).toBe(bar());
+    // A failure greys the mark; the trace stays with the bar, which stops
+    // within the step that failed.
+    push(
+      withLocal("failed", { progress: 0.7, message: "Services did not start" }),
+    );
+    expect(mark.classList.contains("off")).toBe(true);
+    expect(mark.classList.contains("breathe")).toBe(false);
+    expect(traced()).toBe(bar());
+  });
+
+  it("folds a download into the same line, in its own words", async () => {
+    // The installer's words name tools and timings; the line does not, and
+    // it carries no file sizes: the bar says how far.
+    const { push } = await openPage(
+      withLocal("installing", {
+        step: "download",
+        progress: 0,
+        transfer: {
+          label: "Downloading private Go 1.26.5",
+          completed: 26 * 1024 ** 2,
+          total: 62 * 1024 ** 2,
+        },
+      }),
+    );
+    expect($("installing-step").textContent).toBe("Downloading Linger");
+    // The download moves the bar through its step: 26 of 62 MB of the
+    // first of the install's steps.
+    const steps = withLocal("installing").localServer.steps.length;
+    const filled = Number($("installing-bar").getAttribute("aria-valuenow"));
+    expect(filled).toBeGreaterThanOrEqual(Math.floor((26 / 62 / steps) * 98));
+    expect(filled).toBeLessThan(Math.ceil(100 / steps));
+    // The local model downloads while the services start.
+    push(
+      withLocal("installing", {
+        source: "local",
+        transfer: {
+          label: "Downloading the local model files…",
+          completed: 12 * GB,
+          total: 31 * GB,
+          bytesPerSecond: 50 * 1024 ** 2,
+        },
+      }),
+    );
+    expect($("installing-step").textContent).toBe(
+      "Downloading the local model",
+    );
+    push(
+      withLocal("installing", {
+        source: "local",
+        transfer: {
+          label: "Downloading the local model files…",
+          completed: 3 * GB,
+          total: 4 * GB,
+          partial: true,
+        },
+      }),
+    );
+    expect($("installing-step").textContent).toBe(
+      "Downloading the local model",
+    );
+    push(withLocal("installing", { source: "local" }));
+    expect($("installing-step").textContent).toBe("Setting up your workspace");
+  });
+
+  it("says what went wrong, with only Report issue", async () => {
+    const { push } = await openPage(
+      withLocal("failed", { message: "Services did not start" }),
+    );
+    expect($("installing-title").textContent).toBe("Installation stopped");
+    expect($("installing-error").textContent).toBe("Services did not start");
+    expect($("installing-actions").hidden).toBe(false);
+    const section = document.querySelector('[data-step="installing"]')!;
+    const shown = [...section.querySelectorAll<HTMLButtonElement>("button")]
+      .filter((el) => !el.closest("[hidden]"))
+      .map((el) => el.id);
+    expect(shown).toEqual(["report-issue"]);
+    expect($("report-issue").textContent).toBe("Report issue");
+    for (const id of ["local-retry", "local-back", "send-diagnostics"])
+      expect(document.getElementById(id)).toBeNull();
+    // A runtime lookup that did not finish says so briefly.
+    push(
       withLocal("failed", {
         message:
           "Checking the AI runtime on this computer did not finish in time.",
         failure: "runtime_lookup_timed_out",
       }),
     );
-    expect($("installing-waiting").hidden).toBe(true);
     expect($("installing-error").textContent).toBe(
-      "Checking the AI runtime did not finish in 10 minutes. Try Again picks up the same check; if it stops again, save diagnostics and send them to Linger support.",
+      "Checking the AI runtime took too long.",
     );
-    expect($("installing-actions").hidden).toBe(false);
-    expect($("local-retry").hidden).toBe(false);
   });
 
   it("words both in Chinese", async () => {
@@ -1356,7 +1978,7 @@ describe("setup page slow runtime lookup", () => {
       "installing",
       "zh-CN",
     );
-    expect($("installing-waiting").textContent).toBe(zhCN.setup.waitingRuntime);
+    expect($("installing-step").textContent).toBe(zhCN.setup.waitingRuntime);
     push(
       withLocal("failed", {
         message: "Lost the connection to the installer.",
@@ -1366,11 +1988,68 @@ describe("setup page slow runtime lookup", () => {
     expect($("installing-error").textContent).toBe(
       zhCN.setup.runtimeLookupUnreachable,
     );
+    expect($("report-issue").textContent).toBe(zhCN.setup.reportIssue);
+  });
+
+  it("says beside the install mark that Linger runs locally and is your own agent", async () => {
+    for (const [language, want] of [
+      [
+        "en",
+        [
+          "Local",
+          "Runs on your computer",
+          "Personal agent",
+          "Works just for you",
+        ],
+      ],
+      [
+        "zh-CN",
+        [
+          zhCN.setup.agentLocal,
+          zhCN.setup.agentLocalAbout,
+          zhCN.setup.agentPersonal,
+          zhCN.setup.agentPersonalAbout,
+        ],
+      ],
+    ] as const) {
+      await openPage(withLocal("installing"), "installing", language);
+      const cards = [...document.querySelectorAll("#floaters .agent")];
+      expect(
+        cards.flatMap((card) =>
+          [...card.querySelectorAll("b, small")].map((el) => el.textContent),
+        ),
+      ).toEqual(want);
+    }
+  });
+
+  it("words a lost installer without asking to try again", async () => {
+    for (const [language, want] of [
+      ["en", "Couldn't reconnect to the installation."],
+      ["zh-CN", zhCN.setup.installerUnreachable],
+    ] as const) {
+      const { push } = await openPage(
+        withLocal("installing"),
+        "installing",
+        language,
+      );
+      push(
+        withLocal("failed", {
+          message: "Couldn't reconnect to the installation.",
+          failure: "installer_unreachable",
+        }),
+      );
+      expect($("installing-error").textContent).toBe(want);
+      expect($("installing-error").textContent).not.toMatch(/try again/i);
+      const section = document.querySelector('[data-step="installing"]')!;
+      const shown = [...section.querySelectorAll<HTMLButtonElement>("button")]
+        .filter((el) => !el.closest("[hidden]"))
+        .map((el) => el.id);
+      expect(shown).toEqual(["report-issue"]);
+    }
   });
 });
 
-describe("setup page Send Diagnostics", () => {
-  // A failure scrolls its actions into view, which jsdom lacks.
+describe("setup page Report issue", () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = () => {};
   });
@@ -1386,17 +2065,25 @@ describe("setup page Send Diagnostics", () => {
     };
   };
 
-  it("hides Send Diagnostics while no receiver is set up", async () => {
-    await openPage(failed());
-    expect($("installing-diagnostics").hidden).toBe(false);
-    expect($("send-diagnostics").hidden).toBe(true);
+  it("saves diagnostics to Downloads while no receiver is set up", async () => {
+    const { run, push } = await openPage(failed());
     expect($("send-modal").hidden).toBe(true);
+    $("report-issue").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "diagnostics.save" }),
+    );
+    push({
+      ...failed(),
+      diagnostics: { file: "linger-diagnostics.zip" },
+    } as SetupState);
+    expect($("diagnostics-note").textContent).toBe(
+      "Saved linger-diagnostics.zip. Send it to Linger support.",
+    );
   });
 
   it("asks before sending and lists every file", async () => {
     const { run, push } = await openPage(failed({ phase: "idle" }));
-    expect($("send-diagnostics").hidden).toBe(false);
-    $("send-diagnostics").click();
+    $("report-issue").click();
     await vi.waitFor(() =>
       expect(run).toHaveBeenCalledWith({
         op: "diagnostics.send",
@@ -1477,7 +2164,7 @@ describe("setup page Send Diagnostics", () => {
     );
   });
 
-  it("offers Try Again only when it can help", async () => {
+  it("retries a send that can be retried, else saves it to Downloads", async () => {
     const { run, push } = await openPage(failed({ phase: "idle" }));
     push(failed({ phase: "failed", error: "Couldn't reach it", retry: true }));
     expect($("send-error").textContent).toBe("Couldn't reach it");
@@ -1490,43 +2177,16 @@ describe("setup page Send Diagnostics", () => {
       }),
     );
     push(failed({ phase: "failed", error: "Too large", retry: false }));
-    expect($("send-primary").hidden).toBe(true);
-    expect($("send-lead").textContent).toContain("Save Diagnostics");
+    expect($("send-primary").textContent).toBe("Save to Downloads");
     expect($("send-close").textContent).toBe("Close");
-  });
-});
-
-describe("setup page installation failure plan", () => {
-  beforeEach(() => {
-    Element.prototype.scrollIntoView = () => {};
-  });
-
-  it("shows data-kept guidance on installation failure and restores progress text on retry", async () => {
-    const folder = "D:\\Software\\Linger";
-    const errorMessage = `Windows private path validation failed: ${folder} is inside a linked folder. Use a current-user owned local directory without links or shared access.`;
-    const base = state("failed");
-    const failedState: SetupState = {
-      ...base,
-      platform: "win32",
-      localServer: {
-        ...base.localServer,
-        message: errorMessage,
-        location: { path: folder, custom: true },
-        refusal: {
-          code: "WINDOWS_PRIVATE_PATH_UNSAFE",
-          reason: "UNSAFE_PARENT_LINK",
-        },
-      },
-    };
-    const { push } = await openPage(failedState);
-    expect($("installing-error").textContent).toBe(errorMessage);
-    expect($("installing-plan").textContent).toBe(
-      "Your data is kept. Fix the problem and try again.",
+    $("send-primary").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenLastCalledWith({ op: "diagnostics.save" }),
     );
-    push(state("installing"));
-    expect($("installing-plan").textContent).toBe(
-      "This takes a few minutes. You can keep working.",
-    );
+    expect(run).toHaveBeenCalledWith({
+      op: "diagnostics.send",
+      action: "cancel",
+    });
   });
 });
 
@@ -1538,21 +2198,35 @@ describe("setup page in Chinese", () => {
   it("speaks the language it was served in", async () => {
     await openPage(welcome(capable), "welcome", "zh-CN");
     // The harness loads the body only; static text comes from data-t.
-    expect(document.querySelector('[data-t="welcomeTitle"]')!.textContent).toBe(
-      zh.welcomeTitle,
+    expect($("intro-title").textContent).toBe(zh.welcomeTitle);
+    expect($("step-label").textContent).toBe(
+      fill(zh.stepOf, { step: "1", total: "2" }),
     );
-    expect($("plan-summary").textContent).toBe(
-      fill(zh.recommendedPlan, { plan: zh.localModelPi }),
+    expect($("source-local-about").textContent).toBe(zh.sourceLocalAbout);
+    $("source-continue").click();
+    expect($("step-label").textContent).toBe(
+      fill(zh.stepOf, { step: "2", total: "2" }),
     );
-    expect($("plan-why").textContent).toBe(
-      [
-        "qwen3-8b",
-        fill(zh.fitsGpu, { gpu: "RTX 4090" }),
-        fill(zh.memoryAmount, { size: "64 GB" }),
-        fill(zh.downloadAmount, { size: "6 GB" }),
-      ].join(" · "),
+    expect($("plan-line").textContent).toBe("");
+    expect($("local-install-label").textContent).toBe(zh.install);
+  });
+
+  it("words the subscription runtimes from the catalog", async () => {
+    await openPage(
+      welcome(small, {
+        runtimes: rows(
+          { installed: true },
+          { installed: true, signedIn: true },
+        ),
+      }),
+      "welcome",
+      "zh-CN",
     );
-    expect($("local-install-label").textContent).toBe(zh.quickInstall);
+    open("subscription");
+    expect(inRow("claude", "[data-runtime-sub]").textContent).toBe(
+      zh.rtInstalledNotSignedIn,
+    );
+    expect(inRow("codex", "[data-runtime-sub]").textContent).toBe(zh.signedIn);
   });
 
   it("words a held local model from the catalog", async () => {
@@ -1562,18 +2236,18 @@ describe("setup page in Chinese", () => {
     );
   });
 
-  it("counts the download its way", async () => {
+  it("names the download in its words", async () => {
     const base = state("installing");
     await openPage(
       {
         ...base,
         localServer: {
           ...base.localServer,
+          source: "local",
           transfer: {
-            label: "Downloading the local model…",
+            label: "Downloading the local model files…",
             completed: 3 * GB,
             total: 4 * GB,
-            bytesPerSecond: 50 * 1024 ** 2,
             partial: true,
           },
         },
@@ -1581,155 +2255,353 @@ describe("setup page in Chinese", () => {
       "installing",
       "zh-CN",
     );
-    expect($("installing-transfer-bytes").textContent).toBe(
-      `${fill(zh.thisFile, {
-        amount: fill(zh.amountOf, { done: "3.0 GB", total: "4.0 GB" }),
-      })} · 50 MB/s`,
-    );
+    expect($("installing-step").textContent).toBe(zh.stepModel);
   });
 
-  it("localizes the Inkling 2 Mini spotlight in both recommended and library states", async () => {
-    const inklingCapable: SetupLocalModelsCheck = {
-      ...capable,
-      model: {
-        name: "inkling-2-mini:Q4_K_M",
-        downloadBytes: 15 * GB,
-        diskBytes: 18 * GB,
-        memoryBytes: 22 * GB,
-        featuredInkling: true,
-      },
-    };
-    await openPage(welcome(inklingCapable), "welcome", "zh-CN");
-    expect($("plan-featured-badge").hidden).toBe(false);
-    expect($("plan-featured-badge").textContent).toBe(zh.featuredPartnerBadge);
-    expect($("featured-spotlight").hidden).toBe(false);
-    expect($("featured-spotlight-note").textContent).toBe(
-      zh.featuredModelSelected,
+  it("words the loader, BYOK and the password change", async () => {
+    await openPage(welcome({ state: "checking" }), "welcome", "zh-CN");
+    expect($("welcome-checking").getAttribute("aria-label")).toBe(
+      zh.gettingReady,
     );
-    expect($("featured-spotlight-link").textContent).toBe(zh.learnMoreLink);
-    expect(
-      $("featured-spotlight").querySelector(".spotlight-specs")!.textContent,
-    ).toBe(zh.featuredModelSpecs);
-
-    $("local-customize").click();
-    expect($("local-model-featured").hidden).toBe(false);
-    expect($("local-model-featured").textContent).toBe(zh.featuredPartnerBadge);
-    expect($("local-spotlight-text").textContent).toBe(zh.featuredModelSpecs);
-    expect($("local-spotlight-link").textContent).toBe(zh.learnMoreLink);
-
-    await openPage(welcome(capable), "welcome", "zh-CN");
-    expect($("plan-featured-badge").hidden).toBe(true);
-    expect($("featured-spotlight").hidden).toBe(true);
-    $("local-customize").click();
-    expect($("local-model-featured").hidden).toBe(true);
-    expect($("local-spotlight-text").textContent).toBe(
-      zh.featuredModelCustomizeNote,
+    expect($("source-local-about").textContent).toBe(zh.checkingComputer);
+    const { push } = await openPage(undefined, undefined, "zh-CN");
+    push(state("ready", { email: "admin@gmail.com" }));
+    expect($("account-toggle").textContent?.trim()).toBe(zh.accountTitle);
+    $("account-toggle").click();
+    expect($("account-change-open").textContent).toBe(zh.changePassword);
+    $("account-change-open").click();
+    expect(($("account-new-password") as HTMLInputElement).placeholder).toBe(
+      zh.newPassword,
     );
-    expect($("local-spotlight-link").textContent).toBe(zh.thinkingMachinesLink);
+    expect($("account-new-save-label").textContent).toBe(zh.save);
   });
 });
 
-describe("setup page Inkling 2 Mini featured spotlight", () => {
-  const inklingCapable = (
-    name = "inkling-2-mini:Q4_K_M",
-  ): SetupLocalModelsCheck => ({
+describe("setup page model picker", () => {
+  // What the kit lists on a 36 GB Mac: two builds of one model, a smaller
+  // and faster one, and one that needs more memory. The words stay the same
+  // on every system.
+  const option = (
+    fields: Partial<SetupModelOption> & { library: string },
+  ): SetupModelOption => ({
+    name: "Inkling 2 Mini",
+    publisher: "Thinking Machines",
+    quant: "UD-Q4_K_M",
+    family: "other",
+    featured: true,
+    downloadBytes: 16 * GB,
+    memoryBytes: 18 * GB,
+    fits: true,
+    ...fields,
+  });
+  const listed: SetupLocalModelsCheck = {
     ...capable,
+    memoryBytes: 36 * GB,
+    totalMemoryBytes: 36 * GB,
+    availableMemoryBytes: 27 * GB,
     model: {
-      name,
-      downloadBytes: 15 * GB,
-      diskBytes: 18 * GB,
-      memoryBytes: 22 * GB,
-      ...(isInkling2MiniModelId(name)
-        ? { featuredInkling: true as const }
-        : {}),
+      name: "Inkling 2 Mini",
+      library: "inkling-2-mini:UD-Q4_K_M",
+      downloadBytes: 16 * GB,
+      diskBytes: 17 * GB,
+      memoryBytes: 18 * GB,
     },
-  });
-
-  it("emphasizes Inkling 2 Mini directly in the plan line and local model card when recommended", async () => {
-    const { run } = await openPage(welcome(inklingCapable()), "welcome");
-    expect($("plan-summary").textContent).toBe(
-      "Recommended for this computer: Local model + Pi",
-    );
-    expect($("plan-featured-badge").hidden).toBe(false);
-    expect($("plan-featured-badge").textContent).toBe(
-      "Featured · Thinking Machines",
-    );
-    expect($("featured-spotlight").hidden).toBe(false);
-    expect($("featured-spotlight").dataset.recommended).toBe("true");
-    expect($("featured-spotlight-note").textContent).toBe(
-      "Selected for Quick Install on this computer.",
-    );
-    expect($("featured-spotlight-link").textContent).toBe("Learn more ↗");
-
-    $("featured-spotlight-link").click();
-    await vi.waitFor(() =>
-      expect(run).toHaveBeenCalledWith({
-        op: "external.open",
-        url: INKLING_2_MINI_ANNOUNCEMENT_URL,
+    models: [
+      option({
+        library: "inkling-2-mini:UD-Q4_K_M",
+        quality: 61,
+        decodeTokS: 63.2,
+        recommended: true,
+        role: "smartest",
       }),
-    );
+      option({
+        library: "inkling-2-mini:IQ3_XXS",
+        quant: "IQ3_XXS",
+        downloadBytes: 11 * GB,
+        memoryBytes: 13 * GB,
+        quality: 58,
+        decodeTokS: 71,
+      }),
+      option({
+        library: "spark-x2.6-4b-q4km:Q4_K_M",
+        name: "Spark X2.6 4B",
+        publisher: "XHToken",
+        featured: undefined,
+        downloadBytes: 3 * GB,
+        memoryBytes: 5 * GB,
+        quality: 44,
+        decodeTokS: 140,
+        role: "fastest",
+      }),
+      option({
+        library: "qwen3.8-flash-next-iq2xs:IQ2_XS",
+        name: "Qwen 3.8 Flash Next",
+        publisher: "Qwen",
+        family: "qwen",
+        featured: undefined,
+        downloadBytes: 48 * GB,
+        memoryBytes: 52 * GB,
+        fits: false,
+        tooLarge: true,
+        needsMemoryBytes: 52 * GB,
+      }),
+    ],
+  };
+  const onMac = () => ({ ...welcome(listed), platform: "darwin" as const });
+  const rowFor = (library: string) =>
+    document.querySelector<HTMLButtonElement>(
+      `#model-list .mrow[data-library="${library}"]`,
+    )!;
 
-    $("local-customize").click();
-    expect($("featured-spotlight").hidden).toBe(true);
-    expect($("plan-featured-badge").hidden).toBe(true);
-    expect($("local-model-name").textContent).toBe("inkling-2-mini:Q4_K_M");
-    expect($("local-model-featured").hidden).toBe(false);
-    expect($("local-model-featured").textContent).toBe(
-      "Featured · Thinking Machines",
-    );
-    expect($("local-spotlight").dataset.recommended).toBe("true");
-    expect($("local-spotlight-text").textContent).toBe(
-      "26.4B Looped MoE · 3.4B active · Vision & Agentic Coding · Apache 2.0",
-    );
-    expect($("local-spotlight-link").textContent).toBe("Learn more ↗");
-
-    $("local-spotlight-link").click();
-    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
-    expect(run).toHaveBeenLastCalledWith({
-      op: "external.open",
-      url: INKLING_2_MINI_ANNOUNCEMENT_URL,
-    });
+  it("shows the kit's pick on the card with its estimates", async () => {
+    await openPage(onMac(), "welcome");
+    open("local");
+    // Two builds of one model: the build follows the name.
+    expect($("local-model-name").textContent).toBe("Inkling 2 Mini · Standard");
+    // Who makes it, and nothing more: no parameter counts.
+    expect($("local-model-sub").textContent).toBe("Thinking Machines");
+    // Its maker's logo before the name, as on the Local models page.
+    expect($("local-model-icon").dataset.brand).toBe("thinkingmachines");
+    expect($("local-model-icon").dataset.fullBleed).toBe("true");
+    expect(
+      $("local-model-icon").querySelector("img")!.getAttribute("src"),
+    ).toBe("model-logo/thinkingmachines.png");
+    // No pitch line while the model fits.
+    expect($("local-model-why-row").hidden).toBe(true);
+    // Two estimates; the download size is not on the card.
+    expect($("local-model-quality").textContent).toBe("≈ Sonnet 4.6");
+    expect($("local-model-speed").textContent).toBe("~63 tok/s");
+    expect(
+      [...document.querySelectorAll("#local-facts > div")].map(
+        (cell) => cell.querySelector("span")!.textContent,
+      ),
+    ).toEqual(["Quality", "Speed · est."]);
+    expect(document.getElementById("local-model-needs")).toBeNull();
+    expect($("local-model-mem").textContent).toBe("18 GB of 36 GB");
+    // The bar: what macOS and apps hold now (36 - 27 GB), then the model,
+    // then what is free, with a key for each.
+    expect($("local-model-sys").style.width).toBe("25%");
+    expect($("local-model-bar").style.width).toBe("50%");
+    expect(
+      [...document.querySelectorAll("#local-model-memory .memkey > span")].map(
+        (key) => key.textContent,
+      ),
+    ).toEqual(["System & apps", "Inkling 2 Mini · Standard", "Free"]);
+    expect($("model-change").hidden).toBe(false);
+    expect($("model-sheet").hidden).toBe(true);
   });
 
-  it("matches org-prefixed Inkling 2 Mini model IDs", async () => {
+  it("lists every model with its estimates, and dims one too large", async () => {
+    await openPage(onMac(), "welcome");
+    open("local");
+    $("model-change").click();
+    expect($("model-sheet").hidden).toBe(false);
+    expect($("model-change").getAttribute("aria-expanded")).toBe("true");
+    expect($("model-sheet-title").textContent).toBe("Models for this computer");
+    // No subtitle: the estimates carry their own ≈ and ~.
+    expect(document.querySelector("#model-sheet .head p")).toBeNull();
+    const rows =
+      document.querySelectorAll<HTMLButtonElement>("#model-list .mrow");
+    expect(rows).toHaveLength(4);
+    // What fits comes first; what cannot run here is last, dimmed.
+    expect(rows[3]!.dataset.library).toBe("qwen3.8-flash-next-iq2xs:IQ2_XS");
+    const best = rowFor("inkling-2-mini:UD-Q4_K_M");
+    expect(best.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(best);
+    expect(best.querySelector(".nm")!.textContent).toBe(
+      "Inkling 2 Mini · Standard",
+    );
+    expect(best.querySelector(".tg")!.textContent).toBe("Thinking Machines");
+    // Each row leads with its maker's logo: Inkling's, XHToken's for its
+    // Spark id, and Qwen's for its family.
+    expect(
+      [...rows].map(
+        (row) => row.querySelector<HTMLElement>(".m-ico")!.dataset.brand,
+      ),
+    ).toEqual(["thinkingmachines", "thinkingmachines", "xhtoken", "qwen"]);
+    expect(
+      [...rows].map((row) =>
+        row.querySelector(".m-ico img")!.getAttribute("src"),
+      ),
+    ).toEqual([
+      "model-logo/thinkingmachines.png",
+      "model-logo/thinkingmachines.png",
+      "model-logo/xhtoken.png",
+      "model-logo/qwen.svg",
+    ]);
+    expect(
+      [...rows].some((row) => /\d+(\.\d+)?B\b/.test(row.textContent ?? "")),
+    ).toBe(false);
+    expect([...best.querySelectorAll(".mc")].map((c) => c.textContent)).toEqual(
+      ["16.0 GB", "Best fit"],
+    );
+    expect(
+      [...best.querySelectorAll(".meter em")].map((c) => c.textContent),
+    ).toEqual(["≈ Sonnet 4.6", "~63 tok/s"]);
+    expect(
+      rowFor("inkling-2-mini:IQ3_XXS").querySelector(".nm")!.textContent,
+    ).toBe("Inkling 2 Mini · Compact");
+    // Fastest only where the kit says so.
+    expect(
+      [...rowFor("spark-x2.6-4b-q4km:Q4_K_M").querySelectorAll(".mc")].map(
+        (c) => c.textContent,
+      ),
+    ).toEqual(["3.0 GB", "Fastest"]);
+    const large = rowFor("qwen3.8-flash-next-iq2xs:IQ2_XS");
+    expect(large.disabled).toBe(true);
+    expect(large.querySelector(".needs")!.textContent).toBe(
+      "Needs 96 GB of memory",
+    );
+    expect(large.querySelector(".meter")).toBeNull();
+    $("model-sheet").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    expect($("model-change").getAttribute("aria-expanded")).toBe("false");
+    expect($("model-sheet").hidden).toBe(true);
+    expect(stage()).toBe("settings");
+  });
+
+  it("finds each model's logo as the Local models page does", async () => {
+    const other = (library: string, fields: Partial<SetupModelOption> = {}) =>
+      option({ library, name: library, featured: undefined, ...fields });
     await openPage(
-      welcome(inklingCapable("thinkingmachines/Inkling-2-Mini")),
+      {
+        ...welcome({
+          ...listed,
+          models: [
+            listed.models![0]!,
+            other("llama-4-scout:Q4_K_M", { family: "llama" }),
+            other("kimi-k3:Q4_K_M", { family: "kimi" }),
+            other("starcoder-9b:Q4_K_M", { family: "starcoder" }),
+            other("ornith-coder:Q4_K_M", { sourceOrg: "ornith-ai" }),
+            other("ling-lite:Q4_K_M"),
+            other("tiny-1b:Q4_K_M", { sourceOrg: "someone" }),
+          ],
+        }),
+        platform: "darwin" as const,
+      },
       "welcome",
     );
-    expect($("plan-featured-badge").hidden).toBe(false);
-    expect($("featured-spotlight").dataset.recommended).toBe("true");
+    open("local");
+    $("model-change").click();
+    const icons = [
+      ...document.querySelectorAll<HTMLElement>("#model-list .mrow .m-ico"),
+    ];
+    expect(icons.map((icon) => icon.dataset.brand)).toEqual([
+      "thinkingmachines",
+      "meta",
+      "kimi",
+      // A family with no logo keeps the plain mark, as on that page.
+      "default",
+      "ornith",
+      "inclusionai",
+      "default",
+    ]);
+    expect(icons.map((icon) => icon.dataset.fullBleed)).toEqual([
+      "true",
+      "false",
+      "true",
+      "false",
+      "true",
+      "true",
+      "false",
+    ]);
+    expect(icons[3]!.querySelector("img")).toBeNull();
+    expect(icons[3]!.querySelector("svg path")).not.toBeNull();
   });
 
-  it("hides the welcome spotlight when another model or subscription is recommended while keeping the Customize note", async () => {
-    for (const check of [capable, small, held]) {
-      const { run } = await openPage(welcome(check), "welcome");
-      expect($("plan-featured-badge").hidden).toBe(true);
-      expect($("featured-spotlight").hidden).toBe(true);
-      expect($("featured-spotlight").dataset.recommended).toBe("false");
-
-      $("local-customize").click();
-      document
-        .querySelector<HTMLButtonElement>(
-          '[data-plan="source"] [data-value="local"]',
-        )!
-        .click();
-      expect($("local-model-featured").hidden).toBe(true);
-      expect($("local-spotlight").dataset.recommended).toBe("false");
-      expect($("local-spotlight-text").textContent).toContain(
-        "Settings → Models",
-      );
-      expect($("local-spotlight-link").textContent).toBe("Thinking Machines ↗");
-      $("local-spotlight-link").click();
-      await vi.waitFor(() =>
-        expect(run).toHaveBeenCalledWith({
-          op: "external.open",
-          url: INKLING_2_MINI_ANNOUNCEMENT_URL,
-        }),
-      );
-    }
+  it("changes the card to a picked model, checks it fits, and installs it", async () => {
+    const { run, push } = await openPage(onMac(), "welcome");
+    open("local");
+    $("model-change").click();
+    rowFor("spark-x2.6-4b-q4km:Q4_K_M").click();
+    await vi.waitFor(() => expect($("model-sheet").hidden).toBe(true));
+    expect($("local-model-name").textContent).toBe("Spark X2.6 4B");
+    expect($("local-model-sub").textContent).toBe("XHToken");
+    expect($("local-model-icon").dataset.brand).toBe("xhtoken");
+    expect($("local-model-icon").dataset.fullBleed).toBe("false");
+    expect($("local-model-quality").textContent).toBe("≈ Gemini 2.5 Pro");
+    expect(run).toHaveBeenCalledWith({
+      op: "local.model.check",
+      model: "spark-x2.6-4b-q4km:Q4_K_M",
+    });
+    const base = onMac();
+    const priced = (modelCheck: SetupState["localServer"]["modelCheck"]) =>
+      push({ ...base, localServer: { ...base.localServer, modelCheck } });
+    priced({ library: "spark-x2.6-4b-q4km:Q4_K_M", state: "checking" });
+    expect($("local-model-why").textContent).toBe(
+      "Checking it fits this computer…",
+    );
+    expect(button("local-install").disabled).toBe(true);
+    priced({
+      library: "spark-x2.6-4b-q4km:Q4_K_M",
+      state: "checked",
+      fits: false,
+      code: "MEMORY_INSUFFICIENT",
+      memoryBytes: 30 * GB,
+    });
+    expect($("local-model-why").textContent).toBe(
+      "Needs 30.0 GB of free memory.",
+    );
+    expect(button("local-install").disabled).toBe(true);
+    priced({
+      library: "spark-x2.6-4b-q4km:Q4_K_M",
+      state: "checked",
+      fits: true,
+    });
+    expect(button("local-install").disabled).toBe(false);
+    $("local-install").click();
+    await vi.waitFor(() =>
+      expect(installed(run)[0]).toMatchObject({
+        runtime: "local",
+        model: "spark-x2.6-4b-q4km:Q4_K_M",
+      }),
+    );
   });
 
-  it("badges a held Inkling 2 Mini card in Customize without showing the welcome spotlight", async () => {
+  it("installs the kit's pick without a model when none was picked", async () => {
+    const { run } = await openPage(onMac(), "welcome");
+    open("local");
+    $("local-install").click();
+    await vi.waitFor(() => expect(installed(run)).toHaveLength(1));
+    expect(installed(run)[0]).not.toHaveProperty("model");
+    expect(run).not.toHaveBeenCalledWith(
+      expect.objectContaining({ op: "local.model.check" }),
+    );
+  });
+
+  it("offers no picker when the kit lists one model or none", async () => {
+    await openPage(welcome(capable), "welcome");
+    open("local");
+    expect($("model-change").hidden).toBe(true);
+    expect($("local-model-name").textContent).toBe("qwen3-8b");
+  });
+});
+
+describe("setup page local model plan", () => {
+  it("names the model on step 2, and no badge or link", async () => {
+    await openPage(
+      welcome({
+        ...capable,
+        model: {
+          name: "inkling-2-mini:Q4_K_M",
+          downloadBytes: 15 * GB,
+          diskBytes: 18 * GB,
+          memoryBytes: 22 * GB,
+        },
+      }),
+      "welcome",
+    );
+    expect(card("local").getAttribute("aria-checked")).toBe("true");
+    expect($("source-local-about").textContent).toBe("On this computer");
+    $("source-continue").click();
+    expect($("local-model-name").textContent).toBe("inkling-2-mini:Q4_K_M");
+    expect(
+      document.querySelector(".featured-pill, .spotlight-link"),
+    ).toBeNull();
+  });
+
+  it("does not offer a held Inkling 2 Mini", async () => {
     await openPage(
       welcome({
         ...held,
@@ -1738,34 +2610,12 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
           downloadBytes: 15 * GB,
           diskBytes: 18 * GB,
           memoryBytes: 22 * GB,
-          featuredInkling: true,
         },
       }),
       "welcome",
     );
-    expect($("plan-featured-badge").hidden).toBe(true);
-    expect($("featured-spotlight").hidden).toBe(true);
-    expect($("featured-spotlight").dataset.recommended).toBe("false");
-    $("local-customize").click();
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-plan="source"] [data-value="local"]',
-      )!
-      .click();
-    expect($("local-model-name").textContent).toBe("inkling-2-mini:UD-Q4_K_M");
-    expect($("local-model-featured").hidden).toBe(false);
-    expect($("local-spotlight").dataset.recommended).toBe("true");
-    expect($("local-spotlight-link").textContent).toBe("Learn more ↗");
-  });
-
-  it("hides the featured spotlight when local installation is unavailable", async () => {
-    const base = welcome(small);
-    await openPage(
-      { ...base, localServer: { ...base.localServer, available: false } },
-      "welcome",
-    );
-    expect($("featured-spotlight").hidden).toBe(true);
-    expect($("plan-featured-badge").hidden).toBe(true);
+    expect(card("local").disabled).toBe(true);
+    expect(card("subscription").getAttribute("aria-checked")).toBe("true");
   });
 
   it("offers one-click driver installation and renders live progress on Windows Setup", async () => {
@@ -1842,7 +2692,7 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
     );
   });
 
-  it("shows subscription Harnesses with detected status and lets the user pick Codex", async () => {
+  it("marks detected runtimes on the runtime sign-in switcher", async () => {
     const detectedCheck: SetupLocalModelsCheck = {
       ...small,
       recommendation: "claude",
@@ -1862,306 +2712,230 @@ describe("setup page Inkling 2 Mini featured spotlight", () => {
         { runtime: "pi", installed: true, authenticated: true, ready: true },
       ],
     };
-    const { run } = await openPage(welcome(detectedCheck), "welcome");
-    expect($("local-install-label").textContent).toBe("Quick Install");
-    $("local-customize").click();
-    expect($("local-install-label").textContent).toBe("Install");
-
-    const harness = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="runtime"] [data-value="${value}"]`,
-      )!;
-    expect(harness("claude").dataset.detected).toBe("true");
-    expect(harness("claude").dataset.recommended).toBe("true");
-    expect(harness("codex").dataset.detected).toBe("false");
-    expect(harness("codex").dataset.recommended).toBe("false");
-    expect($("runtime-sub").textContent).toBe(
-      "Detected: Claude Code · Recommended: Claude Code.",
-    );
-
-    harness("codex").click();
-    $("local-install").click();
-    await vi.waitFor(() =>
-      expect(run).toHaveBeenCalledWith({
-        op: "local.start",
-        runtime: "codex",
-      }),
-    );
+    const base = state("installing");
+    await openPage({
+      ...base,
+      localServer: {
+        ...base.localServer,
+        localModels: detectedCheck,
+        steps: ["prepare", "services", "signin", "connect", "agents"],
+        step: "signin",
+        signIn: { runtime: "claude", state: "required" },
+      },
+    });
+    const switcher = (value: string) =>
+      document.querySelector<HTMLButtonElement>(`[data-switch="${value}"]`)!;
+    expect(switcher("claude").dataset.detected).toBe("true");
+    expect(switcher("codex").dataset.detected).toBe("false");
+    expect(switcher("pi").dataset.detected).toBe("true");
   });
 });
 
-describe("setup page install location and customizing layout", () => {
+describe("setup page install location and free space", () => {
   const fill = (text: string, values: Record<string, string>) =>
     text.replace(/\{(\w+)\}/gu, (_, name: string) => values[name]!);
   const withLocation = (
     localModels: SetupLocalModelsCheck,
     location: SetupState["localServer"]["location"],
-  ): SetupState => {
-    const base = welcome(localModels);
-    return {
-      ...base,
-      localServer: {
-        ...base.localServer,
-        location,
-      },
-    };
-  };
+  ): SetupState => welcome(localModels, { location });
   const type = (id: string, value: string) => {
     const input = $(id) as HTMLInputElement;
     input.value = value;
     input.dispatchEvent(new Event("input"));
   };
+  const roomy = {
+    path: "~/.linger",
+    custom: false,
+    freeBytes: 80 * GB,
+    minFreeBytes: 20 * GB,
+  };
 
-  it("renders a quiet install-location bar and shows Reset only for custom folders (EN and zh-CN)", async () => {
+  const calm = () => {
+    expect($("location-row").hidden).toBe(false);
+    expect($("location-row").dataset.warn).toBe("false");
+    expect($("location-sub").hidden).toBe(true);
+    expect($("location-change").hidden).toBe(false);
+  };
+
+  it("shows where Linger installs for every source, quietly while the disk has room", async () => {
+    for (const value of ["local", "byok", "subscription"]) {
+      await openPage(withLocation(capable, roomy), "welcome");
+      open(value);
+      calm();
+      expect($("location-path").textContent).toBe("~/.linger");
+      expect($("location-path").title).toBe("~/.linger");
+      // The default needs no Reset.
+      expect($("location-reset").hidden).toBe(true);
+    }
+
     const { run, push } = await openPage(
-      withLocation(small, {
-        path: "~/.linger",
-        custom: false,
-        freeBytes: 80 * GB,
-        minFreeBytes: 20 * GB,
-      }),
+      withLocation(capable, roomy),
       "welcome",
     );
-    expect($("install-location").hidden).toBe(false);
-    expect($("install-location").dataset.warn).toBe("false");
-    expect($("location-path").textContent).toBe("~/.linger");
-    expect($("location-path").title).toBe("~/.linger");
-    expect($("location-sub").hidden).toBe(true);
-    expect($("location-sub").textContent).toBe("");
-    expect($("location-reset").hidden).toBe(true);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+    open("local");
+    expect(button("local-install").disabled).toBe(false);
+    push(
+      withLocation(capable, {
+        path: "/Volumes/Data/Linger",
+        custom: true,
+        freeBytes: 120 * GB,
+        minFreeBytes: 20 * GB,
+      }),
+    );
+    calm();
+    expect($("location-path").textContent).toBe("/Volumes/Data/Linger");
+    expect($("location-reset").hidden).toBe(false);
+    expect(button("local-install").disabled).toBe(false);
+    expect(run).not.toHaveBeenCalledWith({ op: "local.location.pick" });
+    $("location-change").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.pick" }),
+    );
+  });
 
+  it("shortens a long Windows path in the middle and keeps all of it in the tooltip", async () => {
+    const long =
+      "D:\\Users\\someone.with.a.long.name\\AppData\\Local\\Programs\\Linger Workspace\\data";
+    await openPage(
+      {
+        ...withLocation(small, {
+          path: long,
+          custom: true,
+          freeBytes: 200 * GB,
+          minFreeBytes: 20 * GB,
+        }),
+        platform: "win32",
+      },
+      "welcome",
+    );
+    open("byok");
+    calm();
+    const shown = $("location-path").textContent!;
+    expect(shown.length).toBeLessThan(long.length);
+    expect(shown).toContain("…");
+    expect(shown.startsWith("D:\\Users\\")).toBe(true);
+    expect(shown.endsWith("\\data")).toBe(true);
+    expect($("location-path").title).toBe(long);
+    expect($("location-reset").hidden).toBe(false);
+  });
+
+  it("warns and holds Install when the disk is below what the services need, in EN and zh-CN", async () => {
+    const low = {
+      path: "C:\\Users\\demo\\.linger",
+      custom: false,
+      freeBytes: 10 * GB,
+      minFreeBytes: 20 * GB,
+    };
+    const { run } = await openPage(withLocation(small, low), "welcome");
+    open("byok");
+    expect($("location-row").hidden).toBe(false);
+    expect($("location-row").dataset.warn).toBe("true");
+    expect($("location-path").textContent).toBe("C:\\Users\\demo\\.linger");
+    expect($("location-sub").textContent).toBe(
+      "Needs 20 GB free; this disk has 10 GB.",
+    );
+    type("byok-url", "https://api.example.com");
+    type("byok-key", "sk-test");
+    type("byok-model", "claude-sonnet-4-6");
+    expect(button("local-install").disabled).toBe(true);
+    expect($("location-reset").hidden).toBe(true);
     $("location-change").click();
     await vi.waitFor(() =>
       expect(run).toHaveBeenCalledWith({ op: "local.location.pick" }),
     );
 
-    push(
-      withLocation(small, {
-        path: "/Volumes/Data/Linger",
-        custom: true,
-        freeBytes: 120 * GB,
-        minFreeBytes: 20 * GB,
-      }),
-    );
-    expect($("install-location").dataset.warn).toBe("false");
-    expect($("location-path").textContent).toBe("/Volumes/Data/Linger");
-    expect($("location-reset").hidden).toBe(false);
-    expect($("location-reset").textContent).toBe("Reset");
-    $("location-reset").click();
-    await vi.waitFor(() =>
-      expect(run).toHaveBeenCalledWith({ op: "local.location.reset" }),
-    );
-
-    await openPage(
-      withLocation(small, {
-        path: "/Volumes/Data/Linger",
-        custom: true,
-        freeBytes: 120 * GB,
-        minFreeBytes: 20 * GB,
-      }),
-      "welcome",
-      "zh-CN",
-    );
-    expect($("location-reset").hidden).toBe(false);
-    expect($("location-reset").textContent).toBe(zhCN.setup.resetLocation);
-  });
-
-  it("warns and disables Quick Install when default disk space is below minFreeBytes in EN and zh-CN", async () => {
-    await openPage(
-      withLocation(small, {
-        path: "C:\\Users\\demo\\.linger",
-        custom: false,
-        freeBytes: 10 * GB,
-        minFreeBytes: 20 * GB,
-      }),
-      "welcome",
-    );
-    expect($("install-location").dataset.warn).toBe("true");
-    expect($("location-sub").hidden).toBe(false);
-    expect($("location-sub").dataset.warn).toBe("true");
-    expect($("location-sub").textContent).toBe(
-      "Needs 20 GB free; this disk has 10 GB.",
-    );
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    expect($("location-reset").hidden).toBe(true);
-
-    await openPage(
-      withLocation(small, {
-        path: "C:\\Users\\demo\\.linger",
-        custom: false,
-        freeBytes: 10 * GB,
-        minFreeBytes: 20 * GB,
-      }),
-      "welcome",
-      "zh-CN",
-    );
-    expect($("install-location").dataset.warn).toBe("true");
-    expect($("location-sub").hidden).toBe(false);
+    await openPage(withLocation(small, low), "welcome", "zh-CN");
+    open("byok");
     expect($("location-sub").textContent).toBe(
       fill(zhCN.setup.locationSpaceLow, { needed: "20", free: "10" }),
     );
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    expect($("location-reset").hidden).toBe(true);
   });
 
-  it("includes the planned local model disk budget dynamically and clears the warning for Subscription or valid BYOK", async () => {
-    const bigModel: SetupLocalModelsCheck = {
-      ...capable,
-      model: {
-        name: "inkling-2-mini:Q4_K_M",
-        downloadBytes: 15 * GB,
-        diskBytes: 18 * GB,
-        memoryBytes: 22 * GB,
-        featuredInkling: true,
-      },
+  it("counts the picked local model's disk only while the local model is the source", async () => {
+    const roomForServices = {
+      path: "~/.linger",
+      custom: false,
+      freeBytes: 25 * GB,
+      minFreeBytes: 20 * GB,
     };
-    await openPage(
-      withLocation(bigModel, {
-        path: "~/.linger",
-        custom: false,
-        freeBytes: 28 * GB,
-        minFreeBytes: 20 * GB,
-      }),
-      "welcome",
-    );
-    // 28 GB free covers the 20 GB base requirement, but not 20 + 18 = 38 GB for the local model.
-    expect($("install-location").dataset.warn).toBe("true");
-    expect($("location-sub").hidden).toBe(false);
+    await openPage(withLocation(capable, roomForServices), "welcome");
+    open("local");
+    // 25 GB covers the 20 GB the services need, not 20 + 8 for the model.
+    expect($("location-row").hidden).toBe(false);
     expect($("location-sub").textContent).toBe(
-      "Needs 38 GB free; this disk has 28 GB.",
+      "Needs 28 GB free; this disk has 25 GB.",
     );
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    expect($("location-reset").hidden).toBe(true);
+    expect(button("local-install").disabled).toBe(true);
 
-    $("local-customize").click();
-    const source = (value: string) =>
-      document.querySelector<HTMLButtonElement>(
-        `[data-plan="source"] [data-value="${value}"]`,
-      )!;
-    source("subscription").click();
-    expect($("install-location").dataset.warn).toBe("false");
-    expect($("location-sub").hidden).toBe(true);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
-
-    source("byok").click();
-    expect($("install-location").dataset.warn).toBe("false");
-    expect($("location-sub").hidden).toBe(true);
-    // Disabled only because BYOK fields are incomplete.
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    await openPage(withLocation(capable, roomForServices), "welcome");
+    open("byok");
+    calm();
     type("byok-url", "https://api.example.com");
+    type("byok-key", "sk-test");
     type("byok-model", "claude-sonnet-4-6");
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+    expect(button("local-install").disabled).toBe(false);
   });
 
-  it("gives location.error precedence over spaceLow and shows full error text with Reset", async () => {
+  it("puts the folder's error first and shows the folder it refused, with Reset", async () => {
     const errorMessage =
       "Linger can't write to this folder. Choose another one.";
-    await openPage(
-      withLocation(small, {
-        path: "~/.linger",
-        custom: false,
+    const { run, push } = await openPage(
+      withLocation(capable, {
+        ...roomy,
         freeBytes: 5 * GB,
-        minFreeBytes: 20 * GB,
-        error: errorMessage,
-      }),
-      "welcome",
-    );
-    expect($("install-location").dataset.warn).toBe("true");
-    expect($("location-sub").hidden).toBe(false);
-    expect($("location-sub").textContent).toBe(errorMessage);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    expect($("location-reset").hidden).toBe(false);
-  });
-
-  it("syncs document.body.dataset.customizing when toggling Customize and leaving welcome", async () => {
-    await openPage(welcome(capable), "welcome");
-    expect(document.body.dataset.customizing).toBe("false");
-
-    $("local-customize").click();
-    expect(document.body.dataset.customizing).toBe("true");
-
-    $("local-customize").click();
-    expect(document.body.dataset.customizing).toBe("false");
-
-    // Enter customizing, then leave welcome via a step transition: body flag resets to false.
-    $("local-customize").click();
-    expect(document.body.dataset.customizing).toBe("true");
-    document
-      .querySelector<HTMLButtonElement>('#team [data-go="server"]')!
-      .click();
-    expect(document.body.dataset.customizing).toBe("false");
-  });
-
-  it("handles legacy snapshots without freeBytes/minFreeBytes cleanly", async () => {
-    await openPage(
-      withLocation(small, {
-        path: "~/.linger",
-        custom: false,
-      }),
-      "welcome",
-    );
-    expect($("install-location").hidden).toBe(false);
-    expect($("install-location").dataset.warn).toBe("false");
-    expect($("location-path").textContent).toBe("~/.linger");
-    expect($("location-sub").hidden).toBe(true);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("warns and disables Quick Install when freeBytes is 0", async () => {
-    await openPage(
-      withLocation(small, {
-        path: "~/.linger",
-        custom: false,
-        freeBytes: 0,
-        minFreeBytes: 20 * GB,
-      }),
-      "welcome",
-    );
-    expect($("install-location").dataset.warn).toBe("true");
-    expect($("location-sub").hidden).toBe(false);
-    expect($("location-sub").textContent).toBe(
-      "Needs 20 GB free; this disk has 0 GB.",
-    );
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
-    expect($("location-reset").hidden).toBe(true);
-  });
-
-  it("shows rejectedPath while location.error is active and restores location.path once cleared", async () => {
-    const errorMessage =
-      "Linger can't write to this folder. Choose another one.";
-    const { push } = await openPage(
-      withLocation(small, {
-        path: "~/.linger",
-        custom: false,
-        freeBytes: 80 * GB,
-        minFreeBytes: 20 * GB,
         error: errorMessage,
         rejectedPath: "/Volumes/ReadOnly/Linger",
       }),
       "welcome",
     );
-    expect($("install-location").dataset.warn).toBe("true");
-    expect($("location-path").textContent).toBe("/Volumes/ReadOnly/Linger");
+    open("local");
+    expect($("location-row").hidden).toBe(false);
+    // Beside Reset the path is shortened in the middle; the tooltip has it all.
+    expect($("location-path").textContent).toBe("/Volumes/…dOnly/Linger");
     expect($("location-path").title).toBe("/Volumes/ReadOnly/Linger");
-    expect($("location-sub").hidden).toBe(false);
     expect($("location-sub").textContent).toBe(errorMessage);
     expect($("location-reset").hidden).toBe(false);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(true);
+    expect($("location-reset").textContent).toBe("Reset");
+    expect(button("local-install").disabled).toBe(true);
+    $("location-reset").click();
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledWith({ op: "local.location.reset" }),
+    );
 
-    push(
+    push(withLocation(capable, roomy));
+    calm();
+    expect($("location-path").textContent).toBe("~/.linger");
+    expect($("location-reset").hidden).toBe(true);
+    expect(button("local-install").disabled).toBe(false);
+  });
+
+  it("names Reset in Chinese for a custom folder without room", async () => {
+    await openPage(
       withLocation(small, {
-        path: "~/.linger",
-        custom: false,
-        freeBytes: 80 * GB,
+        path: "/Volumes/Data/Linger",
+        custom: true,
+        freeBytes: 0,
         minFreeBytes: 20 * GB,
       }),
+      "welcome",
+      "zh-CN",
     );
-    expect($("install-location").dataset.warn).toBe("false");
-    expect($("location-path").textContent).toBe("~/.linger");
-    expect($("location-path").title).toBe("~/.linger");
-    expect($("location-sub").hidden).toBe(true);
-    expect($("location-reset").hidden).toBe(true);
-    expect(($("local-install") as HTMLButtonElement).disabled).toBe(false);
+    open("byok");
+    expect($("location-row").hidden).toBe(false);
+    expect($("location-reset").hidden).toBe(false);
+    expect($("location-reset").textContent).toBe(zhCN.setup.resetLocation);
+    expect($("location-sub").textContent).toBe(
+      fill(zhCN.setup.locationSpaceLow, { needed: "20", free: "0" }),
+    );
+  });
+
+  it("handles snapshots without freeBytes or minFreeBytes", async () => {
+    await openPage(
+      withLocation(capable, { path: "~/.linger", custom: false }),
+      "welcome",
+    );
+    open("local");
+    calm();
+    expect(button("local-install").disabled).toBe(false);
   });
 });

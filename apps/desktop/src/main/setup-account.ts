@@ -12,13 +12,12 @@ export interface SetupAccountOptions {
     readText(): Promise<string>;
     clear(): void;
   };
-  readonly showFile: (file: string) => void;
 }
 
-type Cached = Pick<LocalAccount, "email" | "file"> | { readonly error: string };
+type Cached = Pick<LocalAccount, "email"> | { readonly error: string };
 
 // The owner account the setup page shows once Linger is installed. Only the
-// email and the file are kept; the password is read from the file when the
+// email is kept; the password is read from the file when the
 // person shows or copies it, and is held only while it is shown.
 export class SetupAccount {
   readonly #options: SetupAccountOptions;
@@ -53,6 +52,12 @@ export class SetupAccount {
     this.#shown = undefined;
   }
 
+  // The email is not secret and stays on the clipboard.
+  async copyEmail(): Promise<void> {
+    const email = (await this.#read())?.email;
+    if (email !== undefined) await this.#options.clipboard.writeText(email);
+  }
+
   async copy(): Promise<void> {
     const password = (await this.#read())?.password;
     if (password === undefined) return;
@@ -72,15 +77,10 @@ export class SetupAccount {
     this.#clear.unref?.();
   }
 
-  reveal(): void {
-    const account = this.#account;
-    if (account && !("error" in account)) this.#options.showFile(account.file);
-  }
-
   async #read(): Promise<LocalAccount | undefined> {
     try {
       const account = await this.#options.read();
-      this.#account = { email: account.email, file: account.file };
+      this.#account = { email: account.email };
       return account;
     } catch (error) {
       this.#account = {

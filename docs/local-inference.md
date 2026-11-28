@@ -17,7 +17,9 @@ How agents, approvals and background work share a model is in
 
 Each computer serves all of its agents from one source at a time. Setup asks
 for it, and **Settings › Models** switches it later to Local model or BYOK; it
-does not offer a switch to Subscription.
+does not offer a switch to Subscription. Choosing BYOK or Subscription in setup
+downloads no local model and does not wait for the check of this computer; add
+a local model later from **Settings › Models**.
 
 | Source       | Runtime                  | Where the model runs                                                                       |
 | ------------ | ------------------------ | ------------------------------------------------------------------------------------------ |

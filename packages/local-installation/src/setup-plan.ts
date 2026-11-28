@@ -2,13 +2,22 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { InstallerEvent } from "./events.js";
 import { localmodelsFailure } from "./localmodels-failure.js";
-import { runLocalmodels } from "./localmodels-tool.js";
+import {
+  localmodelsBaseDirectory,
+  runLocalmodels,
+} from "./localmodels-tool.js";
 import {
   probeRuntimesWithDaemon,
   recommendRuntimeFromDaemon,
   type DaemonRuntimeStatus,
 } from "./daemon-runtime-probe.js";
 import { DEFAULT_GPU_SHARING } from "./setup-selection.js";
+import {
+  isLibraryModel,
+  listSetupModels,
+  type SetupModelOption,
+  type SetupModels,
+} from "./setup-models.js";
 import { windowsPrivateRefusal } from "./windows-private.js";
 
 export type SetupChoice = "local-models" | "codex" | "claude" | "pi";
@@ -125,10 +134,25 @@ export interface SetupReport {
     selectedGpuIndex: number | null;
     estimate: SetupEstimate & { model: string };
     /**
+     * The planned model as a model library id (`<catalog id>:<quant>`), when
+     * the plan names its quantization. Setup downloads it in the background
+     * with `library download` while another model source runs.
+     */
+    libraryModel?: string;
+    /**
      * Upstream `stack.upgrade`, when freeing memory unlocks a stronger local
      * model than the currently selected plan.
      */
     upgrade?: SetupUpgrade;
+    /**
+     * Every model the kit's catalog offers here, fitting or not, with its
+     * estimates (`setup-models.ts`), for the setup page's model picker.
+     */
+    models?: SetupModelOption[];
+    /** This computer's memory, from the same library report. */
+    totalMemoryBytes?: number;
+    /** The memory free now, from the same library report. */
+    availableMemoryBytes?: number;
   };
   runtimes: {
     choice: RuntimeChoice;
@@ -155,7 +179,10 @@ export interface SetupOptions {
   onEvent?: (event: InstallerEvent) => void;
 }
 interface UpstreamPlan {
-  llm: { model: { id: string }; placement: { gpus: { index: number }[] } };
+  llm: {
+    model: { id: string; quant?: unknown };
+    placement: { gpus: { index: number }[] };
+  };
   budget: {
     download_bytes: number;
     disk_needed_bytes: number;
@@ -220,6 +247,13 @@ interface UpstreamReport {
     }[];
   };
   recommendation?: SetupChoice;
+}
+export { LIBRARY_MODEL_ID } from "./setup-models.js";
+function planLibraryModel(plan: UpstreamPlan): string | undefined {
+  const { id, quant } = plan.llm.model;
+  if (typeof id !== "string" || typeof quant !== "string") return undefined;
+  const value = `${id.trim()}:${quant.trim()}`;
+  return isLibraryModel(value) ? value : undefined;
 }
 export const setupChoices: readonly SetupChoice[] = [
   "local-models",
@@ -312,6 +346,18 @@ export async function inspectSetup(
       failure = cause;
       throw new Error("Upstream setup failed");
     }
+    // The picker's list: every catalog model with the kit's estimates for
+    // this computer. Read after the report, once the tool is in place (the
+    // first check downloads it); a failure only leaves the list out.
+    const choices = await listSetupModels(home, {
+      baseDir: localmodelsBaseDirectory(targetHome),
+      signal: options.signal,
+      ...(options.env ? { env: options.env } : {}),
+      localmodels: tool,
+    }).catch((): SetupModels => {
+      options.signal?.throwIfAborted();
+      return { models: [] };
+    });
     const value = JSON.parse(result.stdout) as UpstreamReport;
     const hasValidHarness =
       value.harness === undefined ||
@@ -488,6 +534,7 @@ export async function inspectSetup(
       };
     };
     const upgrade = parseUpgrade(value.stack.upgrade);
+    const libraryModel = plan ? planLibraryModel(plan) : undefined;
     const memory = value.stack.memory ? counts(value.stack.memory) : undefined;
     const upstreamRuntimes = value.harness?.runtimes ?? [];
     const upstreamEstimates = new Map(
@@ -584,7 +631,15 @@ export async function inspectSetup(
           ),
           model: plan?.llm.model.id ?? "",
         },
+        ...(libraryModel ? { libraryModel } : {}),
         ...(upgrade ? { upgrade } : {}),
+        ...(choices.models.length ? { models: choices.models } : {}),
+        ...(choices.totalMemoryBytes !== undefined
+          ? { totalMemoryBytes: choices.totalMemoryBytes }
+          : {}),
+        ...(choices.availableMemoryBytes !== undefined
+          ? { availableMemoryBytes: choices.availableMemoryBytes }
+          : {}),
       },
       runtimes: reportedRuntimes,
       recommendation,

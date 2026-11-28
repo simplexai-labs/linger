@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, realpath } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { readSetupChoice } from "./setup-selection.js";
+import { readLinkedRuntimes, readSetupChoice } from "./setup-selection.js";
 import { privateDirectory } from "./instance.js";
 import { runLocalmodels } from "./localmodels-tool.js";
 import { runProcess } from "./process.js";
@@ -448,7 +448,11 @@ export async function inspectRuntimeDescriptors(
     throw unavailable();
   }
 }
-/** Only the instance's chosen Harness is an explicit Computer binding. */
+/**
+ * Only the instance's chosen Harness is an explicit Computer binding, with
+ * the subscription runtimes setup linked beside it (linked-runtimes.json)
+ * once they are installed. The chosen runtime's row comes first.
+ */
 export async function inspectSelectedRuntimeDescriptors(
   home: string,
   instanceRoot: string,
@@ -456,12 +460,44 @@ export async function inspectSelectedRuntimeDescriptors(
 ): Promise<RuntimeDescriptor[]> {
   const choice = await readSetupChoice({ root: instanceRoot });
   if (!choice || choice === "local-models") return [];
+  const linked = await inspectLinkedRuntimeDescriptors(
+    home,
+    instanceRoot,
+    dependencies,
+  );
   const rows = await inspectRuntimeDescriptors(
     home,
     { runtime: choice },
     dependencies,
   );
-  return rows.filter((row) => row.runtime === choice);
+  return [
+    ...rows.filter((row) => row.runtime === choice),
+    ...linked.filter((row) => row.runtime !== choice),
+  ];
+}
+/** The installed runtimes setup linked beside the chosen one. */
+export async function inspectLinkedRuntimeDescriptors(
+  home: string,
+  instanceRoot: string,
+  dependencies: Pick<RuntimeDependencies, "localmodels"> = {},
+): Promise<RuntimeDescriptor[]> {
+  const choice = await readSetupChoice({ root: instanceRoot });
+  if (choice !== "codex" && choice !== "claude") return [];
+  const linked = (await readLinkedRuntimes({ root: instanceRoot })).filter(
+    (runtime) => runtime !== choice,
+  );
+  const rows: RuntimeDescriptor[] = [];
+  for (const runtime of linked) {
+    const found = await inspectRuntimeDescriptors(
+      home,
+      { runtime },
+      dependencies,
+    );
+    rows.push(
+      ...found.filter((row) => row.runtime === runtime && row.installed),
+    );
+  }
+  return rows;
 }
 export function runtimeEnvironmentFromDescriptors(
   descriptors: RuntimeDescriptor[],

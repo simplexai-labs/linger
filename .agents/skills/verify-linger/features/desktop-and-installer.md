@@ -81,22 +81,22 @@ Never run live verification against a developer's real `~/.simplexai`, `<appData
 
 ## Desktop Client journeys
 
-### Quick Install ("Run on This Computer") and starter workspace
+### Two-step setup ("Run on This Computer") and starter workspace
 
 **Setup:** Packaged Desktop build for the host target (`darwin-arm64`, `linux-x64`, or `win32-x64`) with isolated `LINGER_DESKTOP_USER_DATA`, `LINGER_HOME`, and `LINGER_BRIDGE_STATE_DIR`, non-root / non-admin user, and free disk space on the chosen install location.
 
 **Journey:**
 
 1. Launch the packaged app (`Linger.app`, `./linger`, or installed `Linger.exe`). On macOS, the notarized app opens without a Gatekeeper warning. On Windows, record SmartScreen separately.
-2. On **Welcome**, open **Customize**, verify the install location picker and free-space check, select a model source (Local model, Subscription, or BYOK — see [Local Models and BYOK](local-models-and-byok.md)), and run **Quick Install**.
-3. Observe installation stage progression (`prepare` → `download` → `services`/`workspace` → optional `signin` → `connect` → `agents`).
-4. On **Ready**, confirm the generated owner email appears, verify password **Show** / **Copy** (and that the clipboard clears after 60 seconds if untouched), click **Open account file location** to confirm `local-account.json` is owner-private, and click **Open Linger**.
+2. On **Welcome**, confirm the intro (orb and "Welcome to Linger") hands off to step 1 after about 2.6 s even while the computer is still checked; the Local model card then says "Checking this computer…" with a soft shimmer (no spinner, no tool names) and can be picked, its step 2 card is a shimmering outline with Change and Install off until the check answers, and a card you picked never moves when the answer arrives. Confirm each card is a title and one short line with no badges or tags and the advised card is preselected, and pick a model source (Local model, Subscription, or BYOK — see [Local Models and BYOK](local-models-and-byok.md)). On step 2, confirm there is no account editing and no keys, and that every source shows one install location row (a long path shortened in the middle with the whole path in its tooltip, **Change**, and **Reset** only for a folder other than the default); pick a folder Linger cannot write to and confirm the reason shows inside the row and Install stays off until a usable folder is picked; for Subscription, confirm only Claude Code and Codex are listed, install and sign in to one from its row (Install stays disabled until one is signed in); run **Install**.
+3. Observe one progress bar whose single line changes with the stage (`prepare` → `download` → `services`/`workspace` → optional `signin` → `connect` → `agents`), with no checklist. Force a failure (for example an unwritable install location) and confirm the screen shows a brief message and only **Report issue**, which opens the Send Diagnostics consent dialog when a receiver is set up and otherwise saves the diagnostics zip to Downloads.
+4. On **Ready**, confirm **Sign-in details** is collapsed; expand it and confirm a new installation's email is `admin@gmail.com` (an upgraded one keeps its own) and **Copy** copies it, verify password **Show** / **Copy** (and that the clipboard clears after 60 seconds if untouched), and confirm `local-account.json` in the installation folder is owner-private (setup itself no longer opens its location). Use **Change password**: a too-short password is refused inline, a valid one saves, `local-account.json` holds the new password, Linger stays signed in and signing in again after quitting the app works without asking. Click **Open Linger**.
 5. Confirm the main window opens signed in, `Another Me` (`Linger`) and `Getting Started` exist, and this machine's Computer shows **Online** in both the tray menu and Settings → Computers.
 6. Sign out and verify "Sign in with this computer's account" (`POST /v0/local/identity` HMAC check) signs back in without re-running setup.
 
 **Pass:** All 5 native services (`postgres`, `livekit`, `teamhub`, `node-services`, `web`) and the bundled Computer Daemon reach healthy/online state; `desktop/local-server.json` is written; owner credentials stay private on disk; no root/elevated process is used.
 
-**Evidence:** Screenshots of Welcome/Customize, Installing progress, Ready (with password masked), and signed-in Room with Online Computer; redacted `local-server.json` summary; `daemon status --json`; file permission/ACL listing for `local-account.json` and `credential.json` (never print secrets).
+**Evidence:** Screenshots of Welcome steps 1 and 2, Installing progress, Ready (with password masked), and signed-in Room with Online Computer; redacted `local-server.json` summary; `daemon status --json`; file permission/ACL listing for `local-account.json` and `credential.json` (never print secrets).
 
 ### Connect to Server and PKCE enrollment
 
@@ -203,7 +203,7 @@ This journey proves the updater mechanics. The [upgrade from the previous releas
 
 Follow [Physical Windows acceptance](../../../../docs/desktop-release.md#physical-windows-acceptance) on a clean standard-user Windows 10/11 x64 desktop with default Defender:
 
-1. Verify `Linger-<v>-windows-x64-setup.exe` SHA-256 and complete interactive Setup + Quick Install (also test `/S` silent install separately). Verify elevated / built-in Administrator installation starts `postgres.exe` via restricted token (`windows-restricted-token.ts`) and that a nested folder on a data drive (e.g. `D:\program\Linger`) is accepted with an owner-only protected DACL on the target while a junction ancestor is refused with `UNSAFE_PARENT_LINK`.
+1. Verify `Linger-<v>-windows-x64-setup.exe` SHA-256 and complete interactive Setup + Install (also test `/S` silent install separately). Verify elevated / built-in Administrator installation starts `postgres.exe` via restricted token (`windows-restricted-token.ts`) and that a nested folder on a data drive (e.g. `D:\program\Linger`) is accepted with an owner-only protected DACL on the target while a junction ancestor is refused with `UNSAFE_PARENT_LINK`.
 2. Run one unique Room journey with `node scripts/acceptance/room-journey.mjs` (and verify file bytes + Agent logs with `node scripts/local-runner-message-evidence.mjs --run-evidence`). Quit and reopen Desktop; confirm Room reply and file persist.
 3. Run the graphical uninstaller from **Add or remove programs** while Desktop and local services are running. Confirm `Linger.exe --quit` and `installer.js --instance desktop --stop` stop all 5 services, local models, and the Daemon, remove `%LOCALAPPDATA%\Programs\Linger` payloads/shortcuts/startup registrations, and preserve `%APPDATA%\Linger` and `%USERPROFILE%\.simplexai`.
 4. Confirm zero lingering `postgres`, `livekit`, `teamhub`, `node-services`, `web`, or `linger-computer-daemon` processes or listeners remain. Exit code `0` alone is not cleanup proof; record before/after payload, process, listener, and retained-data checksums. Label Windows ARM emulation evidence separately from native Windows x64.

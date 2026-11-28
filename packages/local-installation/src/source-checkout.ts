@@ -48,8 +48,12 @@ export interface BackgroundVoiceToolsLaunchOptions {
 // unpacked source package, or a developer's clone.
 export interface SourceInstallOptions {
   setupChoice?: SetupChoice;
+  // Subscription runtimes signed in at setup, configured beside setupChoice.
+  linkedRuntimes?: ("codex" | "claude")[];
   byok?: ByokConfiguration;
   shareGpu?: boolean;
+  // The local model picked in setup (`<catalog id>:<quant>`), for local-models.
+  localModel?: string;
   localModelsApproval?: string;
   localModelsReplan?: boolean;
   name: string;

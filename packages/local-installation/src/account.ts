@@ -56,6 +56,24 @@ export async function readLocalLogin(
     );
   }
 }
+// The sign-in a new installation's owner gets; an installation that has an
+// account keeps it.
+export const DEFAULT_OWNER_EMAIL = "admin@gmail.com";
+// Replaces the owner's password in local-account.json once TeamHub took it,
+// so the desktop keeps signing in. The file must pass the same checks as a
+// read; the email stays and the new file is owner-only, written beside the
+// old one and renamed over it.
+export async function writeLocalLoginPassword(
+  instance: Pick<Instance, "root">,
+  password: string,
+): Promise<void> {
+  validateLocalCredentials({ password });
+  const { email, file } = await readLocalLogin(instance);
+  await atomicPrivate(
+    file,
+    JSON.stringify({ email, password, provisioned: true }, null, 2) + "\n",
+  );
+}
 // How the desktop app checks that the server it sends the owner password to
 // is this instance's TeamHub: TeamHub's own loopback address and the key
 // only TeamHub's process and this file's owner hold (see TeamHub's /v0/local/identity).
@@ -265,7 +283,7 @@ async function loadOrInitLocalAccount(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     validateLocalCredentials(options);
     account = {
-      email: options.email ?? "owner@linger.local",
+      email: options.email ?? DEFAULT_OWNER_EMAIL,
       password: options.password ?? randomBytes(24).toString("base64url"),
       provisioned: false,
     };

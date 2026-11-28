@@ -10,12 +10,13 @@ import type { components } from "@linger/wire-contracts/linger-installer/types";
 type Snapshot = components["schemas"]["RuntimeLogin"];
 /** Codex's two logins: the one that calls back to this computer, or a device code. */
 export type LoginMethod = "browser" | "device";
-interface Input {
+export interface RuntimeLoginInput {
   instance: string;
   home: string;
   root: string;
   runtime: NativeRuntime;
 }
+type Input = RuntimeLoginInput;
 interface Session {
   runtime: NativeRuntime;
   method: LoginMethod | undefined;
@@ -43,6 +44,7 @@ function allowedCodexUrl(url: URL, nativeBrowser: boolean) {
     return false;
   }
 }
+const PROBE_TIMEOUT_MS = 45_000;
 /** Native output is private and ephemeral. Never attach it to persisted jobs or logs. */
 export class RuntimeLoginManager {
   private sessions = new Map<string, Session>();
@@ -52,24 +54,47 @@ export class RuntimeLoginManager {
     private inspect: typeof inspectRuntime = inspectRuntime,
     private platform: NodeJS.Platform = process.platform,
     private timeoutMs = 15 * 60_000,
+    // The runtime's managed profile. An installed instance names its chosen
+    // runtime; setup, before any instance, asks for one runtime's own.
+    private environment: (input: Input) => Promise<NodeJS.ProcessEnv> = (
+      input,
+    ) => managedRuntimeEnvironment(input.home, input.root),
   ) {}
   private async probe(input: Input, signal?: AbortSignal) {
     const env = {
       ...process.env,
-      ...(await managedRuntimeEnvironment(input.home, input.root)),
+      ...(await this.environment(input)),
     };
     signal?.throwIfAborted();
     const state = await this.inspect(input.runtime, {
       home: input.home,
       env,
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-        : AbortSignal.timeout(15000),
+        ? AbortSignal.any([signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)])
+        : AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     return { env, state };
   }
   async status(input: Input): Promise<Snapshot> {
-    const { state } = await this.probe(input);
+    const activeSession = this.sessions.get(input.instance);
+    const active =
+      activeSession?.runtime === input.runtime &&
+      (activeSession.snapshot.state === "starting" ||
+        activeSession.snapshot.state === "waiting_user");
+    let state;
+    try {
+      ({ state } = await this.probe(input));
+    } catch (error) {
+      if (active) {
+        const current = this.sessions.get(input.instance);
+        return structuredClone(
+          current?.runtime === input.runtime
+            ? current.snapshot
+            : { state: "idle" },
+        );
+      }
+      throw error;
+    }
     if (state.ready) {
       // The native CLI may write credentials before serving its final browser
       // callback. Let it exit naturally; killing it here races that response.
@@ -233,7 +258,9 @@ export class RuntimeLoginManager {
       }
       const deviceCode =
         login === "device"
-          ? output.match(/^\s*([A-Z0-9]{4,8}-[A-Z0-9]{4,8})\s*$/m)?.[1]
+          ? output.match(
+              /^\s*(?:[Cc][Oo][Dd][Ee]:\s*)?([A-Z0-9]{4,8}-[A-Z0-9]{4,8})\s*$/m,
+            )?.[1]
           : undefined;
       if (deviceCode) session.snapshot.deviceCode = deviceCode;
     };
