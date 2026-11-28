@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -197,80 +196,22 @@ func TestApplyProgressShardAndSmokeTest(t *testing.T) {
 
 func TestRunCustomSearchProbeAndCustomDownloadStdinTokenSafety(t *testing.T) {
 	dir := t.TempDir()
-	scriptPath := filepath.Join(dir, "fake_python.sh")
 	stdinCapture := filepath.Join(dir, "stdin.json")
 	argvCapture := filepath.Join(dir, "argv.txt")
-	stdoutCapture := filepath.Join(dir, "stdout.txt")
-	script := `#!/bin/sh
-echo "$@" > "` + argvCapture + `"
-cat > "` + stdinCapture + `"
-case "$*" in
-  *"custom search"*)
-    echo '{"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}'
-    exit 0
-    ;;
-  *"custom probe"*)
-    echo '{"schema":"localmodels.library-custom-probe/v1","ok":true,"outcome":"gated","hub_http_status":401,"token_provided":true,"repo":{"hub":"huggingface","repo_id":"meta-llama/Llama-3.1-8B-GGUF","url":"https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}'
-    exit 0
-    ;;
-  *"custom download"*)
-    echo '{"schema":"localmodels.library-event/v1","event":"progress","model":"custom.hf.bartowski--qwen:Q4_K_M","phase":"download","done":10,"total":100,"shard_index":1,"shard_count":2}'
-    echo '{"schema":"localmodels.library-event/v1","event":"result","model":"custom.hf.bartowski--qwen:Q4_K_M","ok":true}'
-    exit 0
-    ;;
-  *"status"*)
-    echo '{"schema":"localmodels.library-status/v1","tool_version":"0.1.0.dev60","observed_at":"2026-11-26T00:00:00Z","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":16000000000,"disk_free_bytes":100000000000,"gpus":[],"supported_formats":["gguf"]},"pools":[],"models":[]}'
-    exit 0
-    ;;
-esac
-exit 1
-`
-	if runtime.GOOS == "windows" {
-		scriptPath = filepath.Join(dir, "fake_python.cmd")
-		batchScript := `@echo off
-setlocal
->"` + argvCapture + `" echo %*
-set /p "stdinLine="
->"` + stdinCapture + `" echo(%stdinLine%
->"` + stdoutCapture + `" echo [%~5][%~6][%~7]
-if /I "%~7"=="search" goto search
-if /I "%~7"=="probe" goto probe
-if /I "%~7"=="download" goto download
-if /I "%~5"=="status" goto status
-type "` + stdoutCapture + `"
-exit /b 1
-:search
->"` + stdoutCapture + `" echo {"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}
-type "` + stdoutCapture + `"
-exit /b 0
-:probe
-echo {"schema":"localmodels.library-custom-probe/v1","ok":true,"outcome":"gated","hub_http_status":401,"token_provided":true,"repo":{"hub":"huggingface","repo_id":"meta-llama/Llama-3.1-8B-GGUF","url":"https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}
-exit /b 0
-:download
-echo {"schema":"localmodels.library-event/v1","event":"progress","model":"custom.hf.bartowski--qwen:Q4_K_M","phase":"download","done":10,"total":100,"shard_index":1,"shard_count":2}
-echo {"schema":"localmodels.library-event/v1","event":"result","model":"custom.hf.bartowski--qwen:Q4_K_M","ok":true}
-exit /b 0
-:status
-echo {"schema":"localmodels.library-status/v1","tool_version":"0.1.0.dev60","observed_at":"2026-11-26T00:00:00Z","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":16000000000,"disk_free_bytes":100000000000,"gpus":[],"supported_formats":["gguf"]},"pools":[],"models":[]}
-exit /b 0
-`
-		if err := os.WriteFile(scriptPath, []byte(batchScript), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	} else if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+	scriptPath, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
 	tool := Tool{Python: scriptPath, ModuleDirectory: dir, StateDirectory: filepath.Join(dir, "state"), BaseDirectory: filepath.Join(dir, "models")}
 	if err := os.MkdirAll(tool.StateDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	var environment map[string]string
-	if runtime.GOOS == "windows" {
-		environment = map[string]string{
-			"ComSpec":    os.Getenv("ComSpec"),
-			"SystemRoot": os.Getenv("SystemRoot"),
-			"PATH":       os.Getenv("PATH"),
-		}
+	environment := map[string]string{
+		"LOCALMODELS_FAKE_TOOL":            "1",
+		"LOCALMODELS_CUSTOM_FAKE_TOOL":     "1",
+		"LOCALMODELS_CUSTOM_ARGV_CAPTURE":  argvCapture,
+		"LOCALMODELS_CUSTOM_STDIN_CAPTURE": stdinCapture,
+		"PATH":                             os.Getenv("PATH"),
 	}
 	secret := "hf_SuperSecretReadOnlyToken987654321"
 	searchRes, err := tool.runCustomSearch(context.Background(), environment, dir, wire.LocalModelCustomSearchInput{
@@ -279,8 +220,7 @@ exit /b 0
 	if err != nil {
 		argvBytes, _ := os.ReadFile(argvCapture)
 		stdinBytes, _ := os.ReadFile(stdinCapture)
-		stdoutBytes, _ := os.ReadFile(stdoutCapture)
-		t.Fatalf("runCustomSearch: %v argv=%q stdin=%q stdout=%q", err, argvBytes, stdinBytes, stdoutBytes)
+		t.Fatalf("runCustomSearch: %v argv=%q stdin=%q", err, argvBytes, stdinBytes)
 	}
 	if len(searchRes.Results) != 1 || searchRes.Results[0].RepoID != "bartowski/Qwen2.5-7B-Instruct-GGUF" {
 		t.Fatalf("unexpected search result: %+v", searchRes)

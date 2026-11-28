@@ -3,6 +3,7 @@ package localmodels
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,6 +46,9 @@ type fakeLine struct {
 }
 
 func runFakeTool(args []string) int {
+	if os.Getenv("LOCALMODELS_CUSTOM_FAKE_TOOL") == "1" {
+		return runCustomFakeTool(args)
+	}
 	state := os.Getenv("LOCALMODELS_STATE")
 	if len(args) >= 6 && strings.Join(args[:5], " ") == "-P -s -m localmodels source" {
 		return runFakeSourceTool(state, args[5:])
@@ -117,6 +121,29 @@ func runFakeTool(args []string) int {
 		}
 	}
 	return script.Exit
+}
+
+func runCustomFakeTool(args []string) int {
+	argvPath := os.Getenv("LOCALMODELS_CUSTOM_ARGV_CAPTURE")
+	stdinPath := os.Getenv("LOCALMODELS_CUSTOM_STDIN_CAPTURE")
+	_ = os.WriteFile(argvPath, []byte(strings.Join(args, " ")), 0o600)
+	stdin, _ := io.ReadAll(os.Stdin)
+	_ = os.WriteFile(stdinPath, stdin, 0o600)
+	if len(args) < 7 || args[5] != "custom" {
+		return 1
+	}
+	switch args[6] {
+	case "search":
+		fmt.Println(`{"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}`)
+	case "probe":
+		fmt.Println(`{"schema":"localmodels.library-custom-probe/v1","ok":true,"outcome":"gated","hub_http_status":401,"token_provided":true,"repo":{"hub":"huggingface","repo_id":"meta-llama/Llama-3.1-8B-GGUF","url":"https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}`)
+	case "download":
+		fmt.Println(`{"schema":"localmodels.library-event/v1","event":"progress","model":"custom.hf.bartowski--qwen:Q4_K_M","phase":"download","done":10,"total":100,"shard_index":1,"shard_count":2}`)
+		fmt.Println(`{"schema":"localmodels.library-event/v1","event":"result","model":"custom.hf.bartowski--qwen:Q4_K_M","ok":true}`)
+	default:
+		return 1
+	}
+	return 0
 }
 
 func readFileRetrying(path string) ([]byte, error) {
