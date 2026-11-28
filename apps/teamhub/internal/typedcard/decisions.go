@@ -393,6 +393,7 @@ type DecisionAnswerCommand struct {
 	Decision            string
 	Comment             string
 	ConnectionID        string
+	Remember            bool
 	Answers             map[string]any
 	Links               []string
 	AttachmentUploadIDs []string
@@ -404,6 +405,7 @@ type decisionAnswer struct {
 	Decision            string         `json:"decision"`
 	Comment             string         `json:"comment,omitempty"`
 	ConnectionID        string         `json:"connection_id,omitempty"`
+	Remember            bool           `json:"remember,omitempty"`
 	Backend             string         `json:"backend,omitempty"`
 	Answers             map[string]any `json:"answers,omitempty"`
 	Links               []string       `json:"links,omitempty"`
@@ -417,6 +419,7 @@ func normalizeDecisionAnswer(kind string, view []byte, command DecisionAnswerCom
 	if utf8.RuneCountInString(command.Comment) > 10000 ||
 		kind != DecisionKindQuestion && len(command.Answers) > 0 ||
 		kind != DecisionKindConnectionAuth && command.ConnectionID != "" ||
+		kind != DecisionKindConnectorWrite && command.Remember ||
 		kind != DecisionKindProfileSetupSources && (len(command.Links) > 0 || len(command.AttachmentUploadIDs) > 0) {
 		return decisionAnswer{}, "", ErrInvalid
 	}
@@ -472,11 +475,20 @@ func normalizeDecisionAnswer(kind string, view []byte, command DecisionAnswerCom
 		if command.Decision != "approve" && command.Decision != "deny" || command.Decision == "approve" && command.Comment != "" {
 			return decisionAnswer{}, "", ErrInvalid
 		}
+		if command.Remember {
+			if kind != DecisionKindConnectorWrite || command.Decision != "approve" {
+				return decisionAnswer{}, "", ErrInvalid
+			}
+			var stored ConnectorWriteView
+			if err := json.Unmarshal(view, &stored); err != nil || !stored.CanRemember {
+				return decisionAnswer{}, "", ErrInvalid
+			}
+		}
 		status := "denied"
 		if command.Decision == "approve" {
 			status = "approved"
 		}
-		return decisionAnswer{Decision: command.Decision, Comment: command.Comment}, status, nil
+		return decisionAnswer{Decision: command.Decision, Comment: command.Comment, Remember: command.Remember}, status, nil
 	}
 }
 
@@ -561,6 +573,17 @@ func (d *decisionAnswerStep) apply(ctx context.Context, tx pgx.Tx, queries *stor
 	switch {
 	case authority.Kind == DecisionKindRuntimePermission && status == "approved":
 		lifetime = runtimePermissionApprovalTTL.Seconds()
+	case authority.Kind == DecisionKindConnectorWrite && answer.Decision == "approve" && answer.Remember:
+		var writeRequest ConnectorWriteRequest
+		if err := json.Unmarshal(authority.Request, &writeRequest); err != nil || writeRequest.ConnectionID == "" {
+			return decisionOutcome{}, ErrInvalid
+		}
+		if d.service.connections == nil {
+			return decisionOutcome{}, errors.New("connection authorizer is not configured")
+		}
+		if err := d.service.connections.SetAgentConnectionWritePolicyInTx(ctx, tx, d.accountID, writeRequest.ConnectionID, authority.RequestedByActorID, "always_allow"); err != nil {
+			return decisionOutcome{}, err
+		}
 	case authority.Kind == DecisionKindConnectionAuth && answer.Decision == "approve":
 		if status, err = d.service.beginConnectionAuthorization(ctx, tx, authority, answer.ConnectionID, d.accountID); err != nil {
 			return decisionOutcome{}, err

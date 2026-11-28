@@ -173,6 +173,10 @@ components:
           $ref: "./common.yaml#/components/schemas/Timestamp"
         updated_at:
           $ref: "./common.yaml#/components/schemas/Timestamp"
+    ExternalConnectionWritePolicy:
+      type: string
+      enum: [auto, always_allow, always_ask]
+      description: Controls whether non-destructive workspace writes on this delegated connection ask on a card, run automatically, or always prompt.
     ExternalConnectionAgentAccess:
       type: object
       additionalProperties: false
@@ -183,6 +187,7 @@ components:
           agent_display_name,
           tenant_id,
           granted,
+          write_policy,
           revision,
         ]
       properties:
@@ -201,6 +206,8 @@ components:
           $ref: "./common.yaml#/components/schemas/Id"
         granted:
           type: boolean
+        write_policy:
+          $ref: "#/components/schemas/ExternalConnectionWritePolicy"
         revision:
           type: integer
           format: int64
@@ -228,6 +235,8 @@ components:
       properties:
         granted:
           type: boolean
+        write_policy:
+          $ref: "#/components/schemas/ExternalConnectionWritePolicy"
     SlackConversation:
       type: object
       additionalProperties: false

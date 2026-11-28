@@ -104,6 +104,7 @@ func (command BrowserConnectionDecision) draft() (decisionDraft, error) {
 type ConnectionAuthorizer interface {
 	SupportsAgentTools(string) bool
 	GrantAgentConnectionInTx(context.Context, pgx.Tx, string, string, string) error
+	SetAgentConnectionWritePolicyInTx(context.Context, pgx.Tx, string, string, string, string) error
 }
 
 // SetConnectionAuthorizer installs External Source's grant policy.

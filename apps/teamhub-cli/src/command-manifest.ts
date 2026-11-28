@@ -22,7 +22,7 @@ export function commandManifest(): CommandManifest {
       command: definition.command,
       approval:
         definition.approval ??
-        (definition.toolName === "execute_app_tool" ? "judge" : "allow"),
+        (definition.toolName === "execute_app_tool" ? "confirm" : "allow"),
     })),
   };
 }

@@ -580,6 +580,7 @@
     "instructions": "指令",
     "send": "发送",
     "approve": "批准",
+    "alwaysAllowApp": "始终允许 {app}",
     "deny": "拒绝",
     "approvalActions": "审批操作",
     "closeReason": "收起理由",
@@ -2168,7 +2169,14 @@
     "accessUnavailable": "无法为这个 Agent 设置访问权限",
     "loadingAccess": "正在加载访问权限…",
     "retryAccess": "重新加载访问权限",
-    "allowAgentAccess": "允许 Agent 访问 {account}"
+    "allowAgentAccess": "允许 Agent 访问 {account}",
+    "writePermissions": "写入权限",
+    "writePolicyFor": "{account} 的写入策略",
+    "writePolicyForAgent": "{agent} 的写入策略",
+    "writePolicyAuto": "自动",
+    "writePolicyAlwaysAllow": "始终允许写入",
+    "writePolicyAlwaysAsk": "始终询问",
+    "noAgentsWithAccess": "还没有 Agent 有权访问这个账号。"
   },
   "webSearch": {
     "apiKey": "{backend} API 密钥",

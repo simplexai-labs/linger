@@ -209,7 +209,11 @@ function ApprovalDecision({
     (currentActorId === card.decision_owner.id ||
       (roomCreation && Boolean(roomMemberDecisionAllowed)));
 
-  async function decide(decision: "approve" | "deny", reason?: string) {
+  async function decide(
+    decision: "approve" | "deny",
+    reason?: string,
+    options?: { remember?: boolean },
+  ) {
     setDecisionError(null);
     setSubmitting(true);
     try {
@@ -218,6 +222,7 @@ function ApprovalDecision({
         expectedVersion: card.version,
         feedback: reason || undefined,
         messageId,
+        remember: options?.remember || undefined,
         requestId: card.decision_id,
       });
     } catch (error) {
@@ -330,8 +335,21 @@ function ApprovalDecision({
                 denyRisk={words.denyRisk}
                 disabled={submitting}
                 onApprove={() => void decide("approve")}
+                onApproveRemember={
+                  write?.can_remember
+                    ? () =>
+                        void decide("approve", undefined, { remember: true })
+                    : undefined
+                }
                 onDeny={(reason) => void decide("deny", reason)}
                 reasonRequired={roomCreation}
+                rememberLabel={
+                  write?.can_remember
+                    ? t(cardsMessages.alwaysAllowApp, {
+                        app: connectedAppDisplayName(write.app),
+                      })
+                    : undefined
+                }
               />
             )}
           </CardActions>

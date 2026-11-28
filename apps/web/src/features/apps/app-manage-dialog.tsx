@@ -15,11 +15,14 @@ import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubExternalApp,
   TeamHubExternalConnection,
+  TeamHubExternalConnectionWritePolicy,
 } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
 import {
+  externalConnectionAgentAccessQueryKey,
+  externalConnectionAgentAccessQueryOptions,
   externalConnectionQueryOptions,
   externalConnectionsQueryKey,
 } from "./connected-apps-queries";
@@ -77,6 +80,7 @@ export function AppManageDialog({
   const supportsAutoReminders = app.capabilities.includes(
     "proactive_reminders",
   );
+  const supportsAgentTools = app.capabilities.includes("agent_tools");
 
   return (
     <>
@@ -141,6 +145,7 @@ export function AppManageDialog({
                   canReconnect={canAuthorize}
                   connection={connection}
                   key={connection.id}
+                  supportsAgentTools={supportsAgentTools}
                   supportsAutoReminders={supportsAutoReminders}
                   reconnecting={connectFlow.connection.isPending}
                   onDisconnect={() => setDisconnecting(connection)}
@@ -171,6 +176,7 @@ export function AppManageDialog({
 function ConnectionRow({
   canReconnect,
   connection,
+  supportsAgentTools,
   supportsAutoReminders,
   reconnecting,
   onReconnect,
@@ -178,6 +184,7 @@ function ConnectionRow({
 }: {
   canReconnect: boolean;
   connection: TeamHubExternalConnection;
+  supportsAgentTools: boolean;
   supportsAutoReminders: boolean;
   reconnecting: boolean;
   onReconnect: () => void;
@@ -312,6 +319,121 @@ function ConnectionRow({
       ) : null}
       {connection.status === "active" && supportsAutoReminders ? (
         <AutoReminders connection={connection} />
+      ) : null}
+      {connection.status === "active" && supportsAgentTools ? (
+        <ConnectionWritePolicies connection={connection} />
+      ) : null}
+    </div>
+  );
+}
+
+function ConnectionWritePolicies({
+  connection,
+}: {
+  connection: TeamHubExternalConnection;
+}) {
+  const { client } = useTeamHubRuntime();
+  const queryClient = useQueryClient();
+  const t = useT();
+  const [expanded, setExpanded] = useState(false);
+  const access = useQuery({
+    ...externalConnectionAgentAccessQueryOptions(client, connection.id),
+    enabled: expanded,
+  });
+  const update = useMutation({
+    mutationFn: ({
+      agentActorId,
+      writePolicy,
+    }: {
+      agentActorId: string;
+      writePolicy: TeamHubExternalConnectionWritePolicy;
+    }) =>
+      client.setExternalConnectionAgentAccess(
+        connection.id,
+        agentActorId,
+        true,
+        writePolicy,
+      ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: externalConnectionAgentAccessQueryKey(connection.id),
+      });
+    },
+  });
+  const grantedAgents = (access.data?.agents ?? []).filter(
+    (item) => item.granted,
+  );
+
+  return (
+    <div className="basis-full pt-2">
+      <button
+        aria-expanded={expanded}
+        className="text-xs font-medium text-muted-foreground hover:text-foreground"
+        onClick={() => setExpanded((current) => !current)}
+        type="button"
+      >
+        {t(m.writePermissions)}
+      </button>
+      {expanded ? (
+        <div className="mt-2 flex flex-col gap-2 rounded-lg border border-border/70 p-2.5">
+          {access.isPending ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              {t(m.loadingAccess)}
+            </p>
+          ) : access.error ? (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-app-danger" role="alert">
+                {errorMessage(access.error, t(m.connectionActionFailed))}
+              </p>
+              <Button size="compact" onClick={() => void access.refetch()}>
+                {t(m.retryAccess)}
+              </Button>
+            </div>
+          ) : grantedAgents.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t(m.noAgentsWithAccess)}
+            </p>
+          ) : (
+            grantedAgents.map((agent) => (
+              <div
+                className="flex items-center justify-between gap-2"
+                key={agent.agent_actor_id}
+              >
+                <span className="truncate text-xs font-medium text-foreground">
+                  {agent.agent_display_name}
+                </span>
+                <select
+                  aria-label={t(m.writePolicyForAgent, {
+                    agent: agent.agent_display_name,
+                  })}
+                  className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus disabled:opacity-50"
+                  disabled={update.isPending}
+                  onChange={(event) =>
+                    update.mutate({
+                      agentActorId: agent.agent_actor_id,
+                      writePolicy: event.target
+                        .value as TeamHubExternalConnectionWritePolicy,
+                    })
+                  }
+                  value={agent.write_policy ?? "auto"}
+                >
+                  <option value="auto">{t(m.writePolicyAuto)}</option>
+                  <option value="always_allow">
+                    {t(m.writePolicyAlwaysAllow)}
+                  </option>
+                  <option value="always_ask">
+                    {t(m.writePolicyAlwaysAsk)}
+                  </option>
+                </select>
+              </div>
+            ))
+          )}
+          {update.error ? (
+            <p className="text-xs text-app-danger" role="alert">
+              {errorMessage(update.error, t(m.connectionActionFailed))}
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

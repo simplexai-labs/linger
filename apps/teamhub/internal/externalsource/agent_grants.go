@@ -12,12 +12,29 @@ import (
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
 )
 
+// Write policy values for external_connection_agent_grants.write_policy.
+const (
+	WritePolicyAuto        = "auto"
+	WritePolicyAlwaysAllow = "always_allow"
+	WritePolicyAlwaysAsk   = "always_ask"
+)
+
+func validWritePolicy(policy string) bool {
+	switch policy {
+	case WritePolicyAuto, WritePolicyAlwaysAllow, WritePolicyAlwaysAsk:
+		return true
+	default:
+		return false
+	}
+}
+
 type AgentConnectionAccess struct {
 	AgentActorID      string
 	AgentManagementID string
 	AgentDisplayName  string
 	TenantID          string
 	Granted           bool
+	WritePolicy       string
 	Revision          int64
 }
 
@@ -37,7 +54,9 @@ func (s *Service) ListAgentConnectionAccess(ctx context.Context, accountID, conn
 	rows, err := s.pool.Query(ctx, `
 		SELECT registration.actor_id,registration.agent_management_id,
 		       registration.tenant_id,agent.display_name,
-		       coalesce(delegation.status='active',false),coalesce(delegation.revision,0)
+		       coalesce(delegation.status='active',false),
+		       coalesce(delegation.write_policy,'auto'),
+		       coalesce(delegation.revision,0)
 		FROM agent_registrations registration
 		JOIN actors grantor
 		  ON grantor.account_id=$1
@@ -69,7 +88,7 @@ func (s *Service) ListAgentConnectionAccess(ctx context.Context, accountID, conn
 		var item AgentConnectionAccess
 		if err := rows.Scan(
 			&item.AgentActorID, &item.AgentManagementID, &item.TenantID,
-			&item.AgentDisplayName, &item.Granted, &item.Revision,
+			&item.AgentDisplayName, &item.Granted, &item.WritePolicy, &item.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -83,7 +102,23 @@ func (s *Service) SetAgentConnectionAccess(
 	accountID, connectionID, agentActorID string,
 	granted bool,
 ) (AgentConnectionAccess, error) {
+	return s.SetAgentConnectionAccessWithPolicy(ctx, accountID, connectionID, agentActorID, granted, "")
+}
+
+// SetAgentConnectionAccessWithPolicy grants or revokes an Agent's access to a
+// Connection and optionally sets its write policy. An empty writePolicy keeps
+// the current policy when active or defaults to "auto"; revoking always resets
+// write_policy to "auto".
+func (s *Service) SetAgentConnectionAccessWithPolicy(
+	ctx context.Context,
+	accountID, connectionID, agentActorID string,
+	granted bool,
+	writePolicy string,
+) (AgentConnectionAccess, error) {
 	if accountID == "" || connectionID == "" || agentActorID == "" {
+		return AgentConnectionAccess{}, ErrInvalid
+	}
+	if writePolicy != "" && !validWritePolicy(writePolicy) {
 		return AgentConnectionAccess{}, ErrInvalid
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -92,7 +127,7 @@ func (s *Service) SetAgentConnectionAccess(
 	}
 	defer tx.Rollback(ctx)
 
-	access, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, granted)
+	access, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, granted, writePolicy)
 	if err != nil {
 		return AgentConnectionAccess{}, err
 	}
@@ -102,13 +137,56 @@ func (s *Service) SetAgentConnectionAccess(
 	return access, nil
 }
 
+// SetAgentConnectionWritePolicyInTx updates write_policy on an active Agent
+// grant inside the caller's transaction.
+func (s *Service) SetAgentConnectionWritePolicyInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID, connectionID, agentActorID, policy string,
+) error {
+	if tx == nil || accountID == "" || connectionID == "" || agentActorID == "" || !validWritePolicy(policy) {
+		return ErrInvalid
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "connection-grant:"+connectionID+":"+agentActorID); err != nil {
+		return err
+	}
+	var currentPolicy string
+	err := tx.QueryRow(ctx, `
+		SELECT grant_row.write_policy
+		FROM external_connection_agent_grants grant_row
+		JOIN external_connections connection ON connection.id=grant_row.connection_id
+		WHERE grant_row.connection_id=$1
+		  AND grant_row.agent_actor_id=$2
+		  AND grant_row.status='active'
+		  AND connection.account_id=$3
+		FOR UPDATE OF grant_row`,
+		connectionID, agentActorID, accountID,
+	).Scan(&currentPolicy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if currentPolicy == policy {
+		return nil
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE external_connection_agent_grants
+		SET write_policy=$3,revision=revision+1,updated_at=now()
+		WHERE connection_id=$1 AND agent_actor_id=$2 AND status='active'`,
+		connectionID, agentActorID, policy,
+	)
+	return mapDatabaseError(err)
+}
+
 func (s *Service) SupportsAgentTools(appKey string) bool {
 	_, ok := s.agentToolsApp(appKey)
 	return ok
 }
 
 func (s *Service) GrantAgentConnectionInTx(ctx context.Context, tx pgx.Tx, accountID, connectionID, agentActorID string) error {
-	_, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true)
+	_, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true, "")
 	return err
 }
 
@@ -161,7 +239,7 @@ func (s *Service) connectionActivatedTx(ctx context.Context, tx pgx.Tx, accountI
 				return err
 			}
 			for _, agentActorID := range agents {
-				if _, err = s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true); err != nil {
+				if _, err = s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true, ""); err != nil {
 					return err
 				}
 			}
@@ -196,7 +274,7 @@ func (ProfileSetupReminderArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: jobs.QueueDefault, MaxAttempts: 5, UniqueOpts: jobs.UniqueUnfinished}
 }
 
-func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, accountID, connectionID, agentActorID string, granted bool) (AgentConnectionAccess, error) {
+func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, accountID, connectionID, agentActorID string, granted bool, writePolicy string) (AgentConnectionAccess, error) {
 	// Serialize the initially absent grant as well as updates to an existing grant.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "connection-grant:"+connectionID+":"+agentActorID); err != nil {
 		return AgentConnectionAccess{}, err
@@ -252,36 +330,52 @@ func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, a
 		return AgentConnectionAccess{}, err
 	}
 
-	var grantID, status string
+	var grantID, status, currentPolicy string
 	err := tx.QueryRow(ctx, `
-		SELECT id,status,revision
+		SELECT id,status,write_policy,revision
 		FROM external_connection_agent_grants
 		WHERE connection_id=$1 AND agent_actor_id=$2
-		FOR UPDATE`, connectionID, agentActorID).Scan(&grantID, &status, &access.Revision)
+		FOR UPDATE`, connectionID, agentActorID).Scan(&grantID, &status, &currentPolicy, &access.Revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if !granted {
 			access.Granted = false
+			access.WritePolicy = WritePolicyAuto
 			return access, nil
 		}
+		targetPolicy := WritePolicyAuto
+		if writePolicy != "" {
+			targetPolicy = writePolicy
+		}
 		access.Revision = 1
+		access.WritePolicy = targetPolicy
 		_, err = tx.Exec(ctx, `
 			INSERT INTO external_connection_agent_grants(
-				id,connection_id,tenant_id,agent_actor_id,represented_human_actor_id,status
-			) VALUES($1,$2,$3,$4,$5,'active')`,
+				id,connection_id,tenant_id,agent_actor_id,represented_human_actor_id,status,write_policy
+			) VALUES($1,$2,$3,$4,$5,'active',$6)`,
 			idgen.New("external_connection_agent_grant"), connectionID, access.TenantID,
-			agentActorID, grantingHumanActorID,
+			agentActorID, grantingHumanActorID, targetPolicy,
 		)
 	} else if err == nil {
 		access.Granted = status == "active"
-		if access.Granted != granted {
+		targetPolicy := currentPolicy
+		if !granted {
+			targetPolicy = WritePolicyAuto
+		} else if writePolicy != "" {
+			targetPolicy = writePolicy
+		} else if !access.Granted {
+			targetPolicy = WritePolicyAuto
+		}
+		if access.Granted != granted || currentPolicy != targetPolicy {
 			access.Revision++
 			_, err = tx.Exec(ctx, `
 				UPDATE external_connection_agent_grants
 				SET status=CASE WHEN $3 THEN 'active' ELSE 'revoked' END,
+				    write_policy=$5,
 				    revision=$4,updated_at=now(),
 				    revoked_at=CASE WHEN $3 THEN NULL ELSE now() END
-				WHERE id=$1 AND revision=$2`, grantID, access.Revision-1, granted, access.Revision)
+				WHERE id=$1 AND revision=$2`, grantID, access.Revision-1, granted, access.Revision, targetPolicy)
 		}
+		access.WritePolicy = targetPolicy
 	}
 	if err != nil {
 		return AgentConnectionAccess{}, mapDatabaseError(err)

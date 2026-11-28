@@ -123,16 +123,73 @@ type RateLimitError struct {
 
 func (e *RateLimitError) Error() string { return "Composio " + e.Operation + " was rate limited" }
 
+// ToolAnnotations carries optional MCP-style tool behavior hints reported by Composio.
+type ToolAnnotations struct {
+	Title           string `json:"title,omitempty"`
+	ReadOnlyHint    *bool  `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool  `json:"destructiveHint,omitempty"`
+	IdempotentHint  *bool  `json:"idempotentHint,omitempty"`
+	OpenWorldHint   *bool  `json:"openWorldHint,omitempty"`
+}
+
 type Tool struct {
-	Slug            string         `json:"slug"`
-	Name            string         `json:"name"`
-	Description     string         `json:"description"`
-	InputParameters map[string]any `json:"input_parameters"`
-	Version         string         `json:"version"`
-	IsDeprecated    bool           `json:"is_deprecated"`
+	Slug            string           `json:"slug"`
+	Name            string           `json:"name"`
+	Description     string           `json:"description"`
+	InputParameters map[string]any   `json:"input_parameters"`
+	Version         string           `json:"version"`
+	IsDeprecated    bool             `json:"is_deprecated"`
+	Tags            []string         `json:"tags,omitempty"`
+	Annotations     *ToolAnnotations `json:"annotations,omitempty"`
 	Toolkit         struct {
 		Slug string `json:"slug"`
 	} `json:"toolkit"`
+}
+
+// IsDestructiveHint reports whether Composio annotations or tags mark the tool as destructive.
+func (t Tool) IsDestructiveHint() bool {
+	if t.Annotations != nil && t.Annotations.DestructiveHint != nil && *t.Annotations.DestructiveHint {
+		return true
+	}
+	for _, tag := range t.Tags {
+		switch normalizeToolTag(tag) {
+		case "destructive", "destructivehint":
+			return true
+		}
+	}
+	return false
+}
+
+// IsReadOnlyHint reports whether Composio annotations or tags mark the tool as read-only.
+// A destructive hint always overrides a read-only hint.
+func (t Tool) IsReadOnlyHint() bool {
+	if t.IsDestructiveHint() {
+		return false
+	}
+	if t.Annotations != nil && t.Annotations.ReadOnlyHint != nil {
+		return *t.Annotations.ReadOnlyHint
+	}
+	for _, tag := range t.Tags {
+		switch normalizeToolTag(tag) {
+		case "readonly", "readonlyhint":
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeToolTag(tag string) string {
+	var builder strings.Builder
+	builder.Grow(len(tag))
+	for _, r := range strings.TrimSpace(tag) {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			builder.WriteRune(r + ('a' - 'A'))
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 type ToolExecution struct {

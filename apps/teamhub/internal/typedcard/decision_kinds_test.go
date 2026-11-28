@@ -94,6 +94,9 @@ func TestNormalizeDecisionAnswerForConnectionAndRoomKinds(t *testing.T) {
 		{DecisionKindRoomCreation, DecisionAnswerCommand{Decision: "deny"}, ""},
 		{DecisionKindRoomCreation, DecisionAnswerCommand{Decision: "approve", Comment: "ok"}, ""},
 		{DecisionKindConnectorWrite, DecisionAnswerCommand{Decision: "approve", ConnectionID: "connection_notion"}, ""},
+		{DecisionKindConnectorWrite, DecisionAnswerCommand{Decision: "approve", Remember: true}, ""},
+		{DecisionKindConnectorWrite, DecisionAnswerCommand{Decision: "deny", Remember: true}, ""},
+		{DecisionKindAgentChange, DecisionAnswerCommand{Decision: "approve", Remember: true}, ""},
 	} {
 		answer, status, err := normalizeDecisionAnswer(test.kind, nil, test.command)
 		if test.status == "" {
@@ -105,6 +108,19 @@ func TestNormalizeDecisionAnswerForConnectionAndRoomKinds(t *testing.T) {
 		if err != nil || status != test.status || answer.Decision != test.command.Decision || answer.ConnectionID != test.command.ConnectionID {
 			t.Fatalf("%s %+v: answer=%+v status=%q err=%v", test.kind, test.command, answer, status, err)
 		}
+	}
+
+	rememberView, _ := json.Marshal(ConnectorWriteView{Kind: "change", App: "linear", Title: "Create Linear issue", CanRemember: true})
+	noRememberView, _ := json.Marshal(ConnectorWriteView{Kind: "message", App: "gmail", Title: "Send an email", CanRemember: false})
+	answer, status, err := normalizeDecisionAnswer(DecisionKindConnectorWrite, rememberView, DecisionAnswerCommand{Decision: "approve", Remember: true})
+	if err != nil || status != "approved" || !answer.Remember {
+		t.Fatalf("remember approve on can_remember=true: answer=%+v status=%q err=%v", answer, status, err)
+	}
+	if _, _, err := normalizeDecisionAnswer(DecisionKindConnectorWrite, noRememberView, DecisionAnswerCommand{Decision: "approve", Remember: true}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("remember approve on can_remember=false: err=%v, want ErrInvalid", err)
+	}
+	if _, _, err := normalizeDecisionAnswer(DecisionKindConnectorWrite, rememberView, DecisionAnswerCommand{Decision: "deny", Remember: true}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("remember deny: err=%v, want ErrInvalid", err)
 	}
 }
 

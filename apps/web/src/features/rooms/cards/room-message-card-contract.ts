@@ -7,6 +7,7 @@ export interface RoomCardDecision {
   feedback?: string;
   links?: string[];
   messageId: string;
+  remember?: boolean;
   /** The decision the card names. */
   requestId: string;
 }

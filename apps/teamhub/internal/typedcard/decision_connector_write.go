@@ -27,6 +27,9 @@ type ConnectorWriteView struct {
 	// arguments as JSON.
 	Tool  string `json:"tool"`
 	Input string `json:"input"`
+	// CanRemember is true when approving this card may also offer
+	// "Always allow <App>" for future non-destructive workspace writes.
+	CanRemember bool `json:"can_remember,omitempty"`
 }
 
 // ConnectorWriteMessage is the mail or chat message a write sends, exactly

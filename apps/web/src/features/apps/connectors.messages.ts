@@ -222,4 +222,11 @@ export const connectorMessages = defineMessages("connectors", {
   loadingAccess: "Loading access...",
   retryAccess: "Retry access",
   allowAgentAccess: "Allow Agent access to {account}",
+  writePermissions: "Write permissions",
+  writePolicyFor: "Write policy for {account}",
+  writePolicyForAgent: "Write policy for {agent}",
+  writePolicyAuto: "Auto",
+  writePolicyAlwaysAllow: "Always allow writes",
+  writePolicyAlwaysAsk: "Always ask",
+  noAgentsWithAccess: "No Agents have access to this account yet.",
 });

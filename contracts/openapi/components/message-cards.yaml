@@ -305,6 +305,9 @@ components:
           type: string
           maxLength: 8001
           description: The full call arguments as JSON.
+        can_remember:
+          type: boolean
+          description: Whether approving this write may also remember "Always allow" for non-destructive workspace writes on this connection.
     AgentChangeDecisionView:
       type: object
       additionalProperties: false
@@ -654,6 +657,9 @@ components:
         connection_id:
           $ref: "./common.yaml#/components/schemas/Id"
           description: The Connection a connection_auth approval chose.
+        remember:
+          type: boolean
+          description: Whether a connector_write approval also saved "always_allow" for future non-destructive writes on this connection.
         backend:
           $ref: "./web-search.yaml#/components/schemas/WebSearchKeyBackend"
           description: >-
@@ -804,6 +810,9 @@ components:
           allOf:
             - $ref: "./common.yaml#/components/schemas/Id"
           description: The Connection a connection_auth approval chose; only with its approve.
+        remember:
+          type: boolean
+          description: Save "always_allow" for non-destructive writes on this connection; only valid with approve on a connector_write card with can_remember=true.
         answers:
           type: object
           additionalProperties:

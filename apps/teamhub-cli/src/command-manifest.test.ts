@@ -31,7 +31,7 @@ describe("command manifest", () => {
     expect(find("outlook-calendar", "update")?.approval).toBe("judge");
     expect(find("outlook-calendar", "cancel")?.approval).toBe("judge");
     expect(find("slack", "react")?.approval).toBe("judge");
-    expect(find("apps", "execute")?.approval).toBe("judge");
+    expect(find("apps", "execute")?.approval).toBe("confirm");
     expect(find("apps", "search")?.approval).toBe("allow");
     // Agent changes open their own sponsor card when TeamHub requires one.
     expect(find("agent", "list")?.approval).toBe("allow");

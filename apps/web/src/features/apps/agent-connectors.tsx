@@ -18,6 +18,7 @@ import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
 import type {
   TeamHubExternalApp,
   TeamHubExternalConnection,
+  TeamHubExternalConnectionWritePolicy,
 } from "@/features/teamhub/teamhub-types";
 import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
@@ -156,12 +157,25 @@ function AgentConnectionAccess({
     enabled: connection.status === "active",
   });
   const update = useMutation({
-    mutationFn: (granted: boolean) =>
-      client.setExternalConnectionAgentAccess(
-        connection.id,
-        agentActorId,
-        granted,
-      ),
+    mutationFn: ({
+      granted,
+      writePolicy,
+    }: {
+      granted: boolean;
+      writePolicy?: TeamHubExternalConnectionWritePolicy;
+    }) =>
+      writePolicy === undefined
+        ? client.setExternalConnectionAgentAccess(
+            connection.id,
+            agentActorId,
+            granted,
+          )
+        : client.setExternalConnectionAgentAccess(
+            connection.id,
+            agentActorId,
+            granted,
+            writePolicy,
+          ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: externalConnectionAgentAccessQueryKey(connection.id),
@@ -220,17 +234,44 @@ function AgentConnectionAccess({
           {t(m.retryAccess)}
         </Button>
       ) : (
-        <input
-          type="checkbox"
-          role="switch"
-          aria-label={t(m.allowAgentAccess, {
-            account: connection.identity_label || connection.provider,
-          })}
-          checked={agent?.granted ?? false}
-          disabled={!agent || update.isPending}
-          onChange={(event) => update.mutate(event.target.checked)}
-          className="agent-connector-switch"
-        />
+        <div className="flex shrink-0 items-center gap-2">
+          {agent?.granted ? (
+            <select
+              aria-label={t(m.writePolicyFor, {
+                account: connection.identity_label || connection.provider,
+              })}
+              className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-app-focus disabled:opacity-50"
+              disabled={update.isPending}
+              onChange={(event) =>
+                update.mutate({
+                  granted: true,
+                  writePolicy: event.target
+                    .value as TeamHubExternalConnectionWritePolicy,
+                })
+              }
+              value={agent.write_policy ?? "auto"}
+            >
+              <option value="auto">{t(m.writePolicyAuto)}</option>
+              <option value="always_allow">
+                {t(m.writePolicyAlwaysAllow)}
+              </option>
+              <option value="always_ask">{t(m.writePolicyAlwaysAsk)}</option>
+            </select>
+          ) : null}
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label={t(m.allowAgentAccess, {
+              account: connection.identity_label || connection.provider,
+            })}
+            checked={agent?.granted ?? false}
+            disabled={!agent || update.isPending}
+            onChange={(event) =>
+              update.mutate({ granted: event.target.checked })
+            }
+            className="agent-connector-switch"
+          />
+        </div>
       )}
     </SettingsRow>
   );

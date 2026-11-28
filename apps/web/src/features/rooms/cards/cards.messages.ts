@@ -27,6 +27,7 @@ export const cardsMessages = defineMessages("cards", {
 
   // Approve or deny, with a reason.
   approve: "Approve",
+  alwaysAllowApp: "Always allow {app}",
   deny: "Deny",
   approvalActions: "Approval actions",
   closeReason: "Close the reason",

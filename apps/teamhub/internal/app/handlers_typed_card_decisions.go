@@ -25,6 +25,9 @@ func (a *App) decideDecision(c *gin.Context) {
 	if request.ConnectionId != nil {
 		command.ConnectionID = *request.ConnectionId
 	}
+	if request.Remember != nil {
+		command.Remember = *request.Remember
+	}
 	if request.Answers != nil {
 		answers, err := decisionAnswers(*request.Answers)
 		if err != nil {

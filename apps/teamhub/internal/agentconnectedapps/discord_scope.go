@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
@@ -43,6 +44,9 @@ var discordReadScopes = map[string]discordScope{
 func (s *Service) discordReadInScope(ctx context.Context, connection externalsource.AgentToolConnection, slug string, arguments map[string]any) (bool, error) {
 	scope, discord := discordReadScopes[slug]
 	if !discord {
+		if connection.AppKey == "discord" || strings.HasPrefix(slug, "DISCORDBOT_") {
+			return false, nil
+		}
 		return true, nil
 	}
 	switch scope {

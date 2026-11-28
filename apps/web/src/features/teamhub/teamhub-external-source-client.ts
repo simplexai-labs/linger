@@ -8,6 +8,7 @@ import type {
   TeamHubExternalConnectionAgentAccess,
   TeamHubExternalConnectionAgentAccessList,
   TeamHubExternalConnectionList,
+  TeamHubExternalConnectionWritePolicy,
   TeamHubExternalProviderKeyStatus,
   TeamHubDiscordChannelList,
   TeamHubGoogleCalendarPage,
@@ -75,6 +76,7 @@ export interface TeamHubExternalSourceClient {
     connectionId: string,
     agentActorId: string,
     granted: boolean,
+    writePolicy?: TeamHubExternalConnectionWritePolicy,
   ): Promise<TeamHubExternalConnectionAgentAccess>;
   setExternalConnectionAutoReminders(
     connectionId: string,
@@ -213,13 +215,16 @@ export function createHttpTeamHubExternalSourceClient(
       externalConnectionId,
       agentActorId,
       granted,
+      writePolicy,
     ) =>
       data(
         api.PUT(
           "/v0/external-connections/{externalConnectionId}/agent-grants/{agentActorId}",
           {
             params: { path: { externalConnectionId, agentActorId } },
-            body: { granted },
+            body: writePolicy
+              ? { granted, write_policy: writePolicy }
+              : { granted },
           },
         ),
       ),

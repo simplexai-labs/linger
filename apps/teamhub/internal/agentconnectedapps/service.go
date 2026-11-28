@@ -274,7 +274,7 @@ func (s *Service) Search(ctx context.Context, token string, input SearchInput) (
 }
 
 // Execute runs one tool call, or holds a write that needs the sponsor's
-// confirmation and returns its card instead (see accessOf).
+// confirmation and returns its card instead (see classifyTool).
 func (s *Service) Execute(ctx context.Context, token string, input ExecuteInput) (Result, error) {
 	input.ConnectionID = strings.TrimSpace(input.ConnectionID)
 	input.ToolSlug = strings.TrimSpace(input.ToolSlug)
@@ -304,23 +304,43 @@ func (s *Service) execute(ctx context.Context, input ExecuteInput, authorize fun
 	if err := s.checkConnectionActive(ctx, connection); err != nil {
 		return Result{}, err
 	}
-	if _, err := s.pinnedTool(ctx, connection, input.ToolSlug, input.ToolVersion, "execute"); err != nil {
+	tool, err := s.pinnedTool(ctx, connection, input.ToolSlug, input.ToolVersion, "execute")
+	if err != nil {
 		return Result{}, err
 	}
-	access := accessOf(input.ToolSlug, input.Arguments)
-	if access == accessRead {
+	tier := classifyTool(tool, input.Arguments)
+	if tier == tierReadOnly {
 		inScope, err := s.discordReadInScope(ctx, connection, input.ToolSlug, input.Arguments)
 		if err != nil {
 			return Result{}, err
 		}
 		if !inScope {
-			access = accessConfirm
+			tier = tierConfirmStrict
 		}
 	}
-	if access == accessConfirm {
+	writePolicy := connection.WritePolicy
+	if writePolicy == "" {
+		writePolicy = externalsource.WritePolicyAuto
+	}
+	var hold, canRemember bool
+	switch tier {
+	case tierReadOnly:
+		hold = false
+	case tierDirectWrite:
+		hold = writePolicy == externalsource.WritePolicyAlwaysAsk
+	case tierWorkspaceWrite:
+		if writePolicy != externalsource.WritePolicyAlwaysAllow {
+			hold = true
+			canRemember = writePolicy == externalsource.WritePolicyAuto
+		}
+	case tierConfirmStrict:
+		hold = true
+		canRemember = false
+	}
+	if hold {
 		return s.prepareConfirmation(ctx, connection, confirmationAction{
 			ToolSlug: input.ToolSlug, ToolVersion: input.ToolVersion, Arguments: input.Arguments,
-		})
+		}, canRemember)
 	}
 	// Revalidate Agent authority immediately before admission, including the exact connection
 	// revision that was checked upstream. No network call holds database locks.

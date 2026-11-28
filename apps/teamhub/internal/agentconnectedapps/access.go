@@ -4,46 +4,226 @@
 package agentconnectedapps
 
 import (
+	"strings"
+
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/composio"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 )
 
-// toolAccess is how TeamHub admits one provider tool call. The
-// generic `teamhub apps execute` and the wrapped connector commands submit
-// their calls to the same Execute, which decides here; neither the CLI nor
-// the host decides whether a write waits for the sponsor.
-type toolAccess int
+// toolTier is how TeamHub classifies one provider tool call before combining it
+// with the connection's write policy. Neither the CLI nor the host decides
+// whether a connected-app write waits for the sponsor.
+type toolTier int
 
 const (
-	// accessConfirm runs the call only after the sponsor approves its
-	// confirmation card. It is the default: a tool TeamHub does not know is
-	// treated as a write that needs confirmation.
-	accessConfirm toolAccess = iota
-	// accessRead runs the call at once.
-	accessRead
-	// accessWrite runs the call at once. These are writes nobody else sees
-	// before a confirmed step (creating a draft, opening a chat) and writes
-	// the host's permission reviewer judges (calendar events, uploads).
-	accessWrite
+	// tierConfirmStrict always holds the call for a sponsor confirmation card
+	// and never offers "Always allow", regardless of write_policy.
+	tierConfirmStrict toolTier = iota
+	// tierWorkspaceWrite holds non-destructive workspace mutations on "auto"
+	// (offering "Always allow <App>"), runs immediately on "always_allow", and
+	// holds without remember on "always_ask".
+	tierWorkspaceWrite
+	// tierDirectWrite runs immediately unless write_policy is "always_ask".
+	tierDirectWrite
+	// tierReadOnly runs immediately.
+	tierReadOnly
 )
 
 // linearGraphQLTool runs any GraphQL document against Linear, so its slug
 // alone cannot say whether a call reads or writes.
 const linearGraphQLTool = "LINEAR_RUN_QUERY_OR_MUTATION"
 
-// accessOf classifies a provider tool call by its exact slug, and a Linear
-// GraphQL call by the operations its document declares.
-func accessOf(slug string, arguments map[string]any) toolAccess {
+// classifyTool assigns a provider tool call to its risk tier using explicit
+// lists, Composio annotations/tags, and whole-token action-verb rules.
+func classifyTool(tool composio.Tool, arguments map[string]any) toolTier {
+	slug := tool.Slug
 	switch {
+	case strictConfirmTools[slug]:
+		return tierConfirmStrict
 	case readTools[slug]:
-		return accessRead
+		return tierReadOnly
 	case directWriteTools[slug]:
-		return accessWrite
-	case slug == linearGraphQLTool && onlyQueries(arguments["query_or_mutation"]):
-		return accessRead
+		return tierDirectWrite
+	case slug == linearGraphQLTool:
+		if onlyQueries(arguments["query_or_mutation"]) {
+			return tierReadOnly
+		}
+		return tierWorkspaceWrite
+	case tool.IsDestructiveHint() || hasDestructiveVerb(tool):
+		return tierConfirmStrict
+	case tool.IsReadOnlyHint():
+		return tierReadOnly
+	case hasSafeReadOnlyVerb(tool):
+		return tierReadOnly
 	default:
-		return accessConfirm
+		return tierWorkspaceWrite
 	}
+}
+
+func actionTokens(tool composio.Tool) []string {
+	slug := strings.ToUpper(strings.TrimSpace(tool.Slug))
+	if slug == "" {
+		return nil
+	}
+	rest := slug
+	if prefix := strings.ToUpper(strings.TrimSpace(tool.Toolkit.Slug)); prefix != "" {
+		prefix = strings.ReplaceAll(prefix, "-", "_")
+		if strings.HasPrefix(rest, prefix+"_") {
+			rest = strings.TrimPrefix(rest, prefix+"_")
+		} else if idx := strings.IndexByte(rest, '_'); idx >= 0 {
+			rest = rest[idx+1:]
+		}
+	} else if idx := strings.IndexByte(rest, '_'); idx >= 0 {
+		rest = rest[idx+1:]
+	}
+	if rest == "" {
+		return nil
+	}
+	raw := strings.Split(rest, "_")
+	tokens := make([]string, 0, len(raw))
+	for _, token := range raw {
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+func hasDestructiveVerb(tool composio.Tool) bool {
+	tokens := actionTokens(tool)
+	for i, token := range tokens {
+		if destructiveActionVerbs[token] {
+			return true
+		}
+		if token == "FORCE" && i+1 < len(tokens) && tokens[i+1] == "PUSH" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSafeReadOnlyVerb(tool composio.Tool) bool {
+	tokens := actionTokens(tool)
+	if len(tokens) == 0 || !readOnlyLeadingVerbs[tokens[0]] {
+		return false
+	}
+	for i, token := range tokens {
+		if destructiveActionVerbs[token] || mutationActionVerbs[token] {
+			return false
+		}
+		if token == "FORCE" && i+1 < len(tokens) && tokens[i+1] == "PUSH" {
+			return false
+		}
+	}
+	return true
+}
+
+// strictConfirmTools are outbound messaging and file-sharing actions that
+// always wait for explicit sponsor confirmation and never offer "Always allow".
+var strictConfirmTools = map[string]bool{
+	"DISCORDBOT_CREATE_MESSAGE":              true,
+	"FEISHU_MAIL_SEND_DRAFT":                 true,
+	"GMAIL_REPLY_TO_THREAD":                  true,
+	"GMAIL_SEND_DRAFT":                       true,
+	"GMAIL_SEND_EMAIL":                       true,
+	"OUTLOOK_REPLY_EMAIL":                    true,
+	"OUTLOOK_SEND_DRAFT":                     true,
+	"OUTLOOK_SEND_EMAIL":                     true,
+	"SLACK_SEND_MESSAGE":                     true,
+	"SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK": true,
+}
+
+var destructiveActionVerbs = map[string]bool{
+	"BROADCAST": true,
+	"CHARGE":    true,
+	"DELETE":    true,
+	"DESTROY":   true,
+	"FORWARD":   true,
+	"GRANT":     true,
+	"INVITE":    true,
+	"MERGE":     true,
+	"PAY":       true,
+	"PUBLISH":   true,
+	"PURCHASE":  true,
+	"PURGE":     true,
+	"REPLY":     true,
+	"REVOKE":    true,
+	"SEND":      true,
+	"SHARE":     true,
+}
+
+var readOnlyLeadingVerbs = map[string]bool{
+	"CHECK":    true,
+	"DOWNLOAD": true,
+	"EXPORT":   true,
+	"FETCH":    true,
+	"FIND":     true,
+	"GET":      true,
+	"INSPECT":  true,
+	"LIST":     true,
+	"LOOKUP":   true,
+	"QUERY":    true,
+	"READ":     true,
+	"RETRIEVE": true,
+	"SEARCH":   true,
+	"TEST":     true,
+}
+
+var mutationActionVerbs = map[string]bool{
+	"ADD":       true,
+	"APPEND":    true,
+	"ARCHIVE":   true,
+	"ASSIGN":    true,
+	"CANCEL":    true,
+	"CLONE":     true,
+	"CLOSE":     true,
+	"COMMENT":   true,
+	"COPY":      true,
+	"CREATE":    true,
+	"DISABLE":   true,
+	"EDIT":      true,
+	"ENABLE":    true,
+	"EXECUTE":   true,
+	"FORK":      true,
+	"IMPORT":    true,
+	"INSERT":    true,
+	"LABEL":     true,
+	"LINK":      true,
+	"LOCK":      true,
+	"MODIFY":    true,
+	"MOVE":      true,
+	"MUTATION":  true,
+	"PATCH":     true,
+	"PIN":       true,
+	"POST":      true,
+	"PUT":       true,
+	"REACT":     true,
+	"REMOVE":    true,
+	"REOPEN":    true,
+	"REPLACE":   true,
+	"RUN":       true,
+	"SET":       true,
+	"STAR":      true,
+	"START":     true,
+	"STOP":      true,
+	"SUBMIT":    true,
+	"SYNC":      true,
+	"TAG":       true,
+	"TRIGGER":   true,
+	"UNARCHIVE": true,
+	"UNASSIGN":  true,
+	"UNLABEL":   true,
+	"UNLINK":    true,
+	"UNLOCK":    true,
+	"UNPIN":     true,
+	"UNSTAR":    true,
+	"UNTAG":     true,
+	"UNWATCH":   true,
+	"UPDATE":    true,
+	"UPLOAD":    true,
+	"WATCH":     true,
+	"WRITE":     true,
 }
 
 // onlyQueries reports whether document is a GraphQL document whose operations

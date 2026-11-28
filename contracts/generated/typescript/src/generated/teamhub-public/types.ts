@@ -5817,6 +5817,8 @@ export interface components {
       comment?: string;
       /** @description The Connection a connection_auth approval chose. */
       connection_id?: components["schemas"]["Id"];
+      /** @description Whether a connector_write approval also saved "always_allow" for future non-destructive writes on this connection. */
+      remember?: boolean;
       /** @description The web search backend whose key was saved, on a configured search_key answer; it may differ from the backend the card showed. */
       backend?: components["schemas"]["WebSearchKeyBackend"];
       /** @description Map of question id to the Human's answer; only with submit. */
@@ -5866,6 +5868,8 @@ export interface components {
       tool: string;
       /** @description The full call arguments as JSON. */
       input: string;
+      /** @description Whether approving this write may also remember "Always allow" for non-destructive workspace writes on this connection. */
+      can_remember?: boolean;
     };
     AgentChangeConfirmationChange: {
       /** @enum {string} */
@@ -6486,6 +6490,8 @@ export interface components {
       comment?: string;
       /** @description The Connection a connection_auth approval chose; only with its approve. */
       connection_id?: components["schemas"]["Id"];
+      /** @description Save "always_allow" for non-destructive writes on this connection; only valid with approve on a connector_write card with can_remember=true. */
+      remember?: boolean;
       answers?: {
         [key: string]: components["schemas"]["DecisionAnswerValue"];
       };
@@ -7362,12 +7368,18 @@ export interface components {
     SetExternalConnectionAutoRemindersRequest: {
       enabled: boolean;
     };
+    /**
+     * @description Controls whether non-destructive workspace writes on this delegated connection ask on a card, run automatically, or always prompt.
+     * @enum {string}
+     */
+    ExternalConnectionWritePolicy: "auto" | "always_allow" | "always_ask";
     ExternalConnectionAgentAccess: {
       agent_actor_id: components["schemas"]["Id"];
       agent_management_id: string;
       agent_display_name: string;
       tenant_id: components["schemas"]["Id"];
       granted: boolean;
+      write_policy: components["schemas"]["ExternalConnectionWritePolicy"];
       /** Format: int64 */
       revision: number;
     };
@@ -7376,6 +7388,7 @@ export interface components {
     };
     SetExternalConnectionAgentAccessRequest: {
       granted: boolean;
+      write_policy?: components["schemas"]["ExternalConnectionWritePolicy"];
     };
     DisconnectExternalConnectionRequest: {
       /** Format: int64 */

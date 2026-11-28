@@ -126,7 +126,7 @@ func stopConnectionAccessTx(ctx context.Context, tx pgx.Tx, connectionID string)
 	if _, err := tx.Exec(ctx, `DELETE FROM external_mail_import_documents WHERE connection_id=$1`, connectionID); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE external_connection_agent_grants SET status='revoked',revision=revision+1,revoked_at=now(),updated_at=now() WHERE connection_id=$1 AND status='active'`, connectionID)
+	_, err := tx.Exec(ctx, `UPDATE external_connection_agent_grants SET status='revoked',write_policy='auto',revision=revision+1,revoked_at=now(),updated_at=now() WHERE connection_id=$1 AND status='active'`, connectionID)
 	return err
 }
 

@@ -918,3 +918,27 @@ func TestInspectConnectionStatusForToolkit(t *testing.T) {
 		t.Fatalf("plain ErrConnectionScope field=%q want empty", field)
 	}
 }
+
+func TestToolBehaviorHints(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+	var decoded Tool
+	raw := `{"slug":"LINEAR_LIST_ISSUES","tags":["read_only"],"annotations":{"title":"List issues","readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}`
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatalf("unmarshal tool: %v", err)
+	}
+	if !decoded.IsReadOnlyHint() || decoded.IsDestructiveHint() {
+		t.Fatalf("decoded=%+v want readOnly=true destructive=false", decoded)
+	}
+	if (Tool{Tags: []string{"Read-Only"}}).IsReadOnlyHint() != true {
+		t.Fatal("tag Read-Only should report IsReadOnlyHint=true")
+	}
+	if (Tool{Tags: []string{"destructive"}, Annotations: &ToolAnnotations{ReadOnlyHint: boolPtr(true)}}).IsReadOnlyHint() {
+		t.Fatal("destructive tag must override readOnlyHint=true")
+	}
+	if (Tool{Annotations: &ToolAnnotations{ReadOnlyHint: boolPtr(true), DestructiveHint: boolPtr(true)}}).IsReadOnlyHint() {
+		t.Fatal("destructiveHint=true must override readOnlyHint=true")
+	}
+	if (Tool{Tags: []string{"read_only"}, Annotations: &ToolAnnotations{ReadOnlyHint: boolPtr(false)}}).IsReadOnlyHint() {
+		t.Fatal("explicit readOnlyHint=false must not be overridden by tag")
+	}
+}

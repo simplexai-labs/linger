@@ -34,6 +34,7 @@ export function createRoomCardDecisionController({
               ...(action.connectionId
                 ? { connection_id: action.connectionId }
                 : {}),
+              ...(action.remember ? { remember: true } : {}),
               ...(action.answers ? { answers: action.answers } : {}),
               ...(action.links?.length ? { links: action.links } : {}),
               ...(action.attachmentUploadIds?.length

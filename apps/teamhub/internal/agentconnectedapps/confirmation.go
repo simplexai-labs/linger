@@ -43,13 +43,14 @@ type confirmationAction struct {
 
 // prepareConfirmation builds the stored call and its card from what will run
 // for an authorized call on an active connection.
-func (s *Service) prepareConfirmation(ctx context.Context, connection externalsource.AgentToolConnection, action confirmationAction) (Result, error) {
+func (s *Service) prepareConfirmation(ctx context.Context, connection externalsource.AgentToolConnection, action confirmationAction, canRemember bool) (Result, error) {
 	canvas, err := s.checkedCanvasSource(ctx, connection, action)
 	if err != nil {
 		return Result{}, err
 	}
 	action.CanvasSourceDigest = canvas.digest
 	card := describeConfirmation(connection, action)
+	card.CanRemember = canRemember
 	// A tool without its own card layout shows only its arguments, so they
 	// must fit on the card: the sponsor approves nothing they cannot see.
 	if card.Title == "Run "+action.ToolSlug && len([]rune(jsonText(action.Arguments, math.MaxInt))) > maxCardInput {

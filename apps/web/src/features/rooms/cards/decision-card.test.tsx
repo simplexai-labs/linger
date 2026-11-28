@@ -769,4 +769,50 @@ describe("DecisionCard", () => {
       unmount();
     }
   });
+
+  it("offers Always allow <App> only when connector_write sets can_remember", () => {
+    const { onDecision, unmount } = renderCard(
+      connectorCard({
+        account: "workspace@example.com",
+        app: "linear",
+        can_remember: true,
+        fields: [{ label: "Title", value: "Fix bug" }],
+        input: '{"title":"Fix bug"}',
+        kind: "change",
+        title: "Create Linear issue: Fix bug",
+        tool: "LINEAR_CREATE_ISSUE",
+      }),
+    );
+
+    const alwaysButton = screen.getByRole("button", {
+      name: "Always allow Linear",
+    });
+    expect(alwaysButton).toBeVisible();
+    fireEvent.click(alwaysButton);
+    expect(onDecision).toHaveBeenCalledWith({
+      decision: "approve",
+      expectedVersion: 1,
+      feedback: undefined,
+      messageId: "message_1",
+      remember: true,
+      requestId: "decision_1",
+    });
+    unmount();
+
+    renderCard(
+      connectorCard({
+        account: "workspace@example.com",
+        app: "linear",
+        can_remember: false,
+        fields: [{ label: "Issue", value: "ENG-1" }],
+        input: '{"issue_id":"ENG-1"}',
+        kind: "change",
+        title: "Run LINEAR_DELETE_ISSUE",
+        tool: "LINEAR_DELETE_ISSUE",
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Always allow Linear" }),
+    ).not.toBeInTheDocument();
+  });
 });

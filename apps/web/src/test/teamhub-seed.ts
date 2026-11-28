@@ -1619,6 +1619,7 @@ export function createExternalSourceSeed() {
           agent_display_name: "Jenny's AnotherMe",
           tenant_id: "tenant-northstar",
           granted: true,
+          write_policy: "auto",
           revision: 1,
         },
       ],

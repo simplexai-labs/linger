@@ -170,9 +170,13 @@ func (a *App) setExternalConnectionAgentAccess(c *gin.Context) {
 		a.writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "External connection Agent grant request is invalid")
 		return
 	}
-	access, err := a.externalSources.SetAgentConnectionAccess(
+	writePolicy := ""
+	if request.WritePolicy != nil {
+		writePolicy = string(*request.WritePolicy)
+	}
+	access, err := a.externalSources.SetAgentConnectionAccessWithPolicy(
 		c.Request.Context(), currentPrincipal(c).Session.AccountID,
-		c.Param("externalConnectionId"), c.Param("agentActorId"), request.Granted,
+		c.Param("externalConnectionId"), c.Param("agentActorId"), request.Granted, writePolicy,
 	)
 	if a.writeExternalSourceError(c, "set external connection Agent grant", err) {
 		return
@@ -202,10 +206,14 @@ func (a *App) setExternalConnectionAutoReminders(c *gin.Context) {
 }
 
 func externalConnectionAgentAccessModel(access externalsource.AgentConnectionAccess) httpapi.ExternalConnectionAgentAccess {
+	policy := access.WritePolicy
+	if policy == "" {
+		policy = externalsource.WritePolicyAuto
+	}
 	return httpapi.ExternalConnectionAgentAccess{
 		AgentActorId: access.AgentActorID, AgentManagementId: access.AgentManagementID,
 		AgentDisplayName: access.AgentDisplayName, TenantId: access.TenantID,
-		Granted: access.Granted, Revision: access.Revision,
+		Granted: access.Granted, WritePolicy: httpapi.ExternalConnectionWritePolicy(policy), Revision: access.Revision,
 	}
 }
 

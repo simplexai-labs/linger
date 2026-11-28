@@ -115,6 +115,8 @@ export type TeamHubExternalProviderKeyStatus =
   components["schemas"]["ExternalProviderKeyStatus"];
 export type TeamHubExternalConnectionList =
   components["schemas"]["ExternalConnectionList"];
+export type TeamHubExternalConnectionWritePolicy =
+  components["schemas"]["ExternalConnectionWritePolicy"];
 export type TeamHubExternalConnectionAgentAccess =
   components["schemas"]["ExternalConnectionAgentAccess"];
 export type TeamHubExternalConnectionAgentAccessList =

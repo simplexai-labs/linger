@@ -21,7 +21,10 @@ type AgentToolConnection struct {
 	// RemoteTeamID is the workspace the connection was verified in, such as
 	// a Discord bot's server; empty when the app has none.
 	RemoteTeamID string
-	Revision     int64
+	// WritePolicy controls whether workspace mutations ask on a card, run
+	// automatically, or always prompt: "auto", "always_allow", or "always_ask".
+	WritePolicy string
+	Revision    int64
 }
 
 func (s *Service) ListGrantedAgentToolConnectionsInTx(
@@ -35,7 +38,8 @@ func (s *Service) ListGrantedAgentToolConnectionsInTx(
 	rows, err := tx.Query(ctx, `
 		SELECT connection.account_id,connection.id,connection.provider,
 		       coalesce(connection.identity_label,''),coalesce(connection.toolkit_slug,''),
-		       connection.upstream_connection_id,coalesce(connection.remote_team_id,''),connection.revision
+		       connection.upstream_connection_id,coalesce(connection.remote_team_id,''),
+		       delegation.write_policy,connection.revision
 		FROM external_connection_agent_grants delegation
 		JOIN external_connections connection ON connection.id=delegation.connection_id
 		JOIN agent_registrations registration
@@ -66,7 +70,8 @@ func (s *Service) ListGrantedAgentToolConnectionsInTx(
 		var connection AgentToolConnection
 		if err := rows.Scan(
 			&connection.AccountID, &connection.ID, &connection.AppKey, &connection.IdentityLabel,
-			&connection.ToolkitSlug, &connection.UpstreamConnectionID, &connection.RemoteTeamID, &connection.Revision,
+			&connection.ToolkitSlug, &connection.UpstreamConnectionID, &connection.RemoteTeamID,
+			&connection.WritePolicy, &connection.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -118,7 +123,7 @@ func (s *Service) LockGrantedAgentToolConnectionInTx(
 	}
 	var current bool
 	if err := tx.QueryRow(ctx, `
-		SELECT true
+		SELECT true,delegation.write_policy
 		FROM external_connection_agent_grants delegation
 		JOIN agent_registrations registration
 		  ON registration.actor_id=delegation.agent_actor_id
@@ -135,7 +140,7 @@ func (s *Service) LockGrantedAgentToolConnectionInTx(
 		  AND represented.account_id=$4
 		FOR SHARE OF delegation,registration,represented`,
 		connectionID, agentActorID, tenantID, connection.AccountID,
-	).Scan(&current); errors.Is(err, pgx.ErrNoRows) {
+	).Scan(&current, &connection.WritePolicy); errors.Is(err, pgx.ErrNoRows) {
 		return AgentToolConnection{}, ErrNotFound
 	} else if err != nil {
 		return AgentToolConnection{}, err

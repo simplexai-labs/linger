@@ -97,6 +97,44 @@ func describeConfirmation(connection externalsource.AgentToolConnection, action 
 	case "NOTION_UPDATE_PAGE_MARKDOWN":
 		card.Title = "Edit a Notion page"
 		card.Fields = fields("Page", str(args, "page_id"), "Changes", jsonValue(args["update_content"]))
+	case "LINEAR_CREATE_ISSUE", "LINEAR_CREATE_LINEAR_ISSUE":
+		title := str(args, "title")
+		if title != "" {
+			card.Title = "Create Linear issue: " + title
+		} else {
+			card.Title = "Create a Linear issue"
+		}
+		card.Fields = fields(
+			"Team", firstString(args, "team_id", "teamId"),
+			"Title", title,
+			"Priority", str(args, "priority"),
+			"Description", str(args, "description"),
+		)
+	case "LINEAR_UPDATE_ISSUE":
+		issue := firstString(args, "issue_id", "issueId", "id")
+		if issue != "" {
+			card.Title = "Update Linear issue " + issue
+		} else {
+			card.Title = "Update a Linear issue"
+		}
+		card.Fields = fields(
+			"Issue", issue,
+			"Title", str(args, "title"),
+			"State", firstString(args, "state_id", "stateId", "state"),
+			"Priority", str(args, "priority"),
+			"Description", str(args, "description"),
+		)
+	case "LINEAR_CREATE_COMMENT", "LINEAR_CREATE_LINEAR_COMMENT":
+		issue := firstString(args, "issue_id", "issueId")
+		if issue != "" {
+			card.Title = "Comment on Linear issue " + issue
+		} else {
+			card.Title = "Comment on a Linear issue"
+		}
+		card.Fields = fields(
+			"Issue", issue,
+			"Comment", str(args, "body"),
+		)
 	}
 	card.Title = truncate(card.Title, 200)
 	return card

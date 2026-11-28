@@ -140,8 +140,10 @@ export function DecisionActions({
   denyRisk = denyText === undefined ? "confirm" : undefined,
   disabled,
   onApprove,
+  onApproveRemember,
   onDeny,
   reasonRequired = false,
+  rememberLabel,
 }: {
   approveLabel?: string;
   /** What Voice Mode risks by approving, as on `data-voice-risk`. */
@@ -151,8 +153,10 @@ export function DecisionActions({
   denyRisk?: VoiceRisk;
   disabled: boolean;
   onApprove: () => void;
+  onApproveRemember?: () => void;
   onDeny: (reason?: string) => void;
   reasonRequired?: boolean;
+  rememberLabel?: string;
 }) {
   const t = useT();
   const approveLabel = approveText ?? t(cardsMessages.approve);
@@ -201,6 +205,8 @@ export function DecisionActions({
     }
   }
 
+  const hasRemember = Boolean(rememberLabel && onApproveRemember);
+
   return (
     <div
       aria-label={t(cardsMessages.approvalActions)}
@@ -208,13 +214,15 @@ export function DecisionActions({
         "grid w-full gap-2 transition-[grid-template-columns] duration-[var(--app-emphasized-duration)] ease-[var(--app-out-quint)] motion-reduce:transition-none",
         composing
           ? "grid-cols-[0fr_1fr]"
-          : "grid-cols-[auto_auto] justify-start",
+          : hasRemember
+            ? "flex flex-wrap items-center justify-start"
+            : "grid-cols-[auto_auto] justify-start",
       )}
       role="group"
     >
       <Button
         aria-label={approveLabel}
-        className="group/tip w-full"
+        className={cn("group/tip", !hasRemember && "w-full")}
         data-voice-risk={approveRisk}
         disabled={disabled}
         onClick={onApprove}
@@ -230,6 +238,18 @@ export function DecisionActions({
           approveLabel
         )}
       </Button>
+      {hasRemember && !composing ? (
+        <Button
+          aria-label={rememberLabel}
+          data-voice-risk="never"
+          disabled={disabled}
+          onClick={onApproveRemember}
+          size="large"
+          tone="secondary"
+        >
+          {rememberLabel}
+        </Button>
+      ) : null}
       <div className="flex min-w-0 gap-px">
         <div className="grid min-w-0 flex-1">
           {/* Each layer hides on its own wrapper: the controls inside carry

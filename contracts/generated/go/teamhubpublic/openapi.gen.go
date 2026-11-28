@@ -1817,6 +1817,27 @@ func (e ExternalConnectionStatus) Valid() bool {
 	}
 }
 
+// Defines values for ExternalConnectionWritePolicy.
+const (
+	AlwaysAllow ExternalConnectionWritePolicy = "always_allow"
+	AlwaysAsk   ExternalConnectionWritePolicy = "always_ask"
+	Auto        ExternalConnectionWritePolicy = "auto"
+)
+
+// Valid indicates whether the value is a known member of the ExternalConnectionWritePolicy enum.
+func (e ExternalConnectionWritePolicy) Valid() bool {
+	switch e {
+	case AlwaysAllow:
+		return true
+	case AlwaysAsk:
+		return true
+	case Auto:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExternalProviderKeyStatusSource.
 const (
 	ExternalProviderKeyStatusSourceEnvironment ExternalProviderKeyStatusSource = "environment"
@@ -5938,6 +5959,9 @@ type ConnectorWriteDecisionView struct {
 	// App Connected application key, such as gmail or slack.
 	App string `json:"app"`
 
+	// CanRemember Whether approving this write may also remember "Always allow" for non-destructive workspace writes on this connection.
+	CanRemember *bool `json:"can_remember,omitempty"`
+
 	// Fields Target and key values of a change, in display order.
 	Fields *[]ConnectorConfirmationField `json:"fields,omitempty"`
 
@@ -6030,6 +6054,9 @@ type DecisionAnswer struct {
 
 	// Links Absolute http(s) URLs a profile_setup_sources "done" answer shares; trimmed and deduplicated by TeamHub.
 	Links *[]string `json:"links,omitempty"`
+
+	// Remember Whether a connector_write approval also saved "always_allow" for future non-destructive writes on this connection.
+	Remember *bool `json:"remember,omitempty"`
 }
 
 // DecisionAnswerDecision approve or deny for connector_write, agent_change, runtime_permission, connection_auth and room_creation; deny or connected (recorded by TeamHub once the owner connects Chrome) for browser_connection; deny or configured (recorded by TeamHub once a Composio key is saved) for provider_key and search_key (with the backend whose key was saved); deny or granted (recorded by TeamHub once the Computer reports every permission granted) for computer_permission; submit for question; connected or skipped for profile_setup_apps; done or skipped for profile_setup_sources.
@@ -6079,6 +6106,9 @@ type DecisionRequest struct {
 	Decision        DecisionRequestDecision `json:"decision"`
 	ExpectedVersion int64                   `json:"expected_version"`
 	Links           *[]string               `json:"links,omitempty"`
+
+	// Remember Save "always_allow" for non-destructive writes on this connection; only valid with approve on a connector_write card with can_remember=true.
+	Remember *bool `json:"remember,omitempty"`
 }
 
 // DecisionRequestDecision defines model for DecisionRequest.Decision.
@@ -7140,6 +7170,9 @@ type ExternalConnectionAgentAccess struct {
 
 	// TenantId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
 	TenantId Id `json:"tenant_id"`
+
+	// WritePolicy Controls whether non-destructive workspace writes on this delegated connection ask on a card, run automatically, or always prompt.
+	WritePolicy ExternalConnectionWritePolicy `json:"write_policy"`
 }
 
 // ExternalConnectionAgentAccessList defines model for ExternalConnectionAgentAccessList.
@@ -7162,6 +7195,9 @@ type ExternalConnectionStatus string
 type ExternalConnectionStatusCheckRequest struct {
 	ExpectedRevision int64 `json:"expected_revision"`
 }
+
+// ExternalConnectionWritePolicy Controls whether non-destructive workspace writes on this delegated connection ask on a card, run automatically, or always prompt.
+type ExternalConnectionWritePolicy string
 
 // ExternalProviderKeyStatus Where the Composio API key comes from. The key itself is never returned.
 type ExternalProviderKeyStatus struct {
@@ -9630,6 +9666,9 @@ type SetDocumentLinkShareRole string
 // SetExternalConnectionAgentAccessRequest defines model for SetExternalConnectionAgentAccessRequest.
 type SetExternalConnectionAgentAccessRequest struct {
 	Granted bool `json:"granted"`
+
+	// WritePolicy Controls whether non-destructive workspace writes on this delegated connection ask on a card, run automatically, or always prompt.
+	WritePolicy *ExternalConnectionWritePolicy `json:"write_policy,omitempty"`
 }
 
 // SetExternalConnectionAutoRemindersRequest defines model for SetExternalConnectionAutoRemindersRequest.

@@ -115,4 +115,37 @@ describe("Agent sidebar connectors", () => {
     expect(screen.queryByRole("region", { name: "Slack" })).toBeNull();
     expect(screen.queryByText("Not connected")).toBeNull();
   });
+
+  it("updates per-agent write policy on a granted connection", async () => {
+    const runtime = await fixture();
+    const initial = await runtime.client.listExternalConnectionAgentAccess(
+      "external-connection-gmail",
+    );
+    const updated = {
+      ...initial.agents[0]!,
+      revision: 2,
+      write_policy: "always_allow" as const,
+    };
+    const readAccess = vi
+      .spyOn(runtime.client, "listExternalConnectionAgentAccess")
+      .mockResolvedValue(initial);
+    const update = vi
+      .spyOn(runtime.client, "setExternalConnectionAgentAccess")
+      .mockResolvedValue(updated);
+    mount(runtime);
+    const gmail = await screen.findByRole("region", { name: "Gmail" });
+    const policy = await within(gmail).findByRole("combobox", {
+      name: "Write policy for jenny@linger.test",
+    });
+    expect(policy).toHaveValue("auto");
+    readAccess.mockResolvedValue({ agents: [updated] });
+    fireEvent.change(policy, { target: { value: "always_allow" } });
+    await waitFor(() => expect(policy).toHaveValue("always_allow"));
+    expect(update).toHaveBeenCalledWith(
+      "external-connection-gmail",
+      "actor-anotherme-jenny",
+      true,
+      "always_allow",
+    );
+  });
 });
