@@ -76,11 +76,11 @@ One command detects your hardware, recommends the best model, installs it and ch
     <th align="left" width="2700">Compares with</th>
   </tr>
   <tr><td>Mac 16 GB</td><td>Spark-X2.6-4B Q4_K_M</td><td align="center">41</td><td align="center">31.5</td><td>≈ Gemini 2.5 Pro</td></tr>
-  <tr><td>Mac 24 GB</td><td>Inkling 2 Mini UD-IQ3_XXS</td><td align="center">29.9</td><td align="center">53.4</td><td>≈ Claude Sonnet 4.6</td></tr>
-  <tr><td>Mac 32 GB</td><td>Inkling 2 Mini UD-Q4_K_M</td><td align="center">30</td><td align="center">54.2</td><td>≈ Claude Sonnet 4.6</td></tr>
-  <tr><td>Linux NVIDIA 8 GB + 32 GB</td><td>Inkling 2 Mini UD-Q3_K_XL</td><td align="center">50</td><td align="center">53.9</td><td>≈ Claude Sonnet 4.6</td></tr>
-  <tr><td>Linux NVIDIA 12 GB + 32 GB</td><td>Inkling 2 Mini UD-Q3_K_XL</td><td align="center">68</td><td align="center">53.9</td><td>≈ Claude Sonnet 4.6</td></tr>
-  <tr><td>Linux NVIDIA 24 GB + 64 GB</td><td>Qwen3.8-Flash-Next GSQ-RCO IQ2_XS†</td><td align="center">128.5</td><td align="center">58.8</td><td>≈ Claude Opus 4.6</td></tr>
+  <tr><td>Mac 24 GB</td><td>Inkling 2 Mini UD-IQ3_XXS</td><td align="center">29.9</td><td align="center">51.1</td><td>≈ Claude Opus 4.5</td></tr>
+  <tr><td>Mac 32 GB</td><td>Inkling 2 Mini UD-Q4_K_M</td><td align="center">30</td><td align="center">53.1</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Linux NVIDIA 8 GB + 32 GB</td><td>Inkling 2 Mini UD-Q3_K_XL</td><td align="center">50</td><td align="center">53.1</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Linux NVIDIA 12 GB + 32 GB</td><td>Inkling 2 Mini UD-Q3_K_XL</td><td align="center">68</td><td align="center">53.1</td><td>≈ Claude Sonnet 4.6</td></tr>
+  <tr><td>Linux NVIDIA 24 GB + 64 GB</td><td>Qwen3.8-Flash-Next GSQ-RCO IQ2_XS†</td><td align="center">128.5</td><td align="center">52.1</td><td>≈ Claude Sonnet 4.6</td></tr>
 </table>
 
 Full benchmarks, test conditions, and scoring details: [docs.heylinger.com/hardware/benchmarks](https://docs.heylinger.com/hardware/benchmarks).
