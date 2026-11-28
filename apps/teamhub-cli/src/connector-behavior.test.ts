@@ -344,6 +344,45 @@ describe("reviewed Connector command boundaries", () => {
     expect((await f.run(command)).code).toBe(0);
     expect(f.calls.filter((x) => x.url.endsWith("/execute"))).toHaveLength(1);
   });
+  it("decodes Gmail text parts using each declared charset", async () => {
+    const f = await fixture("gmail", (slug) => {
+      expect(slug).toBe("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID");
+      return {
+        id: "message_one",
+        payload: {
+          mimeType: "multipart/alternative",
+          parts: [
+            {
+              mimeType: "text/plain",
+              headers: [
+                {
+                  name: "Content-Type",
+                  value: 'text/plain; charset="ISO-8859-1"',
+                },
+              ],
+              body: {
+                data: Buffer.from("caf\u00e9", "latin1").toString("base64url"),
+              },
+            },
+            {
+              mimeType: "text/html",
+              headers: [
+                { name: "content-type", value: "text/html; charset=UTF-8" },
+              ],
+              body: {
+                data: Buffer.from("<p>caf\u00e9</p>").toString("base64url"),
+              },
+            },
+          ],
+        },
+      };
+    });
+    expect(await f.run(["gmail", "read", "message_one"])).toMatchObject({
+      code: 0,
+      result: { mail: { bodyText: "caf\u00e9", bodyHtml: "<p>caf\u00e9</p>" } },
+    });
+  });
+
   it("retains unconsumed Gmail thread messages and binds the next page to its account", async () => {
     const f = await fixture("gmail", (slug) =>
       slug === "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"

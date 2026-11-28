@@ -1,6 +1,7 @@
 import { sliceConnectorPage } from "./connector-pages.js";
 import path from "node:path";
 import { lstat } from "node:fs/promises";
+import { MIMEType } from "node:util";
 import {
   assertNewOutput,
   connectorTransferURL,
@@ -1376,10 +1377,24 @@ export function decodeMail(
       typeof body.data === "string" &&
       ["text/plain", "text/html"].includes(String(part.mimeType))
     ) {
-      const decoded = new TextDecoder("utf-8", { fatal: true }).decode(
-        Buffer.from(body.data, "base64url"),
-      );
-      result[part.mimeType === "text/html" ? "bodyHtml" : "bodyText"] = decoded;
+      const contentType = headers.find(
+        (h) => String(h.name).toLowerCase() === "content-type",
+      )?.value;
+      try {
+        const charset =
+          typeof contentType === "string"
+            ? new MIMEType(contentType).params.get("charset")
+            : null;
+        result[part.mimeType === "text/html" ? "bodyHtml" : "bodyText"] =
+          new TextDecoder(charset ?? "utf-8", { fatal: true }).decode(
+            Buffer.from(body.data, "base64url"),
+          );
+      } catch {
+        throw new CliError(
+          "incomplete_response",
+          "The Gmail text part has an unsupported charset or invalid text.",
+        );
+      }
     }
     if (Array.isArray(part.parts)) part.parts.forEach((x) => visit(record(x)));
   };
