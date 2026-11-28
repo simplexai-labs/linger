@@ -226,37 +226,35 @@ exit 1
 `
 	if runtime.GOOS == "windows" {
 		scriptPath = filepath.Join(dir, "fake_python.cmd")
-		powershellPath := filepath.Join(dir, "fake_python.ps1")
-		powershellScript := `$ErrorActionPreference = 'Stop'
-$argvPath = '` + strings.ReplaceAll(argvCapture, "'", "''") + `'
-$stdinPath = '` + strings.ReplaceAll(stdinCapture, "'", "''") + `'
-$argText = $args -join ' '
-[IO.File]::WriteAllText($argvPath, $argText, [Text.UTF8Encoding]::new($false))
-$stdinText = [Console]::In.ReadToEnd()
-[IO.File]::WriteAllText($stdinPath, $stdinText, [Text.UTF8Encoding]::new($false))
-if ($argText -like '*custom search*') {
-  [Console]::WriteLine('{"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}')
-  exit 0
-}
-if ($argText -like '*custom probe*') {
-  [Console]::WriteLine('{"schema":"localmodels.library-custom-probe/v1","ok":true,"outcome":"gated","hub_http_status":401,"token_provided":true,"repo":{"hub":"huggingface","repo_id":"meta-llama/Llama-3.1-8B-GGUF","url":"https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}')
-  exit 0
-}
-if ($argText -like '*custom download*') {
-  [Console]::WriteLine('{"schema":"localmodels.library-event/v1","event":"progress","model":"custom.hf.bartowski--qwen:Q4_K_M","phase":"download","done":10,"total":100,"shard_index":1,"shard_count":2}')
-  [Console]::WriteLine('{"schema":"localmodels.library-event/v1","event":"result","model":"custom.hf.bartowski--qwen:Q4_K_M","ok":true}')
-  exit 0
-}
-if ($argText -like '*status*') {
-  [Console]::WriteLine('{"schema":"localmodels.library-status/v1","tool_version":"0.1.0.dev60","observed_at":"2026-11-26T00:00:00Z","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":16000000000,"disk_free_bytes":100000000000,"gpus":[],"supported_formats":["gguf"]},"pools":[],"models":[] }')
-  exit 0
-}
-exit 1
+		batchScript := `@echo off
+setlocal
+>"` + argvCapture + `" echo %*
+set /p "stdinLine="
+>"` + stdinCapture + `" echo(%stdinLine%
+echo(%*| findstr /C:"custom search" >nul
+if not errorlevel 1 (
+  echo {"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}
+  exit /b 0
+)
+echo(%*| findstr /C:"custom probe" >nul
+if not errorlevel 1 (
+  echo {"schema":"localmodels.library-custom-probe/v1","ok":true,"outcome":"gated","hub_http_status":401,"token_provided":true,"repo":{"hub":"huggingface","repo_id":"meta-llama/Llama-3.1-8B-GGUF","url":"https://huggingface.co/meta-llama/Llama-3.1-8B-GGUF"}}
+  exit /b 0
+)
+echo(%*| findstr /C:"custom download" >nul
+if not errorlevel 1 (
+  echo {"schema":"localmodels.library-event/v1","event":"progress","model":"custom.hf.bartowski--qwen:Q4_K_M","phase":"download","done":10,"total":100,"shard_index":1,"shard_count":2}
+  echo {"schema":"localmodels.library-event/v1","event":"result","model":"custom.hf.bartowski--qwen:Q4_K_M","ok":true}
+  exit /b 0
+)
+echo(%*| findstr /C:"status" >nul
+if not errorlevel 1 (
+  echo {"schema":"localmodels.library-status/v1","tool_version":"0.1.0.dev60","observed_at":"2026-11-26T00:00:00Z","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":16000000000,"disk_free_bytes":100000000000,"gpus":[],"supported_formats":["gguf"]},"pools":[],"models":[]}
+  exit /b 0
+)
+exit /b 1
 `
-		if err := os.WriteFile(scriptPath, []byte("@echo off\r\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(powershellPath, []byte(powershellScript), 0o700); err != nil {
+		if err := os.WriteFile(scriptPath, []byte(batchScript), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	} else if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
