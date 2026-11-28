@@ -413,7 +413,10 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   without a backend runs the chosen default as if it were named, even when its
   key stopped working; without one it uses the first backend with a usable key,
   else You.com's keyless MCP trial, which TeamHub does not count. A failed call
-  never falls back to another backend. `include_quota=false` lists the
+  never falls back to another backend. MCP calls send the protocol version
+  even when the server creates no session, and complete when their matching
+  response arrives instead of waiting for the event stream to close.
+  `include_quota=false` lists the
   backends without calling any provider. A missing or refused key,
   or the end of the trial, posts a `search_key` card that stores the request.
   A key added from that card replays the request first: a provider 401/403

@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -145,9 +147,9 @@ func (p *providers) mcpPost(ctx context.Context, session string, message any, id
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
 	if session != "" {
 		request.Header.Set("Mcp-Session-Id", session)
-		request.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
 	}
 	response, err := p.client.Do(request)
 	if err != nil {
@@ -168,13 +170,15 @@ func (p *providers) mcpPost(ctx context.Context, session string, message any, id
 		return session, nil, nil
 	}
 	body := io.LimitReader(response.Body, maxResponseBody)
-	var messages []json.RawMessage
+	var messages iter.Seq[json.RawMessage]
 	if strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
 		messages = eventStreamData(body)
 	} else if read, err := io.ReadAll(body); err == nil {
-		messages = []json.RawMessage{read}
+		messages = slices.Values([]json.RawMessage{read})
+	} else {
+		return session, nil, &Failure{Code: CodeProviderUnavailable, Backend: You}
 	}
-	for _, raw := range messages {
+	for raw := range messages {
 		var reply struct {
 			ID     json.RawMessage `json:"id"`
 			Result json.RawMessage `json:"result"`
@@ -196,29 +200,33 @@ func jsonNumber(id int) string {
 	return string(encoded)
 }
 
-// eventStreamData returns the data of each event; notifications may come
-// before the result.
-func eventStreamData(body io.Reader) []json.RawMessage {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64<<10), maxResponseBody)
-	var events []json.RawMessage
-	var data []string
-	flush := func() {
-		if len(data) > 0 {
-			events = append(events, json.RawMessage(strings.Join(data, "\n")))
+// eventStreamData yields complete events so a matching result can end the
+// call without waiting for the server to close the response stream.
+func eventStreamData(body io.Reader) iter.Seq[json.RawMessage] {
+	return func(yield func(json.RawMessage) bool) {
+		scanner := bufio.NewScanner(body)
+		scanner.Buffer(make([]byte, 64<<10), maxResponseBody)
+		var data []string
+		flush := func() bool {
+			if len(data) == 0 {
+				return true
+			}
+			event := json.RawMessage(strings.Join(data, "\n"))
 			data = nil
+			return yield(event)
 		}
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				if !flush() {
+					return
+				}
+				continue
+			}
+			if value, ok := strings.CutPrefix(line, "data:"); ok {
+				data = append(data, strings.TrimPrefix(value, " "))
+			}
+		}
+		flush()
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			flush()
-			continue
-		}
-		if value, ok := strings.CutPrefix(line, "data:"); ok {
-			data = append(data, strings.TrimPrefix(value, " "))
-		}
-	}
-	flush()
-	return events
 }
