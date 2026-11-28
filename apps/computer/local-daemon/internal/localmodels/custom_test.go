@@ -200,6 +200,7 @@ func TestRunCustomSearchProbeAndCustomDownloadStdinTokenSafety(t *testing.T) {
 	scriptPath := filepath.Join(dir, "fake_python.sh")
 	stdinCapture := filepath.Join(dir, "stdin.json")
 	argvCapture := filepath.Join(dir, "argv.txt")
+	stdoutCapture := filepath.Join(dir, "stdout.txt")
 	script := `#!/bin/sh
 echo "$@" > "` + argvCapture + `"
 cat > "` + stdinCapture + `"
@@ -232,7 +233,8 @@ setlocal
 set /p "stdinLine="
 >"` + stdinCapture + `" echo(%stdinLine%
 if /I "%~6"=="custom" if /I "%~7"=="search" (
-  echo {"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}
+  >"` + stdoutCapture + `" echo {"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}
+  type "` + stdoutCapture + `"
   exit /b 0
 )
 if /I "%~6"=="custom" if /I "%~7"=="probe" (
@@ -275,7 +277,8 @@ exit /b 1
 	if err != nil {
 		argvBytes, _ := os.ReadFile(argvCapture)
 		stdinBytes, _ := os.ReadFile(stdinCapture)
-		t.Fatalf("runCustomSearch: %v argv=%q stdin=%q", err, argvBytes, stdinBytes)
+		stdoutBytes, _ := os.ReadFile(stdoutCapture)
+		t.Fatalf("runCustomSearch: %v argv=%q stdin=%q stdout=%q", err, argvBytes, stdinBytes, stdoutBytes)
 	}
 	if len(searchRes.Results) != 1 || searchRes.Results[0].RepoID != "bartowski/Qwen2.5-7B-Instruct-GGUF" {
 		t.Fatalf("unexpected search result: %+v", searchRes)
