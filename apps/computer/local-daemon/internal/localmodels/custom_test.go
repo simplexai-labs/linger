@@ -273,7 +273,9 @@ exit /b 1
 		Hub: "huggingface", Query: "qwen", Token: secret,
 	})
 	if err != nil {
-		t.Fatalf("runCustomSearch: %v", err)
+		argvBytes, _ := os.ReadFile(argvCapture)
+		stdinBytes, _ := os.ReadFile(stdinCapture)
+		t.Fatalf("runCustomSearch: %v argv=%q stdin=%q", err, argvBytes, stdinBytes)
 	}
 	if len(searchRes.Results) != 1 || searchRes.Results[0].RepoID != "bartowski/Qwen2.5-7B-Instruct-GGUF" {
 		t.Fatalf("unexpected search result: %+v", searchRes)
