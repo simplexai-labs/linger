@@ -71,10 +71,27 @@ func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Co
 		gatewayMs = time.Since(gatewayStartedAt).Milliseconds()
 	}
 	if err == nil {
+		if d.localModelLoadingStatus.Load() && d.willLoadLocalModel(spec.Provider, spec.Model) {
+			_ = emit(ctx, protocol.Event{
+				Type:    protocol.EventOperationEvent,
+				SentAt:  time.Now().UTC(),
+				Payload: mustJSON(map[string]any{"type": "status.changed", "status": "queued", "stage": "loading_local_model"}),
+			})
+		}
 		localModelStartedAt := time.Now()
 		failureCode, err = d.ensureLocalModel(ctx, spec.Provider, spec.Model)
 		modelLoadFailed = err != nil && failureCode != ""
 		localModelMs = time.Since(localModelStartedAt).Milliseconds()
+		if err == nil {
+			releaseLocalModel := d.acquireLocalModelUse(spec.Provider, spec.Model)
+			d.activeMu.Lock()
+			if active := d.activeOperations[command.OperationID]; active != nil {
+				active.releaseLocalModel = releaseLocalModel
+			} else {
+				releaseLocalModel()
+			}
+			d.activeMu.Unlock()
+		}
 	}
 	joinProvider := func() {
 		joinStartedAt := time.Now()

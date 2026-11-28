@@ -207,11 +207,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -227,11 +230,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -246,11 +252,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -265,11 +274,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -283,11 +295,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -301,11 +316,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -319,11 +337,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -336,11 +357,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -352,11 +376,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -368,11 +395,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -383,11 +413,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -398,11 +431,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -412,11 +448,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     [
@@ -426,11 +465,14 @@ describe("Runner Gateway local models", () => {
         "local_model_unavailable",
         "model_gateway_unavailable",
         "local_models_external_holders",
+        "local_models_storage",
         "runtime_failure_detail",
         "operation_background_wait",
         "dynamic_reasoning_efforts",
         "antigravity_history",
         "antigravity_usage_provider",
+        "local_models_admission_v2",
+        "local_model_loading_status",
       ],
     ],
     ["0.51.0", undefined],
@@ -740,6 +782,73 @@ describe("runner.local_models external_holders", () => {
     expect(envelope.local_models.pools[0]?.external_holders).toEqual(
       externalHolders,
     );
+  });
+});
+
+describe("runner.local_models storage", () => {
+  it("parses host.models_dir, host.models_dir_exists, and model.storage", () => {
+    const base = snapshot("v1");
+    const storage = {
+      dir: "/home/alice/.simplexai/runtime/localmodels/models/models",
+      primary_path:
+        "/home/alice/.simplexai/runtime/localmodels/models/models/qwen3-4b.gguf",
+      dedicated_dir: false,
+      disk_bytes: 4_123_456_789,
+      files_present: true,
+      files: [
+        {
+          path: "/home/alice/.simplexai/runtime/localmodels/models/models/qwen3-4b.gguf",
+          role: "weights" as const,
+          size_bytes: 3_900_000_000,
+          present: true,
+          shared: false,
+        },
+        {
+          path: "/home/alice/.simplexai/runtime/localmodels/models/models/assets/mmproj-qwen3-4b.gguf",
+          role: "mmproj" as const,
+          size_bytes: 223_456_789,
+          present: true,
+          shared: true,
+        },
+      ],
+    };
+    const envelope = parseDaemonToAgentEnvelope({
+      type: "runner.local_models",
+      protocol_version: "2",
+      runner_id: target.computerId,
+      sent_at: new Date().toISOString(),
+      revision: 2,
+      local_models: {
+        ...base,
+        host: {
+          platform: "linux",
+          arch: "x86_64",
+          os_label: "Ubuntu 24.04",
+          engine_label: "llama.cpp · CUDA",
+          ram_total_bytes: 64_000_000_000,
+          disk_free_bytes: 500_000_000_000,
+          models_dir:
+            "/home/alice/.simplexai/runtime/localmodels/models/models",
+          models_dir_exists: true,
+          gpus: [],
+        },
+        models: [
+          {
+            ...base.models[0]!,
+            state: "idle",
+            storage,
+          },
+          base.models[1]!,
+        ],
+      },
+    });
+    if (envelope.type !== "runner.local_models")
+      throw new Error("Unexpected envelope");
+    expect(envelope.local_models.host?.models_dir).toBe(
+      "/home/alice/.simplexai/runtime/localmodels/models/models",
+    );
+    expect(envelope.local_models.host?.models_dir_exists).toBe(true);
+    expect(envelope.local_models.models[0]?.storage).toEqual(storage);
   });
 });
 
@@ -1143,5 +1252,79 @@ describe("runner.local_models concurrency probing and ModelQueue wiring", () => 
         runtime_type: "codex",
       });
     }
+  });
+
+  it("advertises admission v2 and loading status features and gates force load by Computer version", async () => {
+    const modern = await connect(undefined, "0.70.0");
+    const modernWelcome = modern.sent.find(
+      (frame) => frame.type === "runner.welcome",
+    );
+    expect(modernWelcome?.type).toBe("runner.welcome");
+    if (modernWelcome?.type === "runner.welcome") {
+      expect(modernWelcome.service_features).toContain(
+        "local_models_admission_v2",
+      );
+      expect(modernWelcome.service_features).toContain(
+        "local_model_loading_status",
+      );
+    }
+    await modern.report(1);
+
+    const forceLoad = modern.gateway.actOnLocalModels({
+      ...target,
+      action: "load",
+      modelId: "qwen3-4b:Q4_K_M",
+      force: true,
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    const sentCommand = await modern.command();
+    expect(sentCommand.action).toBe("load");
+    expect(sentCommand.force).toBe(true);
+    await modern.connection.receive({
+      type: "executed",
+      kind: "local_models",
+      protocol_version: "2",
+      command_id: sentCommand.command_id,
+      runner_id: target.computerId,
+      tenant_id: target.tenantId,
+      owner_actor_id: target.ownerActorId,
+      connection_epoch: sentCommand.connection_epoch,
+      expires_at: sentCommand.expires_at,
+      action: "load",
+      model_id: "qwen3-4b:Q4_K_M",
+      outcome: "refused",
+      refusal: {
+        code: "LOAD_NO_ROOM",
+        pool: "unified",
+        need_bytes: 12_000,
+        free_bytes: 8_000,
+        shortfall_bytes: 4_000,
+        can_force: false,
+      },
+    });
+    await expect(forceLoad).resolves.toEqual({
+      outcome: "refused",
+      refusal: {
+        code: "LOAD_NO_ROOM",
+        pool: "unified",
+        need_bytes: 12_000,
+        free_bytes: 8_000,
+        shortfall_bytes: 4_000,
+        can_force: false,
+      },
+    });
+
+    // An older Computer (0.69.0) must not be sent unknown `force` on execute local_models.
+    const older = await connect(undefined, "0.69.0");
+    await older.report(1);
+    await expect(
+      older.gateway.actOnLocalModels({
+        ...target,
+        action: "load",
+        modelId: "qwen3-4b:Q4_K_M",
+        force: true,
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      }),
+    ).rejects.toBeInstanceOf(LocalComputerCapabilityError);
   });
 });

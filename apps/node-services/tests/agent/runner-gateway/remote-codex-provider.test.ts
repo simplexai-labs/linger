@@ -1979,6 +1979,58 @@ describe("RemoteCodexProvider session compaction", () => {
       { type: "run.completed" },
     ]);
   });
+
+  it("forwards pre-start loading_local_model status events before run.started arrives", async () => {
+    const base = new ScriptedDispatcher();
+    const originalStart = base.startOperation.bind(base);
+    let releaseStarted!: () => void;
+    const allowStarted = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    const dispatcher: RunnerOperationDispatcher = {
+      startOperation: async (target) => {
+        const operation = await originalStart(target);
+        if (target.request.kind !== "run.start") return operation;
+        return {
+          ...operation,
+          events: (async function* () {
+            yield {
+              type: "status.changed" as const,
+              status: "queued" as const,
+              stage: "loading_local_model" as const,
+            };
+            await allowStarted;
+            yield* operation.events;
+          })(),
+        };
+      },
+    };
+    const provider = createProvider(dispatcher, "pi");
+    const session = await provider.createSession(sessionOptions());
+    const preStartStatuses: Array<
+      Extract<RunEvent, { type: "status.changed" }>
+    > = [];
+    const starting = provider.startRun(
+      session,
+      { type: "text", text: "wake standby model" },
+      {
+        ...runSpec,
+        onPreStartStatus: (event) => {
+          preStartStatuses.push(event);
+        },
+      },
+    );
+    await vi.waitFor(() => expect(preStartStatuses).toHaveLength(1));
+    expect(preStartStatuses[0]).toEqual({
+      type: "status.changed",
+      status: "queued",
+      stage: "loading_local_model",
+    });
+    releaseStarted();
+    const run = await starting;
+    await run.wait();
+    await provider.close();
+  });
 });
 
 const createProvider = (

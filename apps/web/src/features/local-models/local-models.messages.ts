@@ -94,7 +94,7 @@ export const localModelsMessages = defineMessages("localModels", {
   statusAvailable: "Not downloaded",
   statusDownloading: "Downloading",
   statusFailed: "Couldn't load",
-  statusIdle: "Downloaded",
+  statusIdle: "Standby",
   statusLoaded: "Loaded",
   statusLoading: "Loading",
   statusProbingConcurrency: "Probing max concurrency",
@@ -123,11 +123,27 @@ export const localModelsMessages = defineMessages("localModels", {
   variantLabelWithEngine: "{quant} · {engine}",
   variantOptionDetail: "{label} · {detail}",
   noRoomYet: "no room to load yet",
-  loadToAnswer: "load to answer",
+  standbyAutoLoad: "loads automatically",
+  lowMemoryModePill: "Low-memory mode",
+  lowMemoryModePillPosture: "Low-memory mode · {posture}",
+  postureSlotCount: { one: "{count} slot", other: "{count} slots" },
+  postureSummary: "{slots} · {context}",
+  postureContext: "{thousands}K",
+  degradedPostureTooltip: "Requested: {requested} → Active: {effective}",
+  degradedPostureDetail:
+    "Running in low-memory mode ({effective} instead of {requested}) to fit current memory.",
+  degradedPostureDetailSimple:
+    "Running in low-memory mode to fit current memory.",
+  tightMemoryIndicator: "Tight memory",
+  tightMemoryDetail:
+    "Loaded under tight memory — closing unused apps improves responsiveness.",
+  tightMemoryHighDetail:
+    "Loaded under high memory pressure — closing unused apps improves responsiveness.",
   usedByNames: "Used by {names}",
   actionDownload: "Download",
   actionResumeDownload: "Resume download",
   actionLoad: "Load",
+  actionLoadAnyway: "Load Anyway",
   actionUnload: "Unload",
   downloadModel: "Download {name}",
   cancelModel: "Cancel {name}",
@@ -135,6 +151,7 @@ export const localModelsMessages = defineMessages("localModels", {
   removeModel: "Remove {name}",
   retryModel: "Retry {name}",
   loadModel: "Load {name}",
+  loadAnywayModel: "Load {name} anyway",
   unloadModel: "Unload {name}",
   switchToModelNamed: "Switch to {name}",
   switchModel: "Switch",
@@ -173,12 +190,37 @@ export const localModelsMessages = defineMessages("localModels", {
   factGateway: "Gateway",
   factEndpoint: "Endpoint",
   factFreeDisk: "Free disk",
+  factModelStorage: "Model storage",
+  factFileLocation: "File location",
+  storageDiskFree: "{free} disk free",
+  storageCreatedOnFirstDownload: "Created on first download",
+  storageCopyPath: "Copy path",
+  storageCopiedPath: "Copied path",
+  storageCopyPathOf: "Copy path {path}",
+  storageCopiedPathOf: "Copied path {path}",
+  storageOpenInFinder: "Open in Finder",
+  storageOpenInFileExplorer: "Open in File Explorer",
+  storageOpenFolder: "Open folder",
+  storageShowInFinder: "Show in Finder",
+  storageShowInFileExplorer: "Show in File Explorer",
+  storageShowInFolder: "Show in folder",
+  storageFilesCount: { one: "{count} file", other: "{count} files" },
+  storageFilesMissing: "Some model files are missing on disk.",
+  storageRoleMmproj: "mmproj",
+  storageRoleOther: "Companion",
+  storageSharedBadge: "Shared",
+  storageFileMissingBadge: "Missing",
+  storageOpenFailed: "Couldn't open folder — copy the path instead.",
+  storageNotFound: "This folder or file doesn't exist on disk yet.",
+  storageNotAvailable: "Local folder access isn't available for this computer.",
+  storageOutsideRoot: "This path is outside Linger's model storage folder.",
   memoryOn: "{size} on {place}",
   runtimeMemory: "Runtime memory",
   diskSpace: "Disk space",
-  idleUsedWarning: {
-    one: "{names} uses this model. Load it so it can answer.",
-    other: "{names} use this model. Load it so they can answer.",
+  standbyAutoLoadNote: {
+    one: "{names} uses this model. Unloaded to save memory; loads automatically on next message when memory is free.",
+    other:
+      "{names} use this model. Unloaded to save memory; loads automatically on next message when memory is free.",
   },
   needsFreeMemory: "Needs {size} free",
   noAgentYet: "No Agent yet",
@@ -196,8 +238,9 @@ export const localModelsMessages = defineMessages("localModels", {
 
   // Confirmations.
   affectedUnload: {
-    one: "{names} uses this model and can't answer until it is loaded again.",
-    other: "{names} use this model and can't answer until it is loaded again.",
+    one: "{names} uses this model. Unloading moves it to standby to free memory now; it loads automatically on next message when memory is free.",
+    other:
+      "{names} use this model. Unloading moves it to standby to free memory now; it loads automatically on next message when memory is free.",
   },
   affectedRemove: {
     one: "{names} uses this model and can't answer until you choose another model for it.",
@@ -207,6 +250,8 @@ export const localModelsMessages = defineMessages("localModels", {
   noAgentUses: "No Agent uses this model.",
   makeRoomTitle: "Make room to load",
   makeRoomDescription: "{name} needs {need} on {pool}; {free} is free.",
+  loadAnywayWarning:
+    "Forcing a load overrides the memory safety guard and may cause heavy system swap or slowdown.",
   unloadAndLoad: "Unload and load",
   roomFreeNow:
     "Enough memory is free now ({free} available). Click Load to start.",
@@ -228,13 +273,13 @@ export const localModelsMessages = defineMessages("localModels", {
     "Other apps are using {size} on {pool}. Close unnecessary apps and click Recheck memory to free the remaining room.",
   selectMore: "Select at least {size} more to unload before loading {name}.",
   affectedUntilReload:
-    "{names} can't answer until their model is loaded again.",
+    "{names} will move to standby and load on next message once memory is free.",
   switchOnceLoaded: "Switch {agents} to {model} once loaded",
   unloadTitle: "Unload {name}?",
   unloadDescription:
-    "Frees {size} of memory. It stays on disk, so you can load it again later.",
+    "Frees {size} of memory now and puts the model on standby. It stays on disk and loads automatically when needed.",
   unloadDescriptionPool:
-    "Frees {size} of {pool}. It stays on disk, so you can load it again later.",
+    "Frees {size} of {pool} now and puts the model on standby. It stays on disk and loads automatically when needed.",
   removeTitle: "Remove {name}?",
   removeDescription:
     "Deletes its files and frees {size} of disk on {computer}. You can download it again later.",
@@ -341,6 +386,9 @@ export const localModelsMessages = defineMessages("localModels", {
   errorInvalidState: "The model was busy with another step.",
   errorJobRunning: "Another step was still running.",
   errorLoadNoRoom: "There wasn't enough free memory to load it.",
+  errorLoadNoRoomShortfall:
+    "Needs {shortfall} more free memory ({free} free, {need} minimum required).",
+  errorLoadNoRoomShortfallOnly: "Needs {shortfall} more free memory to load.",
   errorMemoryInsufficient: "The computer doesn't have enough memory for it.",
   errorModelFilesMissing:
     "Its files are missing. Remove the model and download it again.",
@@ -364,6 +412,7 @@ export const localModelsMessages = defineMessages("localModels", {
   shortHealthCheckFailed: "model didn't answer",
   shortBusy: "busy with another step",
   shortLoadNoRoom: "not enough free memory",
+  shortLoadNoRoomShortfall: "needs {shortfall} more free memory",
   shortMemoryInsufficient: "not enough memory",
   shortModelFilesMissing: "files missing",
   shortModelUnknown: "no longer on computer",

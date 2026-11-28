@@ -92,6 +92,13 @@ info:
     (runtime_type "antigravity") is sent only to Computer 0.66.0 and later,
     because older Computers reject those runtime_type values and close the
     connection.
+    Elastic admission metadata (minimum_memory_bytes, degraded,
+    requested_posture, effective_posture, degradation_reason,
+    memory_pressure_warning, oom_retries, forced, plus shortfall_bytes and
+    can_force on errors and refusals) travels only after a runner.welcome whose
+    service_features names local_models_admission_v2. Pre-run.started
+    status.changed events with stage loading_local_model travel only after a
+    runner.welcome whose service_features names local_model_loading_status.
     execute with kind model_source reads or switches the Computer's model
     source. A BYOK input names its address as base_url, path and endpoint
     with an explicit protocol, and the Computer sends one request there; the

@@ -141,6 +141,15 @@ type Daemon struct {
 	// localModelsExternalHolders holds whether the current Agent Service
 	// declared serviceFeatureLocalModelsExternalHolders in its welcome.
 	localModelsExternalHolders atomic.Bool
+	// localModelsStorage holds whether the current Agent Service declared
+	// serviceFeatureLocalModelsStorage in its welcome.
+	localModelsStorage atomic.Bool
+	// localModelsAdmissionV2 holds whether the current Agent Service declared
+	// serviceFeatureLocalModelsAdmissionV2 in its welcome.
+	localModelsAdmissionV2 atomic.Bool
+	// localModelLoadingStatus holds whether the current Agent Service declared
+	// serviceFeatureLocalModelLoadingStatus in its welcome.
+	localModelLoadingStatus atomic.Bool
 	// modelInvokeOutcomes holds whether the current Agent Service declared
 	// serviceFeatureModelInvokeOutcomes in its welcome.
 	modelInvokeOutcomes atomic.Bool
@@ -255,6 +264,7 @@ type activeOperation struct {
 	execution         *provider.Execution
 	reason            string
 	mcpProxies        *mcpproxy.Set
+	releaseLocalModel func()
 	terminalCommitted bool
 	inputMu           sync.Mutex
 	finishing         bool

@@ -266,3 +266,178 @@ func TestMapStatusDropsMalformedExternalHolders(t *testing.T) {
 		t.Fatalf("malformed holders changed the rest of the snapshot")
 	}
 }
+
+func TestMapStatusSanitizesHostAndModelStorage(t *testing.T) {
+	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	host := document["host"].(map[string]any)
+	host["models_dir"] = "  /home/alice/.simplexai/runtime/localmodels/models/models  "
+	host["models_dir_exists"] = true
+
+	rows := document["models"].([]any)
+	// Row 0 is absent: storage must always be cleared even if present in JSON.
+	absentRow := rows[0].(map[string]any)
+	absentRow["state"] = "absent"
+	absentRow["storage"] = map[string]any{
+		"dir": "/home/alice/models", "primary_path": "/home/alice/models/a.gguf",
+		"dedicated_dir": false, "disk_bytes": 100, "files_present": true,
+		"files": []any{map[string]any{"path": "/home/alice/models/a.gguf", "role": "weights", "size_bytes": 100, "present": true, "shared": false}},
+	}
+
+	// Row 1 is idle: trims/clips paths, clamps negatives, drops empty file paths, coerces unknown role.
+	idleRow := rows[1].(map[string]any)
+	idleRow["state"] = "idle"
+	idleRow["storage"] = map[string]any{
+		"dir":           "  /home/alice/models  ",
+		"primary_path":  "  /home/alice/models/qwen.gguf  ",
+		"dedicated_dir": false,
+		"disk_bytes":    -42,
+		"files_present": true,
+		"files": []any{
+			map[string]any{"path": "  /home/alice/models/qwen.gguf ", "role": "weights", "size_bytes": 1234, "present": true, "shared": false},
+			map[string]any{"path": "   ", "role": "mmproj", "size_bytes": 10, "present": true, "shared": false},
+			map[string]any{"path": "/home/alice/models/assets/extra.bin", "role": "future_role", "size_bytes": -9, "present": false, "shared": true},
+		},
+	}
+
+	// Row 2 is idle with empty files after dropping blank paths: storage becomes nil.
+	emptyRow := rows[2].(map[string]any)
+	emptyRow["state"] = "idle"
+	emptyRow["storage"] = map[string]any{
+		"dir": "/home/alice/models", "primary_path": "/home/alice/models/empty.gguf",
+		"dedicated_dir": false, "disk_bytes": 0, "files_present": false,
+		"files": []any{map[string]any{"path": "   ", "role": "weights", "size_bytes": 0, "present": false, "shared": false}},
+	}
+
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Host == nil || snapshot.Host.ModelsDir != "/home/alice/.simplexai/runtime/localmodels/models/models" ||
+		snapshot.Host.ModelsDirExists == nil || !*snapshot.Host.ModelsDirExists {
+		t.Fatalf("host storage = %+v", snapshot.Host)
+	}
+	if snapshot.Models[0].Storage != nil {
+		t.Fatalf("absent model kept storage: %+v", snapshot.Models[0].Storage)
+	}
+	got := snapshot.Models[1].Storage
+	want := &wire.LocalModelStorage{
+		Dir:          "/home/alice/models",
+		PrimaryPath:  "/home/alice/models/qwen.gguf",
+		DedicatedDir: false,
+		DiskBytes:    0,
+		FilesPresent: true,
+		Files: []wire.LocalModelStorageFile{
+			{Path: "/home/alice/models/qwen.gguf", Role: "weights", SizeBytes: 1234, Present: true, Shared: false},
+			{Path: "/home/alice/models/assets/extra.bin", Role: "other", SizeBytes: 0, Present: false, Shared: true},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sanitized storage = %+v, want %+v", got, want)
+	}
+	if snapshot.Models[2].Storage != nil {
+		t.Fatalf("model with no valid storage files kept storage: %+v", snapshot.Models[2].Storage)
+	}
+}
+
+func TestMapStatusPreservesAndSanitizesElasticAdmissionFields(t *testing.T) {
+	encoded, err := os.ReadFile("testdata/library-status-dev38.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		t.Fatal(err)
+	}
+	rows := document["models"].([]any)
+	first := rows[0].(map[string]any)
+	first["state"] = "loaded"
+	first["minimum_memory_bytes"] = float64(4_000_000_000)
+	first["degraded"] = true
+	first["requested_posture"] = map[string]any{"context_tokens": float64(65536), "slots": float64(2), "kv_cache_quant": "f16"}
+	first["effective_posture"] = map[string]any{"context_tokens": float64(32768), "slots": float64(1), "kv_cache_quant": "q8_0"}
+	first["degradation_reason"] = "reduced_context"
+	first["memory_pressure_warning"] = map[string]any{
+		"level": "soft", "pool": "unified", "free_bytes": float64(2_000_000_000), "budget_bytes": float64(12_000_000_000),
+	}
+	first["oom_retries"] = float64(1)
+	first["forced"] = true
+
+	second := rows[1].(map[string]any)
+	second["state"] = "failed"
+	second["error"] = map[string]any{
+		"code": "LOAD_NO_ROOM", "detail": "short", "pool": "gpu:0",
+		"need_bytes": float64(10_000_000_000), "free_bytes": float64(6_000_000_000),
+		"shortfall_bytes": float64(4_000_000_000), "can_force": true,
+	}
+
+	third := rows[2].(map[string]any)
+	third["state"] = "loaded"
+	third["degradation_reason"] = "future_reason"
+	third["requested_posture"] = map[string]any{"context_tokens": float64(0), "slots": float64(1)}
+	third["effective_posture"] = map[string]any{"context_tokens": float64(16384), "slots": float64(1), "kv_cache_quant": "unknown_kv"}
+	third["memory_pressure_warning"] = map[string]any{"level": "critical", "pool": "gpu:0", "free_bytes": float64(1), "budget_bytes": float64(2)}
+	third["oom_retries"] = float64(0)
+	third["forced"] = false
+
+	encoded, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := mapStatus(encoded, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m0 := snapshot.Models[0]
+	if m0.MinimumMemoryBytes == nil || *m0.MinimumMemoryBytes != 4_000_000_000 ||
+		m0.Degraded == nil || !*m0.Degraded ||
+		m0.RequestedPosture == nil || m0.RequestedPosture.ContextTokens != 65536 || m0.RequestedPosture.Slots != 2 || m0.RequestedPosture.KvCacheQuant != "f16" ||
+		m0.EffectivePosture == nil || m0.EffectivePosture.ContextTokens != 32768 || m0.EffectivePosture.Slots != 1 || m0.EffectivePosture.KvCacheQuant != "q8_0" ||
+		m0.DegradationReason != "reduced_context" ||
+		m0.MemoryPressureWarning == nil || m0.MemoryPressureWarning.Level != "soft" || m0.MemoryPressureWarning.Pool != "unified" ||
+		m0.OomRetries == nil || *m0.OomRetries != 1 ||
+		m0.Forced == nil || !*m0.Forced {
+		t.Fatalf("model 0 elastic fields = %+v", m0)
+	}
+	m1 := snapshot.Models[1]
+	if m1.Error == nil || m1.Error.Code != "LOAD_NO_ROOM" || m1.Error.Pool != "gpu:0" ||
+		m1.Error.NeedBytes == nil || *m1.Error.NeedBytes != 10_000_000_000 ||
+		m1.Error.FreeBytes == nil || *m1.Error.FreeBytes != 6_000_000_000 ||
+		m1.Error.ShortfallBytes == nil || *m1.Error.ShortfallBytes != 4_000_000_000 ||
+		m1.Error.CanForce == nil || !*m1.Error.CanForce {
+		t.Fatalf("model 1 error room fields = %+v", m1.Error)
+	}
+	m2 := snapshot.Models[2]
+	if m2.DegradationReason != "" || m2.RequestedPosture != nil ||
+		m2.EffectivePosture == nil || m2.EffectivePosture.KvCacheQuant != "" ||
+		m2.MemoryPressureWarning != nil || m2.OomRetries != nil || m2.Forced != nil {
+		t.Fatalf("model 2 sanitized elastic fields = %+v", m2)
+	}
+
+	var event libraryEvent
+	if err := json.Unmarshal([]byte(`{"event":"error","code":"LOAD_NO_ROOM","pool":"unified","need_bytes":12000,"free_bytes":9000,"shortfall_bytes":3000,"can_force":true}`), &event); err != nil {
+		t.Fatal(err)
+	}
+	refusal := event.refusal()
+	if refusal.Code != "LOAD_NO_ROOM" || refusal.Pool != "unified" ||
+		refusal.NeedBytes == nil || *refusal.NeedBytes != 12000 ||
+		refusal.FreeBytes == nil || *refusal.FreeBytes != 9000 ||
+		refusal.ShortfallBytes == nil || *refusal.ShortfallBytes != 3000 ||
+		refusal.CanForce == nil || !*refusal.CanForce {
+		t.Fatalf("refusal = %+v", refusal)
+	}
+	cause := event.cause()
+	if cause == nil || cause.ShortfallBytes == nil || *cause.ShortfallBytes != 3000 || cause.CanForce == nil || !*cause.CanForce {
+		t.Fatalf("cause = %+v", cause)
+	}
+}

@@ -2,12 +2,16 @@ package app
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/roomagent"
 	"github.com/simplexai-labs/linger/contracts-go/teamhubinternal"
 	httpapi "github.com/simplexai-labs/linger/contracts-go/teamhubpublic"
 )
@@ -334,5 +338,234 @@ func TestLocalModelsViewPassesThroughConcurrencyProbingWhileLoading(t *testing.T
 	probingModel := view.Models[2].Model
 	if probingModel.State != httpapi.LocalModelStateLoading || probingModel.ConcurrencyProbing == nil || !*probingModel.ConcurrencyProbing {
 		t.Fatalf("probing model = %+v, want state=loading concurrency_probing=true", probingModel)
+	}
+}
+
+func TestLocalModelsViewRedactsStoragePathsForNonOwnersAndKeepsOfflineHost(t *testing.T) {
+	storageJSON := `,"storage":{"dir":"/home/alice/.simplexai/runtime/localmodels/models/models","primary_path":"/home/alice/.simplexai/runtime/localmodels/models/models/idle.gguf","dedicated_dir":false,"disk_bytes":1024,"files_present":true,"files":[{"path":"/home/alice/.simplexai/runtime/localmodels/models/models/idle.gguf","role":"weights","size_bytes":1024,"present":true,"shared":false}]}`
+	snapshot := strings.Replace(storedLocalModelsSnapshotJSON, `"state":"idle"`, `"state":"idle"`+storageJSON, 1)
+	hostJSON := `{"platform":"linux","arch":"x86_64","os_label":"Ubuntu","engine_label":"llama.cpp","ram_total_bytes":1,"disk_free_bytes":1,"models_dir":"/home/alice/.simplexai/runtime/localmodels/models/models","models_dir_exists":true,"gpus":[]}`
+
+	record := agentruntimestate.LocalModelsRecord{
+		ComputerID: "computer_1", DisplayName: "Studio", Status: "offline",
+		Owner:    agentruntimestate.LocalComputerOwner{TenantID: "tenant_1", OwnerActorID: "actor_owner"},
+		Snapshot: json.RawMessage(snapshot),
+		Host:     json.RawMessage(hostJSON),
+	}
+
+	ownerView, err := localModelsView(record, "actor_owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerView.Computer.Status != httpapi.LocalModelsComputerOffline ||
+		ownerView.Computer.Host == nil ||
+		ownerView.Computer.Host.ModelsDir == nil ||
+		*ownerView.Computer.Host.ModelsDir != "/home/alice/.simplexai/runtime/localmodels/models/models" ||
+		ownerView.Computer.Host.ModelsDirExists == nil ||
+		!*ownerView.Computer.Host.ModelsDirExists {
+		t.Fatalf("owner offline host lost storage fields: %+v", ownerView.Computer.Host)
+	}
+	if ownerView.Models[2].Model.Storage == nil ||
+		ownerView.Models[2].Model.Storage.PrimaryPath != "/home/alice/.simplexai/runtime/localmodels/models/models/idle.gguf" {
+		t.Fatalf("owner model lost storage: %+v", ownerView.Models[2].Model.Storage)
+	}
+
+	memberView, err := localModelsView(record, "actor_member", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if memberView.Computer.Host == nil || memberView.Computer.Host.ModelsDir != nil || memberView.Computer.Host.ModelsDirExists != nil {
+		t.Fatalf("non-owner saw host storage fields: %+v", memberView.Computer.Host)
+	}
+	for _, entry := range memberView.Models {
+		if entry.Model.Storage != nil {
+			t.Fatalf("non-owner saw model storage on %s: %+v", entry.Model.Id, entry.Model.Storage)
+		}
+	}
+
+	// Offline Computer with no snapshot still preserves host.models_dir for owner only.
+	noSnap := record
+	noSnap.Snapshot = nil
+	ownerNoSnap, err := localModelsView(noSnap, "actor_owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ownerNoSnap.Computer.Host == nil || ownerNoSnap.Computer.Host.ModelsDir == nil {
+		t.Fatalf("owner without snapshot lost host.models_dir: %+v", ownerNoSnap.Computer.Host)
+	}
+	memberNoSnap, err := localModelsView(noSnap, "actor_member", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if memberNoSnap.Computer.Host == nil || memberNoSnap.Computer.Host.ModelsDir != nil || memberNoSnap.Computer.Host.ModelsDirExists != nil {
+		t.Fatalf("non-owner without snapshot saw host storage fields: %+v", memberNoSnap.Computer.Host)
+	}
+}
+
+func TestSanitizeLocalModelsSnapshotStorage(t *testing.T) {
+	var snapshot teamhubinternal.LocalModelsSnapshot
+	if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	rawDir := "  /tmp/models  "
+	exists := true
+	snapshot.Host = &teamhubinternal.LocalModelHost{
+		Platform:        teamhubinternal.LocalModelHostPlatformLinux,
+		Arch:            teamhubinternal.LocalModelHostArchX8664,
+		OsLabel:         "Ubuntu",
+		EngineLabel:     "llama.cpp",
+		RamTotalBytes:   1,
+		DiskFreeBytes:   1,
+		ModelsDir:       &rawDir,
+		ModelsDirExists: &exists,
+		Gpus:            []teamhubinternal.LocalModelGpu{},
+	}
+	// Idle model with dirty storage fields gets sanitized.
+	snapshot.Models[2].Storage = &teamhubinternal.LocalModelStorage{
+		Dir:          "  /tmp/models  ",
+		PrimaryPath:  "  /tmp/models/m.gguf  ",
+		DedicatedDir: false,
+		DiskBytes:    -10,
+		FilesPresent: true,
+		Files: []teamhubinternal.LocalModelStorageFile{
+			{Path: "  /tmp/models/m.gguf ", Role: "future_role", SizeBytes: -5, Present: true, Shared: false},
+			{Path: "   ", Role: teamhubinternal.LocalModelStorageFileRoleMmproj, SizeBytes: 100, Present: true, Shared: true},
+		},
+	}
+	// Absent model must have storage cleared.
+	snapshot.Models[4].Storage = &teamhubinternal.LocalModelStorage{
+		Dir: "/tmp/models", PrimaryPath: "/tmp/models/a.gguf",
+		Files: []teamhubinternal.LocalModelStorageFile{{Path: "/tmp/models/a.gguf", Role: teamhubinternal.LocalModelStorageFileRoleWeights}},
+	}
+
+	sanitizeLocalModelsSnapshot(&snapshot)
+	if !validLocalModelsSnapshot(snapshot) {
+		t.Fatal("sanitized snapshot with storage was rejected")
+	}
+	if snapshot.Host.ModelsDir == nil || *snapshot.Host.ModelsDir != "/tmp/models" {
+		t.Fatalf("sanitized host models_dir = %+v", snapshot.Host.ModelsDir)
+	}
+	if got := snapshot.Models[2].Storage; got == nil || got.Dir != "/tmp/models" || got.PrimaryPath != "/tmp/models/m.gguf" ||
+		got.DiskBytes != 0 || len(got.Files) != 1 || got.Files[0].Role != teamhubinternal.LocalModelStorageFileRoleOther || got.Files[0].SizeBytes != 0 {
+		t.Fatalf("sanitized model storage = %+v", got)
+	}
+	if snapshot.Models[4].Storage != nil {
+		t.Fatalf("absent model retained storage: %+v", snapshot.Models[4].Storage)
+	}
+}
+
+func TestValidLocalModelActionForce(t *testing.T) {
+	yes := true
+	if !validLocalModelAction("qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: httpapi.LocalModelActionRequestLoad, Force: &yes}) {
+		t.Fatal("load with force=true should be valid")
+	}
+	for _, action := range []httpapi.LocalModelActionRequestAction{
+		httpapi.LocalModelActionRequestDownload,
+		httpapi.LocalModelActionRequestCancel,
+		httpapi.LocalModelActionRequestUnload,
+		httpapi.LocalModelActionRequestRemove,
+	} {
+		if validLocalModelAction("qwen3-4b:Q4_K_M", httpapi.LocalModelActionRequest{Action: action, Force: &yes}) {
+			t.Errorf("%s with force=true should be rejected", action)
+		}
+	}
+}
+
+func TestWriteLocalModelsErrorDetailsPreservesNoRoomRefusalFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("request_id", "req-local-model-test")
+	need, free, shortfall := int64(12_000_000_000), int64(8_000_000_000), int64(4_000_000_000)
+	canForce := true
+	refusal := &roomagent.LocalModelActionRefusal{
+		Code: "LOAD_NO_ROOM", Pool: "unified", NeedBytes: &need, FreeBytes: &free,
+		ShortfallBytes: &shortfall, CanForce: &canForce,
+	}
+	app := &App{}
+	app.writeLocalModelsErrorDetails(ctx, httpapi.LocalModelsErrorCodeLOCALMODELNOROOM, localModelRefusalDetails(refusal))
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", recorder.Code)
+	}
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details []struct {
+				Field  string `json:"field"`
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != string(httpapi.LocalModelsErrorCodeLOCALMODELNOROOM) {
+		t.Fatalf("error code = %q", payload.Error.Code)
+	}
+	got := map[string]string{}
+	for _, item := range payload.Error.Details {
+		got[item.Field] = item.Reason
+	}
+	want := map[string]string{
+		"pool":            "unified",
+		"need_bytes":      "12000000000",
+		"free_bytes":      "8000000000",
+		"shortfall_bytes": "4000000000",
+		"can_force":       "true",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("details[%q] = %q, want %q (all=%v)", k, got[k], v, got)
+		}
+	}
+}
+
+func TestSanitizeAndValidateElasticAdmissionSnapshotFields(t *testing.T) {
+	var snapshot teamhubinternal.LocalModelsSnapshot
+	if err := json.Unmarshal([]byte(storedLocalModelsSnapshotJSON), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	minBytes := int64(4_000_000_000)
+	degraded, forced := true, true
+	retries := 2
+	kv := teamhubinternal.LocalModelKvQuantQ80
+	reason := teamhubinternal.LocalModelDegradationReasonReducedContext
+	snapshot.Models[0].MinimumMemoryBytes = &minBytes
+	snapshot.Models[0].Degraded = &degraded
+	snapshot.Models[0].RequestedPosture = &teamhubinternal.LocalModelPosture{ContextTokens: 65536, Slots: 2}
+	snapshot.Models[0].EffectivePosture = &teamhubinternal.LocalModelPosture{ContextTokens: 32768, Slots: 1, KvCacheQuant: &kv}
+	snapshot.Models[0].DegradationReason = &reason
+	pressurePool := teamhubinternal.LocalModelPoolId("unified")
+	pressureFree := int64(1_000_000_000)
+	pressureBudget := int64(8_000_000_000)
+	snapshot.Models[0].MemoryPressureWarning = &teamhubinternal.LocalModelPressureWarning{
+		Level: teamhubinternal.LocalModelPressureWarningLevelSoft, Pool: &pressurePool, FreeBytes: &pressureFree, BudgetBytes: &pressureBudget,
+	}
+	snapshot.Models[0].OomRetries = &retries
+	snapshot.Models[0].Forced = &forced
+	if !validLocalModelsSnapshot(snapshot) {
+		t.Fatal("valid elastic admission snapshot was rejected")
+	}
+
+	// Unknown future enums and invalid values are sanitized forward-compatibly.
+	badMin := int64(-10)
+	badReason := teamhubinternal.LocalModelDegradationReason("future_reason")
+	badKV := teamhubinternal.LocalModelKvQuant("fp8")
+	badLevel := teamhubinternal.LocalModelPressureWarningLevel("critical")
+	badRetries := -1
+	snapshot.Models[0].MinimumMemoryBytes = &badMin
+	snapshot.Models[0].DegradationReason = &badReason
+	snapshot.Models[0].EffectivePosture.KvCacheQuant = &badKV
+	snapshot.Models[0].MemoryPressureWarning.Level = badLevel
+	snapshot.Models[0].OomRetries = &badRetries
+	sanitizeLocalModelsSnapshot(&snapshot)
+	if !validLocalModelsSnapshot(snapshot) {
+		t.Fatal("sanitized elastic admission snapshot was rejected")
+	}
+	if snapshot.Models[0].MinimumMemoryBytes != nil || snapshot.Models[0].DegradationReason != nil ||
+		snapshot.Models[0].EffectivePosture.KvCacheQuant != nil || snapshot.Models[0].MemoryPressureWarning != nil ||
+		snapshot.Models[0].OomRetries != nil {
+		t.Fatalf("unexpected remaining invalid elastic fields: %+v", snapshot.Models[0])
 	}
 }

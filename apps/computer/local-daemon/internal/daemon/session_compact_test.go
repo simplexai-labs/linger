@@ -477,6 +477,46 @@ func TestSessionCompactPiEnsuresModelGatewayAndLocalModel(t *testing.T) {
 			t.Fatalf("gateway=%v ensured=%v prepareCalls=%d, want none", source.runtime, library.ensured, session.prepareCalls.Load())
 		}
 	})
+
+	t.Run("holds and releases local model use lease during Pi compaction", func(t *testing.T) {
+		session := newFakeParkedSession(native.CompactResult{Outcome: "compacted"})
+		session.modelID = localRunModel
+		d, stream, _ := sessionCompactFixture(t, session, nil)
+		library := &fakeLocalModels{}
+		d.localModels = library
+		d.takeParkedSession = func(runtimeType, contextKey string) parkedSession {
+			if runtimeType == "pi" && contextKey == "context-1" {
+				return session
+			}
+			return nil
+		}
+		if err := d.handleSessionCompact(context.Background(), stream, piSessionCompactCommand("compact-pi-lease")); err != nil {
+			t.Fatal(err)
+		}
+		<-session.started
+
+		library.mu.Lock()
+		activeWhileRunning := library.activeLeases[localRunModel]
+		releasesWhileRunning := library.leaseReleases
+		library.mu.Unlock()
+		if activeWhileRunning != 1 || releasesWhileRunning != 0 {
+			t.Fatalf("during compaction: activeLeases=%d releases=%d, want 1 and 0", activeWhileRunning, releasesWhileRunning)
+		}
+
+		close(session.release)
+		payload := waitForSessionCompacted(t, stream, "compact-pi-lease")
+		if payload["outcome"] != "compacted" {
+			t.Fatalf("payload=%v, want compacted", payload)
+		}
+
+		library.mu.Lock()
+		activeAfter := library.activeLeases[localRunModel]
+		releasesAfter := library.leaseReleases
+		library.mu.Unlock()
+		if activeAfter != 0 || releasesAfter != 1 {
+			t.Fatalf("after compaction: activeLeases=%d releases=%d, want 0 and 1", activeAfter, releasesAfter)
+		}
+	})
 }
 
 func TestSessionCompactCodexAndClaudeSkipModelReadiness(t *testing.T) {

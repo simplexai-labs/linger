@@ -229,9 +229,23 @@ take precedence.
   (older Computers and unprobed/unmeasured loads fall back to
   `{ initial: 1, max: 8 }`). Loading another model in the library does not drop
   the endpoint to `1` or reset an existing learned limit.
-- `local_models_external_holders` is advertised to every Computer (a Daemon
+- `local_models_external_holders`, `local_models_admission_v2`, and
+  `local_model_loading_status` are advertised to every Computer (a Daemon
   ignores an unknown feature); a Daemon talking to an older Agent Service
-  strips `external_holders` from `LocalModelPool` rows.
+  strips `external_holders` from `LocalModelPool` rows, strips elastic
+  admission fields (`minimum_memory_bytes`, `degraded`, `requested_posture`,
+  `effective_posture`, `degradation_reason`, `memory_pressure_warning`,
+  `oom_retries`, `forced`, and error/refusal room fields) without
+  `local_models_admission_v2`, and omits pre-`run.started`
+  `status.changed` (`stage: "loading_local_model"`) events without
+  `local_model_loading_status`. Sending `force: true` on `execute`
+  `local_models` (`load`) requires Computer 0.70.0 or later
+  (`FIRST_LOCAL_MODELS_FORCE_LOAD_COMPUTER_VERSION`), because an older Computer
+  rejects unknown envelope fields and closes the connection.
+- `local_models_storage` is advertised to every Computer (a Daemon ignores an
+  unknown feature); a Daemon talking to an older Agent Service strips
+  `host.models_dir`, `host.models_dir_exists`, and per-model `storage` from
+  `LocalModelsSnapshot` frames.
 - `operation_background_wait` in `runner.welcome`'s `service_features` is
   advertised to every Computer (a Daemon ignores an unknown feature); only a
   Daemon that sees it emits `run.background_waiting` and
@@ -262,6 +276,17 @@ take precedence.
   connection. Background calls resolve the placed Agent's configured model on
   its Runtime and fall back to the target Runtime's catalog default on
   cross-Runtime fallback or when unconfigured.
+- Local-model wake control on `execute` `model_invoke` (`wake_local_model`) is
+  sent only to Computer 0.69.0 or later
+  (`FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION`), because an older
+  Computer rejects unknown envelope fields and closes the connection.
+  Background maintenance calls set `wake_local_model: false` so they do not
+  wake standby local models (the Daemon answers `unavailable`, which reuses the
+  scheduler's retry-without-attempt-penalty deferral up to its offline wait
+  limit rather than waking the model), while interactive calls set
+  `wake_local_model: true` and receive extra cold-load wait grace
+  (`MODEL_INVOKE_LOCAL_LOAD_GRACE_MS`) when targeting an unloaded local Pi
+  model.
 - `previous_session` on `operation.start` goes only to Computer 0.63.0 or later
   (`FIRST_PREVIOUS_SESSION_COMPUTER_VERSION`), because older Computers reject
   unknown envelope fields and close the connection. On `session_not_found` or

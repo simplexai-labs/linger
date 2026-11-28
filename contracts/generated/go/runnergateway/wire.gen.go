@@ -1227,13 +1227,15 @@ func (LocalModelGpu) RequiredFields() []string {
 
 // LocalModelHost mirrors the LocalModelHost schema shape.
 type LocalModelHost struct {
-	Platform      string          `json:"platform"`
-	Arch          string          `json:"arch"`
-	OsLabel       string          `json:"os_label"`
-	EngineLabel   string          `json:"engine_label"`
-	RamTotalBytes uint64          `json:"ram_total_bytes"`
-	DiskFreeBytes uint64          `json:"disk_free_bytes"`
-	Gpus          []LocalModelGpu `json:"gpus"`
+	Platform        string          `json:"platform"`
+	Arch            string          `json:"arch"`
+	OsLabel         string          `json:"os_label"`
+	EngineLabel     string          `json:"engine_label"`
+	RamTotalBytes   uint64          `json:"ram_total_bytes"`
+	DiskFreeBytes   uint64          `json:"disk_free_bytes"`
+	ModelsDir       string          `json:"models_dir,omitempty"`
+	ModelsDirExists *bool           `json:"models_dir_exists,omitempty"`
+	Gpus            []LocalModelGpu `json:"gpus"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelHost.
@@ -1364,10 +1366,15 @@ func (LocalModelEndpoint) RequiredFields() []string { return []string{"base_url"
 
 // LocalModelError mirrors the LocalModelError schema shape.
 type LocalModelError struct {
-	Code   string `json:"code"`
-	Detail string `json:"detail,omitempty"`
-	Cause  string `json:"cause,omitempty"`
-	Path   string `json:"path,omitempty"`
+	Code           string  `json:"code"`
+	Detail         string  `json:"detail,omitempty"`
+	Cause          string  `json:"cause,omitempty"`
+	Path           string  `json:"path,omitempty"`
+	Pool           string  `json:"pool,omitempty"`
+	NeedBytes      *uint64 `json:"need_bytes,omitempty"`
+	FreeBytes      *uint64 `json:"free_bytes,omitempty"`
+	ShortfallBytes *uint64 `json:"shortfall_bytes,omitempty"`
+	CanForce       *bool   `json:"can_force,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelError.
@@ -1386,6 +1393,68 @@ func (LocalModelNote) FixedFields() map[string]string { return nil }
 
 // RequiredFields lists the keys a LocalModelNote must carry.
 func (LocalModelNote) RequiredFields() []string { return []string{"code"} }
+
+// LocalModelStorageFile mirrors the LocalModelStorageFile schema shape.
+type LocalModelStorageFile struct {
+	Path      string `json:"path"`
+	Role      string `json:"role"`
+	SizeBytes uint64 `json:"size_bytes"`
+	Present   bool   `json:"present"`
+	Shared    bool   `json:"shared"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelStorageFile.
+func (LocalModelStorageFile) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelStorageFile must carry.
+func (LocalModelStorageFile) RequiredFields() []string {
+	return []string{"path", "role", "size_bytes", "present", "shared"}
+}
+
+// LocalModelStorage mirrors the LocalModelStorage schema shape.
+type LocalModelStorage struct {
+	Dir          string                  `json:"dir"`
+	PrimaryPath  string                  `json:"primary_path"`
+	DedicatedDir bool                    `json:"dedicated_dir"`
+	DiskBytes    uint64                  `json:"disk_bytes"`
+	FilesPresent bool                    `json:"files_present"`
+	Files        []LocalModelStorageFile `json:"files"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelStorage.
+func (LocalModelStorage) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelStorage must carry.
+func (LocalModelStorage) RequiredFields() []string {
+	return []string{"dir", "primary_path", "dedicated_dir", "disk_bytes", "files_present", "files"}
+}
+
+// LocalModelPosture mirrors the LocalModelPosture schema shape.
+type LocalModelPosture struct {
+	ContextTokens uint64 `json:"context_tokens"`
+	Slots         uint64 `json:"slots"`
+	KvCacheQuant  string `json:"kv_cache_quant,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelPosture.
+func (LocalModelPosture) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelPosture must carry.
+func (LocalModelPosture) RequiredFields() []string { return []string{"context_tokens", "slots"} }
+
+// LocalModelPressureWarning mirrors the LocalModelPressureWarning schema shape.
+type LocalModelPressureWarning struct {
+	Level       string  `json:"level"`
+	Pool        string  `json:"pool,omitempty"`
+	FreeBytes   *uint64 `json:"free_bytes,omitempty"`
+	BudgetBytes *uint64 `json:"budget_bytes,omitempty"`
+}
+
+// FixedFields lists the keys whose value the schema fixes for a LocalModelPressureWarning.
+func (LocalModelPressureWarning) FixedFields() map[string]string { return nil }
+
+// RequiredFields lists the keys a LocalModelPressureWarning must carry.
+func (LocalModelPressureWarning) RequiredFields() []string { return []string{"level"} }
 
 // LocalModel mirrors the LocalModel schema shape.
 type LocalModel struct {
@@ -1422,6 +1491,15 @@ type LocalModel struct {
 	Concurrency           *uint64                     `json:"concurrency,omitempty"`
 	ConcurrencyProbing    *bool                       `json:"concurrency_probing,omitempty"`
 	HostRamBytes          *uint64                     `json:"host_ram_bytes,omitempty"`
+	Storage               *LocalModelStorage          `json:"storage,omitempty"`
+	MinimumMemoryBytes    *uint64                     `json:"minimum_memory_bytes,omitempty"`
+	Degraded              *bool                       `json:"degraded,omitempty"`
+	RequestedPosture      *LocalModelPosture          `json:"requested_posture,omitempty"`
+	EffectivePosture      *LocalModelPosture          `json:"effective_posture,omitempty"`
+	DegradationReason     string                      `json:"degradation_reason,omitempty"`
+	MemoryPressureWarning *LocalModelPressureWarning  `json:"memory_pressure_warning,omitempty"`
+	OomRetries            *uint64                     `json:"oom_retries,omitempty"`
+	Forced                *bool                       `json:"forced,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModel.
@@ -1478,6 +1556,7 @@ type CapabilityLocalModelsExecute struct {
 	Action          string   `json:"action"`
 	ModelID         string   `json:"model_id,omitempty"`
 	UnloadFirst     []string `json:"unload_first,omitempty"`
+	Force           *bool    `json:"force,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a CapabilityLocalModelsExecute.
@@ -1518,11 +1597,13 @@ func (CapabilityLocalModelsAccepted) RequiredFields() []string {
 
 // LocalModelActionRefusal mirrors the LocalModelActionRefusal schema shape.
 type LocalModelActionRefusal struct {
-	Code      string  `json:"code"`
-	Detail    string  `json:"detail,omitempty"`
-	Pool      string  `json:"pool,omitempty"`
-	NeedBytes *uint64 `json:"need_bytes,omitempty"`
-	FreeBytes *uint64 `json:"free_bytes,omitempty"`
+	Code           string  `json:"code"`
+	Detail         string  `json:"detail,omitempty"`
+	Pool           string  `json:"pool,omitempty"`
+	NeedBytes      *uint64 `json:"need_bytes,omitempty"`
+	FreeBytes      *uint64 `json:"free_bytes,omitempty"`
+	ShortfallBytes *uint64 `json:"shortfall_bytes,omitempty"`
+	CanForce       *bool   `json:"can_force,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a LocalModelActionRefusal.
@@ -2935,6 +3016,7 @@ type ModelInvoke struct {
 	Kind            string            `json:"kind"`
 	MaxOutputChars  *uint64           `json:"max_output_chars,omitempty"`
 	SessionKey      string            `json:"session_key,omitempty"`
+	WakeLocalModel  *bool             `json:"wake_local_model,omitempty"`
 }
 
 // FixedFields lists the keys whose value the schema fixes for a ModelInvoke.

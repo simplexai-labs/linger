@@ -274,6 +274,18 @@ describe("ComputerDaemonModule", () => {
     expect(daemon.connection()).toBe("connecting");
   });
 
+  it("names no localmodels base directory before it starts or without a localmodels tool", async () => {
+    const { daemon, ctx, config } = setup();
+    expect(daemon.localmodelsBaseDirectory()).toBeUndefined();
+    // A base directory alone does not make a localmodels tool for the daemon.
+    config.update({
+      runtimeEnvironment: { LINGER_LOCALMODELS_BASE_DIR: "/opt/models" },
+    });
+    await daemon.start(ctx);
+    expect(daemon.localmodelsBaseDirectory()).toBeUndefined();
+    await daemon.stop();
+  });
+
   it("writes local_models from devLocalmodels even without Quick Install runtimeEnvironment", async () => {
     const devHome = mkdtempSync(path.join(os.tmpdir(), "desktop-dev-home-"));
     const devPython = path.join(devHome, "lab", ".venv", "bin", "python");
@@ -346,6 +358,8 @@ describe("ComputerDaemonModule", () => {
         state_directory: customState,
         base_directory: customModels,
       });
+      // The Models page opens the folder the daemon actually runs with.
+      expect(daemon.localmodelsBaseDirectory()).toBe(customModels);
     } finally {
       await daemon.stop();
       rmSync(devHome, { recursive: true, force: true });

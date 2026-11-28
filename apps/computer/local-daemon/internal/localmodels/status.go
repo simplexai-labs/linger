@@ -1,6 +1,7 @@
 package localmodels
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,18 +40,22 @@ var errorCodes = []string{
 }
 
 var (
-	families          = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
-	architectures     = []string{"dense", "moe"}
-	capabilities      = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
-	engines           = []string{"llama.cpp", "polystrata", "strata"}
-	availabilityCodes = []string{
+	families           = []string{"qwen", "gemma", "llama", "openai", "deepseek", "mistral", "phi", "glm", "kimi", "claude", "grok", "other"}
+	architectures      = []string{"dense", "moe"}
+	capabilities       = []string{"vision", "tool_use", "reasoning", "coding", "multilingual"}
+	engines            = []string{"llama.cpp", "polystrata", "strata"}
+	kvCacheQuants      = []string{"f16", "q8_0", "q4_0"}
+	degradationReasons = []string{"reduced_slots", "reduced_context", "above_soft_budget", "oom_retry", "forced_overcommit"}
+	pressureLevels     = []string{"soft", "high"}
+	availabilityCodes  = []string{
 		"MEMORY_INSUFFICIENT", "DISK_INSUFFICIENT", "PLATFORM_UNSUPPORTED",
 		"GPU_UNSUPPORTED", "DRIVER_UPDATE_REQUIRED", "RUNTIME_DEPENDENCY_MISSING", "UNAVAILABLE",
 	}
-	memoryKinds  = []string{"vram", "ram", "unified"}
-	gpuVendors   = []string{"amd", "intel", "none", "unknown"}
-	debugModes   = []string{"tiny", "simulate"}
-	debugSources = []string{"env", "state_config", "user_config"}
+	memoryKinds      = []string{"vram", "ram", "unified"}
+	gpuVendors       = []string{"amd", "intel", "none", "unknown"}
+	debugModes       = []string{"tiny", "simulate"}
+	debugSources     = []string{"env", "state_config", "user_config"}
+	storageFileRoles = []string{"weights", "mmproj", "other"}
 )
 
 var (
@@ -72,6 +77,14 @@ func unavailable(code, detail string, now time.Time) wire.LocalModelsSnapshot {
 	}
 }
 
+// libraryModel decodes one localmodels.library-status/v1 model row while
+// keeping storage raw so negative or malformed storage payloads sanitize
+// leniently instead of failing the whole snapshot decode.
+type libraryModel struct {
+	wire.LocalModel
+	Storage json.RawMessage `json:"storage"`
+}
+
 // libraryStatus is localmodels.library-status/v1. Its host and model entries
 // already use the wire field names; pools gain kind and gpu_index here.
 type libraryStatus struct {
@@ -86,7 +99,7 @@ type libraryStatus struct {
 		Holders         []wire.LocalModelPoolHolder `json:"holders"`
 		ExternalHolders []json.RawMessage           `json:"external_holders"`
 	} `json:"pools"`
-	Models []wire.LocalModel          `json:"models"`
+	Models []libraryModel             `json:"models"`
 	Debug  *wire.LocalModelsDebugInfo `json:"debug,omitempty"`
 }
 
@@ -117,6 +130,7 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		return wire.LocalModelsSnapshot{}, fmt.Errorf("library status host %s/%s is outside the contract", status.Host.Platform, status.Host.Arch)
 	}
 	host.OsLabel, host.EngineLabel = clip(host.OsLabel, 200), clip(host.EngineLabel, 200)
+	host.ModelsDir = clip(strings.TrimSpace(host.ModelsDir), 4096)
 	if host.Gpus == nil {
 		host.Gpus = []wire.LocalModelGpu{}
 	}
@@ -164,7 +178,9 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 			Holders: holders, ExternalHolders: externalHolders,
 		})
 	}
-	for _, model := range status.Models {
+	for _, rawModel := range status.Models {
+		model := rawModel.LocalModel
+		model.Storage = sanitizeStorage(rawModel.Storage, model.State)
 		sanitizeModel(&model)
 		if err := checkModel(model); err != nil {
 			return wire.LocalModelsSnapshot{}, err
@@ -184,6 +200,70 @@ func mapStatus(encoded []byte, now time.Time) (wire.LocalModelsSnapshot, error) 
 		snapshot.Models = append(snapshot.Models, model)
 	}
 	return snapshot, nil
+}
+
+func sanitizeStorage(raw json.RawMessage, state string) *wire.LocalModelStorage {
+	if state == "absent" || len(raw) == 0 {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var parsed struct {
+		Dir          string  `json:"dir"`
+		PrimaryPath  string  `json:"primary_path"`
+		DedicatedDir bool    `json:"dedicated_dir"`
+		DiskBytes    float64 `json:"disk_bytes"`
+		FilesPresent bool    `json:"files_present"`
+		Files        []struct {
+			Path      string  `json:"path"`
+			Role      string  `json:"role"`
+			SizeBytes float64 `json:"size_bytes"`
+			Present   bool    `json:"present"`
+			Shared    bool    `json:"shared"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil
+	}
+	dir := clip(strings.TrimSpace(parsed.Dir), 4096)
+	primaryPath := clip(strings.TrimSpace(parsed.PrimaryPath), 4096)
+	if dir == "" || primaryPath == "" || len(parsed.Files) == 0 {
+		return nil
+	}
+	files := make([]wire.LocalModelStorageFile, 0, min(len(parsed.Files), 256))
+	for _, entry := range parsed.Files {
+		if len(files) >= 256 {
+			break
+		}
+		filePath := clip(strings.TrimSpace(entry.Path), 4096)
+		if filePath == "" {
+			continue
+		}
+		role := strings.TrimSpace(entry.Role)
+		if !slices.Contains(storageFileRoles, role) {
+			role = "other"
+		}
+		files = append(files, wire.LocalModelStorageFile{
+			Path:      filePath,
+			Role:      role,
+			SizeBytes: bytesValue(entry.SizeBytes),
+			Present:   entry.Present,
+			Shared:    entry.Shared,
+		})
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	return &wire.LocalModelStorage{
+		Dir:          dir,
+		PrimaryPath:  primaryPath,
+		DedicatedDir: parsed.DedicatedDir,
+		DiskBytes:    bytesValue(parsed.DiskBytes),
+		FilesPresent: parsed.FilesPresent,
+		Files:        files,
+	}
 }
 
 func sanitizeDebugInfo(raw *wire.LocalModelsDebugInfo) *wire.LocalModelsDebugInfo {
@@ -288,13 +368,96 @@ func sanitizeModel(model *wire.LocalModel) {
 		if !slices.Contains(errorCodes, model.Error.Code) {
 			model.Error.Code = "UNKNOWN_ERROR"
 			model.Error.Cause, model.Error.Path = "", ""
-		} else if model.Error.Cause != "" && !slices.Contains(errorCauses, model.Error.Cause) {
-			model.Error.Cause, model.Error.Path = "", ""
+			model.Error.Pool = ""
+			model.Error.NeedBytes, model.Error.FreeBytes, model.Error.ShortfallBytes, model.Error.CanForce = nil, nil, nil, nil
+		} else {
+			if model.Error.Cause != "" && !slices.Contains(errorCauses, model.Error.Cause) {
+				model.Error.Cause, model.Error.Path = "", ""
+			}
+			if model.Error.Pool != "" {
+				if _, _, err := poolKind(model.Error.Pool); err != nil {
+					model.Error.Pool = ""
+				}
+			}
+			model.Error.NeedBytes = clampCounter(model.Error.NeedBytes)
+			model.Error.FreeBytes = clampCounter(model.Error.FreeBytes)
+			model.Error.ShortfallBytes = clampCounter(model.Error.ShortfallBytes)
 		}
 	}
 	if model.Note != nil && model.Note.Code != "NO_ROOM_TO_LOAD" {
 		model.Note = nil
 	}
+	model.MinimumMemoryBytes = clampCounter(model.MinimumMemoryBytes)
+	if model.State != "loaded" {
+		model.Degraded = nil
+		model.RequestedPosture = nil
+		model.EffectivePosture = nil
+		model.DegradationReason = ""
+		model.MemoryPressureWarning = nil
+		model.OomRetries = nil
+		model.Forced = nil
+	} else {
+		if model.Degraded != nil && !*model.Degraded {
+			model.Degraded = nil
+		}
+		model.RequestedPosture = sanitizePosture(model.RequestedPosture)
+		model.EffectivePosture = sanitizePosture(model.EffectivePosture)
+		model.DegradationReason = strings.TrimSpace(model.DegradationReason)
+		if model.DegradationReason != "" && !slices.Contains(degradationReasons, model.DegradationReason) {
+			model.DegradationReason = ""
+		}
+		model.MemoryPressureWarning = sanitizePressureWarning(model.MemoryPressureWarning)
+		if model.OomRetries != nil && (*model.OomRetries == 0 || *model.OomRetries > 64) {
+			model.OomRetries = nil
+		}
+		if model.Forced != nil && !*model.Forced {
+			model.Forced = nil
+		}
+	}
+}
+
+func sanitizePosture(raw *wire.LocalModelPosture) *wire.LocalModelPosture {
+	if raw == nil || raw.ContextTokens < 1 || raw.Slots < 1 || raw.Slots > 64 {
+		return nil
+	}
+	cleaned := &wire.LocalModelPosture{
+		ContextTokens: min(raw.ContextTokens, maxWireInteger),
+		Slots:         raw.Slots,
+	}
+	quant := strings.TrimSpace(raw.KvCacheQuant)
+	if quant != "" && slices.Contains(kvCacheQuants, quant) {
+		cleaned.KvCacheQuant = quant
+	}
+	return cleaned
+}
+
+func sanitizePressureWarning(raw *wire.LocalModelPressureWarning) *wire.LocalModelPressureWarning {
+	if raw == nil {
+		return nil
+	}
+	level := strings.TrimSpace(raw.Level)
+	if !slices.Contains(pressureLevels, level) {
+		return nil
+	}
+	cleaned := &wire.LocalModelPressureWarning{
+		Level:       level,
+		FreeBytes:   clampCounter(raw.FreeBytes),
+		BudgetBytes: clampCounter(raw.BudgetBytes),
+	}
+	if raw.Pool != "" {
+		if _, _, err := poolKind(raw.Pool); err == nil {
+			cleaned.Pool = raw.Pool
+		}
+	}
+	return cleaned
+}
+
+func clampCounter(value *uint64) *uint64 {
+	if value == nil {
+		return nil
+	}
+	clamped := min(*value, maxWireInteger)
+	return &clamped
 }
 
 // poolKind splits a pool id so no reader parses "gpu:1".
@@ -362,6 +525,8 @@ type libraryEvent struct {
 	NeedBytes      *float64        `json:"need_bytes"`
 	FreeBytes      *float64        `json:"free_bytes"`
 	HaveBytes      *float64        `json:"have_bytes"`
+	ShortfallBytes *float64        `json:"shortfall_bytes"`
+	CanForce       *bool           `json:"can_force"`
 	Cause          string          `json:"cause"`
 	Path           string          `json:"path"`
 }
@@ -403,6 +568,11 @@ func (e libraryEvent) refusal() *wire.LocalModelActionRefusal {
 	if refusal.FreeBytes == nil {
 		// Download refusals name what the disk or memory has as have_bytes.
 		refusal.FreeBytes = counter(e.HaveBytes)
+	}
+	refusal.ShortfallBytes = counter(e.ShortfallBytes)
+	if e.CanForce != nil {
+		canForce := *e.CanForce
+		refusal.CanForce = &canForce
 	}
 	return refusal
 }
@@ -451,13 +621,43 @@ func bytesValue(value float64) uint64 {
 // line carries one with the path it names.
 var errorCauses = []string{"GATEWAY_HOME_NOT_PRIVATE"}
 
-// cause is the error line's cause as the wire carries it on a model's error,
-// or nil when the line names none the contract knows.
+// cause is the error line's structured fields as the wire carries them on a
+// model's error, or nil when the line carries none the contract knows.
 func (e libraryEvent) cause() *wire.LocalModelError {
-	if !slices.Contains(errorCodes, e.Code) || !slices.Contains(errorCauses, e.Cause) || e.Path == "" {
+	if !slices.Contains(errorCodes, e.Code) {
 		return nil
 	}
-	return &wire.LocalModelError{Code: e.Code, Cause: e.Cause, Path: clip(e.Path, 4096)}
+	result := &wire.LocalModelError{Code: e.Code}
+	hasFields := false
+	if slices.Contains(errorCauses, e.Cause) && e.Path != "" {
+		result.Cause, result.Path = e.Cause, clip(e.Path, 4096)
+		hasFields = true
+	}
+	if _, _, err := poolKind(e.Pool); err == nil {
+		result.Pool = e.Pool
+		hasFields = true
+	}
+	if need := counter(e.NeedBytes); need != nil {
+		result.NeedBytes = need
+		hasFields = true
+	}
+	if free := counter(e.FreeBytes); free != nil {
+		result.FreeBytes = free
+		hasFields = true
+	}
+	if shortfall := counter(e.ShortfallBytes); shortfall != nil {
+		result.ShortfallBytes = shortfall
+		hasFields = true
+	}
+	if e.CanForce != nil {
+		canForce := *e.CanForce
+		result.CanForce = &canForce
+		hasFields = true
+	}
+	if !hasFields {
+		return nil
+	}
+	return result
 }
 
 // clip bounds display text to the schema's length in characters.

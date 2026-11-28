@@ -82,10 +82,16 @@ const fixture = async (
     })),
     clearInstallState: vi.fn(),
   };
+  const localModelsStorage = {
+    openFolder: vi.fn(async () => ({ ok: true as const })),
+    revealPath: vi.fn(async () => ({ ok: true as const })),
+  };
   const send = vi.fn();
+  const mainFrame = { origin: SERVER };
+  const webContents = { send, mainFrame };
   const windows = {
     ...stubModule("WindowManager"),
-    webContents: () => ({ send }),
+    webContents: () => webContents,
     show: vi.fn(),
   };
   const bus = new EventBus();
@@ -102,14 +108,36 @@ const fixture = async (
       stubModule("WorkspaceGrants"),
       updater as never,
       local as never,
-      new DesktopIpcModule({ defaultDisplayName: "Desk", driverUpdater }),
+      new DesktopIpcModule({
+        defaultDisplayName: "Desk",
+        driverUpdater,
+        localModelsStorage,
+      }),
     ],
     { serverUrl: SERVER },
     bus,
   );
   await host.start();
   const invoke = (channel: string, origin = SERVER, ...args: unknown[]) =>
-    handlers.get(channel)!({ senderFrame: { origin } }, ...args);
+    handlers.get(channel)!(
+      {
+        sender: webContents,
+        senderFrame: origin === SERVER ? mainFrame : { origin },
+      },
+      ...args,
+    );
+  const invokeSubframe = (
+    channel: string,
+    origin = SERVER,
+    ...args: unknown[]
+  ) =>
+    handlers.get(channel)!(
+      {
+        sender: webContents,
+        senderFrame: { origin },
+      },
+      ...args,
+    );
   const setUpdate = (state: UpdateState) => {
     updateState = state;
     bus.emit("update.changed", state.kind);
@@ -119,6 +147,7 @@ const fixture = async (
     bus,
     diagnostics,
     driverUpdater,
+    localModelsStorage,
     language,
     local,
     power,
@@ -126,6 +155,7 @@ const fixture = async (
     send,
     setUpdate,
     invoke,
+    invokeSubframe,
     windows,
   };
 };
@@ -409,6 +439,51 @@ describe("DesktopIpcModule driverUpdate", () => {
       }),
     ).toThrow();
     expect(f.driverUpdater.startInstall).not.toHaveBeenCalled();
+    await f.host.stop("quit");
+  });
+});
+
+describe("DesktopIpcModule localModelsStorage", () => {
+  it("opens and reveals paths only from the trusted main frame", async () => {
+    const f = await fixture();
+    expect(await f.invoke(IPC.localModelsStorageOpenFolder)).toEqual({
+      ok: true,
+    });
+    expect(
+      await f.invoke(
+        IPC.localModelsStorageRevealPath,
+        SERVER,
+        "/Users/alice/.simplexai/runtime/localmodels/models/models/qwen.gguf",
+      ),
+    ).toEqual({ ok: true });
+    expect(f.localModelsStorage.openFolder).toHaveBeenCalledOnce();
+    expect(f.localModelsStorage.revealPath).toHaveBeenCalledExactlyOnceWith(
+      "/Users/alice/.simplexai/runtime/localmodels/models/models/qwen.gguf",
+    );
+
+    expect(
+      await f.invoke(IPC.localModelsStorageRevealPath, SERVER, ""),
+    ).toEqual({ ok: false, code: "INVALID_PATH" });
+    expect(
+      await f.invoke(IPC.localModelsStorageRevealPath, SERVER, "/tmp/\0bad"),
+    ).toEqual({ ok: false, code: "INVALID_PATH" });
+    expect(f.localModelsStorage.revealPath).toHaveBeenCalledOnce();
+    await f.host.stop("quit");
+  });
+
+  it("rejects cross-origin and subframe calls", async () => {
+    const f = await fixture();
+    for (const channel of [
+      IPC.localModelsStorageOpenFolder,
+      IPC.localModelsStorageRevealPath,
+    ]) {
+      expect(() => f.invoke(channel, "https://evil.example.com")).toThrow(
+        "Not allowed",
+      );
+      expect(() => f.invokeSubframe(channel, SERVER)).toThrow("Not allowed");
+    }
+    expect(f.localModelsStorage.openFolder).not.toHaveBeenCalled();
+    expect(f.localModelsStorage.revealPath).not.toHaveBeenCalled();
     await f.host.stop("quit");
   });
 });

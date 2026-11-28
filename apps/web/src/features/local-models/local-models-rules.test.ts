@@ -6,11 +6,15 @@ import {
   actionErrorCopy,
   concurrencyCopy,
   debugBannerCopy,
+  degradedBadgeCopy,
+  degradedDetailCopy,
   engineBadgeCopy,
   engineHintCopy,
   hostBlockerCopy,
+  loadNoRoomRefusalCopy,
   modelErrorCopy,
   modelErrorShortCopy,
+  pressureWarningCopy,
   unavailableCopy,
   unavailableShortCopy,
 } from "./local-models-copy";
@@ -37,6 +41,7 @@ import {
   modelEntries,
   modelGroupKey,
   parametersLabel,
+  parseLocalModelRefusalDetails,
   placeName,
   poolLabel,
   poolOtherBytes,
@@ -1620,5 +1625,80 @@ describe("hostBlocker, RAM reclaimability, and diagnostics copy", () => {
     expect(
       dualActiveSections.onComputer.map((g) => g.defaultEntry.model.id),
     ).toEqual(["qwen3.8-27b:UD-Q4_K_M", "qwen3.8-27b-iq3s:UD-IQ3_S"]);
+  });
+
+  it("gates elastic pre-load checks against minimum_memory_bytes and parses refusal details", () => {
+    const elasticModel = localModel({
+      id: "elastic:Q4",
+      memory_bytes: gb(14),
+      minimum_memory_bytes: gb(6),
+      name: "Elastic 14B",
+      pool: "gpu:0",
+      state: "idle",
+    });
+    // 10 GB free: below full memory_bytes (14 GB), above minimum_memory_bytes (6 GB) -> allowed!
+    const roomForFloor = labView({
+      models: [modelView(elasticModel)],
+      pools: [{ ...gpuPool(0, 24), used_bytes: gb(14) }],
+    });
+    expect(loadCheck(roomForFloor, elasticModel)).toBeNull();
+
+    // 4 GB free: below minimum_memory_bytes (6 GB) -> Make Room with needBytes = 6 GB, shortfall = 2 GB.
+    const belowFloor = labView({
+      models: [modelView(elasticModel)],
+      pools: [{ ...gpuPool(0, 24), used_bytes: gb(20) }],
+    });
+    const check = loadCheck(belowFloor, elasticModel);
+    expect(check).not.toBeNull();
+    expect(check?.needBytes).toBe(gb(6));
+    expect(check?.freeBytes).toBe(gb(4));
+    expect(check!.needBytes - check!.freeBytes).toBe(gb(2));
+
+    const parsed = parseLocalModelRefusalDetails([
+      { field: "pool", reason: "unified" },
+      { field: "need_bytes", reason: String(gb(10)) },
+      { field: "free_bytes", reason: String(gb(6)) },
+      { field: "shortfall_bytes", reason: String(gb(4)) },
+      { field: "can_force", reason: "true" },
+    ]);
+    expect(parsed).toEqual({
+      canForce: true,
+      freeBytes: gb(6),
+      needBytes: gb(10),
+      pool: "unified",
+      shortfallBytes: gb(4),
+    });
+    expect(loadNoRoomRefusalCopy(parsed, translate)).toBe(
+      "Needs 4 GB more free memory (6 GB free, 10 GB minimum required).",
+    );
+
+    const degraded = localModel({
+      degraded: true,
+      effective_posture: { context_tokens: 32_768, slots: 1 },
+      id: "degraded:Q4",
+      memory_pressure_warning: {
+        budget_bytes: gb(12),
+        free_bytes: gb(1.5),
+        level: "soft",
+        pool: "unified",
+      },
+      name: "Degraded",
+      requested_posture: { context_tokens: 65_536, slots: 2 },
+      state: "loaded",
+    });
+    expect(degradedBadgeCopy(degraded, translate)).toEqual({
+      label: "Low-memory mode · 1 slot · 32K",
+      title: "Requested: 2 slots · 64K → Active: 1 slot · 32K",
+    });
+    expect(degradedDetailCopy(degraded, translate)).toBe(
+      "Running in low-memory mode (1 slot · 32K instead of 2 slots · 64K) to fit current memory.",
+    );
+    expect(
+      pressureWarningCopy(degraded.memory_pressure_warning, translate),
+    ).toEqual({
+      detail:
+        "Loaded under tight memory — closing unused apps improves responsiveness.",
+      label: "Tight memory",
+    });
   });
 });

@@ -288,7 +288,7 @@ describe("LocalModelsPage", () => {
 
     expect(statuses()).toEqual([
       "Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB",
-      "Gemma 3 27B: Downloaded",
+      "Gemma 3 27B: Standby",
       "GPT-OSS 20B: 12.1 GB",
       "Gemma 3 4B: 3.3 GB",
       "Llama 3.3 70B: 42.5 GB · runs slower",
@@ -477,7 +477,7 @@ describe("LocalModelsPage", () => {
     );
     await waitFor(() =>
       expect(statuses()).toContain(
-        "GPT-OSS 20B: Downloaded · no room to load yet",
+        "GPT-OSS 20B: Standby · no room to load yet",
       ),
     );
   });
@@ -757,7 +757,7 @@ describe("LocalModelsPage", () => {
     });
     expect(gptOss).toBeChecked();
     expect(dialog).toHaveTextContent(
-      "Another Me can't answer until their model is loaded again.",
+      "Another Me will move to standby and load on next message once memory is free.",
     );
 
     fireEvent.click(gptOss);
@@ -905,7 +905,7 @@ describe("LocalModelsPage", () => {
       name: "Unload Qwen3 Coder 30B?",
     });
     expect(dialog).toHaveTextContent(
-      "Research agent, Code reviewer use this model and can't answer until it is loaded again.",
+      "Research agent, Code reviewer use this model. Unloading moves it to standby to free memory now; it loads automatically on next message when memory is free.",
     );
     expect(fixture.actions).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Unload" }));
@@ -1149,7 +1149,7 @@ describe("LocalModelsPage", () => {
       withModel(labView(), "qwen3-coder-30b:Q4_K_M", { state: "idle" }),
     );
     await waitFor(() =>
-      expect(statusOf("Qwen3 Coder 30B")).toMatch(/^Downloaded/),
+      expect(statusOf("Qwen3 Coder 30B")).toMatch(/^Standby/),
     );
     expect(
       screen.getByRole("button", { name: "Load Qwen3 Coder 30B" }),
@@ -1171,7 +1171,7 @@ describe("LocalModelsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Gemma 3 27B: There isn't enough free memory to load it. Close memory-heavy apps or unload another model, then recheck memory.",
     );
-    expect(statusOf("Gemma 3 27B")).toMatch(/^Downloaded/);
+    expect(statusOf("Gemma 3 27B")).toMatch(/^Standby/);
     expect(
       screen.getByRole("button", { name: "Load Gemma 3 27B" }),
     ).toBeEnabled();
@@ -2913,7 +2913,7 @@ describe("Model source", () => {
       within(dialog).getByRole("checkbox", { name: /GPT-OSS 20B/ }),
     ).toBeChecked();
     expect(dialog).toHaveTextContent(
-      "Another Me can't answer until their model is loaded again.",
+      "Another Me will move to standby and load on next message once memory is free.",
     );
     expect(
       within(dialog).getByRole("button", { name: "Unload and load" }),
@@ -2953,7 +2953,7 @@ describe("Model source", () => {
         "Enough memory is free now (36.9 GB available).",
       ),
     );
-    expect(dialog).not.toHaveTextContent("Another Me can't answer");
+    expect(dialog).not.toHaveTextContent("Another Me will move to standby");
     fireEvent.click(within(dialog).getByRole("button", { name: "Load" }));
     await waitFor(() =>
       expect(fixture.actions).toEqual([
@@ -3478,12 +3478,12 @@ describe("Model source", () => {
       screen.queryByRole("button", { name: "Retry Broken 6B" }),
     ).toBeNull();
 
-    expect(statusOf("Idle Used 8B")).toBe("Downloaded · load to answer");
+    expect(statusOf("Idle Used 8B")).toBe("Standby · loads automatically");
     fireEvent.click(screen.getByRole("button", { name: "Idle Used 8B" }));
     expect(
       screen.getByRole("region", { name: "Idle Used 8B details" }),
     ).toHaveTextContent(
-      "Research agent uses this model. Load it so it can answer.",
+      "Research agent uses this model. Unloaded to save memory; loads automatically on next message when memory is free.",
     );
 
     // Details modal includes Other apps in the legend when external apps hold memory.
@@ -4477,7 +4477,7 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(statuses()).toEqual([
       "Inkling 2 Mini: 16.5 GB",
       "Qwen3 Coder 30B: Loaded · GPU 0 · 21.4 GB",
-      "Gemma 3 27B: Downloaded",
+      "Gemma 3 27B: Standby",
       "GPT-OSS 20B: 12.1 GB",
       "Gemma 3 4B: 3.3 GB",
       "Llama 3.3 70B: 42.5 GB · runs slower",
@@ -6010,5 +6010,345 @@ describe("Featured Inkling 2 Mini spotlight", () => {
     expect(details).not.toHaveTextContent("Close memory-heavy apps");
     expect(details).toHaveTextContent("10.4 GB");
     expect(details).toHaveTextContent("Unified memory");
+  });
+
+  it("shows model storage paths for owners with local Desktop Open/Reveal, hides them for non-owners, and preserves offline host storage", async () => {
+    const modelsDir =
+      "C:\\Users\\Alice\\.simplexai\\runtime\\localmodels\\models\\models";
+    const primaryPath = `${modelsDir}\\Qwen3-Coder-30B-Q4_K_M.gguf`;
+    const mmprojPath = `${modelsDir}\\assets\\mmproj-Qwen3-Coder.gguf`;
+    const openFolder = vi.fn(async () => ({ ok: true as const }));
+    const revealPath = vi.fn(async () => ({ ok: true as const }));
+    (window as { lingerDesktop?: unknown }).lingerDesktop = {
+      computer: {
+        getStatus: vi.fn(async () => ({
+          activeOperations: 0,
+          bridge: "online",
+          computerId: "computer-lab",
+          preventSleep: false,
+          runtime: "ready",
+        })),
+        onStatus: vi.fn(() => () => {}),
+      },
+      localModelsStorage: { openFolder, revealPath },
+      platform: "win32",
+    };
+
+    const base = labView();
+    const withStorage = labView({
+      computer: {
+        ...base.computer,
+        host: {
+          ...base.computer.host!,
+          models_dir: modelsDir,
+          models_dir_exists: true,
+        },
+      },
+      models: base.models.map((item) =>
+        item.model.id === "qwen3-coder-30b:Q4_K_M"
+          ? {
+              ...item,
+              model: {
+                ...item.model,
+                storage: {
+                  dedicated_dir: false,
+                  dir: modelsDir,
+                  disk_bytes: gb(19.2),
+                  files: [
+                    {
+                      path: primaryPath,
+                      present: true,
+                      role: "weights",
+                      shared: false,
+                      size_bytes: gb(18.6),
+                    },
+                    {
+                      path: mmprojPath,
+                      present: true,
+                      role: "mmproj",
+                      shared: true,
+                      size_bytes: gb(0.6),
+                    },
+                  ],
+                  files_present: true,
+                  primary_path: primaryPath,
+                },
+              },
+            }
+          : item,
+      ),
+    });
+
+    await renderPage(setup([withStorage]));
+    await findModels();
+
+    // Global storage row in MemorySummaryCard shows path + Windows Open button.
+    expect(screen.getByText(modelsDir)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open in File Explorer" }),
+    );
+    await waitFor(() => expect(openFolder).toHaveBeenCalledOnce());
+
+    // AdvancedDialog -> Hardware also shows Model storage beside Free disk.
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const dialog = screen.getByRole("dialog", { name: "lab-118 details" });
+    expect(within(dialog).getByText("Model storage")).toBeVisible();
+    expect(within(dialog).getByText(modelsDir)).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    // Expanded model facts show actual disk_bytes (19.2 GB), primary_path, Reveal button, and 2 files toggle.
+    fireEvent.click(screen.getByRole("button", { name: "Qwen3 Coder 30B" }));
+    const details = screen.getByRole("region", {
+      name: "Qwen3 Coder 30B details",
+    });
+    expect(details).toHaveTextContent("19.2 GB");
+    expect(within(details).getByText(primaryPath)).toBeInTheDocument();
+    fireEvent.click(
+      within(details).getByRole("button", { name: "Show in File Explorer" }),
+    );
+    await waitFor(() =>
+      expect(revealPath).toHaveBeenCalledExactlyOnceWith(primaryPath),
+    );
+    fireEvent.click(within(details).getByRole("button", { name: "2 files" }));
+    expect(details).toHaveTextContent("assets\\mmproj-Qwen3-Coder.gguf");
+
+    // Remote computer viewed inside Desktop shows Copy only (no Open in File Explorer button).
+    cleanup();
+    const remoteDir = "/Users/bob/.simplexai/runtime/localmodels/models/models";
+    const remoteView = macView({
+      computer: {
+        ...macView().computer,
+        host: {
+          ...macView().computer.host!,
+          models_dir: remoteDir,
+          models_dir_exists: true,
+        },
+        status: "offline",
+      },
+    });
+    await renderPage(
+      setup([withStorage, remoteView]),
+      "?computer=computer-mac",
+    );
+    await findModels();
+    expect(screen.getByText(remoteDir)).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Open in File Explorer" }),
+    ).not.toBeInTheDocument();
+
+    // Non-owner sees neither global storage nor per-model storage.
+    cleanup();
+    const nonOwnerView = {
+      ...withStorage,
+      viewer_is_owner: false,
+    };
+    await renderPage(setup([nonOwnerView]), "?computer=computer-lab", {});
+    await findModels();
+    expect(screen.queryByText(modelsDir)).not.toBeInTheDocument();
+  });
+
+  it("shows degraded posture pill, tight memory indicator, and details banners", async () => {
+    const model = localModel({
+      degraded: true,
+      degradation_reason: "reduced_context",
+      effective_posture: { context_tokens: 32_768, slots: 1 },
+      fit: "unified",
+      id: "qwen3-8b:Q4_K_M",
+      memory_bytes: gb(8),
+      memory_pressure_warning: {
+        budget_bytes: gb(12),
+        free_bytes: gb(1.5),
+        level: "soft",
+        pool: "unified",
+      },
+      minimum_memory_bytes: gb(5),
+      name: "Qwen3 8B",
+      pool: "unified",
+      requested_posture: { context_tokens: 65_536, slots: 2 },
+      state: "loaded",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(model)],
+        pools: [
+          memoryPool("unified", 16, [
+            { gb: 8, id: model.id, name: model.name },
+          ]),
+        ],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    const row = card("Qwen3 8B");
+    expect(
+      within(row).getByText("Low-memory mode · 1 slot · 32K"),
+    ).toBeVisible();
+    expect(within(row).getByText("Tight memory")).toBeVisible();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Qwen3 8B" }));
+    const details = screen.getByRole("region", { name: "Qwen3 8B details" });
+    expect(details).toHaveTextContent(
+      "Running in low-memory mode (1 slot · 32K instead of 2 slots · 64K) to fit current memory.",
+    );
+    expect(details).toHaveTextContent(
+      "Loaded under tight memory — closing unused apps improves responsiveness.",
+    );
+  });
+
+  it("shows LOAD_NO_ROOM shortfall and Load Anyway only when can_force is true", async () => {
+    const forceable = localModel({
+      error: {
+        can_force: true,
+        code: "LOAD_NO_ROOM",
+        free_bytes: gb(6),
+        need_bytes: gb(10),
+        pool: "unified",
+        shortfall_bytes: gb(4),
+      },
+      fit: "unified",
+      id: "forceable:Q4",
+      memory_bytes: gb(10),
+      minimum_memory_bytes: gb(10),
+      name: "Forceable 14B",
+      pool: "unified",
+      state: "failed",
+    });
+    const unforceable = localModel({
+      error: {
+        can_force: false,
+        code: "LOAD_NO_ROOM",
+        free_bytes: gb(2),
+        need_bytes: gb(10),
+        pool: "gpu:0",
+        shortfall_bytes: gb(8),
+      },
+      fit: "gpu",
+      id: "unforceable:Q4",
+      memory_bytes: gb(10),
+      minimum_memory_bytes: gb(10),
+      name: "Unforceable 14B",
+      pool: "gpu:0",
+      state: "failed",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(forceable), modelView(unforceable)],
+        pools: [{ ...memoryPool("unified", 16), used_bytes: gb(10) }],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    const forceRow = card("Forceable 14B");
+    expect(forceRow).toHaveTextContent(
+      "Couldn't load · needs 4 GB more free memory",
+    );
+    const forceButton = within(forceRow).getByRole("button", {
+      name: "Load Forceable 14B anyway",
+    });
+    expect(forceButton).toBeVisible();
+
+    const unforceRow = card("Unforceable 14B");
+    expect(
+      within(unforceRow).queryByRole("button", {
+        name: "Load Unforceable 14B anyway",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(forceButton);
+    await waitFor(() =>
+      expect(fixture.actions).toContainEqual({
+        body: { action: "load", force: true },
+        computerId: "computer-mac",
+        modelId: "forceable:Q4",
+      }),
+    );
+  });
+
+  it("lets elastic models load when minimum_memory_bytes fits and offers Load Anyway in Make Room", async () => {
+    const elastic = localModel({
+      fit: "unified",
+      id: "elastic:Q4",
+      memory_bytes: gb(14),
+      minimum_memory_bytes: gb(6),
+      name: "Elastic 14B",
+      pool: "unified",
+      state: "idle",
+    });
+    const tight = localModel({
+      fit: "unified",
+      id: "tight:Q4",
+      memory_bytes: gb(14),
+      minimum_memory_bytes: gb(10),
+      name: "Tight 14B",
+      pool: "unified",
+      state: "idle",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(elastic), modelView(tight)],
+        // 8 GB free out of 16 GB unified memory: fits elastic (6 GB min), short for tight (10 GB min).
+        pools: [{ ...memoryPool("unified", 16), used_bytes: gb(8) }],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    // Elastic model loads directly without Make Room modal.
+    fireEvent.click(screen.getByRole("button", { name: "Load Elastic 14B" }));
+    await waitFor(() =>
+      expect(fixture.actions).toContainEqual({
+        body: { action: "load" },
+        computerId: "computer-mac",
+        modelId: "elastic:Q4",
+      }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Tight model opens Make Room with exact shortfall and secondary Load Anyway escape hatch.
+    fireEvent.click(screen.getByRole("button", { name: "Load Tight 14B" }));
+    const dialog = screen.getByRole("dialog", { name: "Make room to load" });
+    expect(dialog).toHaveTextContent(
+      "Tight 14B needs 10 GB on Unified memory; 8 GB is free.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Forcing a load overrides the memory safety guard and may cause heavy system swap or slowdown.",
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Load Anyway" }),
+    );
+    await waitFor(() =>
+      expect(fixture.actions).toContainEqual({
+        body: { action: "load", force: true },
+        computerId: "computer-mac",
+        modelId: "tight:Q4",
+      }),
+    );
+  });
+
+  it("hides Load Anyway in Make Room for legacy Computers without admission-v2 metadata", async () => {
+    const legacy = localModel({
+      fit: "unified",
+      id: "legacy:Q4",
+      memory_bytes: gb(10),
+      name: "Legacy 14B",
+      pool: "unified",
+      state: "idle",
+    });
+    const fixture = setup([
+      macView({
+        models: [modelView(legacy)],
+        pools: [{ ...memoryPool("unified", 16), used_bytes: gb(8) }],
+      }),
+    ]);
+    await renderPage(fixture);
+    await findModels();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load Legacy 14B" }));
+    const dialog = screen.getByRole("dialog", { name: "Make room to load" });
+    expect(
+      within(dialog).queryByRole("button", { name: "Load Anyway" }),
+    ).toBeNull();
   });
 });

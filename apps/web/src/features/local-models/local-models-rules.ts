@@ -748,7 +748,85 @@ export function memoryGuidance(view: LocalModelsView): MemoryGuidance | null {
   return null;
 }
 
+export interface LocalModelRefusalDetails {
+  canForce?: boolean;
+  freeBytes?: number;
+  needBytes?: number;
+  pool?: string;
+  shortfallBytes?: number;
+}
+
+/** Extracts structured LOAD_NO_ROOM refusal fields from TeamHub error details. */
+export function parseLocalModelRefusalDetails(
+  details: readonly { field: string; reason: string }[] | undefined,
+): LocalModelRefusalDetails | undefined {
+  if (!details?.length) return undefined;
+  const parsed: LocalModelRefusalDetails = {};
+  let hasAny = false;
+  for (const entry of details) {
+    if (entry.field === "pool" && entry.reason.trim()) {
+      parsed.pool = entry.reason.trim();
+      hasAny = true;
+    } else if (
+      entry.field === "need_bytes" ||
+      entry.field === "free_bytes" ||
+      entry.field === "shortfall_bytes"
+    ) {
+      const value = Number(entry.reason);
+      if (Number.isSafeInteger(value) && value >= 0) {
+        if (entry.field === "need_bytes") parsed.needBytes = value;
+        else if (entry.field === "free_bytes") parsed.freeBytes = value;
+        else parsed.shortfallBytes = value;
+        hasAny = true;
+      }
+    } else if (entry.field === "can_force") {
+      if (entry.reason === "true") {
+        parsed.canForce = true;
+        hasAny = true;
+      } else if (entry.reason === "false") {
+        parsed.canForce = false;
+        hasAny = true;
+      }
+    }
+  }
+  return hasAny ? parsed : undefined;
+}
+
+/** Additional free memory required to load a model, from structured error or refusal fields. */
+export function loadNoRoomShortfallBytes(input?: {
+  freeBytes?: number;
+  needBytes?: number;
+  shortfallBytes?: number;
+}): number | undefined {
+  if (!input) return undefined;
+  if (input.shortfallBytes !== undefined && input.shortfallBytes > 0) {
+    return input.shortfallBytes;
+  }
+  if (
+    input.needBytes !== undefined &&
+    input.freeBytes !== undefined &&
+    input.needBytes > input.freeBytes
+  ) {
+    return input.needBytes - input.freeBytes;
+  }
+  return undefined;
+}
+
+/** Minimum memory needed for the elastic posture ladder to load a model. */
+export function requiredLoadBytes(
+  model: Pick<LocalModel, "memory_bytes" | "minimum_memory_bytes">,
+): number {
+  if (
+    model.minimum_memory_bytes !== undefined &&
+    model.minimum_memory_bytes > 0
+  ) {
+    return model.minimum_memory_bytes;
+  }
+  return model.memory_bytes;
+}
+
 export interface LoadCheck {
+  canForce?: boolean;
   pool: LocalModelPool;
   needBytes: number;
   freeBytes: number;
@@ -759,15 +837,20 @@ export interface LoadCheck {
    * models in another state, by holder.
    */
   kept: LocalModelPool["holders"];
+  shortfallBytes?: number;
 }
 
-/** Why a model cannot load now, or `null` when its pool reports room for it. */
+/**
+ * Why a model cannot load now, or `null` when its pool reports room for at
+ * least its lowest elastic posture rung (`minimum_memory_bytes ?? memory_bytes`).
+ */
 export function loadCheck(
   view: LocalModelsView,
   model: LocalModel,
 ): LoadCheck | null {
   const pool = poolOf(view, model.pool);
-  if (!pool || poolFreeBytes(pool) >= model.memory_bytes) return null;
+  const needBytes = requiredLoadBytes(model);
+  if (!pool || poolFreeBytes(pool) >= needBytes) return null;
   const loaded = modelEntries(view).filter(
     (entry) =>
       entry.status === "loaded" &&
@@ -775,13 +858,19 @@ export function loadCheck(
       entry.model.id !== model.id,
   );
   return {
+    ...(model.error?.can_force !== undefined
+      ? { canForce: model.error.can_force }
+      : {}),
     freeBytes: poolFreeBytes(pool),
     kept: pool.holders.filter(
       (holder) => !loaded.some((entry) => entry.model.id === holder.id),
     ),
     loaded,
-    needBytes: model.memory_bytes,
+    needBytes,
     pool,
+    ...(model.error?.shortfall_bytes !== undefined
+      ? { shortfallBytes: model.error.shortfall_bytes }
+      : {}),
   };
 }
 
@@ -837,10 +926,32 @@ export function downloadPercent(model: LocalModel) {
   );
 }
 
+/** Context length in thousands of tokens, or undefined below 1K, so every context label rounds alike. */
+export function contextThousands(tokens: number) {
+  return tokens < 1024 ? undefined : Math.round(tokens / 1024);
+}
+
 /** Context length in thousands of tokens, as model cards write it: 128K. */
 export function contextLabel(tokens: number, t: Translate) {
-  if (tokens < 1024) return t(m.contextTokens, { tokens });
-  return t(m.contextKiloTokens, { thousands: Math.round(tokens / 1024) });
+  const thousands = contextThousands(tokens);
+  return thousands === undefined
+    ? t(m.contextTokens, { tokens })
+    : t(m.contextKiloTokens, { thousands });
+}
+
+/** Compact slot and context summary for an elastic posture: "1 slot · 32K". */
+export function postureSummary(
+  posture: NonNullable<LocalModel["effective_posture"]>,
+  t: Translate,
+) {
+  const thousands = contextThousands(posture.context_tokens);
+  return t(m.postureSummary, {
+    context:
+      thousands === undefined
+        ? String(posture.context_tokens)
+        : t(m.postureContext, { thousands }),
+    slots: t(m.postureSlotCount, { count: posture.slots }),
+  });
 }
 
 /** Names in one line, separated the way the language lists them. */

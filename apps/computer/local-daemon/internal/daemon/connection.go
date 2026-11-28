@@ -366,6 +366,9 @@ func (d *Daemon) acceptRunnerWelcome(ctx, connectionCtx context.Context, stream 
 	d.localModelsEngine.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsEngine))
 	d.localModelsConcurrencyProbe.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsConcurrencyProbe))
 	d.localModelsExternalHolders.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsExternalHolders))
+	d.localModelsStorage.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsStorage))
+	d.localModelsAdmissionV2.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelsAdmissionV2))
+	d.localModelLoadingStatus.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelLoadingStatus))
 	d.modelInvokeOutcomes.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelInvokeOutcomes))
 	d.localModelUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureLocalModelUnavailable))
 	d.modelGatewayUnavailable.Store(slices.Contains(command.ServiceFeatures, serviceFeatureModelGatewayUnavailable))
@@ -559,6 +562,7 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.dynamicReasoningEfforts.Store(false)
 		d.antigravityHistory.Store(false)
 		d.antigravityUsageProvider.Store(false)
+		d.localModelLoadingStatus.Store(false)
 	}
 	if d.localModelsStream == stream {
 		d.localModelsStream = nil
@@ -566,6 +570,8 @@ func (d *Daemon) clearDiagnosticsStream(stream transport.Stream) {
 		d.localModelsEngine.Store(false)
 		d.localModelsConcurrencyProbe.Store(false)
 		d.localModelsExternalHolders.Store(false)
+		d.localModelsStorage.Store(false)
+		d.localModelsAdmissionV2.Store(false)
 		d.localModelUnavailable.Store(false)
 	}
 	if d.localSpeechStream == stream {

@@ -3796,4 +3796,29 @@ describe("Runtime timeline projection reuse", () => {
     // A Run that leaves the list leaves the cache too.
     expect([...cache.keys()]).toEqual(["run-status-1"]);
   });
+
+  it("renders Loading local model with live shimmer while queued in loading_local_model stage", () => {
+    const status = runStatus({ id: "run-loading-1" });
+    const loadingEvent: TeamHubRuntimePresentationEventRecord = {
+      event: {
+        stage: "loading_local_model",
+        status: "queued",
+        type: "status.changed",
+      },
+      event_ordinal: "1",
+      segment_id: "segment-1",
+    };
+    const [view] = buildRuntimeTimelineViews({
+      cache: new Map(),
+      runStatuses: [status],
+      runtimePresentationEventsByRunStatusId: {
+        "run-loading-1": [loadingEvent],
+      },
+      t: translate,
+    });
+    expect(view?.line).toEqual({
+      text: "Loading local model…",
+      tone: "live",
+    });
+  });
 });

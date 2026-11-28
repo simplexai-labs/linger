@@ -533,6 +533,21 @@ func (e AgentRuntimeSharedTaskScopeVersion) Valid() bool {
 	}
 }
 
+// Defines values for AgentRuntimeWorkingStatusChangedEventStage.
+const (
+	LoadingLocalModel AgentRuntimeWorkingStatusChangedEventStage = "loading_local_model"
+)
+
+// Valid indicates whether the value is a known member of the AgentRuntimeWorkingStatusChangedEventStage enum.
+func (e AgentRuntimeWorkingStatusChangedEventStage) Valid() bool {
+	switch e {
+	case LoadingLocalModel:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentRuntimeWorkingStatusChangedEventStatus.
 const (
 	AgentRuntimeWorkingStatusChangedEventStatusQueued            AgentRuntimeWorkingStatusChangedEventStatus = "queued"
@@ -878,6 +893,33 @@ func (e LocalModelCapability) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelDegradationReason.
+const (
+	LocalModelDegradationReasonAboveSoftBudget  LocalModelDegradationReason = "above_soft_budget"
+	LocalModelDegradationReasonForcedOvercommit LocalModelDegradationReason = "forced_overcommit"
+	LocalModelDegradationReasonOomRetry         LocalModelDegradationReason = "oom_retry"
+	LocalModelDegradationReasonReducedContext   LocalModelDegradationReason = "reduced_context"
+	LocalModelDegradationReasonReducedSlots     LocalModelDegradationReason = "reduced_slots"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelDegradationReason enum.
+func (e LocalModelDegradationReason) Valid() bool {
+	switch e {
+	case LocalModelDegradationReasonAboveSoftBudget:
+		return true
+	case LocalModelDegradationReasonForcedOvercommit:
+		return true
+	case LocalModelDegradationReasonOomRetry:
+		return true
+	case LocalModelDegradationReasonReducedContext:
+		return true
+	case LocalModelDegradationReasonReducedSlots:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelDownloadProgressStep.
 const (
 	LocalModelDownloadStepDownload LocalModelDownloadProgressStep = "download"
@@ -1115,6 +1157,27 @@ func (e LocalModelHostPlatform) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelKvQuant.
+const (
+	LocalModelKvQuantF16 LocalModelKvQuant = "f16"
+	LocalModelKvQuantQ40 LocalModelKvQuant = "q4_0"
+	LocalModelKvQuantQ80 LocalModelKvQuant = "q8_0"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelKvQuant enum.
+func (e LocalModelKvQuant) Valid() bool {
+	switch e {
+	case LocalModelKvQuantF16:
+		return true
+	case LocalModelKvQuantQ40:
+		return true
+	case LocalModelKvQuantQ80:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelNoteCode.
 const (
 	LocalModelNoteNoRoomToLoad LocalModelNoteCode = "NO_ROOM_TO_LOAD"
@@ -1169,6 +1232,24 @@ func (e LocalModelPoolHolderKind) Valid() bool {
 	}
 }
 
+// Defines values for LocalModelPressureWarningLevel.
+const (
+	LocalModelPressureWarningLevelHigh LocalModelPressureWarningLevel = "high"
+	LocalModelPressureWarningLevelSoft LocalModelPressureWarningLevel = "soft"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelPressureWarningLevel enum.
+func (e LocalModelPressureWarningLevel) Valid() bool {
+	switch e {
+	case LocalModelPressureWarningLevelHigh:
+		return true
+	case LocalModelPressureWarningLevelSoft:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LocalModelState.
 const (
 	LocalModelStateAbsent      LocalModelState = "absent"
@@ -1193,6 +1274,27 @@ func (e LocalModelState) Valid() bool {
 	case LocalModelStateLoaded:
 		return true
 	case LocalModelStateLoading:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LocalModelStorageFileRole.
+const (
+	LocalModelStorageFileRoleMmproj  LocalModelStorageFileRole = "mmproj"
+	LocalModelStorageFileRoleOther   LocalModelStorageFileRole = "other"
+	LocalModelStorageFileRoleWeights LocalModelStorageFileRole = "weights"
+)
+
+// Valid indicates whether the value is a known member of the LocalModelStorageFileRole enum.
+func (e LocalModelStorageFileRole) Valid() bool {
+	switch e {
+	case LocalModelStorageFileRoleMmproj:
+		return true
+	case LocalModelStorageFileRoleOther:
+		return true
+	case LocalModelStorageFileRoleWeights:
 		return true
 	default:
 		return false
@@ -3124,12 +3226,17 @@ type AgentRuntimeWorkState struct {
 
 // AgentRuntimeWorkingStatusChangedEvent defines model for AgentRuntimeWorkingStatusChangedEvent.
 type AgentRuntimeWorkingStatusChangedEvent struct {
+	// Stage Optional structured stage for queued status (for example loading_local_model while a standby local model loads before the Runtime starts). Clients branch on stage, never title prose.
+	Stage  *AgentRuntimeWorkingStatusChangedEventStage `json:"stage,omitempty"`
 	Status AgentRuntimeWorkingStatusChangedEventStatus `json:"status"`
 
 	// Title Optional public queue label for queued, or the full provider-visible reasoning summary title for thinking. Omit for working and waiting_background; raw reasoning is never allowed.
 	Title *string `json:"title,omitempty"`
 	Type  string  `json:"type"`
 }
+
+// AgentRuntimeWorkingStatusChangedEventStage Optional structured stage for queued status (for example loading_local_model while a standby local model loads before the Runtime starts). Clients branch on stage, never title prose.
+type AgentRuntimeWorkingStatusChangedEventStage string
 
 // AgentRuntimeWorkingStatusChangedEventStatus defines model for AgentRuntimeWorkingStatusChangedEvent.Status.
 type AgentRuntimeWorkingStatusChangedEventStatus string
@@ -3627,12 +3734,21 @@ type LocalModel struct {
 	Concurrency *int `json:"concurrency,omitempty"`
 
 	// ConcurrencyProbing True while a loaded or loading local model is running its post-load max-concurrency probe before reporting loaded.
-	ConcurrencyProbing *bool                       `json:"concurrency_probing,omitempty"`
-	ContextTokens      int64                       `json:"context_tokens"`
-	Description        string                      `json:"description"`
-	Download           *LocalModelDownloadProgress `json:"download,omitempty"`
-	DownloadBytes      int64                       `json:"download_bytes"`
-	Endpoint           *LocalModelEndpoint         `json:"endpoint,omitempty"`
+	ConcurrencyProbing *bool `json:"concurrency_probing,omitempty"`
+	ContextTokens      int64 `json:"context_tokens"`
+
+	// DegradationReason Why a loaded model stepped down from its requested posture or overrode normal memory headroom.
+	DegradationReason *LocalModelDegradationReason `json:"degradation_reason,omitempty"`
+
+	// Degraded True when loaded on a lower-memory posture rung than requested or after an OOM retry.
+	Degraded      *bool                       `json:"degraded,omitempty"`
+	Description   string                      `json:"description"`
+	Download      *LocalModelDownloadProgress `json:"download,omitempty"`
+	DownloadBytes int64                       `json:"download_bytes"`
+
+	// EffectivePosture Context length, concurrent slots, and optional KV-cache quantization for a loaded or requested model posture.
+	EffectivePosture *LocalModelPosture  `json:"effective_posture,omitempty"`
+	Endpoint         *LocalModelEndpoint `json:"endpoint,omitempty"`
 
 	// Engine Inference engine family that runs this model entry. Never inferred from name or description.
 	Engine *LocalModelEngine `json:"engine,omitempty"`
@@ -3647,6 +3763,9 @@ type LocalModel struct {
 	// Fit Where the model can live, judged on total capacity so it stays stable across loads. system means localmodels can run it from RAM, slower.
 	Fit LocalModelFit `json:"fit"`
 
+	// Forced True when loaded via --force overriding normal memory headroom checks; omitted when false.
+	Forced *bool `json:"forced,omitempty"`
+
 	// HostRamBytes Additional host system RAM used alongside GPU VRAM for hybrid offload engines (such as PolyStrata); absent when all weights stay in the model's primary pool.
 	HostRamBytes *int64 `json:"host_ram_bytes,omitempty"`
 
@@ -3657,9 +3776,18 @@ type LocalModel struct {
 	License *string `json:"license,omitempty"`
 
 	// MemoryBytes Footprint when loaded at its context policy, from the localmodels estimator.
-	MemoryBytes int64           `json:"memory_bytes"`
-	Name        string          `json:"name"`
-	Note        *LocalModelNote `json:"note,omitempty"`
+	MemoryBytes int64 `json:"memory_bytes"`
+
+	// MemoryPressureWarning Present when loaded under tight memory without failing.
+	MemoryPressureWarning *LocalModelPressureWarning `json:"memory_pressure_warning,omitempty"`
+
+	// MinimumMemoryBytes Estimated footprint at the lowest elastic posture rung (floor context and 1 slot).
+	MinimumMemoryBytes *int64          `json:"minimum_memory_bytes,omitempty"`
+	Name               string          `json:"name"`
+	Note               *LocalModelNote `json:"note,omitempty"`
+
+	// OomRetries Number of automatic OOM step-down retries taken before this load succeeded; omitted when 0.
+	OomRetries *int `json:"oom_retries,omitempty"`
 
 	// Parameters Total parameter scale for display, such as 30B or 4B.
 	Parameters *string `json:"parameters,omitempty"`
@@ -3680,11 +3808,17 @@ type LocalModel struct {
 	// Recommended True on at most one model, an absent downloadable one.
 	Recommended bool `json:"recommended"`
 
+	// RequestedPosture Context length, concurrent slots, and optional KV-cache quantization for a loaded or requested model posture.
+	RequestedPosture *LocalModelPosture `json:"requested_posture,omitempty"`
+
 	// SourceUrl HTTPS model card or repository URL.
 	SourceUrl *string `json:"source_url,omitempty"`
 
 	// State absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
 	State LocalModelState `json:"state"`
+
+	// Storage On-disk storage location and files for a model on the Computer. Present only for non-absent models when reported by localmodels and service_features declares local_models_storage; omitted for non-owners in the public view.
+	Storage *LocalModelStorage `json:"storage,omitempty"`
 
 	// TokensPerSecond Warm speed measured at the last load; absent when unknown.
 	TokensPerSecond *float32 `json:"tokens_per_second,omitempty"`
@@ -3743,6 +3877,9 @@ type LocalModelAvailabilityReasonMemoryKind string
 // LocalModelCapability Model capability verified by localmodels on this platform.
 type LocalModelCapability string
 
+// LocalModelDegradationReason Why a loaded model stepped down from its requested posture or overrode normal memory headroom.
+type LocalModelDegradationReason string
+
 // LocalModelDownloadProgress defines model for LocalModelDownloadProgress.
 type LocalModelDownloadProgress struct {
 	BytesPerSecond *int64                         `json:"bytes_per_second,omitempty"`
@@ -3764,6 +3901,9 @@ type LocalModelEngine string
 
 // LocalModelError defines model for LocalModelError.
 type LocalModelError struct {
+	// CanForce True when the owner may override admission with Load Anyway (--force).
+	CanForce *bool `json:"can_force,omitempty"`
+
 	// Cause Why a GATEWAY_REGISTRATION_FAILED happened, when the Computer supervised the failed job. GATEWAY_HOME_NOT_PRIVATE: the local gateway's private folder at path has another owner; closing Linger and renaming that folder lets the model load.
 	Cause *LocalModelErrorCause `json:"cause,omitempty"`
 
@@ -3771,10 +3911,18 @@ type LocalModelError struct {
 	Code LocalModelErrorCode `json:"code"`
 
 	// Detail Diagnostic text for display; never matched on.
-	Detail *string `json:"detail,omitempty"`
+	Detail    *string `json:"detail,omitempty"`
+	FreeBytes *int64  `json:"free_bytes,omitempty"`
+	NeedBytes *int64  `json:"need_bytes,omitempty"`
 
 	// Path The folder the cause names, on the Computer. The public view carries it only for the Computer's owner.
 	Path *string `json:"path,omitempty"`
+
+	// Pool A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
+	Pool *LocalModelPoolId `json:"pool,omitempty"`
+
+	// ShortfallBytes Minimum additional free memory needed to load even at the lowest posture rung.
+	ShortfallBytes *int64 `json:"shortfall_bytes,omitempty"`
 }
 
 // LocalModelErrorCause Why a GATEWAY_REGISTRATION_FAILED happened, when the Computer supervised the failed job. GATEWAY_HOME_NOT_PRIVATE: the local gateway's private folder at path has another owner; closing Linger and renaming that folder lets the model load.
@@ -3807,6 +3955,12 @@ type LocalModelHost struct {
 	EngineLabel string          `json:"engine_label"`
 	Gpus        []LocalModelGpu `json:"gpus"`
 
+	// ModelsDir Absolute directory on the Computer where local model weight files are stored (<base_dir>/models). Sent only when service_features declares local_models_storage; omitted for non-owners in the public view.
+	ModelsDir *string `json:"models_dir,omitempty"`
+
+	// ModelsDirExists Whether models_dir currently exists on disk on the Computer. Sent only when service_features declares local_models_storage; omitted for non-owners in the public view.
+	ModelsDirExists *bool `json:"models_dir_exists,omitempty"`
+
 	// OsLabel Display only, such as Ubuntu 24.04.
 	OsLabel       string                 `json:"os_label"`
 	Platform      LocalModelHostPlatform `json:"platform"`
@@ -3821,6 +3975,9 @@ type LocalModelHostPlatform string
 
 // LocalModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 type LocalModelId = string
+
+// LocalModelKvQuant Symmetric KV-cache quantization of a model posture; omitted when asymmetric or unknown.
+type LocalModelKvQuant string
 
 // LocalModelNote defines model for LocalModelNote.
 type LocalModelNote struct {
@@ -3869,8 +4026,68 @@ type LocalModelPoolHolderKind string
 // LocalModelPoolId A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
 type LocalModelPoolId = string
 
+// LocalModelPosture Context length, concurrent slots, and optional KV-cache quantization for a loaded or requested model posture.
+type LocalModelPosture struct {
+	ContextTokens int64 `json:"context_tokens"`
+
+	// KvCacheQuant Symmetric KV-cache quantization of a model posture; omitted when asymmetric or unknown.
+	KvCacheQuant *LocalModelKvQuant `json:"kv_cache_quant,omitempty"`
+	Slots        int                `json:"slots"`
+}
+
+// LocalModelPressureWarning Present when loaded under tight memory without failing.
+type LocalModelPressureWarning struct {
+	BudgetBytes *int64                         `json:"budget_bytes,omitempty"`
+	FreeBytes   *int64                         `json:"free_bytes,omitempty"`
+	Level       LocalModelPressureWarningLevel `json:"level"`
+
+	// Pool A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
+	Pool *LocalModelPoolId `json:"pool,omitempty"`
+}
+
+// LocalModelPressureWarningLevel defines model for LocalModelPressureWarning.Level.
+type LocalModelPressureWarningLevel string
+
 // LocalModelState absent: not on disk. idle: on disk, holding no memory. loading reserves its memory before it finishes; loaded is registered with the local gateway and Pi.
 type LocalModelState string
+
+// LocalModelStorage On-disk storage location and files for a model on the Computer. Present only for non-absent models when reported by localmodels and service_features declares local_models_storage; omitted for non-owners in the public view.
+type LocalModelStorage struct {
+	// DedicatedDir True when dir holds only this model's files rather than a shared flat folder.
+	DedicatedDir bool `json:"dedicated_dir"`
+
+	// Dir Absolute native OS directory containing primary_path.
+	Dir string `json:"dir"`
+
+	// DiskBytes Total actual bytes currently on disk across files.
+	DiskBytes int64                   `json:"disk_bytes"`
+	Files     []LocalModelStorageFile `json:"files"`
+
+	// FilesPresent True when every required file in files currently exists on disk.
+	FilesPresent bool `json:"files_present"`
+
+	// PrimaryPath Absolute native OS path to the primary weight file for this model.
+	PrimaryPath string `json:"primary_path"`
+}
+
+// LocalModelStorageFile One local weight or companion file belonging to a model on disk. Omitted for non-owners in the public view.
+type LocalModelStorageFile struct {
+	// Path Absolute native OS path to the file on the Computer.
+	Path string `json:"path"`
+
+	// Present Whether the final file currently exists on disk.
+	Present bool                      `json:"present"`
+	Role    LocalModelStorageFileRole `json:"role"`
+
+	// Shared Whether another downloaded model or deployment shares this file.
+	Shared bool `json:"shared"`
+
+	// SizeBytes Actual bytes currently on disk (or partial download bytes); 0 when missing.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// LocalModelStorageFileRole defines model for LocalModelStorageFile.Role.
+type LocalModelStorageFileRole string
 
 // LocalModelsDebugInfo Present only when localmodels debug mode (tiny or simulate) is active on the Computer. config_path is shown only to the Computer owner.
 type LocalModelsDebugInfo struct {

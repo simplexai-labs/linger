@@ -128,6 +128,11 @@ const api: LingerDesktopApi = {
       ipcRenderer.invoke(IPC.driverUpdateStartInstall, request),
     clearInstallState: () => ipcRenderer.invoke(IPC.driverUpdateClearState),
   },
+  localModelsStorage: {
+    openFolder: () => ipcRenderer.invoke(IPC.localModelsStorageOpenFolder),
+    revealPath: (targetPath) =>
+      ipcRenderer.invoke(IPC.localModelsStorageRevealPath, targetPath),
+  },
   ...(process.platform === "darwin"
     ? {
         permissions: {

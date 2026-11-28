@@ -316,6 +316,7 @@ type normalizedPresentationEvent struct {
 type workingStatusEvent struct {
 	Type   string  `json:"type"`
 	Status string  `json:"status"`
+	Stage  *string `json:"stage,omitempty"`
 	Title  *string `json:"title,omitempty"`
 }
 
@@ -380,6 +381,7 @@ func normalizeOfferedPresentationEvent(raw json.RawMessage) (normalizedPresentat
 		var event workingStatusEvent
 		if strictJSON(raw, &event) != nil || event.Type != "status.changed" ||
 			event.Status != "queued" && event.Status != "working" && event.Status != "thinking" && event.Status != "waiting_background" ||
+			event.Stage != nil && (event.Status != "queued" || *event.Stage != "loading_local_model") ||
 			event.Title != nil && ((event.Status != "thinking" && event.Status != "queued") || strings.TrimSpace(*event.Title) == "" || len([]rune(*event.Title)) > 50000) {
 			return normalizedPresentationEvent{}, ErrInvalid
 		}

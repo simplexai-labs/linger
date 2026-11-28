@@ -13,6 +13,8 @@ export type LocalModelView = Schemas["LocalModelView"];
 export type LocalModel = Schemas["LocalModel"];
 export type LocalModelPool = Schemas["LocalModelPool"];
 export type LocalModelHost = Schemas["LocalModelHost"];
+export type LocalModelStorage = Schemas["LocalModelStorage"];
+export type LocalModelStorageFile = Schemas["LocalModelStorageFile"];
 export type LocalModelActionRequest = Schemas["LocalModelActionRequest"];
 export type LocalModelAction = LocalModelActionRequest["action"];
 export type LocalModelsRefreshAccepted = Schemas["LocalModelsRefreshAccepted"];
@@ -105,6 +107,7 @@ export function localModelActionMutationKey(
 
 export interface LocalModelActionInput {
   action: LocalModelAction;
+  force?: boolean;
   modelId: string;
   unloadFirst?: string[];
 }
@@ -114,13 +117,16 @@ export function actOnLocalComputerModel(
   client: TeamHubClient,
   tenantId: string,
   computerId: string,
-  { action, modelId, unloadFirst }: LocalModelActionInput,
+  { action, force, modelId, unloadFirst }: LocalModelActionInput,
 ) {
+  const body: LocalModelActionRequest = {
+    action,
+    ...(unloadFirst?.length ? { unload_first: unloadFirst } : {}),
+    ...(force ? { force: true } : {}),
+  };
   return teamHubData(
     client.api.POST(localModelActionPath, {
-      body: unloadFirst?.length
-        ? { action, unload_first: unloadFirst }
-        : { action },
+      body,
       params: { path: { computerId, modelId, tenantId } },
     }),
   );

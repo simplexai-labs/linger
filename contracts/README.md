@@ -136,6 +136,23 @@ Progress and outcomes travel back only as snapshots:
    it). During rolling deploys, roll out TeamHub accepting `"antigravity"`
    before the Agent Service advertises `antigravity_usage_provider`, so older
    TeamHub instances do not skip `"antigravity"` usage entries.
+   Elastic admission metadata (`minimum_memory_bytes`, `degraded`,
+   `requested_posture`, `effective_posture`, `degradation_reason`,
+   `memory_pressure_warning`, `oom_retries`, `forced`, and `shortfall_bytes` /
+   `can_force` on `LocalModelError` and `LocalModelActionRefusal`) travels only
+   when `service_features` declares `local_models_admission_v2`; otherwise the
+   Daemon strips those fields for older Agent Services.
+   Pre-`run.started` `status.changed` events with `status: "queued"` and
+   `stage: "loading_local_model"` are emitted before `ensureLocalModel` only
+   when `service_features` declares `local_model_loading_status`.
+   `execute` `local_models` with `action: "load"` also accepts optional
+   `force: true` to pass `--force` when the owner overrides a refusal with
+   `can_force: true` (sent only to Computer 0.70.0 and later,
+   `FIRST_LOCAL_MODELS_FORCE_LOAD_COMPUTER_VERSION`).
+   `execute` `model_invoke` carries optional `wake_local_model` (default `true`
+   when omitted; sent only to Computer 0.69.0 and later,
+   `FIRST_MODEL_INVOKE_WAKE_LOCAL_MODEL_COMPUTER_VERSION`) so passive
+   background maintenance calls do not wake standby local models.
 2. Agent Service records it through TeamHub `recordAgentRuntimeLocalModels`
    (`POST /v0/agent-runtime/local-computers/local-models`). TeamHub keeps the
    latest snapshot per Computer, so an offline Computer shows what it last

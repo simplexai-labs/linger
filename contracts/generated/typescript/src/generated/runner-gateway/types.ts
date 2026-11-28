@@ -49,7 +49,10 @@ export type ServiceFeature =
   | "dynamic_reasoning_efforts"
   | "antigravity_history"
   | "antigravity_usage_provider"
-  | "local_voice_asr";
+  | "local_voice_asr"
+  | "local_models_storage"
+  | "local_models_admission_v2"
+  | "local_model_loading_status";
 export type JsonValue =
   | null
   | boolean
@@ -126,6 +129,10 @@ export type CapabilityLocalModelsExecute = LocalSkillCommandIdentity & {
    * @maxItems 64
    */
   unload_first?: LocalModelId[];
+  /**
+   * Only for load. Override the memory safety guard when the Computer allows forced loading.
+   */
+  force?: boolean;
 } & {
   [k: string]: unknown;
 };
@@ -435,6 +442,10 @@ export type LocalModelCapability =
   | "reasoning"
   | "coding"
   | "multilingual";
+/**
+ * Symmetric KV-cache quantization of a model posture; omitted when asymmetric or unknown.
+ */
+export type LocalModelKvQuant = "f16" | "q8_0" | "q4_0";
 export type LocalSpeechRuntimeState =
   | "stopped"
   | "standby"
@@ -738,6 +749,11 @@ export type RunEvent =
       session?: OpaqueObject;
       process_reused?: boolean;
       dispatched_at_unix_ms?: NonNegativeInteger;
+    }
+  | {
+      type: "status.changed";
+      status: "queued";
+      stage: "loading_local_model";
     }
   | {
       type: "status.changed";
@@ -1253,6 +1269,10 @@ export interface ModelInvoke {
    * Names the session a structured call belongs to. A Daemon answers the Codex calls of one session in one resident thread whose base instructions are the call's instructions, so only the input is new to the provider; while that thread answers another call, and for Claude, the call runs on its own. Either way the result is the same.
    */
   session_key?: string;
+  /**
+   * Whether the Computer may load an unloaded local model to answer this call. Omitted defaults to true for backward compatibility; sent only to a Computer release that decodes it.
+   */
+  wake_local_model?: boolean;
 }
 export interface ModelInvokeFile {
   path: string;
@@ -1533,6 +1553,14 @@ export interface LocalModelHost {
   ram_total_bytes: NonNegativeInteger;
   disk_free_bytes: NonNegativeInteger;
   /**
+   * Absolute directory on the Computer where model weight files are stored (<base_dir>/models). Sent only when service_features declares local_models_storage.
+   */
+  models_dir?: string;
+  /**
+   * Whether models_dir currently exists on disk on the Computer. Sent only when service_features declares local_models_storage.
+   */
+  models_dir_exists?: boolean;
+  /**
    * @maxItems 64
    */
   gpus: LocalModelGpu[];
@@ -1675,6 +1703,35 @@ export interface LocalModel {
    * Additional host system RAM used alongside GPU VRAM for hybrid offload engines. Sent only when runner.welcome service_features names local_models_engine.
    */
   host_ram_bytes?: number;
+  storage?: LocalModelStorage;
+  /**
+   * Estimated footprint at the lowest elastic posture rung (floor context and 1 slot). Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  minimum_memory_bytes?: number;
+  /**
+   * True when loaded on a lower-memory posture rung than requested or after an OOM retry. Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  degraded?: boolean;
+  requested_posture?: LocalModelPosture;
+  effective_posture?: LocalModelPosture1;
+  /**
+   * Why the loaded model stepped down or overrode normal memory headroom. Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  degradation_reason?:
+    | "reduced_slots"
+    | "reduced_context"
+    | "above_soft_budget"
+    | "oom_retry"
+    | "forced_overcommit";
+  memory_pressure_warning?: LocalModelPressureWarning;
+  /**
+   * Number of automatic OOM step-down retries taken before this load succeeded; omitted when 0. Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  oom_retries?: number;
+  /**
+   * True when loaded via --force overriding normal memory headroom checks; omitted when false. Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  forced?: boolean;
 }
 export interface LocalModelAvailability {
   downloadable: boolean;
@@ -1876,12 +1933,91 @@ export interface LocalModelError {
    * The folder the cause names.
    */
   path?: string;
+  /**
+   * A place a model can live: gpu:<index>, system (RAM beside GPUs) or unified (RAM of a GPU-less or Apple silicon host).
+   */
+  pool?: string;
+  /**
+   * With LOAD_NO_ROOM.
+   */
+  need_bytes?: number;
+  /**
+   * With LOAD_NO_ROOM.
+   */
+  free_bytes?: number;
+  /**
+   * Minimum additional free memory needed to load even at the lowest posture rung.
+   */
+  shortfall_bytes?: number;
+  /**
+   * True when the owner may override admission with Load Anyway (--force).
+   */
+  can_force?: boolean;
 }
 /**
  * Present only when idle and the automatic load after download was skipped.
  */
 export interface LocalModelNote {
   code: "NO_ROOM_TO_LOAD";
+}
+/**
+ * On-disk storage location and files for this model. Sent only when runner.welcome service_features names local_models_storage.
+ */
+export interface LocalModelStorage {
+  /**
+   * Absolute native OS directory containing primary_path.
+   */
+  dir: string;
+  /**
+   * Absolute native OS path to the primary weight file for this model.
+   */
+  primary_path: string;
+  dedicated_dir: boolean;
+  disk_bytes: NonNegativeInteger;
+  files_present: boolean;
+  /**
+   * @minItems 1
+   * @maxItems 256
+   */
+  files: [LocalModelStorageFile, ...LocalModelStorageFile[]];
+}
+/**
+ * One local weight or companion file belonging to a model on disk.
+ */
+export interface LocalModelStorageFile {
+  /**
+   * Absolute native OS path to the file on the Computer.
+   */
+  path: string;
+  role: "weights" | "mmproj" | "other";
+  size_bytes: NonNegativeInteger;
+  present: boolean;
+  shared: boolean;
+}
+/**
+ * Requested posture before elastic step-down. Sent only when runner.welcome service_features names local_models_admission_v2.
+ */
+export interface LocalModelPosture {
+  context_tokens: PositiveInteger;
+  slots: number;
+  kv_cache_quant?: LocalModelKvQuant;
+}
+/**
+ * Effective loaded posture. Sent only when runner.welcome service_features names local_models_admission_v2.
+ */
+export interface LocalModelPosture1 {
+  context_tokens: PositiveInteger;
+  slots: number;
+  kv_cache_quant?: LocalModelKvQuant;
+}
+/**
+ * Present when loaded under tight memory without failing. Sent only when runner.welcome service_features names local_models_admission_v2.
+ */
+export interface LocalModelPressureWarning {
+  level: "soft" | "high";
+  pool?: LocalModelPoolId;
+  free_bytes?: NonNegativeInteger;
+  budget_bytes?: NonNegativeInteger;
 }
 /**
  * Present only when localmodels debug mode is active and the Agent Service declared local_models_diagnostics.
@@ -2383,6 +2519,14 @@ export interface LocalModelActionRefusal {
    * With LOAD_NO_ROOM, MEMORY_INSUFFICIENT or DISK_INSUFFICIENT.
    */
   free_bytes?: number;
+  /**
+   * With LOAD_NO_ROOM. Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  shortfall_bytes?: number;
+  /**
+   * With LOAD_NO_ROOM. Sent only when runner.welcome service_features names local_models_admission_v2.
+   */
+  can_force?: boolean;
 }
 export interface LocalSpeechActionRefusal {
   code: LocalSpeechActionRefusalCode;

@@ -451,3 +451,30 @@ it("preserves unconfirmed follow-up evidence on a successful terminal event", ()
     unconfirmedInputIds: ["input-follow-up"],
   });
 });
+
+it("projects loading_local_model stage on queued status and clears it on working", () => {
+  const loadingEvent: TeamHubRuntimePresentationEventRecord = {
+    event: {
+      stage: "loading_local_model",
+      status: "queued",
+      type: "status.changed",
+    },
+    event_ordinal: "1",
+    segment_id: "segment-1",
+  };
+  const loading = projectRuntimeChatPresentation([loadingEvent]);
+  expect(loading.currentStatus).toBe("queued");
+  expect(loading.currentStage).toBe("loading_local_model");
+  expect(loading.items[0]).toMatchObject({
+    stage: "loading_local_model",
+    status: "queued",
+  });
+
+  const started = projectRuntimeChatPresentation([
+    loadingEvent,
+    statusRecord("2", "working"),
+  ]);
+  expect(started.currentStatus).toBe("working");
+  expect(started.currentStage).toBeUndefined();
+  expect(started.items[0]).not.toHaveProperty("stage");
+});

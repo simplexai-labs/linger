@@ -270,6 +270,26 @@ export class ComputerDaemonModule implements Module {
     return this.#failure;
   }
 
+  // The localmodels --base-dir the daemon runs with, read from the same
+  // environment it launches with; undefined until that environment resolves
+  // or when it names no localmodels tool.
+  localmodelsBaseDirectory(): string | undefined {
+    if (!this.#env || !this.#ctx) return undefined;
+    return localmodelsToolFromEnvironment(
+      this.#launchEnvironment(this.#env, this.#ctx.config.get()),
+    )?.baseDirectory;
+  }
+
+  #launchEnvironment(
+    env: Readonly<Record<string, string>>,
+    config: DesktopConfig,
+  ): Record<string, string> {
+    const baseEnv = daemonEnvironment(env, config.runtimeEnvironment);
+    return this.#options.devLocalmodels
+      ? applyDevLocalmodelsEnvironment(baseEnv, this.#options.devLocalmodels)
+      : baseEnv;
+  }
+
   async start(ctx: ModuleContext): Promise<void> {
     this.#ctx = ctx;
     this.#unsubscribe.push(
@@ -427,10 +447,7 @@ export class ComputerDaemonModule implements Module {
         this.#setState("stopped");
         return;
       }
-      const baseEnv = daemonEnvironment(this.#env, config.runtimeEnvironment);
-      const env = this.#options.devLocalmodels
-        ? applyDevLocalmodelsEnvironment(baseEnv, this.#options.devLocalmodels)
-        : baseEnv;
+      const env = this.#launchEnvironment(this.#env, config);
       if (this.#options.devLocalmodels) {
         await ensureDevLocalmodelsDirectories(env);
         if (

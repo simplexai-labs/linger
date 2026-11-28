@@ -49,3 +49,16 @@ func TestToolCommandArgsForcesPythonUTF8Mode(t *testing.T) {
 		t.Fatalf("PYTHONIOENCODING entries = %v, want [PYTHONIOENCODING=utf-8]", ioEncodingEntries)
 	}
 }
+
+func TestToolArgumentsIncludeForceOnlyWhenSetOnLoad(t *testing.T) {
+	tool := Tool{BaseDirectory: "/models"}
+	normal := tool.arguments(Action{Name: ActionLoad, Model: "qwen3-4b:Q4_K_M", UnloadFirst: []string{"other:Q4"}})
+	if slices.Contains(normal, "--force") {
+		t.Fatalf("normal load unexpectedly passed --force: %v", normal)
+	}
+	forced := tool.arguments(Action{Name: ActionLoad, Model: "qwen3-4b:Q4_K_M", UnloadFirst: []string{"other:Q4"}, Force: true})
+	want := []string{"-P", "-s", "-m", "localmodels", "library", "load", "qwen3-4b:Q4_K_M", "--unload", "other:Q4", "--force", "--base-dir", "/models", "--jsonl"}
+	if !slices.Equal(forced, want) {
+		t.Fatalf("forced load args = %v, want %v", forced, want)
+	}
+}

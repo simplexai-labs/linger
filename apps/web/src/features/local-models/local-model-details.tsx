@@ -28,10 +28,12 @@ import {
 import {
   capabilityCopy,
   concurrencyCopy,
+  degradedDetailCopy,
   engineBadgeCopy,
   engineHintCopy,
   modelErrorCopy,
   modelNoteCopy,
+  pressureWarningCopy,
   unavailableCopy,
 } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
@@ -56,6 +58,11 @@ import {
   speedLabel,
   type ModelEntry,
 } from "./local-models-rules";
+import {
+  AdvancedStorageFact,
+  ModelStorageFact,
+  selectCodeText,
+} from "./model-storage-location";
 
 /** Category colors from the Nature palette, one per model holding memory. */
 const segmentColors = ["bg-rain-500", "bg-lichen-500", "bg-sun-500"] as const;
@@ -142,16 +149,6 @@ function CopyEndpoint({ endpoint, name }: { endpoint: string; name: string }) {
       </Button>
     </span>
   );
-}
-
-function selectCodeText(element: HTMLElement | null) {
-  if (!element) return;
-  const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  selection.removeAllRanges();
-  selection.addRange(range);
 }
 
 function gatewayFactValue(
@@ -285,8 +282,11 @@ export function ModelFacts({
   disabled = false,
   entry,
   hasPrimaryAssignAction = false,
+  isLocalDesktop = false,
   onAssignAgent,
+  onForceLoad,
   onRecheck,
+  onRetryLoad,
   onUpdateDriver,
   rechecking = false,
   view,
@@ -297,8 +297,11 @@ export function ModelFacts({
   disabled?: boolean;
   entry: ModelEntry;
   hasPrimaryAssignAction?: boolean;
+  isLocalDesktop?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
+  onForceLoad?: () => void;
   onRecheck?: () => void;
+  onRetryLoad?: () => void;
   onUpdateDriver?: () => void;
   rechecking?: boolean;
   view: LocalModelsView;
@@ -333,7 +336,7 @@ export function ModelFacts({
   const reclaimable = memoryReclaimable(view, model);
   const computerId = view.computer.computer_id;
   const usedNames = usedByAgentNames(entry, assignableAgents, computerId);
-  const idleUsedWarning =
+  const standbyUsedNote =
     status === "idle" && !model.note && usedNames.length > 0;
   const unassigned = assignableAgents.filter(
     (agent) => !isAgentUsingModel(entry, agent, computerId),
@@ -389,6 +392,14 @@ export function ModelFacts({
   const hasRuntimeLinks = Boolean(
     onComputer || sourceUrl || model.endpoint || hasFooterTags,
   );
+  const degradedDetail =
+    status === "loaded" ? degradedDetailCopy(model, t) : undefined;
+  const pressureWarning =
+    status === "loaded"
+      ? pressureWarningCopy(model.memory_pressure_warning, t)
+      : undefined;
+  const loadNoRoomError =
+    model.error?.code === "LOAD_NO_ROOM" ? model.error : undefined;
 
   return (
     <div className="space-y-4">
@@ -423,6 +434,39 @@ export function ModelFacts({
                 </span>
                 <span>{modelErrorCopy(model.error, t)}</span>
               </p>
+            ) : null}
+            {loadNoRoomError &&
+            !disabled &&
+            (onRecheck ||
+              onRetryLoad ||
+              (loadNoRoomError.can_force && onForceLoad)) ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {onRecheck ? (
+                  <Button
+                    loading={rechecking}
+                    onClick={onRecheck}
+                    size="compact"
+                    tone="secondary"
+                  >
+                    {t(m.recheckMemory)}
+                  </Button>
+                ) : null}
+                {onRetryLoad ? (
+                  <Button onClick={onRetryLoad} size="compact" tone="secondary">
+                    {t(commonMessages.retry)}
+                  </Button>
+                ) : null}
+                {loadNoRoomError.can_force === true && onForceLoad ? (
+                  <Button
+                    onClick={onForceLoad}
+                    size="compact"
+                    title={t(m.loadAnywayWarning)}
+                    tone="ghost"
+                  >
+                    {t(m.actionLoadAnyway)}
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             {status === "unavailable" ? (
               <div className="space-y-2">
@@ -483,9 +527,19 @@ export function ModelFacts({
           </p>
         </div>
       ) : null}
-      {idleUsedWarning ? (
-        <FormFeedback tone="warning">
-          {t(m.idleUsedWarning, {
+      {degradedDetail ? (
+        <div className="my-1.5">
+          <FormFeedback tone="info">{degradedDetail}</FormFeedback>
+        </div>
+      ) : null}
+      {pressureWarning ? (
+        <div className="my-1.5">
+          <FormFeedback tone="warning">{pressureWarning.detail}</FormFeedback>
+        </div>
+      ) : null}
+      {standbyUsedNote ? (
+        <FormFeedback tone="info">
+          {t(m.standbyAutoLoadNote, {
             count: usedNames.length,
             names: joinList(usedNames, t),
           })}
@@ -518,7 +572,12 @@ export function ModelFacts({
         <SpecTile
           label={t(onComputer ? m.factOnDisk : m.factDownload)}
           subline={t(m.diskSpace)}
-          value={formatGigabytes(model.download_bytes, t)}
+          value={formatGigabytes(
+            onComputer && model.storage && model.storage.disk_bytes > 0
+              ? model.storage.disk_bytes
+              : model.download_bytes,
+            t,
+          )}
         />
         <SpecTile
           label={t(m.factContext)}
@@ -550,6 +609,12 @@ export function ModelFacts({
           ) : null}
         </div>
       ) : null}
+
+      <ModelStorageFact
+        isLocalDesktop={isLocalDesktop}
+        model={model}
+        viewerIsOwner={view.viewer_is_owner}
+      />
 
       {hasRuntimeLinks ? (
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-border/40 pt-3 text-xs">
@@ -734,9 +799,11 @@ function PoolBar({
 
 /** Memory and hardware of one Computer, for people who want the numbers. */
 export function AdvancedDialog({
+  isLocalDesktop = false,
   onClose,
   view,
 }: {
+  isLocalDesktop?: boolean;
   onClose: () => void;
   view: LocalModelsView;
 }) {
@@ -855,6 +922,11 @@ export function AdvancedDialog({
               <Fact label={t(m.factFreeDisk)}>
                 {formatGigabytes(host.disk_free_bytes, t)}
               </Fact>
+              <AdvancedStorageFact
+                host={host}
+                isLocalDesktop={isLocalDesktop}
+                viewerIsOwner={view.viewer_is_owner}
+              />
             </div>
           </section>
         ) : null}

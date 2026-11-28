@@ -145,13 +145,24 @@ func (d *Daemon) runSessionCompact(ctx context.Context, stream transport.Stream,
 
 // executeSessionCompact compacts session. For Pi, model gateway and local model
 // readiness run off admissionMu only after local pre-flight checks confirm
-// compaction will proceed.
+// compaction will proceed, and a local model use lease is held for the duration
+// of compaction so idle auto-unload cannot evict the model mid-call.
 func (d *Daemon) executeSessionCompact(ctx context.Context, runtimeType, instructions string, session parkedSession) native.CompactResult {
+	var releaseLocalModel func()
+	defer func() {
+		if releaseLocalModel != nil {
+			releaseLocalModel()
+		}
+	}()
 	var prepare func(ctx context.Context, modelID string) error
 	if runtimeType == "pi" {
 		prepare = func(prepareCtx context.Context, modelID string) error {
 			_, err := d.ensureModelGateway(prepareCtx, "pi", false)
 			if err == nil && modelID != "" {
+				if releaseLocalModel != nil {
+					releaseLocalModel()
+				}
+				releaseLocalModel = d.acquireLocalModelUse("pi", modelID)
 				_, err = d.ensureLocalModel(prepareCtx, "pi", modelID)
 			}
 			return err

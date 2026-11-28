@@ -29,19 +29,19 @@ import {
   type ModelEntry,
 } from "./local-models-rules";
 
-/** The amber notice naming the Agents that stop answering. */
+/** Notice naming the Agents that use this model when unloading or removing it. */
 function AffectedAgents({
   kind,
   names,
 }: {
-  /** What ends the wait: loading the model again, or choosing another one. */
+  /** Unloading moves Agents to standby; removing requires choosing another model. */
   kind: "remove" | "unload";
   names: readonly string[];
 }) {
   const t = useT();
   const count = names.length;
   return count ? (
-    <FormFeedback tone="warning">
+    <FormFeedback tone={kind === "unload" ? "info" : "warning"}>
       {t(kind === "unload" ? m.affectedUnload : m.affectedRemove, {
         count,
         names: joinList(names, t),
@@ -60,6 +60,7 @@ export function MakeRoomDialog({
   entry,
   onClose,
   onConfirm,
+  onForceLoad,
   onRecheck,
   rechecking = false,
   view,
@@ -71,6 +72,7 @@ export function MakeRoomDialog({
   entry: ModelEntry;
   onClose: () => void;
   onConfirm: (unloadIds: string[], switchAgentIds: string[]) => void;
+  onForceLoad?: (unloadIds: string[], switchAgentIds: string[]) => void;
   onRecheck?: () => void;
   rechecking?: boolean;
   view: LocalModelsView;
@@ -138,6 +140,25 @@ export function MakeRoomDialog({
   );
   const canSwitchOnLoad =
     Boolean(entry.model.pi_model) && affectedAssignable.length > 0;
+  // Older Computers (< 0.66.0) reject `force` and never report
+  // `minimum_memory_bytes` or `can_force`, so pre-load unified fallback
+  // applies only when the snapshot carries admission-v2 metadata.
+  const supportsElasticAdmission =
+    entry.model.minimum_memory_bytes !== undefined;
+  const allowForceLoad =
+    !roomFreeNow &&
+    !enough &&
+    Boolean(onForceLoad) &&
+    (check.canForce === true ||
+      entry.model.error?.can_force === true ||
+      (check.canForce !== false &&
+        entry.model.error?.can_force !== false &&
+        supportsElasticAdmission &&
+        unifiedFitsHardware));
+  const switchAgentIds =
+    canSwitchOnLoad && switchAgents
+      ? affectedAssignable.map((agent) => agent.actorId)
+      : [];
 
   return (
     <ModalDialog
@@ -159,16 +180,18 @@ export function MakeRoomDialog({
             </Button>
           ) : null}
           <Button onClick={onClose}>{t(commonMessages.cancel)}</Button>
+          {allowForceLoad && onForceLoad ? (
+            <Button
+              disabled={disabled}
+              onClick={() => onForceLoad(effectiveSelected, switchAgentIds)}
+              tone="secondary"
+            >
+              {t(m.actionLoadAnyway)}
+            </Button>
+          ) : null}
           <Button
             disabled={disabled || !enough}
-            onClick={() =>
-              onConfirm(
-                effectiveSelected,
-                canSwitchOnLoad && switchAgents
-                  ? affectedAssignable.map((agent) => agent.actorId)
-                  : [],
-              )
-            }
+            onClick={() => onConfirm(effectiveSelected, switchAgentIds)}
             tone="primary"
           >
             {t(effectiveSelected.length ? m.unloadAndLoad : m.actionLoad)}
@@ -302,8 +325,11 @@ export function MakeRoomDialog({
             })}
           </FormFeedback>
         ) : null}
+        {allowForceLoad ? (
+          <FormFeedback tone="warning">{t(m.loadAnywayWarning)}</FormFeedback>
+        ) : null}
         {affected.length ? (
-          <FormFeedback tone="warning">
+          <FormFeedback tone="info">
             {t(m.affectedUntilReload, { names: joinList(affected, t) })}
           </FormFeedback>
         ) : null}
@@ -331,7 +357,7 @@ export function MakeRoomDialog({
   );
 }
 
-/** Unloading a model an Agent uses stops that Agent, so it asks first. */
+/** Unloading frees memory immediately and puts the model on standby. */
 export function UnloadModelDialog({
   assignableAgents = [],
   disabled,

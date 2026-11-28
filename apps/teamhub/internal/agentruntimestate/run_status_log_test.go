@@ -45,3 +45,29 @@ func TestSegmentIDsAreStablePerRunAndOrdinal(t *testing.T) {
 		t.Fatalf("segment IDs %s %s %s", first, again, second)
 	}
 }
+
+func TestNormalizeOfferedPresentationEventLoadingLocalModelStage(t *testing.T) {
+	normalized, err := normalizeOfferedPresentationEvent(json.RawMessage(`{"type":"status.changed","status":"queued","stage":"loading_local_model"}`))
+	if err != nil {
+		t.Fatalf("valid loading_local_model status rejected: %v", err)
+	}
+	if normalized.EventType != "status.changed" {
+		t.Fatalf("event type = %q", normalized.EventType)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(normalized.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["status"] != "queued" || payload["stage"] != "loading_local_model" {
+		t.Fatalf("normalized payload = %v", payload)
+	}
+
+	for _, invalid := range []string{
+		`{"type":"status.changed","status":"working","stage":"loading_local_model"}`,
+		`{"type":"status.changed","status":"queued","stage":"unknown_stage"}`,
+	} {
+		if _, err := normalizeOfferedPresentationEvent(json.RawMessage(invalid)); err == nil {
+			t.Errorf("invalid event accepted: %s", invalid)
+		}
+	}
+}

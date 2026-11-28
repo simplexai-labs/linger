@@ -1568,12 +1568,14 @@ export interface components {
       | "refresh";
     /** @description Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M. */
     LocalModelId: string;
-    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load. */
+    /** @description TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first and force only with load. */
     LocalModelActionCommand: {
       request_id: components["schemas"]["Id"];
       action: components["schemas"]["LocalModelActionKind"];
       model_id?: components["schemas"]["LocalModelId"];
       unload_first?: components["schemas"]["LocalModelId"][];
+      /** @description Only with load. Override the memory safety guard when the Computer allows forced loading. */
+      force?: boolean;
       expires_at: components["schemas"]["Timestamp"];
     };
     /**
@@ -1615,6 +1617,13 @@ export interface components {
       need_bytes?: number;
       /** Format: int64 */
       free_bytes?: number;
+      /**
+       * Format: int64
+       * @description Minimum additional free memory needed to load even at the lowest posture rung.
+       */
+      shortfall_bytes?: number;
+      /** @description True when the owner may override admission with Load Anyway (--force). */
+      can_force?: boolean;
     };
     /** @description The Computer's immediate answer. accepted means the job started (or a snapshot is coming for refresh); refused means nothing changed. Progress and outcomes arrive only as snapshots. */
     LocalModelActionAck: {

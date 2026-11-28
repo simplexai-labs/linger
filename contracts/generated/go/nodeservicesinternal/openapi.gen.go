@@ -2193,13 +2193,16 @@ type LocalModelActionAck struct {
 // LocalModelActionAckOutcome defines model for LocalModelActionAck.Outcome.
 type LocalModelActionAckOutcome string
 
-// LocalModelActionCommand TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first only with load.
+// LocalModelActionCommand TeamHub asks Agent Service to send one execute local_models frame to an owned Computer. model_id is required except for refresh; unload_first and force only with load.
 type LocalModelActionCommand struct {
 	// Action refresh asks the Computer to reread its library and send a snapshot; it names no model.
 	Action LocalModelActionKind `json:"action"`
 
 	// ExpiresAt UTC timestamp in RFC 3339 format with an explicit offset.
 	ExpiresAt Timestamp `json:"expires_at"`
+
+	// Force Only with load. Override the memory safety guard when the Computer allows forced loading.
+	Force *bool `json:"force,omitempty"`
 
 	// ModelId Stable localmodels library id: catalog id and variant, such as qwen3-4b:Q4_K_M.
 	ModelId *LocalModelId `json:"model_id,omitempty"`
@@ -2214,6 +2217,9 @@ type LocalModelActionKind string
 
 // LocalModelActionRefusal defines model for LocalModelActionRefusal.
 type LocalModelActionRefusal struct {
+	// CanForce True when the owner may override admission with Load Anyway (--force).
+	CanForce *bool `json:"can_force,omitempty"`
+
 	// Code Why the Computer refused an action before starting it: a localmodels library error or a reason the library is unavailable.
 	Code LocalModelActionRefusalCode `json:"code"`
 
@@ -2224,6 +2230,9 @@ type LocalModelActionRefusal struct {
 
 	// Pool A place a model can live: gpu:<index>, system (RAM beside GPUs), or unified (RAM of a host without discrete GPUs).
 	Pool *LocalModelPoolId `json:"pool,omitempty"`
+
+	// ShortfallBytes Minimum additional free memory needed to load even at the lowest posture rung.
+	ShortfallBytes *int64 `json:"shortfall_bytes,omitempty"`
 }
 
 // LocalModelActionRefusalCode Why the Computer refused an action before starting it: a localmodels library error or a reason the library is unavailable.

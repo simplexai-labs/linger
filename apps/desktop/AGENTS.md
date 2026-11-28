@@ -801,6 +801,16 @@ home> --stop-local-models` under `ELECTRON_RUN_AS_NODE`, detached, with
   or channel bodies.
 - Every IPC handler checks that the sender frame is on the configured server
   origin and validates input with zod. The SPA cannot change the server URL.
+  `localModelsStorage` (`src/main/local-models-storage.ts`, exposed on
+  `window.lingerDesktop.localModelsStorage`) additionally requires the main
+  window's `mainFrame`. Its root is `<base_dir>/models`, where `base_dir` is
+  the `LINGER_LOCALMODELS_BASE_DIR` of the environment the Computer daemon
+  launches with (`ComputerDaemonModule.localmodelsBaseDirectory()`), never
+  renderer input. It canonicalizes with `realpath` to enforce strict
+  containment, passes only the root itself to `shell.openPath`, reveals every
+  file or directory below it with `shell.showItemInFolder` (a macOS `.app`
+  bundle is never launched), and reports a headless Linux session or a
+  failing `xdg-open` as `OPEN_FAILED`.
 - Keep Electron imports out of files with unit tests; inject Electron APIs.
 
 ## Local Full Stack

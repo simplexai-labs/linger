@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentregistry"
@@ -130,6 +133,10 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 		if err := json.Unmarshal(record.Host, &host); err != nil {
 			return httpapi.LocalModelsView{}, err
 		}
+		if !view.ViewerIsOwner {
+			host.ModelsDir = nil
+			host.ModelsDirExists = nil
+		}
 		view.Computer.Host = &host
 	}
 	if len(record.Snapshot) == 0 {
@@ -162,9 +169,12 @@ func localModelsView(record agentruntimestate.LocalModelsRecord, viewerID string
 				}
 			}
 		}
-		// A cause's path is a folder on the owner's machine; only they can act on it.
-		if model.Error != nil && !view.ViewerIsOwner {
-			model.Error.Path = nil
+		// Host filesystem paths belong to the owner's machine; only they see them.
+		if !view.ViewerIsOwner {
+			if model.Error != nil {
+				model.Error.Path = nil
+			}
+			model.Storage = nil
 		}
 		view.Models = append(view.Models, httpapi.LocalModelView{Model: model, UsedBy: users})
 	}
@@ -191,7 +201,8 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 	if request.UnloadFirst != nil {
 		unloadFirst = *request.UnloadFirst
 	}
-	a.forwardLocalModelAction(c, string(request.Action), modelID, unloadFirst, func(computerID string) {
+	force := request.Force != nil && *request.Force
+	a.forwardLocalModelAction(c, string(request.Action), modelID, unloadFirst, force, func(computerID string) {
 		c.JSON(http.StatusAccepted, httpapi.LocalModelActionAccepted{
 			ComputerId: computerID, ModelId: modelID, Action: httpapi.LocalModelActionAcceptedAction(request.Action),
 		})
@@ -201,14 +212,14 @@ func (a *App) actOnLocalComputerModel(c *gin.Context) {
 // refreshLocalComputerModels asks an owned connected Computer to recheck
 // free memory and models and report a fresh library snapshot.
 func (a *App) refreshLocalComputerModels(c *gin.Context) {
-	a.forwardLocalModelAction(c, "refresh", "", nil, func(computerID string) {
+	a.forwardLocalModelAction(c, "refresh", "", nil, false, func(computerID string) {
 		c.JSON(http.StatusAccepted, httpapi.LocalModelsRefreshAccepted{
 			ComputerId: computerID, Action: httpapi.LocalModelsRefreshAcceptedRefresh,
 		})
 	})
 }
 
-func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID string, unloadFirst []string, onAccepted func(computerID string)) {
+func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID string, unloadFirst []string, force bool, onAccepted func(computerID string)) {
 	tenantID, computerID := c.Param("tenantId"), c.Param("computerId")
 	viewerID, ok := a.spaceHuman(c, tenantID)
 	if !ok {
@@ -239,7 +250,7 @@ func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID str
 	command := roomagent.LocalModelActionCommand{
 		TenantID: tenantID, OwnerActorID: viewerID, ComputerID: computerID,
 		RequestID: ids.New("local_model_action"), Action: action, ModelID: modelID,
-		UnloadFirst: unloadFirst, ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
+		UnloadFirst: unloadFirst, Force: force, ExpiresAt: time.Now().UTC().Add(localModelActionLifetime),
 	}
 	refusal, err := a.localComputers.ActOnLocalModels(c.Request.Context(), command)
 	switch {
@@ -251,7 +262,7 @@ func (a *App) forwardLocalModelAction(c *gin.Context, action string, modelID str
 			a.logger.Warn("local_models.action_refused", "computer_id", computerID, "action", command.Action, "refusal_code", refusal.Code)
 			code = httpapi.LocalModelsErrorCodeLOCALMODELACTIONFAILED
 		}
-		a.writeLocalModelsError(c, code)
+		a.writeLocalModelsErrorDetails(c, code, localModelRefusalDetails(refusal))
 	case errors.Is(err, roomagent.ErrLocalComputerNotFound):
 		a.writeError(c, http.StatusNotFound, "LOCAL_COMPUTER_NOT_FOUND", "Local Computer was not found")
 	case errors.Is(err, roomagent.ErrLocalComputerOffline):
@@ -271,6 +282,9 @@ func validLocalModelAction(modelID string, request httpapi.LocalModelActionReque
 	if !localModelIDPattern.MatchString(modelID) || !request.Action.Valid() {
 		return false
 	}
+	if request.Force != nil && request.Action != httpapi.LocalModelActionRequestLoad {
+		return false
+	}
 	if request.UnloadFirst == nil {
 		return true
 	}
@@ -286,12 +300,39 @@ func validLocalModelAction(modelID string, request httpapi.LocalModelActionReque
 	return true
 }
 
+func localModelRefusalDetails(refusal *roomagent.LocalModelActionRefusal) []httpapi.ErrorDetail {
+	if refusal == nil {
+		return nil
+	}
+	var details []httpapi.ErrorDetail
+	if refusal.Pool != "" {
+		details = append(details, httpapi.ErrorDetail{Field: "pool", Reason: refusal.Pool})
+	}
+	if refusal.NeedBytes != nil && *refusal.NeedBytes >= 0 {
+		details = append(details, httpapi.ErrorDetail{Field: "need_bytes", Reason: strconv.FormatInt(*refusal.NeedBytes, 10)})
+	}
+	if refusal.FreeBytes != nil && *refusal.FreeBytes >= 0 {
+		details = append(details, httpapi.ErrorDetail{Field: "free_bytes", Reason: strconv.FormatInt(*refusal.FreeBytes, 10)})
+	}
+	if refusal.ShortfallBytes != nil && *refusal.ShortfallBytes >= 0 {
+		details = append(details, httpapi.ErrorDetail{Field: "shortfall_bytes", Reason: strconv.FormatInt(*refusal.ShortfallBytes, 10)})
+	}
+	if refusal.CanForce != nil {
+		details = append(details, httpapi.ErrorDetail{Field: "can_force", Reason: strconv.FormatBool(*refusal.CanForce)})
+	}
+	return details
+}
+
 func (a *App) writeLocalModelsError(c *gin.Context, code httpapi.LocalModelsErrorCode) {
+	a.writeLocalModelsErrorDetails(c, code, nil)
+}
+
+func (a *App) writeLocalModelsErrorDetails(c *gin.Context, code httpapi.LocalModelsErrorCode, details []httpapi.ErrorDetail) {
 	status, found := localModelsErrorStatuses[code]
 	if !found {
 		status = http.StatusConflict
 	}
-	a.writeError(c, status, string(code), localModelsErrorMessages[code])
+	a.writeErrorWithDetails(c, status, string(code), localModelsErrorMessages[code], details)
 }
 
 // recordAgentRuntimeLocalModels stores a Computer's latest model library as
@@ -328,11 +369,24 @@ func (a *App) recordAgentRuntimeLocalModels(c *gin.Context) {
 // enums so a newer Computer Daemon or localmodels catalog never fails snapshot
 // ingestion with HTTP 400 while preserving structural and security checks.
 func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) {
+	if snapshot.Host != nil && snapshot.Host.ModelsDir != nil {
+		trimmed := clipLocalModelString(strings.TrimSpace(*snapshot.Host.ModelsDir), 4096)
+		if trimmed == "" {
+			snapshot.Host.ModelsDir = nil
+		} else {
+			snapshot.Host.ModelsDir = &trimmed
+		}
+	}
 	if snapshot.Debug != nil && (!snapshot.Debug.Mode.Valid() || !snapshot.Debug.Source.Valid()) {
 		snapshot.Debug = nil
 	}
 	for i := range snapshot.Models {
 		model := &snapshot.Models[i]
+		if model.State == teamhubinternal.LocalModelStateAbsent {
+			model.Storage = nil
+		} else if model.Storage != nil {
+			model.Storage = sanitizeLocalModelStorage(model.Storage)
+		}
 		if model.Family != nil && !model.Family.Valid() {
 			other := teamhubinternal.LocalModelFamilyOther
 			model.Family = &other
@@ -354,6 +408,43 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 		}
 		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
 			model.HostRamBytes = nil
+		}
+		if model.MinimumMemoryBytes != nil && *model.MinimumMemoryBytes < 0 {
+			model.MinimumMemoryBytes = nil
+		}
+		if model.State != teamhubinternal.LocalModelStateLoaded {
+			model.Degraded = nil
+			model.RequestedPosture = nil
+			model.EffectivePosture = nil
+			model.DegradationReason = nil
+			model.MemoryPressureWarning = nil
+			model.OomRetries = nil
+			model.Forced = nil
+		} else {
+			if model.Degraded != nil && !*model.Degraded {
+				model.Degraded = nil
+			}
+			sanitizeInternalPosture(&model.RequestedPosture)
+			sanitizeInternalPosture(&model.EffectivePosture)
+			if model.DegradationReason != nil && !model.DegradationReason.Valid() {
+				model.DegradationReason = nil
+			}
+			if model.MemoryPressureWarning != nil && !model.MemoryPressureWarning.Level.Valid() {
+				model.MemoryPressureWarning = nil
+			} else if model.MemoryPressureWarning != nil {
+				if model.MemoryPressureWarning.FreeBytes != nil && *model.MemoryPressureWarning.FreeBytes < 0 {
+					model.MemoryPressureWarning.FreeBytes = nil
+				}
+				if model.MemoryPressureWarning.BudgetBytes != nil && *model.MemoryPressureWarning.BudgetBytes < 0 {
+					model.MemoryPressureWarning.BudgetBytes = nil
+				}
+			}
+			if model.OomRetries != nil && (*model.OomRetries <= 0 || *model.OomRetries > 64) {
+				model.OomRetries = nil
+			}
+			if model.Forced != nil && !*model.Forced {
+				model.Forced = nil
+			}
 		}
 		if model.Capabilities != nil {
 			filtered := make([]teamhubinternal.LocalModelCapability, 0, len(*model.Capabilities))
@@ -386,8 +477,20 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 			if !model.Error.Code.Valid() {
 				model.Error.Code = teamhubinternal.UNKNOWNERROR
 				model.Error.Cause, model.Error.Path = nil, nil
-			} else if model.Error.Cause != nil && !model.Error.Cause.Valid() {
-				model.Error.Cause, model.Error.Path = nil, nil
+				model.Error.Pool, model.Error.NeedBytes, model.Error.FreeBytes, model.Error.ShortfallBytes, model.Error.CanForce = nil, nil, nil, nil, nil
+			} else {
+				if model.Error.Cause != nil && !model.Error.Cause.Valid() {
+					model.Error.Cause, model.Error.Path = nil, nil
+				}
+				if model.Error.NeedBytes != nil && *model.Error.NeedBytes < 0 {
+					model.Error.NeedBytes = nil
+				}
+				if model.Error.FreeBytes != nil && *model.Error.FreeBytes < 0 {
+					model.Error.FreeBytes = nil
+				}
+				if model.Error.ShortfallBytes != nil && *model.Error.ShortfallBytes < 0 {
+					model.Error.ShortfallBytes = nil
+				}
 			}
 		}
 		if model.Note != nil && !model.Note.Code.Valid() {
@@ -396,12 +499,63 @@ func sanitizeLocalModelsSnapshot(snapshot *teamhubinternal.LocalModelsSnapshot) 
 	}
 }
 
+func sanitizeLocalModelStorage(raw *teamhubinternal.LocalModelStorage) *teamhubinternal.LocalModelStorage {
+	dir := clipLocalModelString(strings.TrimSpace(raw.Dir), 4096)
+	primaryPath := clipLocalModelString(strings.TrimSpace(raw.PrimaryPath), 4096)
+	if dir == "" || primaryPath == "" || len(raw.Files) == 0 {
+		return nil
+	}
+	files := make([]teamhubinternal.LocalModelStorageFile, 0, min(len(raw.Files), 256))
+	for _, entry := range raw.Files {
+		if len(files) >= 256 {
+			break
+		}
+		filePath := clipLocalModelString(strings.TrimSpace(entry.Path), 4096)
+		if filePath == "" {
+			continue
+		}
+		role := entry.Role
+		if !role.Valid() {
+			role = teamhubinternal.LocalModelStorageFileRoleOther
+		}
+		files = append(files, teamhubinternal.LocalModelStorageFile{
+			Path:      filePath,
+			Role:      role,
+			SizeBytes: max(entry.SizeBytes, int64(0)),
+			Present:   entry.Present,
+			Shared:    entry.Shared,
+		})
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	return &teamhubinternal.LocalModelStorage{
+		Dir:          dir,
+		PrimaryPath:  primaryPath,
+		DedicatedDir: raw.DedicatedDir,
+		DiskBytes:    max(raw.DiskBytes, int64(0)),
+		FilesPresent: raw.FilesPresent,
+		Files:        files,
+	}
+}
+
+func clipLocalModelString(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	return string([]rune(text)[:limit])
+}
+
 // validLocalModelsSnapshot checks what the public view relies on: the
 // unavailable reason travels only with an unavailable library, and every
 // enum the Web branches on is known.
 func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool {
 	if snapshot.ObservedAt.IsZero() || len(snapshot.Pools) > 65 || len(snapshot.Models) > 256 ||
 		snapshot.Available != (snapshot.Reason == nil) || (snapshot.Reason != nil && !snapshot.Reason.Code.Valid()) {
+		return false
+	}
+	if snapshot.Host != nil && snapshot.Host.ModelsDir != nil &&
+		(*snapshot.Host.ModelsDir == "" || utf8.RuneCountInString(*snapshot.Host.ModelsDir) > 4096) {
 		return false
 	}
 	for _, pool := range snapshot.Pools {
@@ -432,6 +586,37 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 		if model.HostRamBytes != nil && *model.HostRamBytes < 0 {
 			return false
 		}
+		if model.Storage != nil {
+			if model.State == teamhubinternal.LocalModelStateAbsent ||
+				model.Storage.Dir == "" || utf8.RuneCountInString(model.Storage.Dir) > 4096 ||
+				model.Storage.PrimaryPath == "" || utf8.RuneCountInString(model.Storage.PrimaryPath) > 4096 ||
+				model.Storage.DiskBytes < 0 || len(model.Storage.Files) == 0 || len(model.Storage.Files) > 256 {
+				return false
+			}
+			for _, file := range model.Storage.Files {
+				if file.Path == "" || utf8.RuneCountInString(file.Path) > 4096 || !file.Role.Valid() || file.SizeBytes < 0 {
+					return false
+				}
+			}
+		}
+		if model.MinimumMemoryBytes != nil && *model.MinimumMemoryBytes < 0 {
+			return false
+		}
+		if model.RequestedPosture != nil && !validInternalPosture(*model.RequestedPosture) {
+			return false
+		}
+		if model.EffectivePosture != nil && !validInternalPosture(*model.EffectivePosture) {
+			return false
+		}
+		if model.DegradationReason != nil && !model.DegradationReason.Valid() {
+			return false
+		}
+		if model.MemoryPressureWarning != nil && !model.MemoryPressureWarning.Level.Valid() {
+			return false
+		}
+		if model.OomRetries != nil && (*model.OomRetries < 0 || *model.OomRetries > 64) {
+			return false
+		}
 		if model.Capabilities != nil {
 			for index, capability := range *model.Capabilities {
 				if !capability.Valid() || slices.Contains((*model.Capabilities)[:index], capability) {
@@ -449,6 +634,29 @@ func validLocalModelsSnapshot(snapshot teamhubinternal.LocalModelsSnapshot) bool
 			return false
 		}
 		seen[model.Id] = true
+	}
+	return true
+}
+
+func sanitizeInternalPosture(posture **teamhubinternal.LocalModelPosture) {
+	if *posture == nil {
+		return
+	}
+	if (*posture).ContextTokens < 1 || (*posture).Slots < 1 || (*posture).Slots > 64 {
+		*posture = nil
+		return
+	}
+	if (*posture).KvCacheQuant != nil && !(*posture).KvCacheQuant.Valid() {
+		(*posture).KvCacheQuant = nil
+	}
+}
+
+func validInternalPosture(posture teamhubinternal.LocalModelPosture) bool {
+	if posture.ContextTokens < 1 || posture.Slots < 1 || posture.Slots > 64 {
+		return false
+	}
+	if posture.KvCacheQuant != nil && !posture.KvCacheQuant.Valid() {
+		return false
 	}
 	return true
 }

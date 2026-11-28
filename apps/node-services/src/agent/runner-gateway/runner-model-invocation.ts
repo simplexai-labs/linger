@@ -29,6 +29,12 @@ export const MODEL_INVOKE_MAX_PROMPT_BYTES = 3 * 1024 * 1024;
  */
 const MODEL_INVOKE_REPLY_GRACE_MS = 30_000;
 
+/**
+ * Extra wait grace granted to interactive Pi calls that may wake and JIT-load
+ * a standby local model before running inference.
+ */
+export const MODEL_INVOKE_LOCAL_LOAD_GRACE_MS = 120_000;
+
 export interface RunnerModelInvokeRequest {
   readonly tenantId: string;
   readonly ownerActorId: string;
@@ -152,12 +158,14 @@ export class RunnerModelInvocation {
       const connection = connections.getConnection(computerId);
       this.#assertAvailable(computerId, request.runtimeType);
       if (!connection) throw new LocalComputerOfflineError();
+      const wakeLocalModel = !isBackgroundModelCall(request.queue.kind);
       const command = this.#command(
         computerId,
         connection.connectionEpoch,
         request,
+        wakeLocalModel,
       );
-      const outcome = this.#wait(command, request, lease);
+      const outcome = this.#wait(command, request, lease, wakeLocalModel);
       sent = true;
       try {
         await connections.sendToCurrentRunner(command);
@@ -265,12 +273,16 @@ export class RunnerModelInvocation {
     computerId: string,
     connectionEpoch: number,
     request: RunnerModelInvokeRequest,
+    wakeLocalModel: boolean,
   ): ModelInvoke {
+    const connections = this.owners.connections();
     const includeModel =
       request.model !== undefined &&
-      this.owners
-        .connections()
-        .supportsModelInvokeModel(computerId, connectionEpoch);
+      connections.supportsModelInvokeModel(computerId, connectionEpoch);
+    const includeWakeLocalModel = connections.supportsModelInvokeWakeLocalModel(
+      computerId,
+      connectionEpoch,
+    );
     const command = parseAgentToDaemonEnvelope({
       type: "execute",
       kind: "model_invoke",
@@ -293,6 +305,7 @@ export class RunnerModelInvocation {
         ? { workspace_files: request.workspaceFiles }
         : {}),
       ...(request.sessionKey ? { session_key: request.sessionKey } : {}),
+      ...(includeWakeLocalModel ? { wake_local_model: wakeLocalModel } : {}),
       timeout_ms: request.timeoutMs,
       ...(request.maxOutputChars === undefined
         ? {}
@@ -311,13 +324,43 @@ export class RunnerModelInvocation {
     return command;
   }
 
+  #needsLocalModelLoadGrace(
+    computerId: string,
+    request: RunnerModelInvokeRequest,
+    wakeLocalModel: boolean,
+  ): boolean {
+    if (!wakeLocalModel || request.runtimeType !== "pi") return false;
+    const snapshot = this.owners
+      .connections()
+      .getConnection(computerId)?.localModelsSnapshot;
+    if (!snapshot?.available) return false;
+    if (request.model) {
+      const target = snapshot.models.find(
+        (model) => model.pi_model === request.model,
+      );
+      return target !== undefined && target.state !== "loaded";
+    }
+    return (
+      snapshot.models.some((model) => Boolean(model.pi_model)) &&
+      !snapshot.models.some((model) => model.state === "loaded")
+    );
+  }
+
   #wait(
     command: ModelInvoke,
     request: RunnerModelInvokeRequest,
     lease: Pick<ModelLease, "release">,
+    wakeLocalModel: boolean,
   ): Promise<RunnerModelInvokeOutcome> {
     return new Promise<RunnerModelInvokeOutcome>((resolve, reject) => {
       const { signal } = request;
+      const loadGraceMs = this.#needsLocalModelLoadGrace(
+        command.runner_id,
+        request,
+        wakeLocalModel,
+      )
+        ? MODEL_INVOKE_LOCAL_LOAD_GRACE_MS
+        : 0;
       const timer = setTimeout(
         () =>
           this.#finish(command.invoke_id, {
@@ -325,7 +368,7 @@ export class RunnerModelInvocation {
               "Local Computer did not answer the model invocation",
             ),
           }),
-        command.timeout_ms + MODEL_INVOKE_REPLY_GRACE_MS,
+        command.timeout_ms + MODEL_INVOKE_REPLY_GRACE_MS + loadGraceMs,
       );
       timer.unref();
       const onAbort = () => {

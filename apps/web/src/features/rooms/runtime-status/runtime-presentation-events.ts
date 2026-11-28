@@ -43,6 +43,8 @@ export interface RuntimeOutputPresentation {
   outputId: string;
 }
 
+export type RuntimeStatusStage = "loading_local_model";
+
 export type RuntimeChatPresentationItem =
   | {
       activities?: readonly RuntimeActivityPresentation[];
@@ -51,6 +53,7 @@ export type RuntimeChatPresentationItem =
       outputs?: readonly RuntimeOutputPresentation[];
       plan?: RuntimePlanPresentation;
       segmentId: string;
+      stage?: RuntimeStatusStage;
       status: "queued" | "working" | "thinking" | "waiting_background";
       terminalOutcome?: "canceled" | "completed" | "failed";
       failure?: RuntimeExecutionFailure;
@@ -66,6 +69,7 @@ export type RuntimeChatPresentationItem =
     };
 
 export interface RuntimeChatPresentation {
+  currentStage?: RuntimeStatusStage;
   currentStatus?: "queued" | "working" | "thinking" | "waiting_background";
   currentTitle?: string;
   items: readonly RuntimeChatPresentationItem[];
@@ -83,6 +87,7 @@ interface MutableSegment {
   outputs: RuntimeOutputPresentation[];
   plan?: RuntimePlanPresentation;
   segmentId: string;
+  stage?: RuntimeStatusStage;
   status?: "queued" | "working" | "thinking" | "waiting_background";
   terminalOutcome?: "canceled" | "completed" | "failed";
   failure?: RuntimeExecutionFailure;
@@ -97,6 +102,7 @@ export function projectRuntimeChatPresentation(
   const items: RuntimeChatPresentationItem[] = [];
   const activities = new Map<string, MutableActivity>();
   let currentPlan: RuntimePlanPresentation | undefined;
+  let currentStage: RuntimeStatusStage | undefined;
   let currentStatus:
     | "queued"
     | "working"
@@ -139,6 +145,7 @@ export function projectRuntimeChatPresentation(
     items.push({
       key: segment.segmentId,
       segmentId: segment.segmentId,
+      ...(segment.stage === undefined ? {} : { stage: segment.stage }),
       status: segment.status ?? "working",
       ...(segment.title === undefined ? {} : { title: segment.title }),
       ...(segment.failure ? { failure: segment.failure } : {}),
@@ -185,6 +192,7 @@ export function projectRuntimeChatPresentation(
       marks: [],
       outputs: [],
       segmentId: record.segment_id,
+      ...(currentStage === undefined ? {} : { stage: currentStage }),
       ...(currentStatus === undefined ? {} : { status: currentStatus }),
       ...(currentTitle === undefined ? {} : { title: currentTitle }),
     };
@@ -198,19 +206,23 @@ export function projectRuntimeChatPresentation(
       if (event.status === "stopped") {
         selected.status ??= currentStatus ?? "working";
         selected.title ??= currentTitle;
+        selected.stage = undefined;
         selected.terminalOutcome = event.outcome;
         selected.unconfirmedInputIds = event.unconfirmed_input_ids;
         selected.failure =
           event.outcome === "failed" ? event.failure : undefined;
+        currentStage = undefined;
         currentStatus = undefined;
         currentTitle = undefined;
       } else {
         currentStatus = event.status;
+        currentStage = event.status === "queued" ? event.stage : undefined;
         currentTitle =
           event.status === "working" || event.status === "waiting_background"
             ? undefined
             : event.title;
         selected.status = currentStatus;
+        selected.stage = currentStage;
         selected.title = currentTitle;
         if (event.status === "thinking") {
           selected.marks.push({
@@ -293,6 +305,7 @@ export function projectRuntimeChatPresentation(
 
   flushSegment();
   return {
+    ...(currentStage === undefined ? {} : { currentStage }),
     ...(currentStatus === undefined ? {} : { currentStatus }),
     ...(currentTitle === undefined ? {} : { currentTitle }),
     items,

@@ -519,7 +519,17 @@ export class RemoteRuntimeProvider implements AgentProvider {
       }
       iterator = operation.events[Symbol.asyncIterator]();
       try {
-        first = await this.#firstRunEvent(operation, iterator, signal);
+        for (;;) {
+          first = await this.#firstRunEvent(operation, iterator, signal);
+          if (!first.done && first.value.type === "status.changed") {
+            const mapped = toRunEvent(first.value);
+            if (mapped?.type === "status.changed") {
+              spec.onPreStartStatus?.(mapped);
+            }
+            continue;
+          }
+          break;
+        }
         if (first.done || first.value.type !== "run.started") {
           await operation.result;
           throw new Error("Local Runtime did not start a steerable run");
@@ -1266,6 +1276,13 @@ const toRunEvent = (event: WireRunEvent): RunEvent | null => {
     case "run.started":
       throw new Error("Local Runtime emitted run.started twice");
     case "status.changed":
+      if (event.status === "queued") {
+        return {
+          type: event.type,
+          status: event.status,
+          ...(event.stage === undefined ? {} : { stage: event.stage }),
+        };
+      }
       if (event.status === "working") {
         return { type: event.type, status: event.status };
       }

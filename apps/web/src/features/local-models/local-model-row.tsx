@@ -27,8 +27,10 @@ import {
 import { ModelBrandIcon } from "./local-model-brand-icon";
 import { ModelFacts } from "./local-model-details";
 import {
+  degradedBadgeCopy,
   engineBadgeCopy,
   modelErrorShortCopy,
+  pressureWarningCopy,
   unavailableShortCopy,
 } from "./local-models-copy";
 import { localModelsMessages as m } from "./local-models.messages";
@@ -102,6 +104,7 @@ const endingLabels: Partial<Record<LocalModelAction, Message<string>>> = {
 interface Handlers {
   onCancel: () => void;
   onDownload: () => void;
+  onForceLoad?: () => void;
   onLoad: () => void;
   onRemove: () => void;
   onToggle: () => void;
@@ -139,12 +142,14 @@ function OpenChatLink({
 function RowStatusLine({
   availableSummary,
   detail,
+  pressureWarning,
   slower,
   status,
   tag,
 }: {
   availableSummary: string;
   detail: string | null;
+  pressureWarning?: { detail: string; label: string };
   slower: boolean;
   status: ModelStatus;
   tag: { dot?: string; label: Message<string>; working?: boolean };
@@ -187,6 +192,18 @@ function RowStatusLine({
           </>
         ) : detail && status !== "available" ? (
           ` · ${detail}`
+        ) : null}
+        {pressureWarning ? (
+          <>
+            {" · "}
+            <span
+              className="font-medium text-app-warning"
+              data-pressure-warning=""
+              title={pressureWarning.detail}
+            >
+              {pressureWarning.label}
+            </span>
+          </>
         ) : null}
       </span>
     </span>
@@ -232,6 +249,7 @@ function variantDetailCopy(entry: ModelEntry, t: Translate): string {
 }
 
 function RowMetadataPills({
+  degradedBadge,
   engine,
   engineBadge,
   engineTitle,
@@ -241,6 +259,7 @@ function RowMetadataPills({
   usedBy,
   usedByTitle,
 }: {
+  degradedBadge?: { label: string; title?: string };
   engine?: LocalModel["engine"];
   engineBadge?: string;
   engineTitle?: string;
@@ -266,6 +285,15 @@ function RowMetadataPills({
       {featured ? (
         <span className="inline-flex h-5 items-center rounded-full bg-muted/80 px-2 text-[11px] font-medium text-foreground/80">
           {t(m.featured)}
+        </span>
+      ) : null}
+      {degradedBadge ? (
+        <span
+          className="inline-flex h-[22px] items-center rounded-sm border border-[var(--app-status-warning-border)] bg-[var(--app-status-warning-surface)] px-2 text-xs font-medium text-app-warning"
+          data-degraded="true"
+          title={degradedBadge.title}
+        >
+          {degradedBadge.label}
         </span>
       ) : null}
       {usedBy ? (
@@ -348,6 +376,7 @@ export function ModelRow({
   entry,
   expanded,
   inSpotlight = false,
+  isLocalDesktop = false,
   onAssignAgent,
   onRecheck,
   onSelectVariant,
@@ -371,6 +400,7 @@ export function ModelRow({
   expanded: boolean;
   /** Rendered inside `FeaturedModelSpotlight`, which already carries the partner header. */
   inSpotlight?: boolean;
+  isLocalDesktop?: boolean;
   onAssignAgent?: (agent: AssignableLocalModelAgent) => void;
   onRecheck?: () => void;
   onSelectVariant?: (modelId: string) => void;
@@ -474,15 +504,28 @@ export function ModelRow({
       ? engineBadgeCopy(model.engine)
       : undefined;
   const engineTitle = model.engine_label ?? engineBadge;
+  const degradedBadge =
+    status === "loaded" ? degradedBadgeCopy(model, t) : undefined;
+  const pressureWarning =
+    status === "loaded" && !ending
+      ? pressureWarningCopy(model.memory_pressure_warning, t)
+      : undefined;
   const hasMeta =
     Boolean(memoryRequirement) ||
     showFeaturedPill ||
+    Boolean(degradedBadge) ||
     Boolean(usedBy) ||
     Boolean(engineBadge);
   const damagedFiles =
     status === "failed" &&
     (model.error?.code === "CHECKSUM_MISMATCH" ||
       model.error?.code === "MODEL_FILES_MISSING");
+  const canForceNoRoom =
+    status === "failed" &&
+    !stopped &&
+    model.error?.code === "LOAD_NO_ROOM" &&
+    model.error.can_force === true &&
+    Boolean(handlers.onForceLoad);
   const detail = {
     available: availableSummary,
     downloading: started ? null : downloadStatusDetail(model, t),
@@ -490,7 +533,7 @@ export function ModelRow({
     idle: model.note
       ? t(m.noRoomYet)
       : usedNames.length
-        ? t(m.loadToAnswer)
+        ? t(m.standbyAutoLoad)
         : null,
     loaded: [placeTitle(view, model.pool, t), loadedMemoryCopy(model, t)]
       .filter(Boolean)
@@ -616,6 +659,7 @@ export function ModelRow({
             <RowStatusLine
               availableSummary={availableSummary}
               detail={ending ? null : detail}
+              pressureWarning={pressureWarning}
               slower={slower}
               status={status}
               tag={tag}
@@ -624,6 +668,7 @@ export function ModelRow({
         </button>
         {hasMeta ? (
           <RowMetadataPills
+            degradedBadge={degradedBadge}
             engine={model.engine}
             engineBadge={engineBadge}
             engineTitle={engineTitle}
@@ -738,6 +783,22 @@ export function ModelRow({
             anotherMeChatHref ? (
             <OpenChatLink href={anotherMeChatHref} onClick={stopRowClick} />
           ) : null}
+          {canForceNoRoom && handlers.onForceLoad ? (
+            <Button
+              aria-label={t(m.loadAnywayModel, { name: model.name })}
+              className="px-2.5"
+              disabled={disabled}
+              onClick={(event) => {
+                stopRowClick(event);
+                handlers.onForceLoad?.();
+              }}
+              size="compact"
+              title={t(m.loadAnywayWarning)}
+              tone="ghost"
+            >
+              {t(m.actionLoadAnyway)}
+            </Button>
+          ) : null}
           {action ? (
             <Button
               aria-label={t(action[3], { name: model.name })}
@@ -813,8 +874,11 @@ export function ModelRow({
               disabled={disabled}
               entry={entry}
               hasPrimaryAssignAction={showsPrimaryAssignButton}
+              isLocalDesktop={isLocalDesktop}
               onAssignAgent={onAssignAgent}
+              onForceLoad={handlers.onForceLoad}
               onRecheck={onRecheck}
+              onRetryLoad={handlers.onLoad}
               onUpdateDriver={onUpdateDriver}
               rechecking={rechecking}
               view={view}

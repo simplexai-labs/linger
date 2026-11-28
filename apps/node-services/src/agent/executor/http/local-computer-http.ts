@@ -228,6 +228,7 @@ export const createLocalComputerRouteHandlers = (options: {
         ...(body.unload_first === undefined
           ? {}
           : { unloadFirst: body.unload_first }),
+        ...(body.force ? { force: true } : {}),
         expiresAt: body.expires_at,
         signal: context.req.raw.signal,
       });
@@ -781,6 +782,7 @@ const isLocalModelId = (value: unknown): value is string =>
 
 const parseLocalModelActionCommand = (value: unknown) => {
   const unloadFirst = isRecord(value) ? value.unload_first : undefined;
+  const force = isRecord(value) ? value.force : undefined;
   if (
     !isRecord(value) ||
     Object.keys(value).some(
@@ -790,6 +792,7 @@ const parseLocalModelActionCommand = (value: unknown) => {
           "action",
           "model_id",
           "unload_first",
+          "force",
           "expires_at",
         ].includes(key),
     ) ||
@@ -804,7 +807,9 @@ const parseLocalModelActionCommand = (value: unknown) => {
         !Array.isArray(unloadFirst) ||
         unloadFirst.length > 64 ||
         !unloadFirst.every(isLocalModelId) ||
-        new Set(unloadFirst).size !== unloadFirst.length))
+        new Set(unloadFirst).size !== unloadFirst.length)) ||
+    (force !== undefined &&
+      (value.action !== "load" || typeof force !== "boolean"))
   ) {
     throw new LocalComputerHttpError(
       400,
@@ -817,6 +822,7 @@ const parseLocalModelActionCommand = (value: unknown) => {
     readonly action: LocalModelActionCommand["action"];
     readonly model_id?: string;
     readonly unload_first?: readonly string[];
+    readonly force?: boolean;
     readonly expires_at: string;
   };
 };

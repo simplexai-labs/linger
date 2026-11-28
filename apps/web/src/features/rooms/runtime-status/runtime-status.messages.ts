@@ -18,6 +18,7 @@ export const runtimeStatusMessages = defineMessages("runtimeStatus", {
   stateWaitingForInput: "Waiting for your input",
   stateWorking: "Working",
   starting: "Starting",
+  loadingLocalModel: "Loading local model…",
   preparingReply: "Preparing a reply",
   runStopped: "Run stopped",
   runCanceled: "Run canceled",

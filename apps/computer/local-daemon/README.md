@@ -253,7 +253,12 @@ downloaded model that Run's Agent names.
   handling runs off the connection loop.
 - Before a Run. A Pi Run whose model is a library row's `pi_model` reaches
   the Daemon because the Pi catalog lists every downloaded library model
-  (Pi catalog below), and waits until that model is loaded. A model no row of the last readable snapshot
+  (Pi catalog below), and waits until that model is loaded. When
+  `d.localModels.WillLoad(model)` reports that the model needs to load (or wait
+  on an active load) and `runner.welcome`'s `service_features` names
+  `local_model_loading_status`, the Daemon emits a pre-`run.started`
+  `status.changed` event (`status: "queued", stage: "loading_local_model"`)
+  before blocking in `EnsureLoaded`. A model no row of the last readable snapshot
   names (a BYOK or setup-stack model) costs no tool call and no wait; once
   the installer lock wait below has ended, neither does a model that
   snapshot shows loaded while its loopback engine `/health` (and saved local
@@ -335,7 +340,11 @@ downloaded model that Run's Agent names.
   `runner.welcome`'s `service_features` names
   `local_models_external_holders` and stripped otherwise; the Models page calls only those "Other
   apps" and shows the rest of `used_bytes` beyond `holders` neutrally, since
-  an engine can hold more than its catalog estimate). Structural and
+  an engine can hold more than its catalog estimate). `host.models_dir`,
+  `host.models_dir_exists`, and per-model `storage` are decoded and sanitized
+  from `localmodels`, with `host.models_dir` falling back to
+  `<base_dir>/models` on older kits, and sent only when `runner.welcome`'s
+  `service_features` names `local_models_storage`. Structural and
   security invariants (`id`, unique model IDs, `fit`, `state`, `pool`,
   `pi_model` length, non-negative speeds, HTTPS `source_url`) still fail
   closed as `TOOL_FAILED`, while extensible display and diagnostic enums
@@ -385,6 +394,15 @@ downloaded model that Run's Agent names.
   (`contentURL` or Pi installation) are not ready yet, and marks completed, HTTP
   404 (unsupported), or failed warm-ups as settled so a failed attempt does not
   retry until the model unloads and reloads.
+  Elastic admission metadata (`minimum_memory_bytes`, `degraded`,
+  `requested_posture`, `effective_posture`, `degradation_reason`,
+  `memory_pressure_warning`, `oom_retries`, `forced` on `LocalModel`, plus
+  `pool`, `need_bytes`, `free_bytes`, `shortfall_bytes`, `can_force` on
+  `LocalModelError` and `shortfall_bytes`, `can_force` on
+  `LocalModelActionRefusal`) is sanitized forward-compatibly and sent only when
+  `runner.welcome`'s `service_features` names `local_models_admission_v2`; it
+  is stripped otherwise. `load` commands may carry `force: true` (passed to
+  `localmodels library load --force`).
   The snapshot is sent after
   every welcome, after every action or job end, and at most every 2 seconds
   for progress. When a job enters the `download` phase, the Daemon publishes
@@ -394,6 +412,21 @@ downloaded model that Run's Agent names.
   rereads the status first so pool use, placement, and unloaded models appear
   atomically before publishing. Later lines of the phase update that snapshot
   without another read.
+- Idle auto-unload and standby guards. `Library` automatically unloads idle
+  loaded models after 15 minutes (`defaultIdleUnloadTTL`). It tracks active
+  Run, `model_invoke`, and Pi session-compaction use leases (`AcquireUse`; a
+  Pi call that names no model leases every loaded library model, since Pi
+  answers it with whichever one is loaded) and
+  `lastUsedAt` (updated on lease release, load completion, and startup `Refresh`
+  of already loaded models). A tracked sweeper goroutine ticks every 30 seconds
+  and unloads any idle loaded model (`ActionUnload`, never `stack down`;
+  localmodels stops Bifrost only once it serves nothing, and the next load
+  starts it again) after
+  acquiring its per-model `ensure.turn` non-blockingly so it never races an
+  incoming JIT `EnsureLoaded`. `provider.prepare` returns `not_eligible`
+  immediately for standby Pi local models instead of spawning Pi, and
+  `model_invoke` with `wake_local_model: false` checks `IsLoadedHealthy` and
+  answers `unavailable` without waking a standby model.
 - Error causes. `library status` keeps only a failed row's `code` and
   `detail`; the `cause` and `path` of a `GATEWAY_REGISTRATION_FAILED` reach
   the Daemon only on the job's error line (`GATEWAY_HOME_NOT_PRIVATE`: the

@@ -300,6 +300,8 @@ interface LocalRunExecution {
   hadPriorProgress: boolean;
   run: AgentRun | null;
   runtimeStatus: RuntimeStatusSession | null;
+  runtimeStatusOpening: Promise<RuntimeStatusSession | null> | null;
+  preStartStatusActive: boolean;
   runtimeStatusEvents: Promise<void> | null;
   removeAbortListener: (() => void) | undefined;
   upstreamCanceled: boolean;
@@ -1020,6 +1022,8 @@ export class RunLoop {
       hadPriorProgress: false,
       run: null,
       runtimeStatus: null,
+      runtimeStatusOpening: null,
+      preStartStatusActive: false,
       runtimeStatusEvents: null,
       removeAbortListener: undefined,
       upstreamCanceled: false,
@@ -1161,11 +1165,29 @@ export class RunLoop {
     this.#firstSessionRun = false;
     this.#previousSession = undefined;
 
-    execution.runtimeStatus ??= await this.#openRuntimeStatus(
-      runId,
-      execution.provenance,
-      execution.runContext.executionEpoch,
-    );
+    if (execution.runtimeStatusOpening) {
+      execution.runtimeStatus ??= await execution.runtimeStatusOpening;
+    }
+    if (execution.runtimeStatus === null) {
+      execution.runtimeStatus = await this.#openRuntimeStatus(
+        runId,
+        execution.provenance,
+        execution.runContext.executionEpoch,
+      );
+    } else if (execution.preStartStatusActive) {
+      execution.preStartStatusActive = false;
+      try {
+        await execution.runtimeStatus.publish([
+          { type: "status.changed", status: "working" },
+        ]);
+      } catch (error) {
+        this.#logger.log("warn", "runtime_status.event_offer_failed", {
+          runId,
+          eventTypes: ["status.changed"],
+          error,
+        });
+      }
+    }
     controller.signal.throwIfAborted();
 
     execution.runtimeStatusEvents = this.#consumeRuntimeStatusEvents(
@@ -1289,6 +1311,9 @@ export class RunLoop {
           runKind: execution.kind,
           priority: execution.intent.priority,
           preemptSignal: execution.intent.preemption.signal,
+          onPreStartStatus: (event) => {
+            void this.#publishPreStartStatus(execution, event);
+          },
           ...(this.#onRunBeforeStop
             ? {
                 onStopHook: async (event, signal) => {
@@ -1704,6 +1729,9 @@ export class RunLoop {
     }
     // Opening the Run status lets TeamHub persist and show the failure
     // even when the Run failed before its stream was opened.
+    if (execution.runtimeStatusOpening) {
+      execution.runtimeStatus ??= await execution.runtimeStatusOpening;
+    }
     if (execution.runtimeStatus === null) {
       await this.#openRuntimeStatus(
         runId,
@@ -1782,10 +1810,49 @@ export class RunLoop {
     );
   }
 
+  async #publishPreStartStatus(
+    execution: LocalRunExecution,
+    event: Extract<RunEvent, { readonly type: "status.changed" }>,
+  ): Promise<void> {
+    execution.preStartStatusActive = true;
+    try {
+      if (execution.runtimeStatus) {
+        await execution.runtimeStatus.publish([event]);
+        return;
+      }
+      if (execution.runtimeStatusOpening) {
+        const session = await execution.runtimeStatusOpening;
+        if (session) {
+          execution.runtimeStatus ??= session;
+          await session.publish([event]);
+        }
+        return;
+      }
+      const opening = this.#openRuntimeStatus(
+        execution.runId,
+        execution.provenance,
+        execution.runContext.executionEpoch,
+        event,
+      );
+      execution.runtimeStatusOpening = opening;
+      execution.runtimeStatus = await opening;
+    } catch (error) {
+      this.#logger.log("warn", "runtime_status.event_offer_failed", {
+        runId: execution.runId,
+        eventTypes: [event.type],
+        error,
+      });
+    }
+  }
+
   async #openRuntimeStatus(
     runId: string,
     provenance: Omit<ToolRunContext, "runId">,
     epoch: ProviderRunContext["executionEpoch"],
+    initialStatus?: Extract<
+      RuntimeStatusUpdate,
+      { readonly type: "status.changed" }
+    >,
   ): Promise<RuntimeStatusSession | null> {
     if (!this.#runtimeStatusPublisher || !this.#executionContextRef || !epoch) {
       return null;
@@ -1796,6 +1863,7 @@ export class RunLoop {
         ref: this.#executionContextRef,
         epoch,
         sourceInboxIds: provenance.sourceInboxIds,
+        ...(initialStatus ? { initialStatus } : {}),
       });
     } catch (error) {
       this.#logger.log("warn", "runtime_status.open_failed", {

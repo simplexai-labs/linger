@@ -8,7 +8,10 @@ import { localModelsMessages as m } from "./local-models.messages";
 import {
   formatGigabytes,
   joinList,
+  loadNoRoomShortfallBytes,
+  postureSummary,
   type HostBlockerReason,
+  type LocalModelRefusalDetails,
   type MemoryGuidance,
 } from "./local-models-rules";
 
@@ -121,6 +124,18 @@ export function modelErrorShortCopy(
   t: Translate,
 ) {
   if (!error) return undefined;
+  if (error.code === "LOAD_NO_ROOM") {
+    const shortfall = loadNoRoomShortfallBytes({
+      freeBytes: error.free_bytes,
+      needBytes: error.need_bytes,
+      shortfallBytes: error.shortfall_bytes,
+    });
+    if (shortfall !== undefined) {
+      return t(m.shortLoadNoRoomShortfall, {
+        shortfall: formatGigabytes(shortfall, t),
+      });
+    }
+  }
   const message = Object.hasOwn(modelErrorsShort, error.code)
     ? modelErrorsShort[error.code]
     : m.shortUnknownError;
@@ -141,11 +156,104 @@ export function modelErrorCopy(
       ? t(cause.withPath, { path: error.path })
       : t(cause.withoutPath);
   }
+  if (error.code === "LOAD_NO_ROOM") {
+    const shortfall = loadNoRoomShortfallBytes({
+      freeBytes: error.free_bytes,
+      needBytes: error.need_bytes,
+      shortfallBytes: error.shortfall_bytes,
+    });
+    if (shortfall !== undefined) {
+      if (error.free_bytes !== undefined && error.need_bytes !== undefined) {
+        return t(m.errorLoadNoRoomShortfall, {
+          free: formatGigabytes(error.free_bytes, t),
+          need: formatGigabytes(error.need_bytes, t),
+          shortfall: formatGigabytes(shortfall, t),
+        });
+      }
+      return t(m.errorLoadNoRoomShortfallOnly, {
+        shortfall: formatGigabytes(shortfall, t),
+      });
+    }
+  }
   return t(
     Object.hasOwn(modelErrors, error.code)
       ? modelErrors[error.code]
       : m.errorUnknownError,
   );
+}
+
+/** Exact shortfall copy for a 409 LOCAL_MODEL_NO_ROOM action refusal. */
+export function loadNoRoomRefusalCopy(
+  refusal: LocalModelRefusalDetails | undefined,
+  t: Translate,
+): string {
+  const shortfall = loadNoRoomShortfallBytes(refusal);
+  if (shortfall !== undefined) {
+    if (refusal?.freeBytes !== undefined && refusal.needBytes !== undefined) {
+      return t(m.errorLoadNoRoomShortfall, {
+        free: formatGigabytes(refusal.freeBytes, t),
+        need: formatGigabytes(refusal.needBytes, t),
+        shortfall: formatGigabytes(shortfall, t),
+      });
+    }
+    return t(m.errorLoadNoRoomShortfallOnly, {
+      shortfall: formatGigabytes(shortfall, t),
+    });
+  }
+  return t(m.refusalNoRoom);
+}
+
+/** Compact pill and tooltip for a loaded model running on a lower-memory posture. */
+export function degradedBadgeCopy(
+  model: Schemas["LocalModel"],
+  t: Translate,
+): { label: string; title?: string } | undefined {
+  if (model.state !== "loaded" || !model.degraded) return undefined;
+  const effective = model.effective_posture
+    ? postureSummary(model.effective_posture, t)
+    : undefined;
+  const requested = model.requested_posture
+    ? postureSummary(model.requested_posture, t)
+    : undefined;
+  return {
+    label: effective
+      ? t(m.lowMemoryModePillPosture, { posture: effective })
+      : t(m.lowMemoryModePill),
+    ...(effective && requested
+      ? {
+          title: t(m.degradedPostureTooltip, { effective, requested }),
+        }
+      : {}),
+  };
+}
+
+/** Expanded details explanation for a loaded model running in low-memory mode. */
+export function degradedDetailCopy(
+  model: Schemas["LocalModel"],
+  t: Translate,
+): string | undefined {
+  if (model.state !== "loaded" || !model.degraded) return undefined;
+  if (model.effective_posture && model.requested_posture) {
+    return t(m.degradedPostureDetail, {
+      effective: postureSummary(model.effective_posture, t),
+      requested: postureSummary(model.requested_posture, t),
+    });
+  }
+  return t(m.degradedPostureDetailSimple);
+}
+
+/** Subtle status-line indicator and details explanation for tight memory pressure. */
+export function pressureWarningCopy(
+  warning: Schemas["LocalModelPressureWarning"] | undefined,
+  t: Translate,
+): { detail: string; label: string } | undefined {
+  if (!warning) return undefined;
+  return {
+    detail: t(
+      warning.level === "high" ? m.tightMemoryHighDetail : m.tightMemoryDetail,
+    ),
+    label: t(m.tightMemoryIndicator),
+  };
 }
 
 const notes = {
