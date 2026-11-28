@@ -37,7 +37,7 @@ exit "$(cat "$d/$key.exit" 2>/dev/null || echo 0)"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tool := &FeishuMail{resolve: func() (string, error) { return script, nil }, env: []string{"PATH=" + os.Getenv("PATH")}, now: time.Now, logins: map[string]feishuLogin{}}
+	tool := &FeishuMail{larkClient: &larkClient{resolve: func() (string, error) { return script, nil }, env: []string{"PATH=" + os.Getenv("PATH")}, now: time.Now, logins: map[string]feishuLogin{}}}
 	return tool, dir
 }
 
@@ -250,7 +250,7 @@ func TestFeishuMailLoginExpires(t *testing.T) {
 }
 
 func TestFeishuMailWithoutLarkCLI(t *testing.T) {
-	tool := &FeishuMail{resolve: func() (string, error) { return "", errors.New("missing") }, logins: map[string]feishuLogin{}}
+	tool := &FeishuMail{larkClient: &larkClient{resolve: func() (string, error) { return "", errors.New("missing") }, logins: map[string]feishuLogin{}}}
 	if result := tool.Call(context.Background(), "status", nil); result["status"] != "not_installed" {
 		t.Fatalf("result = %#v", result)
 	}

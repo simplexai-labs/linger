@@ -75,7 +75,7 @@ ${TASK_BRIEF}
 ${TASK_COORDINATION}`;
 
 const CONNECTED_APPS_COMMANDS_STATIC = `
-- Connected apps: gmail, outlook, feishu-mail, outlook-calendar, gcal, gdrive, slack, notion, and figma have their own commands (teamhub gmail --help). For other apps, search with teamhub apps search "<action in English + app>" and execute with teamhub apps execute --connectionId <id> --toolSlug <slug> --toolVersion <version> --arguments '<json>'. Use apps listed as connected at Run start below without checking first; check teamhub apps list only if connectivity changed or a command reports no account. Never resend a write whose outcome is unknown; check the app first.`;
+- Connected apps: gmail, outlook, feishu-mail, feishu-im, outlook-calendar, gcal, gdrive, slack, notion, and figma have their own commands (teamhub gmail --help). For other apps, search with teamhub apps search "<action in English + app>" and execute with teamhub apps execute --connectionId <id> --toolSlug <slug> --toolVersion <version> --arguments '<json>'. Use apps listed as connected at Run start below without checking first; check teamhub apps list only if connectivity changed or a command reports no account. Never resend a write whose outcome is unknown; check the app first.`;
 
 const STATIC_COMMANDS = (connectedApps: boolean): string =>
   `TeamHub commands, all run through your shell tool (teamhub <domain> <action> --help explains each; credentials are installed, never read them)

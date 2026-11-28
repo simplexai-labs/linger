@@ -10,7 +10,7 @@ import (
 )
 
 var fixedAppToolkits = []struct{ key, toolkit string }{
-	{"gmail", "gmail"}, {"outlook", "outlook"}, {"feishu_mail", "feishu"}, {"googledrive", "googledrive"}, {"slack", "slack"},
+	{"gmail", "gmail"}, {"outlook", "outlook"}, {"feishu_mail", "feishu"}, {"feishu_im", "feishu"}, {"googledrive", "googledrive"}, {"slack", "slack"},
 	{"discord", "discordbot"}, {"facebook", "facebook"}, {"github", "github"}, {"google_meet", "googlemeet"},
 	{"google_calendar", "googlecalendar"}, {"notion", "notion"}, {"linear", "linear"}, {"figma", "figma"}, {"canva", "canva"},
 	{"higgsfield", "higgsfield_mcp"}, {"fal_ai", "fal_ai"}, {"granola", "granola_mcp"}, {"calendly", "calendly"}, {"outlook_calendar", "outlook"},

@@ -528,6 +528,189 @@ Options:
 {"command":["docs","update"],"description":"Edit the title, text or selected blocks of a Native Document.","read_only":false,"input_schema":{"oneOf":[{"type":"object","additionalProperties":false,"required":["document_id","command","content"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"append"},"content":{"type":"string","minLength":1,"maxLength":262144,"pattern":"\\\\S"}}},{"type":"object","additionalProperties":false,"required":["document_id","command","pattern","content"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"str_replace"},"content":{"type":"string","minLength":0,"maxLength":262144,"pattern":"^[^\\\\r\\\\n]*$"},"pattern":{"type":"string","minLength":1,"maxLength":262144,"pattern":"^[^\\\\r\\\\n]+$"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}}}},{"type":"object","additionalProperties":false,"required":["document_id","command","content","block_id"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"block_insert_before"},"content":{"type":"string","minLength":1,"maxLength":262144,"pattern":"\\\\S"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}}}},{"type":"object","additionalProperties":false,"required":["document_id","command","content","block_id"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"block_insert_after"},"content":{"type":"string","minLength":1,"maxLength":262144,"pattern":"\\\\S"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}}}},{"type":"object","additionalProperties":false,"required":["document_id","command","block_id","content"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"block_replace"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"content":{"type":"string","minLength":1,"maxLength":262144,"pattern":"\\\\S"}}},{"type":"object","additionalProperties":false,"required":["document_id","command","block_id"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"block_delete"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}}}},{"type":"object","additionalProperties":false,"required":["document_id","command","start_block_id","end_block_id","content"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"block_replace"},"start_block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"end_block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"content":{"type":"string","minLength":1,"maxLength":262144,"pattern":"\\\\S"}}},{"type":"object","additionalProperties":false,"required":["document_id","command","start_block_id","end_block_id"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"block_delete"},"start_block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"end_block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}}}},{"type":"object","additionalProperties":false,"required":["document_id","command","title"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"set_title"},"title":{"type":"string","minLength":1,"maxLength":255}}},{"type":"object","additionalProperties":false,"required":["document_id","command","block_id","asset_id"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"image_insert_after"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"asset_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"caption":{"type":"string","maxLength":1000,"pattern":"^[^\\\\r\\\\n]*$"}}},{"type":"object","additionalProperties":false,"required":["document_id","command","block_id","asset_id"],"properties":{"document_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},"command":{"const":"image_replace"},"block_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"asset_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$","not":{"const":"0"}},"caption":{"type":"string","maxLength":1000,"pattern":"^[^\\\\r\\\\n]*$"}}}],"description":"One action per operation. Body flags --content/--file are exclusive; --file reads bounded UTF-8 or stdin. Operation JSON and converted block batches are bounded to 256 KiB; converted content allows at most 2048 blocks."},"output_schema":{"type":"object","additionalProperties":false,"required":["semantic_mutation_id","status","duplicate_request"],"properties":{"semantic_mutation_id":{"type":"string"},"status":{"enum":["applied","conflicted"]},"revision_id":{"type":"string"},"history_entry_id":{"type":"string"},"conflict_reason":{"type":"string"},"duplicate_request":{"type":"boolean"},"reason":{"type":"string","minLength":1}},"allOf":[{"if":{"properties":{"duplicate_request":{"const":true}}},"then":{"required":["reason"]},"else":{"not":{"required":["reason"]}}}]},"cli":{"usage":["<document-id> --command <action> [flags]"],"arguments":["<document-id>  Remote Native Document ID."],"options":{"--command":{"description":"Required action: append, str_replace, block_insert_before, block_insert_after, block_replace, block_delete, set_title, image_insert_after, image_replace."},"--content":{"description":"Inline Markdown body; outside code, \\\\n, \\\\t and \\\\\\\\ are decoded. Exclusive with --file, which is never decoded."},"--file":{"description":"Read the UTF-8 body from a regular file or - for stdin."},"--pattern":{"description":"Exact nonempty single-line text for str_replace."},"--pattern-file":{"description":"Read the exact single-line str_replace pattern from a UTF-8 file or - for stdin. Exclusive with --pattern."},"--block-id":{"description":"One real block target or anchor."},"--start-block-id":{"description":"First block of a contiguous sibling range."},"--end-block-id":{"description":"Last block of the same sibling range."},"--title":{"description":"New title for set_title."},"--asset-id":{"description":"Image commands: an Asset of this Document (see docs image put)."},"--caption":{"description":"Image commands: optional one-line caption."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true},"--operation-id":{"description":"Stable operation identity for recovery."}},"notes":[]}}
 ",
   },
+  "feishu-im chats": {
+    "help": "exit 0
+List the Feishu chats the owner can read.
+
+USAGE
+  teamhub feishu-im chats [flags]
+  teamhub feishu-im chats --schema [--json]
+
+FLAGS
+  --limit <value>               1–50 items per page; default 20.
+  --cursor <value>              Page token from the previous page's next_cursor.
+  --account <value>             Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat.
+  --json                        Print complete JSON instead of the default readable text.
+  --schema                      Show offline input and output schemas without business arguments.
+
+INHERITED FLAGS
+  -h, --help                   Show help.
+
+OUTPUT
+  Shows the actual account, plus Chat IDs, names, and kinds.
+
+Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.
+Help and schema are available offline; TeamHub checks current access at execution time.
+
+EXAMPLES
+  teamhub feishu-im chats --limit 50
+
+LEARN MORE
+  teamhub feishu-im --help
+  teamhub feishu-im chats --schema --json
+",
+    "schema": "exit 0
+{"command":["feishu-im","chats"],"description":"List the Feishu chats the owner can read.","read_only":true,"input_schema":{"type":"object","additionalProperties":false,"properties":{"limit":{"type":"integer","minimum":1,"maximum":50,"default":20},"cursor":{"type":"string","minLength":1},"account":{"type":"string","minLength":1,"maxLength":240}}},"output_schema":{"type":"object","additionalProperties":false,"required":["account","chats"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"chats":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["chatId"],"properties":{"chatId":{"type":"string","minLength":1},"name":{"type":"string"},"description":{"type":"string"},"ownerId":{"type":"string"},"chatMode":{"type":"string"},"chatType":{"type":"string"}}}},"next_cursor":{"type":"string","minLength":1}}},"cli":{"usage":["teamhub feishu-im chats [flags]"],"arguments":[],"options":{"--limit":{"description":"1–50 items per page; default 20."},"--cursor":{"description":"Page token from the previous page's next_cursor."},"--account":{"description":"Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true}},"notes":["Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.","Help and schema are available offline; TeamHub checks current access at execution time."]}}
+",
+  },
+  "feishu-im get": {
+    "help": "exit 0
+Read one message without changing its read state.
+
+USAGE
+  teamhub feishu-im get <message-id> [flags]
+  teamhub feishu-im get --schema [--json]
+
+FLAGS
+  --account <value>             Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat.
+  --json                        Print complete JSON instead of the default readable text.
+  --schema                      Show offline input and output schemas without business arguments.
+
+INHERITED FLAGS
+  -h, --help                   Show help.
+
+OUTPUT
+  Shows the actual account, plus The message's sender, type, text, and creation time.
+
+Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.
+Help and schema are available offline; TeamHub checks current access at execution time.
+
+EXAMPLES
+  teamhub feishu-im get om_0123456789abcdef
+
+LEARN MORE
+  teamhub feishu-im --help
+  teamhub feishu-im get --schema --json
+",
+    "schema": "exit 0
+{"command":["feishu-im","get"],"description":"Read one message without changing its read state.","read_only":true,"input_schema":{"type":"object","additionalProperties":false,"required":["messageId"],"properties":{"messageId":{"type":"string","minLength":1},"account":{"type":"string","minLength":1,"maxLength":240}}},"output_schema":{"type":"object","additionalProperties":false,"required":["account","message"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"message":{"type":"object","additionalProperties":false,"required":["messageId"],"properties":{"messageId":{"type":"string","minLength":1},"chatId":{"type":"string"},"threadId":{"type":"string"},"senderId":{"type":"string"},"senderType":{"type":"string"},"msgType":{"type":"string"},"text":{"type":"string"},"createdAt":{"type":"string"}}}}},"cli":{"usage":["teamhub feishu-im get <message-id> [flags]"],"arguments":[],"options":{"--account":{"description":"Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true}},"notes":["Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.","Help and schema are available offline; TeamHub checks current access at execution time."]}}
+",
+  },
+  "feishu-im messages": {
+    "help": "exit 0
+List one chat's messages, newest first.
+
+USAGE
+  teamhub feishu-im messages <chat-id> [flags]
+  teamhub feishu-im messages --schema [--json]
+
+FLAGS
+  --limit <value>               1–50 items per page; default 20.
+  --cursor <value>              Page token from the previous page's next_cursor.
+  --account <value>             Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat.
+  --json                        Print complete JSON instead of the default readable text.
+  --schema                      Show offline input and output schemas without business arguments.
+
+INHERITED FLAGS
+  -h, --help                   Show help.
+
+OUTPUT
+  Shows the actual account, plus Message IDs, senders, types, text, and creation time, oldest first.
+
+Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.
+Help and schema are available offline; TeamHub checks current access at execution time.
+
+EXAMPLES
+  teamhub feishu-im messages oc_0123456789abcdef
+
+LEARN MORE
+  teamhub feishu-im --help
+  teamhub feishu-im messages --schema --json
+",
+    "schema": "exit 0
+{"command":["feishu-im","messages"],"description":"List one chat's messages, newest first.","read_only":true,"input_schema":{"type":"object","additionalProperties":false,"required":["chatId"],"properties":{"limit":{"type":"integer","minimum":1,"maximum":50,"default":20},"cursor":{"type":"string","minLength":1},"chatId":{"type":"string","minLength":1},"account":{"type":"string","minLength":1,"maxLength":240}}},"output_schema":{"type":"object","additionalProperties":false,"required":["account","chatId","messages"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"chatId":{"type":"string","minLength":1},"messages":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["messageId"],"properties":{"messageId":{"type":"string","minLength":1},"chatId":{"type":"string"},"threadId":{"type":"string"},"senderId":{"type":"string"},"senderType":{"type":"string"},"msgType":{"type":"string"},"text":{"type":"string"},"createdAt":{"type":"string"}}}},"next_cursor":{"type":"string","minLength":1}}},"cli":{"usage":["teamhub feishu-im messages <chat-id> [flags]"],"arguments":[],"options":{"--limit":{"description":"1–50 items per page; default 20."},"--cursor":{"description":"Page token from the previous page's next_cursor."},"--account":{"description":"Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true}},"notes":["Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.","Help and schema are available offline; TeamHub checks current access at execution time."]}}
+",
+  },
+  "feishu-im reply": {
+    "help": "exit 0
+Reply to a message in its own chat.
+
+USAGE
+  teamhub feishu-im reply <message-id> (--content <text> | --file <path|->) [flags]
+  teamhub feishu-im reply --schema [--json]
+
+FLAGS
+  --content <value>             Message text; exclusive with --file.
+  --file <value>                UTF-8 text file; - reads stdin.
+  --account <value>             Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat.
+  --json                        Print complete JSON instead of the default readable text.
+  --schema                      Show offline input and output schemas without business arguments.
+  --operation-id <value>        Stable identity for this operation; keep it when the outcome is unknown and do not blindly resend.
+
+INHERITED FLAGS
+  -h, --help                   Show help.
+
+OUTPUT
+  Shows the actual account, plus The reply's message ID; upstream acceptance is not delivery.
+
+Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.
+The message is sent as plain Feishu text; Feishu renders no Markdown in it.
+The external write waits for the sponsor to approve a confirmation card in the chat; TeamHub then runs it and sends you the result, or the denial and its reason.
+Help and schema are available offline; TeamHub checks current access at execution time.
+
+EXAMPLES
+  teamhub feishu-im reply om_0123456789abcdef --content 'Thanks.'
+
+LEARN MORE
+  teamhub feishu-im --help
+  teamhub feishu-im reply --schema --json
+",
+    "schema": "exit 0
+{"command":["feishu-im","reply"],"description":"Reply to a message in its own chat.","read_only":false,"input_schema":{"type":"object","additionalProperties":false,"required":["messageId","content"],"properties":{"messageId":{"type":"string","minLength":1},"content":{"type":"string","minLength":1,"maxLength":4096},"account":{"type":"string","minLength":1,"maxLength":240}}},"output_schema":{"anyOf":[{"type":"object","additionalProperties":false,"required":["account","result"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"result":{"type":"object","additionalProperties":false,"required":["action","acknowledged"],"properties":{"action":{"const":"sent"},"acknowledged":{"const":true},"messageId":{"type":"string","minLength":1}}}}},{"type":"object","additionalProperties":false,"required":["account","result"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"result":{"type":"object","additionalProperties":false,"required":["action","confirmation"],"properties":{"action":{"const":"confirmation_requested"},"confirmation":{"type":"object","additionalProperties":false,"required":["status","interactionId","messageId","roomId"],"properties":{"status":{"const":"pending"},"interactionId":{"type":"string","minLength":1},"messageId":{"type":"string","minLength":1},"roomId":{"type":"string","minLength":1}}}}}}}]},"cli":{"usage":["teamhub feishu-im reply <message-id> (--content <text> | --file <path|->) [flags]"],"arguments":[],"options":{"--content":{"description":"Message text; exclusive with --file."},"--file":{"description":"UTF-8 text file; - reads stdin."},"--account":{"description":"Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true},"--operation-id":{"description":"Stable operation identity for recovery."}},"notes":["Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.","The message is sent as plain Feishu text; Feishu renders no Markdown in it.","The external write waits for the sponsor to approve a confirmation card in the chat; TeamHub then runs it and sends you the result, or the denial and its reason.","Help and schema are available offline; TeamHub checks current access at execution time."]}}
+",
+  },
+  "feishu-im send": {
+    "help": "exit 0
+Send a text message to a chat or directly to a user.
+
+USAGE
+  teamhub feishu-im send (--chat <chat-id> | --user <open-id> | --user-id <user-id>) (--content <text> | --file <path|->) [flags]
+  teamhub feishu-im send --schema [--json]
+
+FLAGS
+  --chat <value>                Chat ID to send into.
+  --user <value>                User open_id to send to directly.
+  --user-id <value>             User ID to send to directly; skip the open_id.
+  --content <value>             Message text; exclusive with --file.
+  --file <value>                UTF-8 text file; - reads stdin.
+  --account <value>             Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat.
+  --json                        Print complete JSON instead of the default readable text.
+  --schema                      Show offline input and output schemas without business arguments.
+  --operation-id <value>        Stable identity for this operation; keep it when the outcome is unknown and do not blindly resend.
+
+INHERITED FLAGS
+  -h, --help                   Show help.
+
+OUTPUT
+  Shows the actual account, plus The sent message's ID; upstream acceptance is not delivery.
+
+Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.
+The message is sent as plain Feishu text; Feishu renders no Markdown in it.
+The external write waits for the sponsor to approve a confirmation card in the chat; TeamHub then runs it and sends you the result, or the denial and its reason.
+Help and schema are available offline; TeamHub checks current access at execution time.
+
+EXAMPLES
+  teamhub feishu-im send --chat oc_0123456789abcdef --content 'Shipped the release.'
+  teamhub feishu-im send --user ou_0123456789abcdef --file ./notice.txt
+
+LEARN MORE
+  teamhub feishu-im --help
+  teamhub feishu-im send --schema --json
+",
+    "schema": "exit 0
+{"command":["feishu-im","send"],"description":"Send a text message to a chat or directly to a user.","read_only":false,"input_schema":{"type":"object","additionalProperties":false,"properties":{"content":{"type":"string","minLength":1,"maxLength":4096},"chatId":{"type":"string","minLength":1},"openId":{"type":"string","minLength":1},"userId":{"type":"string","minLength":1},"account":{"type":"string","minLength":1,"maxLength":240}}},"output_schema":{"anyOf":[{"type":"object","additionalProperties":false,"required":["account","result"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"result":{"type":"object","additionalProperties":false,"required":["action","acknowledged"],"properties":{"action":{"const":"sent"},"acknowledged":{"const":true},"messageId":{"type":"string","minLength":1}}}}},{"type":"object","additionalProperties":false,"required":["account","result"],"properties":{"account":{"type":"object","additionalProperties":false,"required":["connectionId","name","displayName","identityLabel"],"properties":{"connectionId":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"displayName":{"type":"string"},"identityLabel":{"type":"string"}}},"result":{"type":"object","additionalProperties":false,"required":["action","confirmation"],"properties":{"action":{"const":"confirmation_requested"},"confirmation":{"type":"object","additionalProperties":false,"required":["status","interactionId","messageId","roomId"],"properties":{"status":{"const":"pending"},"interactionId":{"type":"string","minLength":1},"messageId":{"type":"string","minLength":1},"roomId":{"type":"string","minLength":1}}}}}}}]},"cli":{"usage":["teamhub feishu-im send (--chat <chat-id> | --user <open-id> | --user-id <user-id>) (--content <text> | --file <path|->) [flags]"],"arguments":[],"options":{"--chat":{"description":"Chat ID to send into."},"--user":{"description":"User open_id to send to directly."},"--user-id":{"description":"User ID to send to directly; skip the open_id."},"--content":{"description":"Message text; exclusive with --file."},"--file":{"description":"UTF-8 text file; - reads stdin."},"--account":{"description":"Select a connection ID or complete account label; when authorization is missing, an authorization card is shown in the chat."},"--json":{"description":"Return machine-readable JSON.","boolean":true},"--help":{"description":"Show this offline command reference.","boolean":true},"-h":{"description":"Show help.","boolean":true},"--schema":{"description":"Show offline input and output schemas.","boolean":true},"--operation-id":{"description":"Stable operation identity for recovery."}},"notes":["Feishu IM is the owner's own Feishu or Lark chats through lark-cli on their Computer; TeamHub checks the login and its scopes at execution time.","The message is sent as plain Feishu text; Feishu renders no Markdown in it.","The external write waits for the sponsor to approve a confirmation card in the chat; TeamHub then runs it and sends you the result, or the denial and its reason.","Help and schema are available offline; TeamHub checks current access at execution time."]}}
+",
+  },
   "feishu-mail archive": {
     "help": "exit 0
 Move a message out of the inbox and keep the message.
@@ -3971,6 +4154,7 @@ Commands:
   browser
   computer
   docs
+  feishu-im
   feishu-mail
   figma
   gcal
@@ -4371,6 +4555,25 @@ Uploads the file, then edits the Document; repeating with the same operation ID 
 The file's type comes from its content; an unsupported file is refused.
 Examples:
 teamhub docs file put document_example ./proposal.pdf --after block_signature
+",
+  "feishu-im": "exit 0
+feishu-im common operations.
+
+USAGE
+  teamhub feishu-im <command> [flags]
+
+COMMANDS
+  chats              List the Feishu chats the owner can read.
+  messages           List one chat's messages, newest first.
+  get                Read one message without changing its read state.
+  send               Send a text message to a chat or directly to a user.
+  reply              Reply to a message in its own chat.
+
+INHERITED FLAGS
+  -h, --help          Show help
+
+EXAMPLES
+  teamhub feishu-im chats --help
 ",
   "feishu-mail": "exit 0
 feishu-mail common operations.

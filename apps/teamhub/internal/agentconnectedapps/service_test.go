@@ -106,6 +106,25 @@ func TestOutlookCalendarAllowsOnlyCalendarTools(t *testing.T) {
 	}
 }
 
+func TestFeishuMailAndIMAllowOnlyTheirOwnTools(t *testing.T) {
+	for slug, want := range map[string]bool{
+		"FEISHU_MAIL_LIST_MESSAGES": true, "FEISHU_MAIL_SEND_DRAFT": true,
+		"FEISHU_IM_LIST_CHATS": false, "FEISHU_IM_SEND_MESSAGE": false,
+	} {
+		if got := appAllowsTool("feishu_mail", slug); got != want {
+			t.Errorf("appAllowsTool(feishu_mail, %s) = %t", slug, got)
+		}
+	}
+	for slug, want := range map[string]bool{
+		"FEISHU_IM_LIST_CHATS": true, "FEISHU_IM_SEND_MESSAGE": true,
+		"FEISHU_MAIL_LIST_MESSAGES": false, "FEISHU_MAIL_SEND_DRAFT": false,
+	} {
+		if got := appAllowsTool("feishu_im", slug); got != want {
+			t.Errorf("appAllowsTool(feishu_im, %s) = %t", slug, got)
+		}
+	}
+}
+
 func TestExecutionErrorsAreNeverRetryableAfterDispatch(t *testing.T) {
 	for _, cause := range []error{
 		nil, errors.New("private provider error"), &composio.RateLimitError{},

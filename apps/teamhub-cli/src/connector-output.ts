@@ -310,6 +310,17 @@ export function connectorOutputDescription(command: readonly string[]): string {
         archive: "The actual message ID and archive receipt.",
       } as Record<string, string>
     )[action]!;
+  if (app === "feishu-im")
+    return (
+      {
+        chats: "Chat IDs, names, and kinds.",
+        messages:
+          "Message IDs, senders, types, text, and creation time, oldest first.",
+        get: "The message's sender, type, text, and creation time.",
+        send: "The sent message's ID; upstream acceptance is not delivery.",
+        reply: "The reply's message ID; upstream acceptance is not delivery.",
+      } as Record<string, string>
+    )[action]!;
   if (app === "gcal" || app === "outlook-calendar")
     return (
       {

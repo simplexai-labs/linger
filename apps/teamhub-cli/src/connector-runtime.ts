@@ -41,6 +41,7 @@ export const appKeys: Record<string, string> = {
   gmail: "gmail",
   outlook: "outlook",
   "feishu-mail": "feishu_mail",
+  "feishu-im": "feishu_im",
   slack: "slack",
   gcal: "google_calendar",
   notion: "notion",
@@ -62,6 +63,8 @@ export const connectorVersions: Record<string, string> = {
   outlook: "20261014_00",
   // TeamHub serves Feishu Mail's tools itself, at this version.
   "feishu-mail": "20261121_00",
+  // TeamHub serves Feishu IM's tools itself, at this version.
+  "feishu-im": "20261126_00",
   slack: "20261015_00",
   gcal: "20261010_00",
   notion: "20261008_00",

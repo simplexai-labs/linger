@@ -156,6 +156,7 @@ var curatedApps = []ExternalApp{
 	{Key: "gmail", DisplayName: "Gmail", Description: "Import the last six months, up to 3,000 messages, for Profile and Wiki.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: "outlook", DisplayName: "Outlook Mail", Description: "Import the last six months, up to 3,000 messages, for Profile and Wiki.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: FeishuMailAppKey, DisplayName: "Feishu Mail", Description: "Let your Another Me read and send your Feishu or Lark mail through lark-cli on your Computer; new mail syncs to your Wiki each night.", Capabilities: []string{"connect", "agent_tools"}, AllowsMultipleConnections: true, selfAuthorized: true},
+	{Key: FeishuIMAppKey, DisplayName: "Feishu IM", Description: "Let your Another Me read and send your Feishu or Lark messages through lark-cli on your Computer.", Capabilities: []string{"connect", "agent_tools"}, AllowsMultipleConnections: true, selfAuthorized: true},
 	{Key: "googledrive", DisplayName: "Google Drive", Description: "Let Agents work with your Drive files.", Capabilities: []string{"connect", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: "slack", DisplayName: "Slack", Description: "Connect workspaces and selected channels.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
 	{Key: "discord", DisplayName: "Discord", Description: "Connect one installed Discord server and selected channels.", Capabilities: []string{"connect", "personal_wiki_import", "agent_tools"}, AllowsMultipleConnections: true},
@@ -214,7 +215,11 @@ func (s *Service) catalogApp(appKey string) (ExternalApp, bool) {
 	app.Capabilities = []string{}
 	if definition.selfAuthorized {
 		// Composio does not serve these apps' logos or capabilities.
-		if s.FeishuConfigured() {
+		configured := s.FeishuConfigured()
+		if app.Key == FeishuIMAppKey {
+			configured = s.FeishuIMConfigured()
+		}
+		if configured {
 			app.Availability = AppAvailabilityAvailable
 			app.Capabilities = slices.Clone(definition.Capabilities)
 			app.SupportsReauthorization = true
@@ -290,14 +295,29 @@ func (s *Service) appIdentity(appKey string) func(context.Context, string) (conn
 				return feishuConnection{service: s}.Identify(ctx, upstreamID, composio.ConnectionActive)
 			}
 		}
+	case FeishuIMAppKey:
+		if s.feishuIM != nil {
+			return func(ctx context.Context, upstreamID string) (connectionIdentity, error) {
+				return feishuIMConnection{service: s}.Identify(ctx, upstreamID, composio.ConnectionActive)
+			}
+		}
 	}
 	return nil
 }
 
 func (s *Service) connectionAdapter(appKey string) (connectionAdapter, error) {
 	app, ok := s.catalogApp(appKey)
-	if ok && app.selfAuthorized && s.FeishuConfigured() {
-		return feishuConnection{service: s}, nil
+	if ok && app.selfAuthorized {
+		switch appKey {
+		case FeishuIMAppKey:
+			if s.FeishuIMConfigured() {
+				return feishuIMConnection{service: s}, nil
+			}
+		default:
+			if s.FeishuConfigured() {
+				return feishuConnection{service: s}, nil
+			}
+		}
 	}
 	if !ok || app.selfAuthorized || !s.ProviderConfigured() {
 		return nil, ErrUnavailable

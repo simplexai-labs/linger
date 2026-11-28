@@ -435,7 +435,7 @@ const createAgentManagerHttpApp = <TRuntimeSettings>(
       if (
         !isRecord(body) ||
         !isRecord(body.arguments) ||
-        !["browser", "playground", "feishu_mail"].includes(
+        !["browser", "playground", "feishu_mail", "feishu_im"].includes(
           String(body.server),
         ) ||
         (body.deadline_ms !== undefined &&

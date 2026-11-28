@@ -174,7 +174,7 @@ const rateLimitCode = 99991400
 func IsAuthFailure(err error) bool {
 	var scopes *ScopesMissingError
 	var apiErr *APIError
-	return errors.Is(err, ErrAuthorizationRequired) || errors.Is(err, ErrMailboxChanged) || errors.As(err, &scopes) ||
+	return errors.Is(err, ErrAuthorizationRequired) || errors.Is(err, ErrMailboxChanged) || errors.Is(err, ErrIMIdentityChanged) || errors.As(err, &scopes) ||
 		errors.As(err, &apiErr) && slices.Contains(authFailureCodes, apiErr.Code)
 }
 

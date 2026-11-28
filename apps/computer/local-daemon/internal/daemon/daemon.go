@@ -113,7 +113,9 @@ type Daemon struct {
 	localSkills       LocalSkillCatalog
 	localTools        LocalToolBinder
 	// feishuMail runs TeamHub's Feishu Mail calls through the owner's lark-cli.
-	feishuMail          *localtools.FeishuMail
+	feishuMail *localtools.FeishuMail
+	// feishuIM runs TeamHub's Feishu IM calls through the owner's lark-cli.
+	feishuIM            *localtools.FeishuIM
 	browserConnections  BrowserConnections
 	computerPermissions ComputerPermissions
 	owners              []ComputerOwner
@@ -324,6 +326,7 @@ func New(options Options) (*Daemon, error) {
 		localSkills:          options.LocalSkills,
 		localTools:           options.LocalTools,
 		feishuMail:           localtools.NewFeishuMail(),
+		feishuIM:             localtools.NewFeishuIM(),
 		browserConnections:   options.BrowserConnections,
 		computerPermissions:  options.ComputerPermissions,
 		owners:               options.Owners,
