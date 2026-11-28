@@ -2703,6 +2703,37 @@ describe("GitHub commands", () => {
 });
 
 describe("outlook-calendar connector", () => {
+  it("keeps an Outlook attendee edit from replacing an unavailable collection", async () => {
+    let attendeeDataAvailable = false;
+    let writes = 0;
+    const f = await fixture("outlook", (slug, args) => {
+      if (slug === "OUTLOOK_GET_EVENT")
+        return {
+          id: "evt_safe",
+          isOrganizer: true,
+          ...(attendeeDataAvailable ? { attendees: [] } : {}),
+        };
+      expect(slug).toBe("OUTLOOK_UPDATE_CALENDAR_EVENT");
+      expect(args.attendees).toEqual([
+        { type: "required", emailAddress: { address: "new@example.test" } },
+      ]);
+      writes++;
+      return { id: "evt_safe" };
+    });
+    const command = [
+      "outlook-calendar",
+      "update",
+      "evt_safe",
+      "--add-attendee",
+      "new@example.test",
+    ];
+    const first = await f.run(command);
+    expect(first.error?.error?.code).toBe("incomplete_response");
+    expect(writes).toBe(0);
+    attendeeDataAvailable = true;
+    expect((await f.run(command)).code).toBe(0);
+    expect(writes).toBe(1);
+  });
   it("lists calendars, queries by mailbox Windows timezone, and searches with OData filter", async () => {
     const f = await fixture("outlook", (slug, args) => {
       if (slug === "OUTLOOK_LIST_CALENDARS") {

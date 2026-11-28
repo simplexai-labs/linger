@@ -1156,7 +1156,7 @@ export async function executeOutlookCalendar(
 
   let mergedAttendees: Json[] | undefined;
   if (input.addAttendees || input.removeAttendees) {
-    if (current.attendees !== undefined && !Array.isArray(current.attendees))
+    if (!Array.isArray(current.attendees))
       throw new CliError(
         "incomplete_response",
         "The full attendee list is unavailable.",
@@ -1169,7 +1169,7 @@ export async function executeOutlookCalendar(
       String(a).toLowerCase() === b.toLowerCase();
     if (organizerEmail && remove.some((x) => same(organizerEmail, x)))
       usage("The organizer cannot be removed.");
-    const existing = ((current.attendees ?? []) as unknown[]).map((x) => {
+    const existing = current.attendees.map((x: unknown) => {
       const entry = record(x, "existing attendee");
       const emailObj = record(entry.emailAddress, "attendee emailAddress");
       const address = requiredString(
