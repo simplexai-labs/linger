@@ -168,7 +168,9 @@ cmd_fetch_native() {
     part="$path.part.$$"
     echo "desktop-release: downloading $name"
     # The folder's address stays out of the log, which a public repository shows to anyone.
-    curl -fsSL --retry 3 "${header[@]}" -o "$part" "${base%/}/$name" 2>/dev/null ||
+    # ${header[@]+"${header[@]}"} keeps an empty header from reading as unbound under
+    # set -u on macOS's stock bash 3.2, which a contributor's machine runs.
+    curl -fsSL --retry 3 ${header[@]+"${header[@]}"} -o "$part" "${base%/}/$name" 2>/dev/null ||
       { rm -f "$part"; die "cannot download $name from LINGER_NATIVE_DEPS_URL (upload it there; see docs/desktop-release.md)"; }
     if [[ "$(wc -c <"$part" | tr -d ' ')" != "$bytes" || "$(sha256_of "$part")" != "$sha" ]]; then
       rm -f "$part"
