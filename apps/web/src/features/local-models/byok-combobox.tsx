@@ -230,6 +230,10 @@ export function ByokCombobox({
         onOpenChange(true);
       }
     } else if (event.key === "Enter") {
+      // Enter while an input method is composing picks a candidate;
+      // browsers report it either as isComposing or as the 229 key code,
+      // and settling then would keep a half-composed value.
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
       // Enter settles the typed value rather than submitting the form.
       event.preventDefault();
       onCommit?.();
