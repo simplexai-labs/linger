@@ -101,7 +101,7 @@ class ComputerToolsTest(unittest.TestCase):
         return resources, stage(resources, target)
 
     def test_accepts_the_staged_tools_of_every_shipped_target(self):
-        for target in ("darwin-arm64", "linux-x64", "win32-x64"):
+        for target in ("darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"):
             with self.subTest(target=target):
                 if os.name == "nt" and not target.startswith("win32-"):
                     self.skipTest("Windows cannot make POSIX executable fixture files")

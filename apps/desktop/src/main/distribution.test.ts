@@ -19,6 +19,7 @@ import {
 } from "@linger/local-installation/native-dependencies";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { resolveDistributionFile } from "../../scripts/build-steps.mjs";
 import {
   BUNDLED_LOCALMODELS_KIT_FILENAME,
   stageBundledLocalmodelsKit,
@@ -63,6 +64,7 @@ describe("desktop distributions", () => {
   // Every target bundles them beside the installer (build.mjs copies it), so they need no network.
   for (const [target, bundled] of [
     ["darwin-arm64", true],
+    ["darwin-x64", true],
     ["linux-x64", true],
     ["win32-x64", true],
   ] as const)
@@ -109,6 +111,23 @@ describe("desktop distributions", () => {
         `https://cdn.npmmirror.com/packages/@simplexai/${name}/${version}/${name}-${version}.tgz`,
       ]);
     });
+
+  it("refuses ambiguous multi-target builds without LINGER_DESKTOP_DISTRIBUTION", () => {
+    expect(resolveDistributionFile(desktop, ["darwin-arm64"], {})).toBe(
+      path.join(desktop, "distribution", "darwin-arm64.json"),
+    );
+    expect(resolveDistributionFile(desktop, ["darwin-x64"], {})).toBe(
+      path.join(desktop, "distribution", "darwin-x64.json"),
+    );
+    expect(() =>
+      resolveDistributionFile(desktop, ["darwin-arm64", "darwin-x64"], {}),
+    ).toThrow(/Multiple tracked distributions matched/);
+    expect(
+      resolveDistributionFile(desktop, ["darwin-arm64", "darwin-x64"], {
+        LINGER_DESKTOP_DISTRIBUTION: "/custom/distribution.json",
+      }),
+    ).toBe("/custom/distribution.json");
+  });
 });
 
 describe("stageBundledLocalmodelsKit", () => {

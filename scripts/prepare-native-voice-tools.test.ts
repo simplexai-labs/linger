@@ -6,6 +6,7 @@ import {
   LIVEKIT,
   assertTarget,
   listedComponents,
+  machoArch,
   machoSigned,
   missingComponents,
   peImports,
@@ -18,7 +19,7 @@ describe("native voice tools publisher", () => {
       ...Object.values(LIVEKIT.releases),
       LIVEKIT.source,
       FFMPEG.source,
-      FFMPEG.darwin,
+      ...Object.values(FFMPEG.darwin),
     ]) {
       expect(source.url).toMatch(/^https:\/\//);
       expect(source.sha256).toMatch(/^[a-f0-9]{64}$/);
@@ -36,6 +37,8 @@ describe("native voice tools publisher", () => {
     expect(DARWIN_CPU_STUB).not.toContain('import "C"');
   });
   it("rejects unknown targets and corrupt sources", () => {
+    expect(assertTarget("darwin-arm64")).toBe("darwin-arm64");
+    expect(assertTarget("darwin-x64")).toBe("darwin-x64");
     expect(assertTarget("win32-x64")).toBe("win32-x64");
     expect(() => assertTarget("linux-arm64")).toThrow("Unsupported");
     expect(() => verifySource(Buffer.from("x"), "0".repeat(64))).toThrow(
@@ -63,15 +66,19 @@ describe("native voice tools publisher", () => {
     expect(missingComponents({ encoders })).toContain("decoders:opus");
     expect(missingComponents({ encoders })).not.toContain("encoders:aac");
   });
-  it("tells a signed Mach-O from an unsigned one", () => {
-    const macho = (command: number) => {
+  it("tells a signed Mach-O from an unsigned one and identifies its arch", () => {
+    const macho = (command: number, cpuType = 0x0100000c) => {
       const file = Buffer.alloc(48);
       file.writeUInt32LE(0xfeedfacf, 0);
+      file.writeUInt32LE(cpuType, 4);
       file.writeUInt32LE(1, 16);
       file.writeUInt32LE(command, 32);
       file.writeUInt32LE(16, 36);
       return file;
     };
+    expect(machoArch(macho(0x1d, 0x0100000c))).toBe("arm64");
+    expect(machoArch(macho(0x19, 0x01000007))).toBe("x64");
+    expect(machoArch(Buffer.from("MZ" + "\0".repeat(30)))).toBeUndefined();
     expect(machoSigned(macho(0x1d))).toBe(true);
     expect(machoSigned(macho(0x19))).toBe(false);
     expect(machoSigned(Buffer.from("MZ" + "\0".repeat(30)))).toBe(false);

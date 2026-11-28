@@ -11,9 +11,10 @@ Gateway and runs Agents. The daemon exits with the app.
 - `pnpm --filter @linger/desktop typecheck`: typecheck the app.
 - `pnpm --filter @linger/desktop build`: bundle `dist/` with esbuild and
   build the Go daemon for this machine into `dist/computer/<platform>-<arch>/`
-  (needs Go). `LINGER_DESKTOP_DAEMON_TARGETS=darwin-arm64,darwin-x64` (or
-  `win32-x64`) builds the targets a package needs;
-  `node scripts/build-daemon.mjs --all` builds every shipped target.
+  (needs Go). Set `LINGER_DESKTOP_DAEMON_TARGETS` to one target at a time
+  (`darwin-arm64`, `darwin-x64`, `linux-x64`, or `win32-x64`) so `dist/`
+  carries that target's `distribution/<target>.json` and native archives;
+  `node scripts/build-daemon.mjs --all` compiles only the Go daemon binaries.
 - `pnpm --filter @linger/desktop electron:install`: download the Electron
   binary; pnpm does not run its install script. Set `ELECTRON_MIRROR` when the
   default host is unreachable.
@@ -25,9 +26,9 @@ Gateway and runs Agents. The daemon exits with the app.
   for local checkout installation, `--localmodels <llm-inference-lab-dir>` for
   live Python edits without restarts, `--debug simulate|tiny`, `--reset`,
   `--skip-daemon`, `--no-watch`, `--dry-run`).
-- `python3 packaging/mac/package.py [--arch arm64|x64]`: build
-  `out/Linger-<version>-<arch>.dmg` for Apple silicon and Intel on Linux
-  after `node build.mjs` with the darwin daemon targets. The daemon is signed
+- `python3 packaging/mac/package.py --arch arm64|x64`: build
+  `out/Linger-<version>-<arch>.dmg` for Apple silicon or Intel on Linux
+  after `LINGER_DESKTOP_DAEMON_TARGETS=darwin-<arch> node build.mjs`. The daemon is signed
   with the app. Needs the `dmgtool` image from
   `packaging/mac/Dockerfile` and `rcodesign` (ad-hoc signature). Add
   `--developer-id P12 --developer-id-password FILE` for a Developer ID

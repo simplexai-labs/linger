@@ -55,6 +55,7 @@ const postgresPrograms = [
 
 export const nativeTargets = [
   "darwin-arm64",
+  "darwin-x64",
   "linux-x64",
   "win32-x64",
 ] as const;
@@ -655,6 +656,13 @@ const pinnedGoSources: Readonly<Record<string, Artifact>> = {
     digest: "efb87ff28af9a188d0536ef5d42e63dd52ba8263cd7344a993cc48dd11dedb6a",
     maxBytes: 64738542,
   },
+  "1.26.5-darwin-x64": {
+    url: "https://dl.google.com/go/go1.26.5.darwin-amd64.tar.gz",
+    mirrors: ["https://mirrors.aliyun.com/golang/go1.26.5.darwin-amd64.tar.gz"],
+    algorithm: "sha256",
+    digest: "6231d8d3b8f5552ec6cbf6d685bdd5482e1e703214b120e89b3bf0d7bf1ef725",
+    maxBytes: 67836304,
+  },
   "1.26.5-linux-x64": {
     url: "https://dl.google.com/go/go1.26.5.linux-amd64.tar.gz",
     mirrors: ["https://mirrors.aliyun.com/golang/go1.26.5.linux-amd64.tar.gz"],
@@ -695,7 +703,7 @@ export async function prepareNativeDependencies(options: {
   const target = `${process.platform}-${process.arch}`;
   if (!(nativeTargets as readonly string[]).includes(target))
     throw new Error(
-      "Native source currently requires macOS arm64, Linux x64 or Windows x64.",
+      "Native source currently requires macOS arm64, macOS x64, Linux x64 or Windows x64.",
     );
   const windows = process.platform === "win32";
   const exe = windows ? ".exe" : "";

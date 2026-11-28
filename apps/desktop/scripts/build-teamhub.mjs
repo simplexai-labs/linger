@@ -27,7 +27,12 @@ const desktop = fileURLToPath(new URL("../", import.meta.url));
 
 // Native then needs no Go toolchain, module download or compile: Windows
 // has no compiler on most computers, and an offline install has no modules.
-export const TEAMHUB_TARGETS = ["win32-x64", "linux-x64", "darwin-arm64"];
+export const TEAMHUB_TARGETS = [
+  "win32-x64",
+  "linux-x64",
+  "darwin-arm64",
+  "darwin-x64",
+];
 const COMMANDS = ["teamhub", "migrate", "account"];
 
 export const teamhubDirectory = (target) =>

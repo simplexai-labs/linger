@@ -4,7 +4,7 @@ Linger desktop releases are published in the public
 [simplexai-labs/linger](https://github.com/simplexai-labs/linger) repository:
 pushing a `desktop-v<version>` tag there runs GitHub Actions
 ([`.github/workflows/desktop-release.yml`](../.github/workflows/desktop-release.yml)),
-which builds the packages for Apple silicon, Linux x64 and Windows x64 and
+which builds the packages for macOS (Apple silicon and Intel), Linux x64 and Windows x64 and
 publishes them as the GitHub Release of that tag. The workflow calls
 [`scripts/ci/desktop-release.sh`](../scripts/ci/desktop-release.sh), so the
 same steps also run on a developer machine.
@@ -61,7 +61,7 @@ The workflow runs for `desktop-v*` tags and from Actions → Desktop release →
 Run workflow. `prepare` validates the version and stops before building when
 an official `simplexai-labs/linger` publish lacks the required macOS signing,
 notarization, or update-manifest secrets. Its `build` (`darwin-arm64`,
-`linux-x64`) and `build-win32` (`win32-x64`) jobs run on `ubuntu-24.04` (the
+`darwin-x64`, `linux-x64`) and `build-win32` (`win32-x64`) jobs run on `ubuntu-24.04` (the
 macOS and Windows runners have no Docker), pull the prebuilt `dmgtool` and
 `wintool` images from GHCR (published by
 [`.github/workflows/desktop-packaging-images.yml`](../.github/workflows/desktop-packaging-images.yml)
@@ -148,8 +148,8 @@ on the branch that pins it
 ([`.github/workflows/sign-macos-native-archives.yml`](../.github/workflows/sign-macos-native-archives.yml)).
 It uses the `MACOS_DEVELOPER_ID_*` secrets, uploads each signed archive to
 `native-deps` beside the original under the name with its new sha256, and
-keeps the updated `distribution/darwin-arm64.json` as the `distribution`
-artifact. Commit that file on the branch; the run's summary gives the command:
+keeps the updated `distribution/darwin-*.json` files as the `distribution`
+artifact. Commit those files on the branch; the run's summary gives the command:
 
 ```sh
 gh run download <run-id> -n distribution -D apps/desktop/distribution
@@ -247,10 +247,12 @@ linked; verify the file bytes and Agent logs separately with
 | File                                        | Contents                                                       |
 | ------------------------------------------- | -------------------------------------------------------------- |
 | `Linger-<version>-macos-arm64.dmg`          | macOS 14.0 or later, Apple silicon                             |
+| `Linger-<version>-macos-x64.dmg`            | macOS 14.0 or later, Intel                                     |
 | `Linger-<version>-linux-x64.tar.gz`         | Linux x64 (requires glibc 2.35 or newer)                       |
 | `Linger-<version>-windows-x64-setup.exe`    | Windows x64 per-user installer                                 |
 | `Linger-<version>-windows-x64-portable.zip` | Windows x64 folder to run without installing                   |
-| `Linger-<version>-macos-arm64.app.tar.gz`   | macOS app the updater swaps in                                 |
+| `Linger-<version>-macos-arm64.app.tar.gz`   | macOS Apple silicon app the updater swaps in                   |
+| `Linger-<version>-macos-x64.app.tar.gz`     | macOS Intel app the updater swaps in                           |
 | `manifest.json`, `manifest.json.sig`        | only with the update key: the [auto-update](#auto-update) feed |
 | `SHA256SUMS.txt`                            | SHA-256 of every file above                                    |
 
@@ -280,6 +282,11 @@ with its size and SHA-256:
   "packages": {
     "darwin-arm64": {
       "file": "Linger-0.16.36-macos-arm64.app.tar.gz",
+      "sha256": "…",
+      "size": 123
+    },
+    "darwin-x64": {
+      "file": "Linger-0.16.36-macos-x64.app.tar.gz",
       "sha256": "…",
       "size": 123
     },
@@ -367,8 +374,8 @@ scripts/ci/desktop-release.sh checksums .linger-runtime/desktop-release/assets 0
 
 With the archives already in `LINGER_NATIVE_POSTGRES_DIR` (default
 `~/.cache/linger-desktop`), `LINGER_NATIVE_DEPS_URL` is not needed.
-`manifest` needs the macOS app archive, the Linux archive and the setup program
-of that version; `checksums` refuses a folder without the DMG, the Linux
+`manifest` needs both macOS app archives, the Linux archive and the setup program
+of that version; `checksums` refuses a folder without both macOS DMGs, the Linux
 archive and the setup program.
 
 ## Packaging Details
@@ -500,7 +507,7 @@ image, most of it Node.js and the universal Cua driver.
 
 ### Release
 
-Each desktop target (`darwin-arm64`, `linux-x64`) gets its own distribution
+Each desktop target (`darwin-arm64`, `darwin-x64`, `linux-x64`, `win32-x64`) gets its own distribution
 file and build. For one release:
 
 1. Make the source package as above and upload it. On a host of each target,
@@ -534,7 +541,7 @@ file and build. For one release:
 
 Official releases come from the public simplexai-labs/linger repository: a
 `desktop-v<version>` tag pushed there runs steps 4 and the packaging for
-`darwin-arm64`, `linux-x64` and `win32-x64` in GitHub Actions and publishes a
+`darwin-arm64`, `darwin-x64`, `linux-x64` and `win32-x64` in GitHub Actions and publishes a
 linger GitHub Release with `SHA256SUMS.txt`; see
 [How the workflow runs](#how-the-workflow-runs). The workflow
 fetches the bundled archives from the assets of the `native-deps` prerelease
@@ -548,8 +555,8 @@ older macOS refuses to open the app, and `MIN_MACOS` in
 `apps/desktop/src/main/local-server.ts` keeps the same value: LocalServer
 refuses to fetch Node.js or run the installer on an older macOS and says
 "Linger needs macOS 14.0 or later" instead. `prepare-native-postgres.mjs`
-sets no `MACOSX_DEPLOYMENT_TARGET`, so PostgreSQL's minimum is the macOS of
-the host that built it. Check every Mach-O file of a new pinned binary
+pins `MACOSX_DEPLOYMENT_TARGET=14.0` on macOS so PostgreSQL's minimum stays
+14.0 regardless of the host macOS version. Check every Mach-O file of a new pinned binary
 (`otool -l`, `minos`) before raising or lowering the value in both places.
 
 The Developer ID signature carries the hardened runtime, which needs an
@@ -613,7 +620,7 @@ the archive, outside the app's signature, like PostgreSQL; their Mach-O files
 are signed with the Developer ID before the archive is pinned (see
 [Bundled archives](#bundled-archives)).
 
-A build with a source package for `win32-x64`, `linux-x64` or `darwin-arm64`
+A build with a source package for `win32-x64`, `linux-x64`, `darwin-arm64` or `darwin-x64`
 also ships TeamHub prebuilt (`scripts/build-teamhub.mjs`): build.mjs
 cross-compiles `teamhub`, `migrate` and `account` from that package (`go` in
 PATH, `CGO_ENABLED=0`) into `dist/installer/native/teamhub-<target>/` with a
@@ -659,4 +666,3 @@ checkouts without bundled services can still install from source). Model data
 (Voice) is not bundled: Node Services downloads it on first use. Dependencies
 the services never load are left out too: officeparser imports its OCR
 engine, tesseract.js, only for OCR, which document extraction never asks for.
-Intel Macs have none of this and install from the network.

@@ -33,6 +33,8 @@ describe("native PostgreSQL publisher", () => {
       "Unsupported",
     );
     expect(() => assertTarget("linux-x64", "darwin-arm64")).toThrow("host");
+    expect(() => assertTarget("darwin-x64", "darwin-arm64")).toThrow("host");
+    expect(assertTarget("darwin-x64", "darwin-x64")).toBe("darwin-x64");
     expect(assertTarget("linux-x64", "linux-x64")).toBe("linux-x64");
     // pgvector for Windows needs MSVC, so Windows also builds on Windows.
     expect(() => assertTarget("win32-x64", "linux-x64")).toThrow("host");

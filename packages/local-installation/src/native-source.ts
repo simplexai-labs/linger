@@ -496,7 +496,8 @@ export async function checkNativeSourceEnvironment(options: {
 }): Promise<EnvironmentReport> {
   options.signal.throwIfAborted();
   const supported =
-    (process.platform === "darwin" && process.arch === "arm64") ||
+    (process.platform === "darwin" &&
+      (process.arch === "arm64" || process.arch === "x64")) ||
     (process.platform === "linux" && process.arch === "x64") ||
     (process.platform === "win32" && process.arch === "x64");
   const checks: EnvironmentReport["checks"] = [
@@ -506,7 +507,7 @@ export async function checkNativeSourceEnvironment(options: {
       state: supported ? "ready" : "action_required",
       detail: supported
         ? `${process.platform}/${process.arch}`
-        : "Native source currently provides macOS arm64, Linux x64 and Windows x64 components.",
+        : "Native source currently provides macOS arm64, macOS x64, Linux x64 and Windows x64 components.",
     },
   ];
   let ready = false;

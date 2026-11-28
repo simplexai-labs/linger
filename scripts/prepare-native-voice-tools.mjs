@@ -85,11 +85,22 @@ export const FFMPEG = Object.freeze({
   image:
     "alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f",
   darwin: {
-    url: "https://github.com/serversideup/ffmpeg-lgpl-builds/releases/download/v8.1.2-27/ffmpeg-8.1.2-aarch64-apple-darwin.tar.gz",
-    sha256: "ac0babf65798bf681da1dc81c4fe4ae049d0d26e161410174b0e120e3e783332",
-    license: "LGPL-2.1-only",
-    // Kept beside COPYING: what it was built from, and its static OpenSSL.
-    notices: ["SOURCE.txt", "FFMPEG-LICENSE.md", "OPENSSL-LICENSE"],
+    "darwin-arm64": {
+      url: "https://github.com/serversideup/ffmpeg-lgpl-builds/releases/download/v8.1.2-27/ffmpeg-8.1.2-aarch64-apple-darwin.tar.gz",
+      sha256:
+        "ac0babf65798bf681da1dc81c4fe4ae049d0d26e161410174b0e120e3e783332",
+      license: "LGPL-2.1-only",
+      // Kept beside COPYING: what it was built from, and its static OpenSSL.
+      notices: ["SOURCE.txt", "FFMPEG-LICENSE.md", "OPENSSL-LICENSE"],
+    },
+    "darwin-x64": {
+      url: "https://github.com/serversideup/ffmpeg-lgpl-builds/releases/download/v8.1.2-27/ffmpeg-8.1.2-x86_64-apple-darwin.tar.gz",
+      sha256:
+        "51ac761dde58a600bb685a5d2510ae38d6ade1f62ef2ef556263c67cb69f2b00",
+      license: "LGPL-2.1-only",
+      // Kept beside COPYING: what it was built from, and its static OpenSSL.
+      notices: ["SOURCE.txt", "FFMPEG-LICENSE.md", "OPENSSL-LICENSE"],
+    },
   },
 });
 // Every native component, nothing from outside FFmpeg: the build never
@@ -117,7 +128,7 @@ export const FFMPEG_NEEDS = Object.freeze({
   demuxers: ["s16le", "mpegts", "mov", "hls", "wav", "ogg", "matroska"],
   bsfs: ["noise", "setts", "aac_adtstoasc"],
 });
-export const targets = ["darwin-arm64", "linux-x64", "win32-x64"];
+export const targets = ["darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"];
 
 export function assertTarget(target) {
   if (!targets.includes(target))
@@ -153,9 +164,19 @@ export function missingComponents(listings) {
   }
   return missing;
 }
+/** Architecture of a 64-bit Mach-O file ("arm64", "x64"), or undefined. */
+export function machoArch(content) {
+  if (content.length < 32 || content.readUInt32LE(0) !== 0xfeedfacf)
+    return undefined;
+  const cpuType = content.readUInt32LE(4);
+  if (cpuType === 0x0100000c) return "arm64";
+  if (cpuType === 0x01000007) return "x64";
+  return undefined;
+}
 /** Whether a 64-bit Mach-O file carries a code signature (LC_CODE_SIGNATURE). */
 export function machoSigned(content) {
-  if (content.readUInt32LE(0) !== 0xfeedfacf) return false;
+  if (content.length < 32 || content.readUInt32LE(0) !== 0xfeedfacf)
+    return false;
   const count = content.readUInt32LE(16);
   let offset = 32;
   for (let index = 0; index < count; index++) {
@@ -254,7 +275,8 @@ function docker(work, image, script, env = {}) {
 }
 async function livekit(target, work, bin, licenses) {
   const exe = target === "win32-x64" ? ".exe" : "";
-  if (target === "darwin-arm64") {
+  if (target.startsWith("darwin-")) {
+    const goarch = target === "darwin-x64" ? "amd64" : "arm64";
     const archive = await download(LIVEKIT.source, work, "livekit-src.tar.gz");
     run("tar", ["-xzf", archive, "-C", work], work);
     const source = path.join(work, LIVEKIT.source.root);
@@ -264,7 +286,7 @@ async function livekit(target, work, bin, licenses) {
       GOTOOLCHAIN: `go${LIVEKIT.go}`,
       CGO_ENABLED: "0",
       GOOS: "darwin",
-      GOARCH: "arm64",
+      GOARCH: goarch,
     };
     run("go", ["mod", "vendor"], source, { ...go, GOFLAGS: "-mod=readonly" });
     const stub = path.join(
@@ -299,7 +321,7 @@ async function livekit(target, work, bin, licenses) {
     );
     return {
       ...LIVEKIT.source,
-      built: `go${LIVEKIT.go} build -trimpath -ldflags="-s -w" ./cmd/server (CGO_ENABLED=0 GOOS=darwin GOARCH=arm64; vendored go-osstat cpu_darwin_nocgo.go reports an idle CPU)`,
+      built: `go${LIVEKIT.go} build -trimpath -ldflags="-s -w" ./cmd/server (CGO_ENABLED=0 GOOS=darwin GOARCH=${goarch}; vendored go-osstat cpu_darwin_nocgo.go reports an idle CPU)`,
     };
   }
   const release = LIVEKIT.releases[target];
@@ -323,8 +345,9 @@ async function livekit(target, work, bin, licenses) {
   return { url: release.url, sha256: release.sha256 };
 }
 async function ffmpeg(target, work, bin, licenses) {
-  if (target === "darwin-arm64") {
-    const archive = await download(FFMPEG.darwin, work, "ffmpeg-darwin.tar.gz");
+  if (target.startsWith("darwin-")) {
+    const darwin = FFMPEG.darwin[target];
+    const archive = await download(darwin, work, "ffmpeg-darwin.tar.gz");
     const unpacked = path.join(work, "ffmpeg-darwin");
     await mkdir(unpacked);
     run("tar", ["-xzf", archive, "-C", unpacked], work);
@@ -334,15 +357,15 @@ async function ffmpeg(target, work, bin, licenses) {
       path.join(unpacked, "COPYING.LGPLv2.1"),
       path.join(licenses, "ffmpeg-COPYING.LGPLv2.1.txt"),
     );
-    for (const name of FFMPEG.darwin.notices)
+    for (const name of darwin.notices)
       await cp(
         path.join(unpacked, name),
         path.join(licenses, `ffmpeg-${name}`),
       );
     return {
-      license: FFMPEG.darwin.license,
-      url: FFMPEG.darwin.url,
-      sha256: FFMPEG.darwin.sha256,
+      license: darwin.license,
+      url: darwin.url,
+      sha256: darwin.sha256,
       source: FFMPEG.source,
     };
   }
@@ -434,12 +457,18 @@ async function checkTools(target, prefix) {
         throw new Error(`${name} is not static`);
     }
   }
-  if (target === "darwin-arm64")
-    for (const name of ["livekit-server", "ffmpeg", "ffprobe"])
-      if (!machoSigned(await readFile(path.join(bin, name))))
+  if (target.startsWith("darwin-")) {
+    const expectedArch = target === "darwin-x64" ? "x64" : "arm64";
+    for (const name of ["livekit-server", "ffmpeg", "ffprobe"]) {
+      const content = await readFile(path.join(bin, name));
+      if (machoArch(content) !== expectedArch)
+        throw new Error(`${name} is not a ${expectedArch} Mach-O binary`);
+      if (target === "darwin-arm64" && !machoSigned(content))
         throw new Error(
           `${name} has no signature; arm64 macOS refuses to run it`,
         );
+    }
+  }
   if (target === "win32-x64")
     for (const name of ["livekit-server", "ffmpeg", "ffprobe"]) {
       const content = await readFile(path.join(bin, `${name}.exe`));
@@ -535,7 +564,7 @@ if (
     const name = process.argv[index];
     if (!["--output", "--target"].includes(name) || !process.argv[index + 1])
       throw new Error(
-        "Usage: prepare-native-voice-tools.mjs --target darwin-arm64|linux-x64|win32-x64 --output DIRECTORY",
+        "Usage: prepare-native-voice-tools.mjs --target darwin-arm64|darwin-x64|linux-x64|win32-x64 --output DIRECTORY",
       );
     options[name.slice(2)] = process.argv[index + 1];
   }

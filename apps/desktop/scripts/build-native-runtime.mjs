@@ -55,7 +55,12 @@ import { resolveSourceArchive } from "./build-teamhub.mjs";
 
 const desktop = fileURLToPath(new URL("../", import.meta.url));
 
-export const RUNTIME_TARGETS = ["win32-x64", "linux-x64", "darwin-arm64"];
+export const RUNTIME_TARGETS = [
+  "win32-x64",
+  "linux-x64",
+  "darwin-arm64",
+  "darwin-x64",
+];
 // The folder the archive holds, which the desktop unpacks into the source as
 // .simplexai-runtime/offline (packages/local-installation/src/native-runtime.ts).
 const ROOT = "runtime";
@@ -70,6 +75,7 @@ export const RUNTIME_LAYOUTS = {
   "win32-x64": "archive",
   "linux-x64": "archive",
   "darwin-arm64": "directory",
+  "darwin-x64": "directory",
 };
 export const RUNTIME_DIRECTORY = ROOT;
 
@@ -77,6 +83,7 @@ const PLATFORMS = {
   "win32-x64": { os: "win32", cpu: "x64" },
   "linux-x64": { os: "linux", cpu: "x64", libc: "glibc" },
   "darwin-arm64": { os: "darwin", cpu: "arm64" },
+  "darwin-x64": { os: "darwin", cpu: "x64" },
 };
 
 // Packages the services load at runtime by a name esbuild cannot see:

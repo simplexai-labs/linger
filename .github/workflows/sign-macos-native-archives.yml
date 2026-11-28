@@ -1,15 +1,15 @@
 name: Sign macOS native archives
 
-# A new PostgreSQL or voice tools archive for darwin-arm64 holds Mach-O files
-# with only the linker's ad-hoc signature, and Apple refuses to notarize an app
-# that bundles one. Run this on the branch that pins the new archive: it signs
-# those files with the release's Developer ID secrets, uploads the signed
-# archives to the native-deps prerelease beside the originals, and keeps the
-# updated distribution/darwin-arm64.json as the `distribution` artifact for
-# the branch owner to commit (`gh run download <run-id> -n distribution -D
-# apps/desktop/distribution`). It pushes nothing: a commit pushed with the
-# workflow's token would not start the pull request's checks.
-# docs/desktop-release.md#bundled-archives describes the flow.
+# A new PostgreSQL or voice tools archive for macOS (darwin-arm64 or darwin-x64)
+# holds Mach-O files with only the linker's ad-hoc signature (or unsigned), and
+# Apple refuses to notarize an app that bundles one. Run this on the branch that
+# pins the new archive: it signs those files with the release's Developer ID
+# secrets, uploads the signed archives to the native-deps prerelease beside the
+# originals, and keeps the updated distribution/darwin-*.json files as the
+# `distribution` artifact for the branch owner to commit (`gh run download
+# <run-id> -n distribution -D apps/desktop/distribution`). It pushes nothing: a
+# commit pushed with the workflow's token would not start the pull request's
+# checks. docs/desktop-release.md#bundled-archives describes the flow.
 on:
   workflow_dispatch:
 
@@ -45,7 +45,11 @@ jobs:
           tar -xzf "$RUNNER_TEMP/rcodesign.tar.gz" -C "$RUNNER_TEMP"
           echo "RCODESIGN=$RUNNER_TEMP/$name/rcodesign" >>"$GITHUB_ENV"
       - name: Fetch the pinned archives
-        run: scripts/ci/desktop-release.sh fetch-native darwin-arm64
+        run: |
+          set -euo pipefail
+          for target in darwin-arm64 darwin-x64; do
+            scripts/ci/desktop-release.sh fetch-native "$target"
+          done
       - name: Sign
         env:
           MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
@@ -61,10 +65,13 @@ jobs:
           mkdir -p "$keys"
           base64 -d <<<"$MACOS_DEVELOPER_ID_P12_BASE64" >"$keys/developer-id.p12"
           printf '%s' "$MACOS_DEVELOPER_ID_PASSWORD" >"$keys/developer-id.password"
-          python3 apps/desktop/packaging/mac/sign_native_archives.py \
-            --developer-id "$keys/developer-id.p12" \
-            --password-file "$keys/developer-id.password" \
-            --dir "$LINGER_NATIVE_POSTGRES_DIR" --rcodesign "$RCODESIGN"
+          for target in darwin-arm64 darwin-x64; do
+            python3 apps/desktop/packaging/mac/sign_native_archives.py \
+              --distribution "apps/desktop/distribution/$target.json" \
+              --developer-id "$keys/developer-id.p12" \
+              --password-file "$keys/developer-id.password" \
+              --dir "$LINGER_NATIVE_POSTGRES_DIR" --rcodesign "$RCODESIGN"
+          done
       - name: Remove signing files
         if: always()
         run: rm -rf "$RUNNER_TEMP/signing"
@@ -74,27 +81,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- apps/desktop/distribution/darwin-arm64.json; then
-            echo "changed=false" >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "changed=true" >>"$GITHUB_OUTPUT"
-          git show HEAD:apps/desktop/distribution/darwin-arm64.json >"$RUNNER_TEMP/before.json"
-          node -e '
-            const fs = require("fs");
-            const files = (f) => { const d = JSON.parse(fs.readFileSync(f, "utf8"));
-              return [...d.nativeSources, ...(d.voiceTools ?? [])].flatMap((s) => s.file ? [s.file] : []); };
-            const before = new Set(files(process.argv[1]));
-            for (const file of files(process.argv[2])) if (!before.has(file)) console.log(require("path").basename(file));
-          ' "$RUNNER_TEMP/before.json" apps/desktop/distribution/darwin-arm64.json >"$RUNNER_TEMP/new-archives"
-          while read -r name; do
-            gh release upload native-deps "$LINGER_NATIVE_POSTGRES_DIR/$name" --repo "$GITHUB_REPOSITORY"
-          done <"$RUNNER_TEMP/new-archives"
+          changed=false
+          mkdir -p "$RUNNER_TEMP/distribution"
+          for target in darwin-arm64 darwin-x64; do
+            dist="apps/desktop/distribution/$target.json"
+            if git diff --quiet -- "$dist"; then
+              continue
+            fi
+            changed=true
+            cp "$dist" "$RUNNER_TEMP/distribution/$target.json"
+            git show "HEAD:$dist" >"$RUNNER_TEMP/before-$target.json"
+            node -e '
+              const fs = require("fs");
+              const files = (f) => { const d = JSON.parse(fs.readFileSync(f, "utf8"));
+                return [...d.nativeSources, ...(d.voiceTools ?? [])].flatMap((s) => s.file ? [s.file] : []); };
+              const before = new Set(files(process.argv[1]));
+              for (const file of files(process.argv[2])) if (!before.has(file)) console.log(require("path").basename(file));
+            ' "$RUNNER_TEMP/before-$target.json" "$dist" >"$RUNNER_TEMP/new-archives-$target"
+            while read -r name; do
+              [ -n "$name" ] || continue
+              gh release upload native-deps "$LINGER_NATIVE_POSTGRES_DIR/$name" --repo "$GITHUB_REPOSITORY" --clobber
+            done <"$RUNNER_TEMP/new-archives-$target"
+          done
+          echo "changed=$changed" >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         if: steps.upload.outputs.changed == 'true'
         with:
           name: distribution
-          path: apps/desktop/distribution/darwin-arm64.json
+          path: ${{ runner.temp }}/distribution/*.json
       - name: Summary
         env:
           CHANGED: ${{ steps.upload.outputs.changed }}
@@ -107,6 +121,6 @@ jobs:
               echo "gh run download $GITHUB_RUN_ID --repo $GITHUB_REPOSITORY -n distribution -D apps/desktop/distribution"
               echo '```'
             else
-              echo "Every pinned darwin-arm64 archive is already signed; nothing to commit."
+              echo "Every pinned macOS archive is already signed; nothing to commit."
             fi
           } >>"$GITHUB_STEP_SUMMARY"

@@ -93,7 +93,12 @@ export function resolveDistributionFile(desktopDir, daemonTargets, env) {
   const tracked = daemonTargets
     .map((target) => path.join(desktopDir, "distribution", `${target}.json`))
     .filter((file) => existsSync(file));
-  return tracked.length === 1 ? tracked[0] : undefined;
+  if (tracked.length > 1) {
+    throw new Error(
+      `Multiple tracked distributions matched (${daemonTargets.join(", ")}); build one target at a time or set LINGER_DESKTOP_DISTRIBUTION`,
+    );
+  }
+  return tracked[0];
 }
 
 async function fileMatchesPin(file, expectedBytes, expectedSha256) {

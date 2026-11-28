@@ -161,11 +161,11 @@ setup screen sets up a Linger server on this computer too.
 | Platform                                                                                       | Package                                                                                            |
 | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | [macOS 14.0 or later, Apple silicon](https://github.com/simplexai-labs/linger/releases/latest) | `Linger-<version>-macos-arm64.dmg`                                                                 |
+| [macOS 14.0 or later, Intel](https://github.com/simplexai-labs/linger/releases/latest)         | `Linger-<version>-macos-x64.dmg`                                                                   |
 | [Windows x64](https://github.com/simplexai-labs/linger/releases/latest)                        | `Linger-<version>-windows-x64-setup.exe`, or `-windows-x64-portable.zip` to run without installing |
 | [Linux x64](https://github.com/simplexai-labs/linger/releases/latest)                          | `Linger-<version>-linux-x64.tar.gz` (glibc 2.35 or newer)                                          |
 
-There is no package for Intel Macs; use Docker Compose there. Check each
-download against `SHA256SUMS.txt` from the same release.
+Check each download against `SHA256SUMS.txt` from the same release.
 
 See [Install the desktop app](https://docs.heylinger.com/install/desktop-app)
 for the install steps and for help when setup fails.

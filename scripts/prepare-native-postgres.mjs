@@ -67,7 +67,9 @@ export function assertTarget(
   target,
   host = `${process.platform}-${process.arch}`,
 ) {
-  if (!["darwin-arm64", "linux-x64", "win32-x64"].includes(target))
+  if (
+    !["darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"].includes(target)
+  )
     throw new Error(`Unsupported target: ${target}`);
   if (target !== host)
     throw new Error("Native PostgreSQL must be built on the target host");
@@ -236,7 +238,19 @@ async function buildFromSource(work, prefix, target) {
     );
   const pg = path.join(work, SOURCES.postgres.root);
   const vector = path.join(work, SOURCES.pgvector.root);
+  const darwinArch =
+    target === "darwin-x64"
+      ? "x86_64"
+      : target === "darwin-arm64"
+        ? "arm64"
+        : undefined;
   const env = {
+    ...(darwinArch
+      ? {
+          CC: `cc -arch ${darwinArch}`,
+          MACOSX_DEPLOYMENT_TARGET: "14.0",
+        }
+      : {}),
     CFLAGS: "-O2",
     LDFLAGS: target.startsWith("linux")
       ? "-Wl,-rpath,\\$$ORIGIN/../lib"
@@ -255,11 +269,11 @@ async function buildFromSource(work, prefix, target) {
     pg,
     env,
   );
-  run("make", ["-j2"], pg);
-  run("make", ["install"], pg);
+  run("make", ["-j2"], pg, env);
+  run("make", ["install"], pg, env);
   const pgConfig = `PG_CONFIG=${path.join(prefix, "bin/pg_config")}`;
-  run("make", ["-j2", pgConfig, "OPTFLAGS="], vector);
-  run("make", ["install", pgConfig], vector);
+  run("make", ["-j2", pgConfig, "OPTFLAGS="], vector, env);
+  run("make", ["install", pgConfig], vector, env);
   await mkdir(path.join(prefix, "licenses"));
   await cp(
     path.join(pg, "COPYRIGHT"),

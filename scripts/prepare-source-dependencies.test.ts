@@ -114,8 +114,11 @@ describe("source dependencies", () => {
   });
 
   it("validates its arguments", () => {
+    expect(
+      parseSourceDependenciesArguments(["--target", "darwin-x64"]).target,
+    ).toBe("darwin-x64");
     expect(() =>
-      parseSourceDependenciesArguments(["--target", "darwin-x64"]),
+      parseSourceDependenciesArguments(["--target", "freebsd-x64"]),
     ).toThrow("--target must be one of");
     expect(() =>
       parseSourceDependenciesArguments(["--url-base", "http://cdn.example"]),

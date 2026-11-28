@@ -71,8 +71,9 @@ def main():
             continue
         path = os.path.join(args.dir, os.path.basename(source["file"]))
         if not os.path.exists(path) or os.path.getsize(path) != source["bytes"] or sha256(path) != source["sha256"]:
+            target = f"{distribution['platform']}-{distribution['arch']}"
             sys.exit(f"{path} does not match {args.distribution}; fetch it first "
-                     "(scripts/ci/desktop-release.sh fetch-native darwin-arm64)")
+                     f"(scripts/ci/desktop-release.sh fetch-native {target})")
         if unsigned_archive_files(path):
             if source["sha256"] not in source["file"]:
                 sys.exit(f"{source['file']} does not carry its sha256 in its name")

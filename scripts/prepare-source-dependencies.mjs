@@ -24,6 +24,7 @@ const repositoryRoot = path.resolve(
 // The hosts the desktop installs native source on.
 export const DEPENDENCY_TARGETS = Object.freeze([
   "darwin-arm64",
+  "darwin-x64",
   "linux-x64",
   "win32-x64",
 ]);

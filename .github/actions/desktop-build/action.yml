@@ -3,13 +3,13 @@ description: Prepare the toolchain, caches, signing material and packaging image
 
 inputs:
   target:
-    description: Desktop build target (darwin-arm64, linux-x64, or win32-x64).
+    description: Desktop build target (darwin-arm64, darwin-x64, linux-x64, or win32-x64).
     required: true
   docker-image:
     description: Packaging Docker image name (dmgtool or wintool), or empty when none is needed.
     default: ""
   require-macos-signing:
-    description: When true, fail darwin-arm64 packaging instead of ad-hoc signing if Developer ID or notary secrets are missing.
+    description: When true, fail macOS packaging instead of ad-hoc signing if Developer ID or notary secrets are missing.
     default: "false"
   ghcr-token:
     description: Token used to log in to ghcr.io for pulling prebuilt packaging images.
@@ -130,7 +130,7 @@ runs:
             sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 install -y -q pigz
         fi
     - name: Install rcodesign
-      if: inputs.target == 'darwin-arm64'
+      if: startsWith(inputs.target, 'darwin-')
       shell: bash
       run: |
         set -euo pipefail
@@ -173,7 +173,7 @@ runs:
         umask 077
         keys="$RUNNER_TEMP/signing"
         mkdir -p "$keys"
-        if [ "$TARGET" = darwin-arm64 ] && [ -n "$MACOS_DEVELOPER_ID_P12_BASE64" ]; then
+        if [[ "$TARGET" == darwin-* ]] && [ -n "$MACOS_DEVELOPER_ID_P12_BASE64" ]; then
           base64 -d <<<"$MACOS_DEVELOPER_ID_P12_BASE64" >"$keys/developer-id.p12"
           printf '%s' "$MACOS_DEVELOPER_ID_PASSWORD" >"$keys/developer-id.password"
           echo "MACOS_DEVELOPER_ID_P12=$keys/developer-id.p12" >>"$GITHUB_ENV"
@@ -233,6 +233,20 @@ runs:
       if: inputs.target == 'darwin-arm64'
       with:
         path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-arm64.app.tar.gz
+        archive: false
+        if-no-files-found: error
+        retention-days: 14
+    - uses: actions/upload-artifact@v7
+      if: inputs.target == 'darwin-x64'
+      with:
+        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-x64.dmg
+        archive: false
+        if-no-files-found: error
+        retention-days: 14
+    - uses: actions/upload-artifact@v7
+      if: inputs.target == 'darwin-x64'
+      with:
+        path: ${{ env.RELEASE_OUT }}/assets/Linger-${{ env.DESKTOP_VERSION }}-macos-x64.app.tar.gz
         archive: false
         if-no-files-found: error
         retention-days: 14

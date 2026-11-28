@@ -32,7 +32,7 @@ set -euo pipefail
 # Inputs (environment):
 #   DESKTOP_VERSION              release version, as printed by `version` (compile, package)
 #   DESKTOP_REQUIRE_MACOS_SIGNING
-#                                when `true`, fail darwin-arm64 packaging instead of ad-hoc signing
+#                                when `true`, fail macOS packaging instead of ad-hoc signing
 #                                if Developer ID or notary credentials are missing
 #   DESKTOP_REQUIRE_UPDATE_KEY   when `true`, fail `manifest` instead of warning if
 #                                DESKTOP_UPDATE_KEY is unset
@@ -56,7 +56,7 @@ set -euo pipefail
 #                                set, ensure_docker_image tries pulling
 #                                <prefix>-<tag>:<dockerfile-sha256> before
 #                                building locally
-#   RCODESIGN                    rcodesign executable for darwin-arm64 (PATH)
+#   RCODESIGN                    rcodesign executable for macOS targets (PATH)
 #   MACOS_DEVELOPER_ID_P12, MACOS_DEVELOPER_ID_PASSWORD_FILE
 #                                Developer ID Application .p12 and a file with its
 #                                password; without them the app is signed ad hoc
@@ -77,7 +77,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 desktop="$repo_root/apps/desktop"
 version_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
-targets='darwin-arm64 linux-x64 win32-x64'
+targets='darwin-arm64 darwin-x64 linux-x64 win32-x64'
 package_name="${DESKTOP_PACKAGE_NAME:-linger-desktop-dry-run}"
 default_release_repo=simplexai-labs/linger
 
@@ -313,13 +313,13 @@ ensure_docker_image() {
 }
 
 package_darwin() {
-  local version="$1" pkg="$2" assets="$3" args=()
+  local arch="$1" version="$2" pkg="$3" assets="$4" args=()
   if [[ "${DESKTOP_REQUIRE_MACOS_SIGNING:-}" == true ]]; then
     [[ -n "${MACOS_DEVELOPER_ID_P12:-}" && -n "${MACOS_DEVELOPER_ID_PASSWORD_FILE:-}" && -n "${MACOS_NOTARY_KEY:-}" ]] ||
       die "MACOS_DEVELOPER_ID_P12, MACOS_DEVELOPER_ID_PASSWORD_FILE, and MACOS_NOTARY_KEY are required when DESKTOP_REQUIRE_MACOS_SIGNING=true (docs/desktop-release.md)"
   fi
   ensure_docker_image dmgtool "$desktop/packaging/mac"
-  args+=(--arch arm64 --rcodesign "${RCODESIGN:-rcodesign}" --out "$pkg")
+  args+=(--arch "$arch" --rcodesign "${RCODESIGN:-rcodesign}" --out "$pkg")
   if [[ -n "${MACOS_DEVELOPER_ID_P12:-}" ]]; then
     args+=(--developer-id "$MACOS_DEVELOPER_ID_P12" --developer-id-password "${MACOS_DEVELOPER_ID_PASSWORD_FILE:?MACOS_DEVELOPER_ID_PASSWORD_FILE is required with MACOS_DEVELOPER_ID_P12}")
     [[ -n "${MACOS_NOTARY_KEY:-}" ]] && args+=(--notary-key "$MACOS_NOTARY_KEY")
@@ -328,9 +328,9 @@ package_darwin() {
   fi
   args+=(--update-archive)
   (cd "$desktop" && python3 packaging/mac/package.py "${args[@]}")
-  mv "$pkg/Linger-$version-arm64.dmg" "$assets/Linger-$version-macos-arm64.dmg"
+  mv "$pkg/Linger-$version-$arch.dmg" "$assets/Linger-$version-macos-$arch.dmg"
   # The installed app replaces itself with this archive (updater.ts).
-  mv "$pkg/Linger-$version-arm64.app.tar.gz" "$assets/Linger-$version-macos-arm64.app.tar.gz"
+  mv "$pkg/Linger-$version-$arch.app.tar.gz" "$assets/Linger-$version-macos-$arch.app.tar.gz"
 }
 
 package_linux() {
@@ -370,7 +370,7 @@ cmd_package() {
   mkdir -p "$assets"
   set_package_version "$version"
   case "$target" in
-    darwin-arm64) package_darwin "$version" "$pkg" "$assets" ;;
+    darwin-arm64 | darwin-x64) package_darwin "${target#darwin-}" "$version" "$pkg" "$assets" ;;
     linux-x64) package_linux "$version" "$pkg" "$assets" ;;
     win32-x64) package_windows "$version" "$pkg" "$assets" ;;
   esac
@@ -390,8 +390,8 @@ cmd_build() {
 # The package each platform's installed app updates from, keyed like
 # packageFor in apps/desktop/src/main/update-manifest.ts. Linux and the
 # portable Windows folder only link to the release.
-update_packages='darwin-arm64:macos-arm64.app.tar.gz linux-x64:linux-x64.tar.gz win32-x64:windows-x64-setup.exe'
-required_installers='macos-arm64.dmg linux-x64.tar.gz windows-x64-setup.exe'
+update_packages='darwin-arm64:macos-arm64.app.tar.gz darwin-x64:macos-x64.app.tar.gz linux-x64:linux-x64.tar.gz win32-x64:windows-x64-setup.exe'
+required_installers='macos-arm64.dmg macos-x64.dmg linux-x64.tar.gz windows-x64-setup.exe'
 
 # manifest.json lists every platform's package with its size and sha256, and
 # manifest.json.sig is its Ed25519 signature, made with DESKTOP_UPDATE_KEY.

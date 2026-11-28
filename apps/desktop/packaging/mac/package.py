@@ -2,8 +2,9 @@
 """Builds Linger-<version>-<arch>.dmg for Apple silicon and Intel on Linux.
 
 Inputs: the desktop bundle from `node build.mjs` (dist/, which includes the
-teamhub CLI and, built with LINGER_DESKTOP_DAEMON_TARGETS=darwin-arm64,darwin-x64,
-the Go daemon for each arch) and the official Electron zip for each arch.
+teamhub CLI, distribution/<target>.json, and the Go daemon built with
+LINGER_DESKTOP_DAEMON_TARGETS=darwin-<arch> for one target at a time) and the
+official Electron zip for that arch.
 Tools: the `dmgtool` image from ./Dockerfile (hfsplus, dmg, ImageMagick) and
 rcodesign for the signature Apple silicon requires.
 
@@ -79,9 +80,8 @@ PRIVACY_USAGE = {
 # LiveKit's ffmpeg are built for 14.0; keep in step with MIN_MACOS in
 # src/main/local-server.ts.
 MINIMUM_MACOS = "14.0"
-# Targets build.mjs bundles the Native services for; Intel Macs install them
-# from the network.
-NATIVE_TARGETS = {"darwin-arm64"}
+# Targets build.mjs bundles the Native services for.
+NATIVE_TARGETS = {"darwin-arm64", "darwin-x64"}
 NATIVE = os.path.join("Contents", "Resources", "app", "dist", "installer", "native")
 RESOURCES = os.path.join("Contents", "Resources")
 TOOLS_NODE = "Contents/Resources/runtime/bin/node"
@@ -645,7 +645,15 @@ def main():
     for arch in arches:
         if not os.path.exists(daemon_binary(arch)):
             sys.exit(f"dist/ is missing the daemon for darwin-{arch}; run "
-                     "`LINGER_DESKTOP_DAEMON_TARGETS=darwin-arm64,darwin-x64 node build.mjs` first")
+                     f"`LINGER_DESKTOP_DAEMON_TARGETS=darwin-{arch} node build.mjs` first")
+        dist_json = os.path.join(DESKTOP, "dist", "installer", "distribution.json")
+        if os.path.exists(dist_json):
+            with open(dist_json) as dist_file:
+                dist = json.load(dist_file)
+            dist_target = f"{dist.get('platform')}-{dist.get('arch')}"
+            if dist_target != f"darwin-{arch}":
+                sys.exit(f"dist/installer/distribution.json is for {dist_target}, not darwin-{arch}; "
+                         f"run `LINGER_DESKTOP_DAEMON_TARGETS=darwin-{arch} node build.mjs` first")
     for arch in arches:
         if f"darwin-{arch}" in NATIVE_TARGETS:
             check_teamhub(f"darwin-{arch}")

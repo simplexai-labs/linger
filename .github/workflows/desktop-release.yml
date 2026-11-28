@@ -1,7 +1,7 @@
 name: Desktop release
 
-# Pushing a desktop-v<version> tag builds the macOS (Apple silicon), Linux x64
-# and Windows x64 packages and uploads them, with SHA256SUMS.txt, to the
+# Pushing a desktop-v<version> tag builds the macOS (Apple silicon and Intel),
+# Linux x64 and Windows x64 packages and uploads them, with SHA256SUMS.txt, to the
 # GitHub Release of that tag in RELEASE_REPO (simplexai-labs/linger unless the
 # variable says otherwise). Stable tags create a draft release so release notes
 # are attached before notifying subscribers or updating releases/latest
@@ -98,9 +98,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [darwin-arm64, linux-x64]
+        target: [darwin-arm64, darwin-x64, linux-x64]
         include:
           - target: darwin-arm64
+            docker_image: dmgtool
+          - target: darwin-x64
             docker_image: dmgtool
           - target: linux-x64
             docker_image: ""

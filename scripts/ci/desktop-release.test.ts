@@ -82,6 +82,7 @@ describe("desktop-release.sh checksums", () => {
   const version = "0.16.33";
   const required = [
     `Linger-${version}-macos-arm64.dmg`,
+    `Linger-${version}-macos-x64.dmg`,
     `Linger-${version}-linux-x64.tar.gz`,
     `Linger-${version}-windows-x64-setup.exe`,
   ];
@@ -109,7 +110,7 @@ describe("desktop-release.sh checksums", () => {
 
   it("refuses a release without one of the installers", () => {
     const dir = folder();
-    for (const name of required.slice(0, 2))
+    for (const name of required.slice(0, 3))
       writeFileSync(join(dir, name), name);
 
     const result = run(["checksums", dir, version]);
@@ -135,6 +136,7 @@ describe("desktop-release.sh manifest", () => {
   const version = "0.16.33";
   const packages = {
     "darwin-arm64": `Linger-${version}-macos-arm64.app.tar.gz`,
+    "darwin-x64": `Linger-${version}-macos-x64.app.tar.gz`,
     "linux-x64": `Linger-${version}-linux-x64.tar.gz`,
     "win32-x64": `Linger-${version}-windows-x64-setup.exe`,
   };
@@ -143,6 +145,7 @@ describe("desktop-release.sh manifest", () => {
     for (const name of Object.values(packages))
       writeFileSync(join(dir, name), name);
     writeFileSync(join(dir, `Linger-${version}-macos-arm64.dmg`), "dmg");
+    writeFileSync(join(dir, `Linger-${version}-macos-x64.dmg`), "dmg");
     return dir;
   };
   // A copy of the script beside an update-manifest.ts holding a throwaway
@@ -262,7 +265,7 @@ describe("desktop-release.sh manifest", () => {
 describe("desktop-release.sh build", () => {
   it("needs a known target and a version", () => {
     expect(
-      run(["build", "darwin-x64"], { DESKTOP_VERSION: "1.0.0" }).status,
+      run(["build", "freebsd-x64"], { DESKTOP_VERSION: "1.0.0" }).status,
     ).toBe(1);
     expect(run(["compile", "linux-x64"]).stderr).toContain("DESKTOP_VERSION");
   });
@@ -786,6 +789,7 @@ describe("desktop-release.sh publish", () => {
     const { bin, log, notes } = setupPublish(
       [
         "Linger-1.0.0-macos-arm64.dmg",
+        "Linger-1.0.0-macos-x64.dmg",
         "Linger-1.0.0-linux-x64.tar.gz",
         "Linger-1.0.0-windows-x64-setup.exe",
         "SHA256SUMS.txt",
@@ -886,13 +890,15 @@ describe("desktop-release.sh package Docker images", () => {
       [
         "#!/bin/sh",
         'out=""',
+        'arch="arm64"',
         'while [ "$#" -gt 0 ]; do',
         '  if [ "$1" = --out ]; then out="$2"; shift 2; continue; fi',
+        '  if [ "$1" = --arch ]; then arch="$2"; shift 2; continue; fi',
         "  shift",
         "done",
         'mkdir -p "$out"',
-        `: >"$out/Linger-${version}-arm64.dmg"`,
-        `: >"$out/Linger-${version}-arm64.app.tar.gz"`,
+        `: >"$out/Linger-${version}-$arch.dmg"`,
+        `: >"$out/Linger-${version}-$arch.app.tar.gz"`,
         "",
       ].join("\n"),
     );
@@ -985,5 +991,31 @@ describe("desktop-release.sh package Docker images", () => {
       `build --label linger.dockerfile.sha256=${dockerfileSha} -t dmgtool`,
     );
     expect(calls).not.toContain("build -q");
+  });
+
+  it("packages darwin-x64 with --arch x64 into macos-x64 release assets", () => {
+    const fixture = setupPackage(
+      `if [ "$1" = image ] && [ "$2" = inspect ]; then echo "${dockerfileSha}"; exit 0; fi\nexit 1`,
+    );
+
+    const result = run(
+      ["package", "darwin-x64"],
+      {
+        PATH: `${fixture.bin}${delimiter}${process.env.PATH ?? ""}`,
+        DESKTOP_VERSION: version,
+        RELEASE_OUT: fixture.out,
+      },
+      fixture.script,
+    );
+
+    expect(result.status).toBe(0);
+    expect(
+      existsSync(join(fixture.out, `assets/Linger-${version}-macos-x64.dmg`)),
+    ).toBe(true);
+    expect(
+      existsSync(
+        join(fixture.out, `assets/Linger-${version}-macos-x64.app.tar.gz`),
+      ),
+    ).toBe(true);
   });
 });

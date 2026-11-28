@@ -552,7 +552,12 @@ export function legacyMigrationResult(
     }),
   };
 }
-const NATIVE_TARGETS = new Set(["darwin-arm64", "linux-x64", "win32-x64"]);
+const NATIVE_TARGETS = new Set([
+  "darwin-arm64",
+  "darwin-x64",
+  "linux-x64",
+  "win32-x64",
+]);
 const MiB = 1024 * 1024;
 const GiB = 1024 * MiB;
 // The free space a first installation asks for, as the installer advises;
