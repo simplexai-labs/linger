@@ -116,6 +116,9 @@ teamhub web connect tavily
 Email canvases support Gmail, Outlook and Feishu Mail. New emails open in a
 canvas and the Human sends from its card; replies keep the mail reply command.
 `teamhub outlook canvas-draft` saves a canvas to Outlook without sending.
+`teamhub gmail draft --update <draft-id>` can fill in a missing subject or body
+when you pass `--subject` or `--content`. The update still requires enough
+information to preserve the draft fields you leave out.
 
 Room collaboration can continue across text and Live voice. In an AnotherMe
 private chat, `teamhub room handoff --inbox room:<room-id> --content <request>`

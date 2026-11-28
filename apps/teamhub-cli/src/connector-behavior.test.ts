@@ -152,6 +152,99 @@ const mail = {
   },
 };
 describe("reviewed Connector command boundaries", () => {
+  it.each([
+    { subject: false, body: true },
+    { subject: true, body: false },
+    { subject: false, body: false },
+  ])(
+    "completes a Gmail draft with subject=$subject and body=$body",
+    async ({ subject, body }) => {
+      const updated = vi.fn(() => ({
+        id: "draft_one",
+        message: { id: "new_message" },
+      }));
+      const f = await fixture("gmail", (slug, args) => {
+        if (slug === "GMAIL_GET_DRAFT") {
+          return {
+            id: "draft_one",
+            message: {
+              id: "old_message",
+              threadId: "thread_one",
+              payload: {
+                mimeType: "text/plain",
+                headers: [
+                  { name: "To", value: "alice@example.test" },
+                  { name: "Cc", value: "bob@example.test" },
+                  ...(subject
+                    ? [{ name: "Subject", value: "Original subject" }]
+                    : []),
+                ],
+                body: body
+                  ? { data: Buffer.from("Original body").toString("base64url") }
+                  : { size: 0 },
+              },
+            },
+          };
+        }
+        if (slug === "GMAIL_UPDATE_DRAFT") {
+          expect(args).toMatchObject({
+            draft_id: "draft_one",
+            recipient_email: "alice@example.test",
+            cc: ["bob@example.test"],
+            subject: subject ? "Original subject" : "New subject",
+            body: body ? "Original body" : "New body",
+            thread_id: "thread_one",
+          });
+          return updated();
+        }
+        throw new Error(`Unexpected tool ${slug}`);
+      });
+      const result = await f.run([
+        "gmail",
+        "draft",
+        "--update",
+        "draft_one",
+        ...(!subject ? ["--subject", "New subject"] : []),
+        ...(!body ? ["--content", "New body"] : []),
+      ]);
+      expect(result.error).toBeUndefined();
+      expect(result.code).toBe(0);
+      expect(result.result.result).toMatchObject({
+        action: "draft_updated",
+        draftId: "draft_one",
+      });
+      expect(updated).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("rejects Gmail draft updates when an omitted field cannot be preserved", async () => {
+    const f = await fixture("gmail", (slug) => {
+      expect(slug).toBe("GMAIL_GET_DRAFT");
+      return {
+        id: "draft_one",
+        message: {
+          ...mail,
+          subject: undefined,
+          payload: {
+            ...mail.payload,
+            headers: [{ name: "To", value: "alice@example.test" }],
+          },
+        },
+      };
+    });
+    const result = await f.run([
+      "gmail",
+      "draft",
+      "--update",
+      "draft_one",
+      "--content",
+      "New body",
+    ]);
+    expect(result.error.error.code).toBe("incomplete_response");
+    expect(
+      f.calls.filter((call) => call.url.endsWith("/apps/tools/execute")),
+    ).toHaveLength(1);
+  });
   it("provides all 68 reviewed leaves as offline help and schemas, excluding removed apps", async () => {
     const f = await fixture("gmail", () => {
       throw new Error("offline must not call provider");

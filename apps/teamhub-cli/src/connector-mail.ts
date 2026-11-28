@@ -1003,7 +1003,8 @@ async function updateDraft(
         "Cannot prove all unchanged Gmail draft headers are present.",
         { operation_rejected: true },
       );
-    const mail = decodeMail(app, record(raw.message), false, true);
+    const keepsBody = input.content === undefined;
+    const mail = decodeMail(app, original, false, true, keepsBody);
     const existing = (mail.attachments ?? []) as Json[];
     if (existing.some((file) => file.isInline || !file.attachmentId))
       throw new CliError(
@@ -1012,6 +1013,7 @@ async function updateDraft(
         { operation_rejected: true },
       );
     if (
+      keepsBody &&
       containsHTMLPart(record(original.payload)) &&
       mail.bodyHtml === undefined
     )
@@ -1031,16 +1033,24 @@ async function updateDraft(
         "The original attachment sizes are unavailable; the draft was not changed.",
         { operation_rejected: true },
       );
+    const to = (input.to ??
+      (mail.to as Json[] | undefined)?.map((x) => x.email)) as
+      | string[]
+      | undefined;
+    const subject = input.subject ?? mail.subject;
+    const body = input.content ?? mail.bodyHtml ?? mail.bodyText;
+    if (!to?.length || subject === undefined || typeof body !== "string")
+      throw new CliError(
+        "incomplete_response",
+        "Cannot reconstruct all unchanged draft fields.",
+        { operation_rejected: true },
+      );
     const encodedSize = [
       ...existing.map((file) => Number(file.sizeBytes)),
       ...runtime.files.map((file) => file.sizeBytes),
     ].reduce(
       (sum, size) => sum + Math.ceil(size / 3) * 4 + 2048,
-      Buffer.byteLength(
-        String(input.content ?? mail.bodyHtml ?? mail.bodyText),
-      ) *
-        2 +
-        8192,
+      Buffer.byteLength(body) * 2 + 8192,
     );
     if (encodedSize > 25 * 1024 * 1024)
       throw invalidInput(
@@ -1066,20 +1076,6 @@ async function updateDraft(
         await runtime.stageDownloadedFile(remote, "GMAIL_UPDATE_DRAFT"),
       );
     }
-    const to = (input.to ??
-      (mail.to as Json[] | undefined)?.map((x) => x.email)) as
-      | string[]
-      | undefined;
-    if (
-      !to?.length ||
-      mail.subject === undefined ||
-      (mail.bodyText === undefined && mail.bodyHtml === undefined)
-    )
-      throw new CliError(
-        "incomplete_response",
-        "Cannot reconstruct all unchanged draft fields.",
-        { operation_rejected: true },
-      );
     args = optionalFields({
       attachment: [
         ...kept,
@@ -1094,8 +1090,8 @@ async function updateDraft(
       extra_recipients: to.slice(1),
       cc: input.cc ?? (mail.cc as Json[] | undefined)?.map((x) => x.email),
       bcc: input.bcc ?? (mail.bcc as Json[] | undefined)?.map((x) => x.email),
-      subject: input.subject ?? mail.subject,
-      body: input.content ?? mail.bodyHtml ?? mail.bodyText,
+      subject,
+      body,
       is_html:
         input.content !== undefined
           ? input.bodyFormat === "html"
@@ -1274,6 +1270,7 @@ export function decodeMail(
   raw: Json,
   summary = false,
   draft = false,
+  readBody = true,
 ): Json {
   if (app === "outlook") {
     const recipient = (v: unknown): Json => {
@@ -1373,6 +1370,7 @@ export function decodeMail(
         }),
       );
     else if (
+      readBody &&
       typeof body.data === "string" &&
       ["text/plain", "text/html"].includes(String(part.mimeType))
     ) {
@@ -1386,13 +1384,14 @@ export function decodeMail(
   if (raw.payload && typeof raw.payload === "object")
     visit(record(raw.payload));
   if (
+    readBody &&
     result.bodyText === undefined &&
-    result.bodyHtml === undefined &&
-    typeof raw.messageText === "string"
-  )
+    result.bodyHtml === undefined
+  ) {
+    if (typeof raw.messageText !== "string")
+      throw new CliError("incomplete_response", "The mail body is incomplete.");
     result.bodyText = raw.messageText;
-  if (result.bodyText === undefined && result.bodyHtml === undefined)
-    throw new CliError("incomplete_response", "The mail body is incomplete.");
+  }
   if (
     Array.isArray(raw.attachmentList) &&
     raw.attachmentList.length > attachments.length
