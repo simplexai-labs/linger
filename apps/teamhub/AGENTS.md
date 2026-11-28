@@ -273,6 +273,10 @@ Go service owning Human HTTP/SSE, Agent callbacks, and active product state.
   `github.com/simplexai-labs/linger/contracts-go`; it resolves only
   through that `replace`.
 - Commit a persisted collaboration fact and its Room Event in the same transaction.
+- Artifact uploads check cancellation after reading the source and before
+  publishing the flushed object. A cancelled upload removes its staging file
+  instead of returning an object; an already-blocked source read still has to
+  return before cancellation can be observed.
 - PostgreSQL is recovery authority; SSE is a low-latency wake signal.
 - PostgreSQL is also the recovery authority for Agent Runtime configuration,
   Execution Context, accepted input, Inbox cursor, Local Run, RuntimeSession,

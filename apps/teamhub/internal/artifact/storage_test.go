@@ -173,6 +173,36 @@ func TestLocalStoreDoesNotPublishStableObjectAfterContextCancellation(t *testing
 	}
 }
 
+func TestLocalStoreDoesNotPublishObjectWhenFinalReadCancelsContext(t *testing.T) {
+	for name, content := range map[string][]byte{
+		"empty":    nil,
+		"content":  []byte("cancelled upload content"),
+		"at limit": bytes.Repeat([]byte("x"), 1024),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			store, err := NewLocalStore(root, 1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			reader := &cancelOnRead{contents: content, cancel: cancel}
+			object, err := store.Put(ctx, reader)
+			if !errors.Is(err, context.Canceled) || object != (Object{}) {
+				t.Fatalf("Put returned object=%+v err=%v, want no object and cancellation", object, err)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("cancelled upload left objects or staging files: %v", entries)
+			}
+		})
+	}
+}
+
 func TestLocalStorePutIfAbsentReplayDoesNotWriteOrSync(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewLocalStore(root, 1024)

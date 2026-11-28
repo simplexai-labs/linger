@@ -118,6 +118,9 @@ func (s *LocalStore) Put(ctx context.Context, source io.Reader) (Object, error) 
 	if size > s.maxBytes {
 		return Object{}, ErrTooLarge
 	}
+	if err := ctx.Err(); err != nil {
+		return Object{}, err
+	}
 	if err := temporary.Sync(); err != nil {
 		return Object{}, err
 	}
@@ -126,6 +129,9 @@ func (s *LocalStore) Put(ctx context.Context, source io.Reader) (Object, error) 
 	}
 	key, err := newObjectKey()
 	if err != nil {
+		return Object{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return Object{}, err
 	}
 	if err := os.Rename(temporaryName, filepath.Join(s.root, key)); err != nil {
