@@ -232,6 +232,7 @@ setlocal
 >"` + argvCapture + `" echo %*
 set /p "stdinLine="
 >"` + stdinCapture + `" echo(%stdinLine%
+>"` + stdoutCapture + `" echo [%~5][%~6][%~7]
 if /I "%~6"=="custom" if /I "%~7"=="search" (
   >"` + stdoutCapture + `" echo {"schema":"localmodels.library-custom-search/v1","ok":true,"query":"qwen","hub":"huggingface","format":"compatible","platform":"linux","arch":"x86_64","supported_formats":["gguf"],"results":[{"hub":"huggingface","repo_id":"bartowski/Qwen2.5-7B-Instruct-GGUF","url":"https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF","title":"Qwen2.5-7B-Instruct-GGUF","owner":"bartowski","format":"gguf","downloads":100,"likes":10,"gated":false,"compatible":true}],"warnings":[]}
   type "` + stdoutCapture + `"
@@ -250,6 +251,7 @@ if /I "%~5"=="status" (
   echo {"schema":"localmodels.library-status/v1","tool_version":"0.1.0.dev60","observed_at":"2026-11-26T00:00:00Z","host":{"platform":"linux","arch":"x86_64","os_label":"Linux","engine_label":"llama.cpp","ram_total_bytes":16000000000,"disk_free_bytes":100000000000,"gpus":[],"supported_formats":["gguf"]},"pools":[],"models":[]}
   exit /b 0
 )
+type "` + stdoutCapture + `"
 exit /b 1
 `
 		if err := os.WriteFile(scriptPath, []byte(batchScript), 0o700); err != nil {
