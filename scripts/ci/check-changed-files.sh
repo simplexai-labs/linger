@@ -3,9 +3,10 @@ set -euo pipefail
 
 # Formats, lints and checks the English-only rule on the files a change adds
 # or modifies. Published built-in Skill versions are immutable and never
-# reformatted. The client's translation catalogs under
-# apps/web/src/i18n/locales/ are formatted like any other file and are the one
-# place the English-only rule does not apply.
+# reformatted. The client's and the desktop shell's translation catalogs under
+# apps/web/src/i18n/locales/ and apps/desktop/src/i18n/locales/ are formatted
+# like any other file, and they and the root README.zh-CN.md are the only places
+# the English-only rule does not apply.
 #
 # Usage: check-changed-files.sh <base> <head>   diff two commits (the gate)
 #        check-changed-files.sh <base> --worktree
@@ -64,9 +65,10 @@ while IFS= read -r -d '' file; do
       if [[ "$app_lints" == false ]]; then eslint_files+=("$file"); fi
       ;;
   esac
-  # Translation catalogs: the Web client's and the desktop shell's.
+  # Translation catalogs (the Web client's and the desktop shell's) and the
+  # Simplified Chinese README, whose whole purpose is to be Chinese.
   case "$file" in
-    apps/web/src/i18n/locales/* | apps/desktop/src/i18n/locales/*) ;;
+    apps/web/src/i18n/locales/* | apps/desktop/src/i18n/locales/* | README.zh-CN.md) ;;
     *) english_only_files+=("$file") ;;
   esac
 done < <(list_changed)

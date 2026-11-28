@@ -19,6 +19,8 @@
   <a href="https://www.reddit.com/user/HeyLinger/"><img height="28" alt="Reddit" src="https://img.shields.io/badge/Reddit-FF4500?logo=reddit&logoColor=white&amp;style=for-the-badge"></a>
 </p>
 
+<p align="center"><b>English</b>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="README.zh-CN.md">&#31616;&#20307;&#20013;&#25991;</a></p>
+
 <p align="center"><a href="assets/linger-story.mp4"><picture><source media="(prefers-reduced-motion: reduce)" srcset="assets/linger-story-poster.jpg"><img src="assets/linger-story.webp" width="900" alt="Linger in 28.5 seconds: a metal laptop opens, sets up a local model and connects apps. Mail, chats and meetings become shared memory. One request assembles an agent team; an agent uses the browser and waits for approval before sending an email. A timely reminder leads to a calendar booking, then the laptop closes."></picture></a></p>
 
 - **A Claude-class brain, running locally.** A 125B model on a 12 GB GPU, on everyday Macs and PCs.
