@@ -85,10 +85,30 @@ var scriptForbidden = []string{"delivery_mode", "foreground", "screenshot_out_fi
 // arguments name an app or window of their own, which Cua lets override the
 // app the call is made on. This is the rule tool calls follow: no key
 // reaches the user's Chrome.
-func guardedScript(args, body string, deadline int64, inputLimit int, chrome int) string {
+func guardedScript(args, body string, deadline int64, inputLimit int, chrome int, allowedApps ...*scriptAppAllowlist) string {
 	pattern := make([]string, 0, len(scriptForbidden))
 	for _, word := range scriptForbidden {
 		pattern = append(pattern, regexp.QuoteMeta(word))
+	}
+	enforceApps := false
+	allowedPIDsJSON := "{}"
+	allowedBundlesJSON := "{}"
+	if len(allowedApps) > 0 && allowedApps[0] != nil {
+		enforceApps = true
+		pidMap := make(map[string]bool, len(allowedApps[0].PIDs))
+		for _, pid := range allowedApps[0].PIDs {
+			pidMap[strconv.Itoa(pid)] = true
+		}
+		bundleMap := make(map[string]bool, len(allowedApps[0].Bundles))
+		for _, bundle := range allowedApps[0].Bundles {
+			bundleMap[strings.ToLower(bundle)] = true
+		}
+		if b, err := json.Marshal(pidMap); err == nil {
+			allowedPIDsJSON = string(b)
+		}
+		if b, err := json.Marshal(bundleMap); err == nil {
+			allowedBundlesJSON = string(b)
+		}
 	}
 	source, _ := json.Marshal(`"use strict"; ` + body + "\n")
 	return strings.ReplaceAll(`const args = Object.freeze(`+args+`), DEADLINE = `+strconv.FormatInt(deadline, 10)+`; const __guarded = (() => {
@@ -97,6 +117,12 @@ const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, tes
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
 const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0, reads = [], readChars = 0, inputs = 0;
+const enforceApps = `+strconv.FormatBool(enforceApps)+`, allowedPIDs = Object.assign(Object.create(null), `+allowedPIDsJSON+`), allowedBundles = Object.assign(Object.create(null), `+allowedBundlesJSON+`);
+const appAgnosticOps = {__proto__: null, list_windows: true, check_permissions: true, report_blocker: true};
+const pidAllowed = p => typeof p === "number" && allowedPIDs[String(p)] === true;
+const bundleAllowed = s => typeof s === "string" && allowedBundles[s.toLowerCase()] === true;
+const checkAppCall = (k, c) => { if (!enforceApps) return; if (k === "getApp") { const t = c[0]; if (typeof t === "string") { if (!bundleAllowed(t)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } else if (t !== null && typeof t === "object") { if (typeof t.pid === "number") { if (!pidAllowed(t.pid)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } else if (typeof t.bundle_id === "string") { if (!bundleAllowed(t.bundle_id)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } else { throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } } else { throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } } else if (k === "call") { const opName = c[0], opArgs = c[1]; if (typeof opName === "string" && appAgnosticOps[opName] === true) return; if (opArgs === null || typeof opArgs !== "object" || !pidAllowed(opArgs.pid) || opArgs.app !== undefined || opArgs.target !== undefined) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } };
+const checkAppResult = (k, x) => { if (!enforceApps || k !== "getApp") return; if (x !== null && typeof x === "object" && typeof x.pid === "number" && !pidAllowed(x.pid)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); };
 const reading = (k, c) => k === "getState" || k === "call" && c[0] === "get_window_state";
 const keep = r => { if (r === null || typeof r !== "object" || typeof r.snapshot_id !== "string" || typeof r.pid !== "number" || typeof r.window_id !== "number") return; const read = {snapshot_id: r.snapshot_id, pid: r.pid, window_id: r.window_id}; for (const f of ["tree_markdown", "tree_diff", "since", "since_status"]) if (typeof r[f] === "string") read[f] = r[f]; const size = (read.tree_markdown || "").length + (read.tree_diff || "").length; reads[reads.length] = read; readChars += size; while (reads.length > `+strconv.Itoa(scriptReadsKept)+` || readChars > `+strconv.Itoa(scriptReadCharacters)+` && reads.length > 0) { const first = reads[0]; readChars -= (first.tree_markdown || "").length + (first.tree_diff || "").length; reads = apply(slice, reads, [1]); } };
 const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
@@ -120,8 +146,9 @@ if (limit > 0 && k === "typeText") { const given = c.length > 2 && c[2] !== null
 if (k === "getState" && (c.length === 0 || c[0] === undefined || c[0] !== null && typeof c[0] === "object" && c[0].include_screenshot === undefined)) { const t = {length: 1}; define(t, 0, {value: {include_screenshot: false, ...(c.length > 0 && c[0] !== undefined ? c[0] : {})}}); c = t; }
 if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0] > `+strconv.Itoa(scriptSleepLimit)+`) { const t = {length: 1}; define(t, 0, {value: `+strconv.Itoa(scriptSleepLimit)+`}); c = t; }
 const sends = input(k, c), fence = () => { reads = []; readChars = 0; inputs++; };
-const run = () => { if (sends) fence(); const at = inputs, r = apply(v, o, c); const seen = x => { if (sends) fence(); else if (reading(k, c) && at === inputs) keep(x); return out(x); }; const missed = e => { if (sends) fence(); throw e; }; return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [seen, missed]) : seen(r); };
+const run = () => { if (sends) fence(); const at = inputs, r = apply(v, o, c); const seen = x => { checkAppResult(k, x); if (sends) fence(); else if (reading(k, c) && at === inputs) keep(x); return out(x); }; const missed = e => { if (sends) fence(); throw e; }; return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [seen, missed]) : seen(r); };
 if (launches(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script opens no app or URL, so the site checks of launch_app hold and the key rule knows every app the script reaches; call launch_app as its own tool");
+checkAppCall(k, c);
 if (keyed(k, c, o)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
 if (limit <= 0 || !sends) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");
@@ -161,7 +188,7 @@ func forbiddenKey(value any, word string) bool {
 // into what remains of the call after waiting for the desktop lane. In a
 // reviewed Run, whose review scope is not empty, a script file runs only as
 // the judge allowed it in that scope: the body it read and the args it saw.
-func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope string, inputLimit int, chrome int) error {
+func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope string, inputLimit int, chrome int, allowedApps ...*scriptAppAllowlist) error {
 	for key := range arguments {
 		switch key {
 		case "script", "script_file", "args", "timeout_ms", "max_calls":
@@ -220,7 +247,7 @@ func scriptArguments(ctx context.Context, arguments map[string]any, reviewScope 
 	arguments["timeout_ms"] = timeout
 	delete(arguments, "script_file")
 	delete(arguments, "args")
-	arguments["script"] = guardedScript(string(encoded), script, time.Now().Add(time.Duration(timeout)*time.Millisecond).UnixMilli(), inputLimit, chrome)
+	arguments["script"] = guardedScript(string(encoded), script, time.Now().Add(time.Duration(timeout)*time.Millisecond).UnixMilli(), inputLimit, chrome, allowedApps...)
 	return nil
 }
 

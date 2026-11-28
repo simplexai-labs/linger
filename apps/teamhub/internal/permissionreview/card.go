@@ -56,6 +56,36 @@ func Card(action Action, evidence Evidence, workspace, rationale string) typedca
 	return card
 }
 
+// ComputerAppCard builds a per-app runtime permission card for window-scoped
+// macOS desktop control. It replaces action-by-action prompts with a single
+// application approval for the task or permanently on this Computer.
+func ComputerAppCard(action Action, evidence Evidence, workspace, agentName, computerID string) typedcard.RuntimePermissionCard {
+	bundleID := ""
+	appName := ""
+	if evidence.Desktop != nil {
+		bundleID = strings.TrimSpace(evidence.Desktop.BundleID)
+		appName = strings.TrimSpace(evidence.Desktop.App)
+	}
+	if appName == "" {
+		appName = bundleID
+	}
+	agentLabel := strings.TrimSpace(agentName)
+	if agentLabel == "" {
+		agentLabel = "this Agent"
+	}
+	rationale := "Window-only capture. Approving lets " + agentLabel + " read and interact with windows belonging to " + appName + "."
+	card := Card(action, evidence, workspace, rationale)
+	card.Kind = "gui"
+	card.Title = truncateRunes("Allow "+agentLabel+" to control "+appName, maxCardTitle)
+	card.ComputerApp = &typedcard.RuntimePermissionComputerApp{
+		BundleID:    bundleID,
+		AppName:     appName,
+		ComputerID:  strings.TrimSpace(computerID),
+		CanRemember: strings.TrimSpace(computerID) != "",
+	}
+	return card
+}
+
 // Title names the action in a few words, from the call and host evidence only:
 // "Edit deploy/values.yaml", "Run scripts/clean.sh", `Click "Merge" · GitLab
 // (git.example.com)`. Text the Agent wrote about its own call (a browser

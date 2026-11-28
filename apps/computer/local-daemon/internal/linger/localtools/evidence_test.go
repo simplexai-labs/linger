@@ -182,7 +182,7 @@ func TestCuaEvidenceCapturesTheWindowWithoutReplacingItsSnapshot(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "calls.jsonl")
 	c := cuaFixtureSession(t, "window-view", marker)
 	c.op.reads.observe(cuaRead(t, "window_id=9 pid=42 snapshot_id=s1\n- [3] AXButton \"Send\"", map[string]string{"snapshot_id": "s1"}))
-	evidence := c.evidence(t.Context(), json.RawMessage(`{"pid":42,"element_token":"s1:3"}`))
+	evidence := c.evidence(t.Context(), "click", json.RawMessage(`{"pid":42,"element_token":"s1:3"}`))
 	if evidence == nil || evidence.Desktop == nil || evidence.Desktop.WindowTitle != "b" ||
 		len(evidence.Desktop.Targets) != 1 || evidence.Desktop.Targets[0] != (permission.DesktopTarget{Token: "s1:3", Role: "AXButton", Name: "Send"}) {
 		t.Fatalf("evidence: %+v", evidence)

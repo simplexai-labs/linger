@@ -31,6 +31,9 @@ type LocalBinding struct {
 	// Allowed reports whether one of the binding's tool calls follows from
 	// what the Agent has already seen and runs without review.
 	Allowed func(tool string, input json.RawMessage) bool
+	// ResolveTarget identifies the desktop application (bundle_id, app) for a
+	// computer tool call before permission review.
+	ResolveTarget func(ctx context.Context, tool string, input json.RawMessage) *permission.Desktop
 	// Timeout bounds an orchestration call; zero uses the ordinary tool limit.
 	Timeout time.Duration
 }
@@ -120,6 +123,24 @@ func (s *Set) LocalEvidence(ctx context.Context, tool, input string) *permission
 	for _, binding := range s.local {
 		if binding.Name == server && binding.Evidence != nil {
 			return binding.Evidence(ctx, name, json.RawMessage(input))
+		}
+	}
+	return nil
+}
+
+// ResolveComputerTarget resolves the macOS app target (bundle_id, app) for a
+// computer tool call, or returns nil when no target resolver is bound.
+func (s *Set) ResolveComputerTarget(ctx context.Context, tool, input string) *permission.Desktop {
+	if s == nil {
+		return nil
+	}
+	server, name, ok := strings.Cut(strings.TrimPrefix(tool, "mcp__"), "__")
+	if !ok {
+		return nil
+	}
+	for _, binding := range s.local {
+		if binding.Name == server && binding.ResolveTarget != nil {
+			return binding.ResolveTarget(ctx, name, json.RawMessage(input))
 		}
 	}
 	return nil

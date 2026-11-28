@@ -86,6 +86,7 @@ export function ComputerDetail({
   activeRuntime,
   agentAvailabilities,
   agents,
+  appGrants,
   browserConnection,
   cliInstallAvailable = true,
   computer: latestComputer,
@@ -98,6 +99,8 @@ export function ComputerDetail({
   activeRuntime?: TeamHubLocalRuntimeType;
   agentAvailabilities: ReadonlyMap<string, AgentAvailability>;
   agents: TeamHubTenantAgent[];
+  /** Persistent per-app desktop grants rendered inside Access; the page owns its TeamHub reads. */
+  appGrants?: ReactNode;
   /** The browser status as a progress chip or an Access row; the page owns its TeamHub reads. */
   browserConnection?: (variant: "chip" | "row") => ReactNode;
   /** Whether the active server ships the standalone CLI daemon (`linger-computer`). */
@@ -283,6 +286,7 @@ export function ComputerDetail({
           >
             <div className="divide-y divide-border/60">
               {browserConnection?.("row")}
+              {appGrants}
               <WorkspaceRows computer={computer} />
             </div>
           </DisclosureItem>

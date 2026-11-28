@@ -19,6 +19,7 @@ func TestLocalWriteToolJudgesEveryNonReadOnlyLocalAction(t *testing.T) {
 		{"mcp__browser__browser_tabs", `{"action":"list"}`, false},
 		{"mcp__browser__browser_snapshot", `{}`, false},
 		{"mcp__computer__click", `{"x":1,"y":2}`, true},
+		{"mcp__computer__get_desktop_state", `{}`, true},
 		{"mcp__computer__type_text", `{"text":"hi"}`, true},
 		{"mcp__computer__scroll", `{}`, false},
 		{"mcp__linger__send_message", `{}`, false},
@@ -28,6 +29,40 @@ func TestLocalWriteToolJudgesEveryNonReadOnlyLocalAction(t *testing.T) {
 		if got := LocalWriteTool(testCase.tool, testCase.input); got != testCase.write {
 			t.Errorf("%s %s: write=%v", testCase.tool, testCase.input, got)
 		}
+	}
+}
+
+func TestAppAgnosticComputerReadsAndProtectedMacApps(t *testing.T) {
+	for _, tool := range []string{
+		"mcp__computer__list_windows",
+		"mcp__computer__check_permissions",
+		"mcp__computer__report_blocker",
+	} {
+		if !AppAgnosticComputerReadTool(tool) {
+			t.Errorf("expected %s to be app-agnostic computer read", tool)
+		}
+	}
+	for _, tool := range []string{
+		"mcp__computer__get_window_state",
+		"mcp__computer__get_desktop_state",
+		"mcp__computer__click",
+	} {
+		if AppAgnosticComputerReadTool(tool) {
+			t.Errorf("expected %s not to be app-agnostic computer read", tool)
+		}
+	}
+	for _, bundle := range []string{
+		"com.apple.systempreferences",
+		"COM.APPLE.KEYCHAINACCESS",
+		"com.apple.SecurityAgent",
+		"com.apple.UserNotificationCenter",
+	} {
+		if !IsProtectedMacApp(bundle) {
+			t.Errorf("expected %s to be protected macOS app", bundle)
+		}
+	}
+	if IsProtectedMacApp("com.apple.Safari") || IsProtectedMacApp("") {
+		t.Fatal("Safari or empty bundle should not be protected")
 	}
 }
 

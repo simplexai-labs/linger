@@ -122,6 +122,43 @@ func TestNormalizeDecisionAnswerForConnectionAndRoomKinds(t *testing.T) {
 	if _, _, err := normalizeDecisionAnswer(DecisionKindConnectorWrite, rememberView, DecisionAnswerCommand{Decision: "deny", Remember: true}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("remember deny: err=%v, want ErrInvalid", err)
 	}
+
+	appPermView, _ := json.Marshal(RuntimePermissionCard{
+		Kind: "gui", Title: "Allow Nova to control Safari", Tool: "mcp__computer__click", Input: "{}",
+		ComputerApp: &RuntimePermissionComputerApp{BundleID: "com.apple.Safari", AppName: "Safari", ComputerID: "computer_1", CanRemember: true},
+	})
+	appPermNoRemember, _ := json.Marshal(RuntimePermissionCard{
+		Kind: "gui", Title: "Allow Nova to control Safari", Tool: "mcp__computer__click", Input: "{}",
+		ComputerApp: &RuntimePermissionComputerApp{BundleID: "com.apple.Safari", AppName: "Safari", ComputerID: "", CanRemember: false},
+	})
+	plainPermView, _ := json.Marshal(RuntimePermissionCard{
+		Kind: "code", Title: "Run git push", Tool: "Bash", Input: `{"command":"git push"}`,
+	})
+	for _, scope := range []string{"once", "task", "always"} {
+		ans, st, err := normalizeDecisionAnswer(DecisionKindRuntimePermission, appPermView, DecisionAnswerCommand{Decision: "approve", ApprovalScope: scope})
+		if err != nil || st != "approved" || ans.ApprovalScope != scope {
+			t.Fatalf("approval_scope=%s: answer=%+v status=%q err=%v", scope, ans, st, err)
+		}
+	}
+	if _, _, err := normalizeDecisionAnswer(DecisionKindRuntimePermission, appPermNoRemember, DecisionAnswerCommand{Decision: "approve", ApprovalScope: "always"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("always on can_remember=false: err=%v, want ErrInvalid", err)
+	}
+	if _, _, err := normalizeDecisionAnswer(DecisionKindRuntimePermission, plainPermView, DecisionAnswerCommand{Decision: "approve", ApprovalScope: "task"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("task on plain runtime_permission: err=%v, want ErrInvalid", err)
+	}
+	if _, _, err := normalizeDecisionAnswer(DecisionKindRuntimePermission, appPermView, DecisionAnswerCommand{Decision: "deny", ApprovalScope: "task"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("task on deny: err=%v, want ErrInvalid", err)
+	}
+	if _, _, err := normalizeDecisionAnswer(DecisionKindConnectorWrite, rememberView, DecisionAnswerCommand{Decision: "approve", ApprovalScope: "task"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("approval_scope on connector_write: err=%v, want ErrInvalid", err)
+	}
+	notice := runtimePermissionNoticeText("decision_1", RuntimePermissionCard{
+		Title:       "Allow Nova to control Safari",
+		ComputerApp: &RuntimePermissionComputerApp{BundleID: "com.apple.Safari", AppName: "Safari"},
+	}, "approved", "")
+	if !strings.Contains(notice, "Safari") || !strings.Contains(notice, "com.apple.Safari") {
+		t.Fatalf("per-app notice=%q", notice)
+	}
 }
 
 // A Room Agent reads a connection result as the payload it always read; a

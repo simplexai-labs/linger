@@ -1960,6 +1960,7 @@ components:
             tokens name in the Agent's latest read of that window.
           properties:
             app: { type: string, maxLength: 256 }
+            bundle_id: { type: string, maxLength: 256 }
             window_title: { type: string, maxLength: 1024 }
             targets:
               type: array

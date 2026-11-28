@@ -167,6 +167,8 @@ func (a *App) publicRoutes() []contractRoute {
 		route(http.MethodPost, "/v0/tenants/:tenantId/local-computer-enrollments", nil, session, a.createLocalComputerEnrollment),
 		route(http.MethodGet, "/v0/tenants/:tenantId/local-computers", nil, session, a.listLocalComputers),
 		route(http.MethodDelete, "/v0/tenants/:tenantId/local-computers/:computerId", nil, session, a.removeLocalComputer),
+		route(http.MethodGet, "/v0/tenants/:tenantId/local-computers/:computerId/app-grants", nil, session, a.listLocalComputerAppGrants),
+		route(http.MethodDelete, "/v0/tenants/:tenantId/local-computers/:computerId/app-grants/:grantId", nil, session, a.revokeLocalComputerAppGrant),
 		route(http.MethodDelete, "/v0/tenants/:tenantId/local-computers/:computerId/browser-connection", nil, session, a.deleteLocalComputerBrowserConnection),
 		route(http.MethodGet, "/v0/tenants/:tenantId/local-computers/:computerId/browser-connection", nil, session, a.getLocalComputerBrowserConnection),
 		route(http.MethodPut, "/v0/tenants/:tenantId/local-computers/:computerId/browser-connection", nil, session, a.putLocalComputerBrowserConnection),

@@ -178,6 +178,29 @@ components:
           $ref: "#/components/schemas/RuntimePermissionPage"
         screenshot:
           $ref: "#/components/schemas/RuntimePermissionScreenshot"
+        computer_app:
+          $ref: "#/components/schemas/RuntimePermissionComputerApp"
+    RuntimePermissionComputerApp:
+      type: object
+      additionalProperties: false
+      required: [bundle_id, app_name, computer_id, can_remember]
+      description: >-
+        Per-app desktop control approval metadata when a runtime_permission
+        card grants window-scoped control of one macOS application.
+      properties:
+        bundle_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        app_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        computer_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        can_remember:
+          type: boolean
     QuestionDecisionView:
       type: object
       additionalProperties: false
@@ -610,6 +633,19 @@ components:
         ends answered once every permission it asks for is granted, denied when
         its owner declines. A search_key ends answered when someone saves any
         web search key, denied when its Human declines.
+    DecisionApprovalScope:
+      type: string
+      enum: [once, task, always]
+      x-enum-varnames:
+        [
+          DecisionApprovalScopeOnce,
+          DecisionApprovalScopeTask,
+          DecisionApprovalScopeAlways,
+        ]
+      description: >-
+        Scope of a runtime_permission approval: once (single retry), task (for
+        the current Context lifetime), or always (persistent per-app grant on
+        the Local Computer).
     DecisionAnswer:
       type: object
       additionalProperties: false
@@ -660,6 +696,8 @@ components:
         remember:
           type: boolean
           description: Whether a connector_write approval also saved "always_allow" for future non-destructive writes on this connection.
+        approval_scope:
+          $ref: "#/components/schemas/DecisionApprovalScope"
         backend:
           $ref: "./web-search.yaml#/components/schemas/WebSearchKeyBackend"
           description: >-
@@ -813,6 +851,8 @@ components:
         remember:
           type: boolean
           description: Save "always_allow" for non-destructive writes on this connection; only valid with approve on a connector_write card with can_remember=true.
+        approval_scope:
+          $ref: "#/components/schemas/DecisionApprovalScope"
         answers:
           type: object
           additionalProperties:

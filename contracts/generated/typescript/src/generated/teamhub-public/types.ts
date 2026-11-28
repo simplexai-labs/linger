@@ -603,6 +603,47 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/app-grants": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    /** List active per-app desktop control grants on one owned Local Computer. */
+    get: operations["listLocalComputerAppGrants"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v0/tenants/{tenantId}/local-computers/{computerId}/app-grants/{grantId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+        grantId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke one per-app desktop control grant on an owned Local Computer. */
+    delete: operations["revokeLocalComputerAppGrant"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v0/tenants/{tenantId}/local-computers/{computerId}/permissions": {
     parameters: {
       query?: never;
@@ -5383,6 +5424,18 @@ export interface components {
       model_id: string;
       context_window: number;
     };
+    LocalComputerAppGrant: {
+      id: components["schemas"]["Id"];
+      computer_id: string;
+      agent_actor_id: components["schemas"]["Id"];
+      agent_display_name: string;
+      bundle_id: string;
+      app_name: string;
+      created_at: components["schemas"]["Timestamp"];
+    };
+    LocalComputerAppGrantList: {
+      items: components["schemas"]["LocalComputerAppGrant"][];
+    };
     /**
      * @description The app macOS grants the permission to. linger is the Linger desktop app, which owns shell commands such as screencapture; computer_use is CuaDriver, which owns the computer-use tools.
      * @enum {string}
@@ -5791,6 +5844,11 @@ export interface components {
       | "consumed"
       | "authorizing";
     /**
+     * @description Scope of a runtime_permission approval: once (single retry), task (for the current Context lifetime), or always (persistent per-app grant on the Local Computer).
+     * @enum {string}
+     */
+    DecisionApprovalScope: "once" | "task" | "always";
+    /**
      * @description A backend that takes an API key saved in the product.
      * @enum {string}
      */
@@ -5819,6 +5877,7 @@ export interface components {
       connection_id?: components["schemas"]["Id"];
       /** @description Whether a connector_write approval also saved "always_allow" for future non-destructive writes on this connection. */
       remember?: boolean;
+      approval_scope?: components["schemas"]["DecisionApprovalScope"];
       /** @description The web search backend whose key was saved, on a configured search_key answer; it may differ from the backend the card showed. */
       backend?: components["schemas"]["WebSearchKeyBackend"];
       /** @description Map of question id to the Human's answer; only with submit. */
@@ -5922,6 +5981,13 @@ export interface components {
       width: number;
       height: number;
     };
+    /** @description Per-app desktop control approval metadata when a runtime_permission card grants window-scoped control of one macOS application. */
+    RuntimePermissionComputerApp: {
+      bundle_id: string;
+      app_name: string;
+      computer_id: string;
+      can_remember: boolean;
+    };
     /** @description The view of a runtime_permission decision: a tool call that needs the sponsor's approval. title is built by rules from the call and host evidence, never by the judge model; tool and input are the full call. */
     RuntimePermissionDecisionView: {
       /**
@@ -5940,6 +6006,7 @@ export interface components {
       patch?: string;
       page?: components["schemas"]["RuntimePermissionPage"];
       screenshot?: components["schemas"]["RuntimePermissionScreenshot"];
+      computer_app?: components["schemas"]["RuntimePermissionComputerApp"];
     };
     /** @description The view of an AnotherMe setup decision. A profile_setup_apps card lists the Connected App keys it offers; a profile_setup_sources card has no fields. */
     ProfileSetupDecisionView: {
@@ -6492,6 +6559,7 @@ export interface components {
       connection_id?: components["schemas"]["Id"];
       /** @description Save "always_allow" for non-destructive writes on this connection; only valid with approve on a connector_write card with can_remember=true. */
       remember?: boolean;
+      approval_scope?: components["schemas"]["DecisionApprovalScope"];
       answers?: {
         [key: string]: components["schemas"]["DecisionAnswerValue"];
       };
@@ -10031,6 +10099,57 @@ export interface operations {
       502: components["responses"]["ModelSourceRefused"];
       503: components["responses"]["ModelSourceRefused"];
       504: components["responses"]["ModelSourceRefused"];
+    };
+  };
+  listLocalComputerAppGrants: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Active desktop app grants for this Local Computer. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalComputerAppGrantList"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+    };
+  };
+  revokeLocalComputerAppGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenantId: components["parameters"]["TenantId"];
+        computerId: components["parameters"]["ComputerId"];
+        grantId: components["schemas"]["Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Desktop app grant revoked. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
     };
   };
   getLocalComputerPermissions: {

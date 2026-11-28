@@ -118,6 +118,12 @@ export function cardNoticeLines(
 
   switch (card.kind) {
     case "runtime_permission":
+      if (card.answer?.approval_scope === "always") {
+        return [line(cardsMessages.noticeAlwaysAllowed, { title, who })];
+      }
+      if (card.answer?.approval_scope === "task") {
+        return [line(cardsMessages.noticeAllowedForTask, { title, who })];
+      }
       return [
         card.status === "consumed"
           ? line(cardsMessages.noticeAllowedOnceRan, { title, who })

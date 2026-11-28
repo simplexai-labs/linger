@@ -1,4 +1,5 @@
 export interface RoomCardDecision {
+  approvalScope?: "once" | "task" | "always";
   connectionId?: string;
   answers?: Record<string, string | string[]>;
   attachmentUploadIds?: string[];

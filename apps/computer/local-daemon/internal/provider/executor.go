@@ -70,7 +70,12 @@ type OperationSpec struct {
 	LocalEvidence func(ctx context.Context, tool, input string) *permission.Evidence
 	// LocalAllowed reports whether a local browser or desktop call runs
 	// without review.
-	LocalAllowed         func(tool, input string) bool
+	LocalAllowed func(tool, input string) bool
+	// ResolveComputerTarget resolves the macOS application target for a
+	// computer tool call before permission review.
+	ResolveComputerTarget func(ctx context.Context, tool, input string) *permission.Desktop
+	// ApprovedComputerApps seeds per-app desktop grants for this Run.
+	ApprovedComputerApps []string
 	RegisterToolReviewer func(*permission.Reviewer) (func(), error)
 	ClaudeSkillNames     []string
 	// ContextSkillDigest identifies the Skill packages of the Context View
@@ -187,6 +192,8 @@ func (e Executor) PrepareProvider(ctx context.Context, spec OperationSpec) (Resu
 	spec.TrustedLocalMCPTools = nil
 	spec.LocalEvidence = nil
 	spec.LocalAllowed = nil
+	spec.ResolveComputerTarget = nil
+	spec.ApprovedComputerApps = nil
 	spec.RegisterToolReviewer = nil
 	execution, err := e.Start(ctx, spec, func(context.Context, protocol.Event) error { return nil })
 	if err != nil {
@@ -567,7 +574,16 @@ func (e Executor) Start(ctx context.Context, spec OperationSpec, emit EmitFunc) 
 		}
 		var reviewer *permission.Reviewer
 		if spec.ReviewsPermissions() {
-			reviewer = &permission.Reviewer{Requester: bridge, TeamHubCommands: teamhubCommands, ScriptScope: permission.ScriptScope(spec.AgentID, spec.ScopeID), LocalEvidence: spec.LocalEvidence, LocalAllowed: spec.LocalAllowed, Environment: permission.Environment{
+			var approved map[string]bool
+			if len(spec.ApprovedComputerApps) > 0 {
+				approved = make(map[string]bool, len(spec.ApprovedComputerApps))
+				for _, bundleID := range spec.ApprovedComputerApps {
+					if trimmed := strings.TrimSpace(bundleID); trimmed != "" {
+						approved[strings.ToLower(trimmed)] = true
+					}
+				}
+			}
+			reviewer = &permission.Reviewer{Requester: bridge, TeamHubCommands: teamhubCommands, ScriptScope: permission.ScriptScope(spec.AgentID, spec.ScopeID), LocalEvidence: spec.LocalEvidence, LocalAllowed: spec.LocalAllowed, ResolveComputerTarget: spec.ResolveComputerTarget, ApprovedComputerApps: approved, Environment: permission.Environment{
 				RuntimeVersion: spec.CodexVersion, Platform: runtime.GOOS, Workspace: spec.WorkingDirectory,
 			}}
 		}

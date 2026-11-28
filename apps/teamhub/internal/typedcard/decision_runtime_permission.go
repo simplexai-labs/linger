@@ -59,6 +59,18 @@ type RuntimePermissionCard struct {
 	// Screenshot describes the image stored beside the card. The projection
 	// adds the URL only the decision owner can read.
 	Screenshot *RuntimePermissionScreenshot `json:"screenshot,omitempty"`
+	// ComputerApp is set when the card approves window-scoped control of one
+	// macOS desktop application rather than a single tool call.
+	ComputerApp *RuntimePermissionComputerApp `json:"computer_app,omitempty"`
+}
+
+// RuntimePermissionComputerApp identifies the desktop application a per-app
+// runtime permission card grants window-scoped control over.
+type RuntimePermissionComputerApp struct {
+	BundleID    string `json:"bundle_id"`
+	AppName     string `json:"app_name"`
+	ComputerID  string `json:"computer_id"`
+	CanRemember bool   `json:"can_remember"`
 }
 
 // RuntimePermissionScreenshot describes the screenshot stored beside a card.
@@ -207,6 +219,9 @@ func requireRuntimeRun(ctx context.Context, tx pgx.Tx, data []byte) error {
 func runtimePermissionNoticeText(decisionID string, view RuntimePermissionCard, status, comment string) string {
 	switch status {
 	case "approved", "consumed":
+		if view.ComputerApp != nil && view.ComputerApp.AppName != "" {
+			return fmt.Sprintf("Approval %s was granted for %s (%s). Continue your task and retry the action now.", decisionID, view.ComputerApp.AppName, view.ComputerApp.BundleID)
+		}
 		return fmt.Sprintf("Approval %s was granted: %s\nRetry that call once with exactly the same arguments; this approval covers only that one call.", decisionID, view.Title)
 	case "denied":
 		return deniedNotice(fmt.Sprintf("Approval %s was denied: %s", decisionID, view.Title), comment)

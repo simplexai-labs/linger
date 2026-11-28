@@ -88,6 +88,21 @@ func (s *Set) closeToolReviewer() {
 	s.ui.mu.Unlock()
 }
 
+// ApprovedComputerApps returns the desktop bundle IDs currently approved by
+// this Operation's reviewer, or nil when none is bound.
+func (s *Set) ApprovedComputerApps() []string {
+	if s == nil || s.ui == nil {
+		return nil
+	}
+	s.ui.mu.Lock()
+	reviewer := s.ui.reviewer
+	s.ui.mu.Unlock()
+	if reviewer == nil {
+		return nil
+	}
+	return reviewer.ApprovedComputerAppList()
+}
+
 // ToolReviewerReady reports whether this operation can review nested UI calls.
 func (s *Set) ToolReviewerReady() bool {
 	if s == nil || s.ui == nil {

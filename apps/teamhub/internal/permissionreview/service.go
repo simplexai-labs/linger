@@ -81,6 +81,15 @@ const (
 )
 
 func (s *Service) Review(ctx context.Context, input ReviewInput) (Outcome, error) {
+	if isComputerAppReview(input) && s.Pool != nil && s.Cards != nil {
+		authority, err := s.loadAuthority(ctx, input)
+		if err != nil {
+			return Outcome{}, err
+		}
+		digest := ActionDigest(input.Action, input.Evidence)
+		input.Action.Digest = digest
+		return s.reviewComputerApp(ctx, input, authority, digest)
+	}
 	if s.Judge == nil {
 		// No judge model is configured: the review is off and the Runtime's
 		// own rules decide alone, as they did before the review existed.
@@ -193,6 +202,7 @@ type authority struct {
 	agentActorID      string
 	agentManagementID string
 	agentName         string
+	computerID        string
 	sponsorActorID    string
 	sponsorName       string
 	kind              string
@@ -208,7 +218,7 @@ func (s *Service) loadAuthority(ctx context.Context, input ReviewInput) (authori
 	// for a meta, and the Task's origin Room (the creating meta's Room) for an
 	// alter_ego. The sponsor's current direct Room is the fallback.
 	err := s.Pool.QueryRow(ctx, `SELECT context.tenant_id, context.agent_actor_id, context.agent_management_id,
- agent.display_name, registration.created_by_actor_id, sponsor.display_name, context.context_kind,
+ agent.display_name, coalesce(registration.computer_id, ''), registration.created_by_actor_id, sponsor.display_name, context.context_kind,
  CASE
    WHEN context.context_kind='meta' THEN context.room_id
    WHEN context.context_kind='alter_ego' THEN (SELECT link.room_id FROM work_item_room_links link
@@ -223,7 +233,7 @@ func (s *Service) loadAuthority(ctx context.Context, input ReviewInput) (authori
  JOIN actors sponsor ON sponsor.id=registration.created_by_actor_id AND sponsor.tenant_id=context.tenant_id
  WHERE context.context_key=$1 AND context.terminal_reason IS NULL`,
 		input.ContextKey, input.RunID).Scan(&a.tenantID, &a.agentActorID, &a.agentManagementID, &a.agentName,
-		&a.sponsorActorID, &a.sponsorName, &a.kind, &roomID, &running)
+		&a.computerID, &a.sponsorActorID, &a.sponsorName, &a.kind, &roomID, &running)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return authority{}, ErrConflict
 	}
@@ -383,11 +393,74 @@ func (s *Service) priorDecisions(ctx context.Context, contextKey, digest string)
 	return priors, rows.Err()
 }
 
+func isComputerAppReview(input ReviewInput) bool {
+	return input.Action.Surface == "computer" &&
+		input.Evidence.Desktop != nil &&
+		strings.TrimSpace(input.Evidence.Desktop.BundleID) != ""
+}
+
+// reviewComputerApp enforces per-app desktop grants without invoking the LLM
+// judge: a persistent grant or an active task approval allows immediately;
+// otherwise one per-app approval card is opened (or reused while pending).
+func (s *Service) reviewComputerApp(ctx context.Context, input ReviewInput, a authority, digest string) (Outcome, error) {
+	bundleID := strings.TrimSpace(input.Evidence.Desktop.BundleID)
+	if a.computerID != "" {
+		var granted bool
+		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM local_computer_app_grants
+			WHERE tenant_id=$1 AND computer_id=$2 AND agent_actor_id=$3
+			  AND lower(bundle_id)=lower($4) AND status='active'
+		)`, a.tenantID, a.computerID, a.agentActorID, bundleID).Scan(&granted); err != nil {
+			return Outcome{}, err
+		}
+		if granted {
+			return Outcome{Decision: DecisionAllow}, nil
+		}
+	}
+	var taskApproved bool
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM decisions
+		WHERE kind='runtime_permission'
+		  AND request->>'context_key'=$1
+		  AND lower(view->'computer_app'->>'bundle_id')=lower($2)
+		  AND status IN ('approved','consumed')
+		  AND answer->>'approval_scope' IN ('task','always')
+		  AND (expires_at IS NULL OR expires_at>clock_timestamp())
+	)`, input.ContextKey, bundleID).Scan(&taskApproved); err != nil {
+		return Outcome{}, err
+	}
+	if taskApproved {
+		return Outcome{Decision: DecisionAllow}, nil
+	}
+	var pending string
+	err := s.Pool.QueryRow(ctx, `SELECT decision.id FROM decisions decision
+ JOIN rooms room ON room.id=decision.room_id AND room.deletion_started_at IS NULL
+ JOIN active_room_members approver ON approver.room_id=decision.room_id AND approver.actor_id=decision.decider_actor_id
+ WHERE decision.kind='runtime_permission'
+   AND decision.request->>'context_key'=$1
+   AND lower(decision.view->'computer_app'->>'bundle_id')=lower($2)
+   AND decision.status='pending'
+   AND (decision.expires_at IS NULL OR decision.expires_at>clock_timestamp())
+ ORDER BY decision.created_at DESC LIMIT 1`, input.ContextKey, bundleID).Scan(&pending)
+	if err == nil {
+		return Outcome{Decision: DecisionNeedsApproval, InteractionID: pending, Message: fmt.Sprintf(approvalMessage, pending)}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Outcome{}, err
+	}
+	card := ComputerAppCard(input.Action, input.Evidence, input.Environment.Workspace, a.agentName, a.computerID)
+	return s.openCardWithView(ctx, input, a, digest, card)
+}
+
 func (s *Service) openCard(ctx context.Context, input ReviewInput, a authority, digest string, verdict Verdict) (Outcome, error) {
+	card := Card(input.Action, input.Evidence, input.Environment.Workspace, verdict.Rationale)
+	return s.openCardWithView(ctx, input, a, digest, card)
+}
+
+func (s *Service) openCardWithView(ctx context.Context, input ReviewInput, a authority, digest string, card typedcard.RuntimePermissionCard) (Outcome, error) {
 	if a.cardRoomID == "" {
 		return Outcome{Decision: DecisionUnavailable, Message: unavailableMessage}, nil
 	}
-	card := Card(input.Action, input.Evidence, input.Environment.Workspace, verdict.Rationale)
 	binding, _ := json.Marshal(map[string]any{
 		"context_key": input.ContextKey, "execution_run_ref": input.RunID, "operation_id": input.OperationID,
 		"request_id": input.RequestID, "kind": typedcard.RuntimePermissionKind,

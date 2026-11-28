@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +39,13 @@ type Reviewer struct {
 	// what the Agent has seen, such as following a link of its page, and
 	// runs without review. It is nil when the Run has no local tools.
 	LocalAllowed func(tool, input string) bool
+	// ResolveComputerTarget resolves the macOS application target (bundle_id,
+	// app, window_title) for a computer tool call. When non-nil, per-app
+	// gating applies to all app-targeted computer tools.
+	ResolveComputerTarget func(ctx context.Context, tool, input string) *Desktop
+	// ApprovedComputerApps seeds bundle IDs already granted for this Run.
+	// Runtime approvals in this Run are added live under mu.
+	ApprovedComputerApps map[string]bool
 	// Now is the clock of verdict reuse; nil means time.Now.
 	Now func() time.Time
 	// ScriptScope is the ScriptScope of the Run's Agent and Context; a Skill
@@ -49,6 +58,59 @@ type Reviewer struct {
 	reuse map[string]time.Time
 }
 
+// ApproveComputerApp records bundleID as approved for the remainder of this Run.
+func (r *Reviewer) ApproveComputerApp(bundleID string) {
+	bundleID = strings.TrimSpace(bundleID)
+	if r == nil || bundleID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ApprovedComputerApps == nil {
+		r.ApprovedComputerApps = map[string]bool{}
+	}
+	r.ApprovedComputerApps[strings.ToLower(bundleID)] = true
+}
+
+// ComputerAppApproved reports whether bundleID is approved for this Run.
+func (r *Reviewer) ComputerAppApproved(bundleID string) bool {
+	bundleID = strings.TrimSpace(bundleID)
+	if r == nil || bundleID == "" {
+		return false
+	}
+	lower := strings.ToLower(bundleID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ApprovedComputerApps[bundleID] || r.ApprovedComputerApps[lower] {
+		return true
+	}
+	for granted := range r.ApprovedComputerApps {
+		if strings.EqualFold(granted, bundleID) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApprovedComputerAppList returns a snapshot of approved bundle IDs for this Run.
+func (r *Reviewer) ApprovedComputerAppList() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.ApprovedComputerApps) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(r.ApprovedComputerApps))
+	for bundleID, allowed := range r.ApprovedComputerApps {
+		if allowed {
+			out = append(out, bundleID)
+		}
+	}
+	return out
+}
+
 // Review allows the Daemon's own read-only tools, local calls that follow
 // what the Agent has seen, the read-only and TeamHub commands the Runtime
 // rules could not match, and a desktop navigation step whose shape the judge
@@ -56,9 +118,35 @@ type Reviewer struct {
 // everything else. Every failure answers Unavailable: the Runtime must not
 // run a call nobody judged.
 func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
-	if ReadOnlyLocalTool(request.Action.Tool, request.Action.Input) ||
-		r.LocalAllowed != nil && r.LocalAllowed(request.Action.Tool, request.Action.Input) {
-		return Verdict{Decision: Allow}
+	var computerTarget *Desktop
+	if strings.HasPrefix(request.Action.Tool, "mcp__computer__") {
+		if AppAgnosticComputerReadTool(request.Action.Tool) {
+			return Verdict{Decision: Allow}
+		}
+		if r.ResolveComputerTarget != nil {
+			computerTarget = r.ResolveComputerTarget(ctx, request.Action.Tool, request.Action.Input)
+			if computerTarget != nil && strings.TrimSpace(computerTarget.BundleID) != "" {
+				if IsProtectedMacApp(computerTarget.BundleID) {
+					name := computerTarget.App
+					if name == "" {
+						name = computerTarget.BundleID
+					}
+					return Verdict{
+						Decision: Deny,
+						Message:  fmt.Sprintf("Access to %s (%s) is blocked by system privacy policy. Ask the user to perform this step directly.", name, computerTarget.BundleID),
+					}
+				}
+				if r.ComputerAppApproved(computerTarget.BundleID) {
+					return Verdict{Decision: Allow}
+				}
+			}
+		}
+	}
+	if computerTarget == nil || strings.TrimSpace(computerTarget.BundleID) == "" {
+		if ReadOnlyLocalTool(request.Action.Tool, request.Action.Input) ||
+			r.LocalAllowed != nil && r.LocalAllowed(request.Action.Tool, request.Action.Input) {
+			return Verdict{Decision: Allow}
+		}
 	}
 	if request.Action.Tool == "Bash" && SystemPrivacyUI(request.Action.Command) {
 		return Verdict{Decision: Deny, Message: SystemPrivacyUIMessage}
@@ -86,11 +174,28 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 		}
 	}
 	reuseKey, reusable := GUIReuseKey(request.Action.Tool, request.Action.Input)
-	if reusable && r.reused(reuseKey) {
+	if computerTarget == nil && reusable && r.reused(reuseKey) {
 		return Verdict{Decision: Allow}
 	}
-	if r.LocalEvidence != nil && request.Evidence == nil && LocalWriteTool(request.Action.Tool, request.Action.Input) {
+	if r.LocalEvidence != nil && request.Evidence == nil && (LocalWriteTool(request.Action.Tool, request.Action.Input) || (computerTarget != nil && computerTarget.BundleID != "")) {
 		request.Evidence = r.LocalEvidence(ctx, request.Action.Tool, request.Action.Input)
+	}
+	if computerTarget != nil && computerTarget.BundleID != "" {
+		if request.Evidence == nil {
+			request.Evidence = &Evidence{}
+		}
+		if request.Evidence.Desktop == nil {
+			request.Evidence.Desktop = &Desktop{}
+		}
+		if request.Evidence.Desktop.BundleID == "" {
+			request.Evidence.Desktop.BundleID = computerTarget.BundleID
+		}
+		if request.Evidence.Desktop.App == "" {
+			request.Evidence.Desktop.App = computerTarget.App
+		}
+		if request.Evidence.Desktop.WindowTitle == "" {
+			request.Evidence.Desktop.WindowTitle = computerTarget.WindowTitle
+		}
 	}
 	request.Environment = r.Environment
 	encoded, err := json.Marshal(request)
@@ -135,6 +240,9 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 			r.remember(reuseKey, verdict.Decision)
 		}
 		if verdict.Decision == Allow {
+			if computerTarget != nil && computerTarget.BundleID != "" {
+				r.ApproveComputerApp(computerTarget.BundleID)
+			}
 			recordApprovedScript(r.ScriptScope, request, r.now())
 		}
 		return verdict

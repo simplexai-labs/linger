@@ -115,3 +115,47 @@ components:
         permission:
           $ref: "#/components/schemas/ComputerPermissionId"
           description: Required for prompt and open_settings.
+    LocalComputerAppGrant:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          computer_id,
+          agent_actor_id,
+          agent_display_name,
+          bundle_id,
+          app_name,
+          created_at,
+        ]
+      properties:
+        id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        computer_id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        agent_actor_id:
+          $ref: "./common.yaml#/components/schemas/Id"
+        agent_display_name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        bundle_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        app_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        created_at:
+          $ref: "./common.yaml#/components/schemas/Timestamp"
+    LocalComputerAppGrantList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalComputerAppGrant"

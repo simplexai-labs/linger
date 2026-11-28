@@ -196,6 +196,7 @@ function ApprovalDecision({
   const state = decisionState(card, now);
   const roomCreation = card.kind === "room_creation";
   const write = card.connector_write;
+  const computerApp = card.runtime_permission?.computer_app;
   const email =
     write?.kind === "message" &&
     (write.app === "gmail" ||
@@ -212,12 +213,16 @@ function ApprovalDecision({
   async function decide(
     decision: "approve" | "deny",
     reason?: string,
-    options?: { remember?: boolean },
+    options?: {
+      approvalScope?: "once" | "task" | "always";
+      remember?: boolean;
+    },
   ) {
     setDecisionError(null);
     setSubmitting(true);
     try {
       await onDecision({
+        approvalScope: options?.approvalScope,
         decision,
         expectedVersion: card.version,
         feedback: reason || undefined,
@@ -274,6 +279,13 @@ function ApprovalDecision({
         )}
         {/* Why the review stopped the call: what a person weighs before
             allowing it, so it stays in view. */}
+        {computerApp ? (
+          <div className="flex flex-wrap items-center gap-1.5 pb-1.5">
+            <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {t(cardsMessages.windowOnlyCapture)}
+            </span>
+          </div>
+        ) : null}
         {card.runtime_permission?.rationale?.trim() ? (
           <p className="pb-1.5 text-xs text-app-muted [overflow-wrap:anywhere]">
             {card.runtime_permission.rationale}
@@ -334,12 +346,23 @@ function ApprovalDecision({
                 denyLabel={t(words.deny)}
                 denyRisk={words.denyRisk}
                 disabled={submitting}
-                onApprove={() => void decide("approve")}
+                onApprove={() =>
+                  void decide(
+                    "approve",
+                    undefined,
+                    computerApp ? { approvalScope: "task" } : undefined,
+                  )
+                }
                 onApproveRemember={
                   write?.can_remember
                     ? () =>
                         void decide("approve", undefined, { remember: true })
-                    : undefined
+                    : computerApp?.can_remember
+                      ? () =>
+                          void decide("approve", undefined, {
+                            approvalScope: "always",
+                          })
+                      : undefined
                 }
                 onDeny={(reason) => void decide("deny", reason)}
                 reasonRequired={roomCreation}
@@ -348,7 +371,11 @@ function ApprovalDecision({
                     ? t(cardsMessages.alwaysAllowApp, {
                         app: connectedAppDisplayName(write.app),
                       })
-                    : undefined
+                    : computerApp?.can_remember
+                      ? t(cardsMessages.alwaysAllowApp, {
+                          app: computerApp.app_name || computerApp.bundle_id,
+                        })
+                      : undefined
                 }
               />
             )}
@@ -432,6 +459,14 @@ function approvalWords(card: DecisionMessageCard): ApprovalWords {
       denied: cardsMessages.notApplied,
       running: cardsMessages.applying,
     };
+  if (card.runtime_permission?.computer_app)
+    return {
+      approve: cardsMessages.allowForThisTask,
+      approved: cardsMessages.allowedForThisTask,
+      deny: cardsMessages.dontAllow,
+      denied: cardsMessages.notAllowed,
+      running: cardsMessages.running,
+    };
   if (card.runtime_permission)
     return {
       approve: cardsMessages.allowOnce,
@@ -504,6 +539,14 @@ function approvalSummary(
         size={16}
       />
     );
+    if (permission.computer_app) {
+      return {
+        detail: permission.computer_app.bundle_id,
+        icon,
+        title:
+          permission.computer_app.app_name || permission.computer_app.bundle_id,
+      };
+    }
     // Without a reason the bubble already reads the title; name the tool.
     return permission.title === prompt.trim()
       ? {
@@ -586,18 +629,25 @@ function doneLine(
   translation: Translation,
 ): { icon: IconSvgElement; text: string; tone: ReceiptTone } | null {
   const { t } = translation;
-  const approved = t(words.approved);
+  const approved =
+    card.kind === "runtime_permission" &&
+    card.answer?.approval_scope === "always"
+      ? t(cardsMessages.alwaysAllowed)
+      : t(words.approved);
   const outcome = card.outcome?.trim();
   switch (state) {
     case "approved":
       return {
         icon: Tick02Icon,
-        text: card.expires_at
-          ? t(cardsMessages.approvedUntil, {
-              approved,
-              time: formatTime(card.expires_at, translation),
-            })
-          : approved,
+        text:
+          card.answer?.approval_scope === "always"
+            ? approved
+            : card.expires_at
+              ? t(cardsMessages.approvedUntil, {
+                  approved,
+                  time: formatTime(card.expires_at, translation),
+                })
+              : approved,
         tone: "success",
       };
     case "used":

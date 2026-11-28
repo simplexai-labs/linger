@@ -121,3 +121,32 @@ func TestCardCarriesTheFullCallAndItsEvidence(t *testing.T) {
 		t.Fatalf("desktop card=%+v", desktop)
 	}
 }
+
+func TestComputerAppCardCarriesPerAppMetadata(t *testing.T) {
+	t.Parallel()
+	card := ComputerAppCard(
+		Action{Surface: "computer", Tool: "mcp__computer__get_window_state", Input: `{"pid":42}`},
+		Evidence{Desktop: &DesktopEvidence{BundleID: "com.apple.Safari", App: "Safari", WindowTitle: "Docs"}},
+		"/work",
+		"Nova",
+		"computer_1",
+	)
+	if card.Kind != "gui" || card.Title != "Allow Nova to control Safari" || !strings.Contains(card.Rationale, "Window-only capture") {
+		t.Fatalf("card=%+v", card)
+	}
+	if card.ComputerApp == nil || card.ComputerApp.BundleID != "com.apple.Safari" || card.ComputerApp.AppName != "Safari" ||
+		card.ComputerApp.ComputerID != "computer_1" || !card.ComputerApp.CanRemember {
+		t.Fatalf("computer_app=%+v", card.ComputerApp)
+	}
+
+	noComputer := ComputerAppCard(
+		Action{Surface: "computer", Tool: "mcp__computer__click"},
+		Evidence{Desktop: &DesktopEvidence{BundleID: "com.apple.Notes"}},
+		"",
+		"",
+		"",
+	)
+	if noComputer.Title != "Allow this Agent to control com.apple.Notes" || noComputer.ComputerApp == nil || noComputer.ComputerApp.CanRemember {
+		t.Fatalf("no-computer card=%+v", noComputer)
+	}
+}

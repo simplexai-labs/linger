@@ -66,6 +66,7 @@ type Browser struct {
 // element tokens name in the Agent's latest read of that window.
 type Desktop struct {
 	App         string          `json:"app,omitempty"`
+	BundleID    string          `json:"bundle_id,omitempty"`
 	WindowTitle string          `json:"window_title,omitempty"`
 	Targets     []DesktopTarget `json:"targets,omitempty"`
 }

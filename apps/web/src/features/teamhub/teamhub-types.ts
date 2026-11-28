@@ -22,6 +22,10 @@ export type TeamHubPocketNotePage = components["schemas"]["PocketNotePage"];
 export type TeamHubLocalRuntimeType = components["schemas"]["LocalRuntimeType"];
 export type TeamHubLocalComputerPage =
   components["schemas"]["LocalComputerPage"];
+export type TeamHubLocalComputerAppGrant =
+  components["schemas"]["LocalComputerAppGrant"];
+export type TeamHubLocalComputerAppGrantList =
+  components["schemas"]["LocalComputerAppGrantList"];
 export type TeamHubBrowserConnectionStatus =
   components["schemas"]["BrowserConnectionStatus"];
 export type TeamHubTenantAgent = components["schemas"]["TenantAgent"];

@@ -1056,6 +1056,49 @@ paths:
           $ref: '../components/model-source.yaml#/components/responses/ModelSourceRefused'
         '504':
           $ref: '../components/model-source.yaml#/components/responses/ModelSourceRefused'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/app-grants:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+    get:
+      tags: [Local Computers]
+      operationId: listLocalComputerAppGrants
+      summary: List active per-app desktop control grants on one owned Local Computer.
+      responses:
+        '200':
+          description: Active desktop app grants for this Local Computer.
+          content:
+            application/json:
+              schema:
+                $ref: '../components/computer-permissions.yaml#/components/schemas/LocalComputerAppGrantList'
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
+  /v0/tenants/{tenantId}/local-computers/{computerId}/app-grants/{grantId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/ComputerId'
+      - name: grantId
+        in: path
+        required: true
+        schema:
+          $ref: '../components/common.yaml#/components/schemas/Id'
+    delete:
+      tags: [Local Computers]
+      operationId: revokeLocalComputerAppGrant
+      summary: Revoke one per-app desktop control grant on an owned Local Computer.
+      responses:
+        '204':
+          description: Desktop app grant revoked.
+        '401':
+          $ref: '../components/common.yaml#/components/responses/Unauthenticated'
+        '403':
+          $ref: '../components/common.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: '../components/common.yaml#/components/responses/NotFound'
   /v0/tenants/{tenantId}/local-computers/{computerId}/permissions:
     parameters:
       - $ref: '#/components/parameters/TenantId'

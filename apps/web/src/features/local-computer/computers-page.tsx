@@ -23,6 +23,7 @@ import { useT } from "@/i18n/use-translation";
 
 import { projectAgentAvailabilitySnapshots } from "./agent-availability";
 import { ComputerBrowserConnection } from "./browser-connection/computer-browser-connection";
+import { ComputerAppGrants } from "./computer-app-grants";
 import { ComputerDetail } from "./computer-detail";
 import { ComputerDirectory } from "./computer-directory";
 import {
@@ -255,6 +256,12 @@ export function ComputersPage() {
               activeRuntime={modelSource.data?.status?.runtime}
               agentAvailabilities={agentAvailabilities}
               agents={selectedAgents}
+              appGrants={
+                <ComputerAppGrants
+                  computerId={selectedComputer.computer_id}
+                  tenantId={tenantId}
+                />
+              }
               browserConnection={(variant) => (
                 <ComputerBrowserConnection
                   computerId={selectedComputer.computer_id}

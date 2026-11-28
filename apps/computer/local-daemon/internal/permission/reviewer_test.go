@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -279,5 +280,66 @@ func TestReviewerEvaluatesPowerShellSeparately(t *testing.T) {
 		if got := Surface("PowerShell", command); got != want {
 			t.Errorf("Surface(PowerShell, %q) = %q, want %q", command, got, want)
 		}
+	}
+}
+
+func TestReviewerPerAppComputerGate(t *testing.T) {
+	requester := newFakeRequester()
+	targets := map[string]*Desktop{
+		`{"pid":1}`: {BundleID: "com.apple.systempreferences", App: "System Settings"},
+		`{"pid":2}`: {BundleID: "com.apple.Notes", App: "Notes", WindowTitle: "Inbox"},
+		`{"pid":3}`: {BundleID: "com.apple.Safari", App: "Safari", WindowTitle: "Docs"},
+	}
+	reviewer := &Reviewer{
+		Requester:            requester,
+		ApprovedComputerApps: map[string]bool{"com.apple.notes": true},
+		ResolveComputerTarget: func(_ context.Context, _ string, input string) *Desktop {
+			return targets[input]
+		},
+	}
+
+	// App-agnostic reads always allow without review.
+	for _, tool := range []string{"mcp__computer__list_windows", "mcp__computer__check_permissions"} {
+		if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: tool, Input: `{}`}}); verdict.Decision != Allow {
+			t.Fatalf("%s: got %+v", tool, verdict)
+		}
+	}
+
+	// Protected macOS privacy apps are hard-denied locally.
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":1}`}}); verdict.Decision != Deny || !strings.Contains(verdict.Message, "com.apple.systempreferences") {
+		t.Fatalf("protected app verdict = %+v", verdict)
+	}
+
+	// Already-approved bundle allows immediately without calling TeamHub.
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":2}`}}); verdict.Decision != Allow {
+		t.Fatalf("approved app verdict = %+v", verdict)
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("unexpected review requests: %v", requester.requests)
+	}
+
+	// Unapproved bundle triggers TeamHub review carrying bundle_id, app, and window_title.
+	verdictCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__get_window_state", Input: `{"pid":3}`}})
+	id := <-requester.sent
+	payload := requester.requests[id]
+	evidence := payload["evidence"].(map[string]any)
+	desktop := evidence["desktop"].(map[string]any)
+	if desktop["bundle_id"] != "com.apple.Safari" || desktop["app"] != "Safari" || desktop["window_title"] != "Docs" {
+		t.Fatalf("desktop evidence = %v", desktop)
+	}
+	requester.answer(t, id, `{"decision":"allow"}`)
+	if got := <-verdictCh; got.Decision != Allow {
+		t.Fatalf("safari allow verdict = %+v", got)
+	}
+
+	// Subsequent calls against Safari are cached in ApprovedComputerApps.
+	if !reviewer.ComputerAppApproved("com.apple.Safari") {
+		t.Fatal("expected Safari to be cached as approved")
+	}
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":3}`}}); verdict.Decision != Allow {
+		t.Fatalf("cached safari verdict = %+v", verdict)
+	}
+	if len(requester.requests) != 1 {
+		t.Fatalf("expected 1 total review request, got %d", len(requester.requests))
 	}
 }

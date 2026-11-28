@@ -151,6 +151,7 @@ type BrowserEvidence struct {
 // DesktopEvidence is the window a desktop action targets and the elements
 // its tokens name.
 type DesktopEvidence struct {
+	BundleID    string          `json:"bundle_id,omitempty"`
 	App         string          `json:"app,omitempty"`
 	WindowTitle string          `json:"window_title,omitempty"`
 	Targets     []DesktopTarget `json:"targets,omitempty"`

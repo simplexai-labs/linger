@@ -32,6 +32,23 @@ var evidenceTimeout = 5 * time.Second
 // permission request.
 const maxScreenshotBytes = 262144 / 4 * 3
 
+// guardTarget runs a desktop target resolver only while the Operation's tools are open.
+func (op *operation) guardTarget(resolve func(context.Context, string, json.RawMessage) *permission.Desktop) func(context.Context, string, json.RawMessage) *permission.Desktop {
+	return func(ctx context.Context, name string, input json.RawMessage) *permission.Desktop {
+		op.mu.Lock()
+		if op.closing {
+			op.mu.Unlock()
+			return nil
+		}
+		op.active.Add(1)
+		op.mu.Unlock()
+		defer op.active.Done()
+		ctx, cancel := context.WithTimeout(ctx, evidenceTimeout)
+		defer cancel()
+		return resolve(ctx, name, input)
+	}
+}
+
 // guard runs an evidence collector only while the Operation's tools are open.
 func (op *operation) guard(collect func(context.Context, string, json.RawMessage) *permission.Evidence) func(context.Context, string, json.RawMessage) *permission.Evidence {
 	return func(ctx context.Context, name string, input json.RawMessage) *permission.Evidence {
@@ -147,9 +164,12 @@ func (op *operation) computerEvidence(ctx context.Context, name string, input js
 	cua := op.cua
 	op.cuaMu.Unlock()
 	if cua == nil || cua.retired() {
+		if target := op.resolveAppTarget(ctx, name, input); target != nil {
+			return &permission.Evidence{Desktop: target}
+		}
 		return nil
 	}
-	return cua.evidence(ctx, input)
+	return cua.evidence(ctx, name, input)
 }
 
 // desktopSteps are the steps a desktop call sends: the call itself, or the
@@ -172,7 +192,7 @@ func desktopSteps(input json.RawMessage) []map[string]any {
 	return steps
 }
 
-func (c *cuaSession) evidence(ctx context.Context, input json.RawMessage) *permission.Evidence {
+func (c *cuaSession) evidence(ctx context.Context, name string, input json.RawMessage) *permission.Evidence {
 	desktop := &permission.Desktop{}
 	var window *windowKey
 	var app any
@@ -202,7 +222,20 @@ func (c *cuaSession) evidence(ctx context.Context, input json.RawMessage) *permi
 		}
 	}
 	if window == nil {
+		if target := c.op.resolveAppTarget(ctx, name, input); target != nil {
+			desktop.BundleID = target.BundleID
+			if desktop.App == "" {
+				desktop.App = target.App
+			}
+			return &permission.Evidence{Desktop: desktop}
+		}
 		return nil
+	}
+	if bundleID, appName, ok := pidAppIdentity(ctx, int(window.pid)); ok {
+		desktop.BundleID = bundleID
+		if desktop.App == "" {
+			desktop.App = appName
+		}
 	}
 	windows, _ := c.appWindows(ctx, float64(window.pid))
 	for _, listed := range windows {

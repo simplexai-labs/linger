@@ -894,6 +894,16 @@ function installSeedRoutes(server: TeamHubTestServer, seed: TeamHubTestSeed) {
     )
     .on(
       "GET",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/app-grants",
+      () => ({ items: [] }),
+    )
+    .on(
+      "DELETE",
+      "/v0/tenants/{tenantId}/local-computers/{computerId}/app-grants/{grantId}",
+      () => new Response(null, { status: 204 }),
+    )
+    .on(
+      "GET",
       "/v0/tenants/{tenantId}/personal-wiki/graph",
       () =>
         new Response("<!doctype html><title>Graph</title>", {

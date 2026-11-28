@@ -848,6 +848,27 @@ func (e DecisionAnswerDecision) Valid() bool {
 	}
 }
 
+// Defines values for DecisionApprovalScope.
+const (
+	DecisionApprovalScopeAlways DecisionApprovalScope = "always"
+	DecisionApprovalScopeOnce   DecisionApprovalScope = "once"
+	DecisionApprovalScopeTask   DecisionApprovalScope = "task"
+)
+
+// Valid indicates whether the value is a known member of the DecisionApprovalScope enum.
+func (e DecisionApprovalScope) Valid() bool {
+	switch e {
+	case DecisionApprovalScopeAlways:
+		return true
+	case DecisionApprovalScopeOnce:
+		return true
+	case DecisionApprovalScopeTask:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DecisionKind.
 const (
 	DecisionKindAgentChange         DecisionKind = "agent_change"
@@ -6037,6 +6058,9 @@ type DecisionAnswer struct {
 	// Answers Map of question id to the Human's answer; only with submit.
 	Answers *map[string]DecisionAnswerValue `json:"answers,omitempty"`
 
+	// ApprovalScope Scope of a runtime_permission approval: once (single retry), task (for the current Context lifetime), or always (persistent per-app grant on the Local Computer).
+	ApprovalScope *DecisionApprovalScope `json:"approval_scope,omitempty"`
+
 	// AttachmentUploadIds Message attachment uploads a profile_setup_sources "done" answer attaches to the Human's message; same rules as message creation.
 	AttachmentUploadIds *[]AttachmentUploadToken `json:"attachment_upload_ids,omitempty"`
 
@@ -6073,6 +6097,9 @@ type DecisionAnswerValue0 = string
 // DecisionAnswerValue1 defines model for .
 type DecisionAnswerValue1 = []string
 
+// DecisionApprovalScope Scope of a runtime_permission approval: once (single retry), task (for the current Context lifetime), or always (persistent per-app grant on the Local Computer).
+type DecisionApprovalScope string
+
 // DecisionKind profile_setup_apps and profile_setup_sources are the AnotherMe setup cards; only TeamHub opens them, never an Agent.
 type DecisionKind string
 
@@ -6095,8 +6122,11 @@ type DecisionQuestionOption struct {
 
 // DecisionRequest The answer the card's kind takes, with the fields DecisionAnswer describes for it.
 type DecisionRequest struct {
-	Answers             *map[string]DecisionAnswerValue `json:"answers,omitempty"`
-	AttachmentUploadIds *[]AttachmentUploadToken        `json:"attachment_upload_ids,omitempty"`
+	Answers *map[string]DecisionAnswerValue `json:"answers,omitempty"`
+
+	// ApprovalScope Scope of a runtime_permission approval: once (single retry), task (for the current Context lifetime), or always (persistent per-app grant on the Local Computer).
+	ApprovalScope       *DecisionApprovalScope   `json:"approval_scope,omitempty"`
+	AttachmentUploadIds *[]AttachmentUploadToken `json:"attachment_upload_ids,omitempty"`
 
 	// Comment A reason with deny (required for room_creation), or a note with submit.
 	Comment *string `json:"comment,omitempty"`
@@ -7365,6 +7395,27 @@ type LocalComputerPlatform string
 
 // LocalComputerStatus defines model for LocalComputer.Status.
 type LocalComputerStatus string
+
+// LocalComputerAppGrant defines model for LocalComputerAppGrant.
+type LocalComputerAppGrant struct {
+	// AgentActorId Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	AgentActorId     Id     `json:"agent_actor_id"`
+	AgentDisplayName string `json:"agent_display_name"`
+	AppName          string `json:"app_name"`
+	BundleId         string `json:"bundle_id"`
+	ComputerId       string `json:"computer_id"`
+
+	// CreatedAt UTC timestamp in RFC 3339 format with an explicit offset.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque, case-sensitive identifier. Clients must not infer type or time from it.
+	Id Id `json:"id"`
+}
+
+// LocalComputerAppGrantList defines model for LocalComputerAppGrantList.
+type LocalComputerAppGrantList struct {
+	Items []LocalComputerAppGrant `json:"items"`
+}
 
 // LocalComputerCredentialBundle defines model for LocalComputerCredentialBundle.
 type LocalComputerCredentialBundle struct {
@@ -9529,8 +9580,19 @@ type RoutineUpdateRequest struct {
 // RoutineWeekday defines model for RoutineWeekday.
 type RoutineWeekday string
 
+// RuntimePermissionComputerApp Per-app desktop control approval metadata when a runtime_permission card grants window-scoped control of one macOS application.
+type RuntimePermissionComputerApp struct {
+	AppName     string `json:"app_name"`
+	BundleId    string `json:"bundle_id"`
+	CanRemember bool   `json:"can_remember"`
+	ComputerId  string `json:"computer_id"`
+}
+
 // RuntimePermissionDecisionView The view of a runtime_permission decision: a tool call that needs the sponsor's approval. title is built by rules from the call and host evidence, never by the judge model; tool and input are the full call.
 type RuntimePermissionDecisionView struct {
+	// ComputerApp Per-app desktop control approval metadata when a runtime_permission card grants window-scoped control of one macOS application.
+	ComputerApp *RuntimePermissionComputerApp `json:"computer_app,omitempty"`
+
 	// Input The shell command or the native tool input as JSON.
 	Input string `json:"input"`
 

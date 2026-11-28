@@ -106,7 +106,9 @@ func permissionReviewInput(input teamhubinternal.CreateRuntimePermissionReviewRe
 			}
 		}
 		if desktop := evidence.Desktop; desktop != nil {
-			review.Evidence.Desktop = &permissionreview.DesktopEvidence{App: text(desktop.App), WindowTitle: text(desktop.WindowTitle)}
+			review.Evidence.Desktop = &permissionreview.DesktopEvidence{
+				BundleID: text(desktop.BundleId), App: text(desktop.App), WindowTitle: text(desktop.WindowTitle),
+			}
 			if desktop.Targets != nil {
 				for _, target := range *desktop.Targets {
 					review.Evidence.Desktop.Targets = append(review.Evidence.Desktop.Targets, permissionreview.DesktopTarget{

@@ -50,7 +50,14 @@ export const computersMessages = defineMessages("computers", {
     "Keeps this computer awake for overnight Memory and Wiki tasks.",
   preventSleepFailed: "Could not update sleep setting. Try again.",
   access: "Access",
-  accessDescription: "Browser & folders",
+  accessDescription: "Browser, desktop apps & folders",
+  allowedDesktopApps: "Allowed Desktop Apps",
+  noAllowedDesktopApps:
+    "No desktop apps have permanent access yet. Approve an app with Always allow to list it here.",
+  allowedForAgent: "{agent} · {bundleId}",
+  revoke: "Revoke",
+  revoking: "Revoking…",
+  revokeAppGrantError: "Could not revoke app access. Try again.",
   foldersCount: {
     one: "{count} folder",
     other: "{count} folders",

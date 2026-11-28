@@ -27,7 +27,6 @@ var readOnlyLocalTools = map[string]bool{
 	"mcp__browser__browser_navigate_back":    true,
 	"mcp__computer__list_windows":            true,
 	"mcp__computer__get_window_state":        true,
-	"mcp__computer__get_desktop_state":       true,
 	"mcp__computer__clipboard_read":          true,
 	"mcp__computer__scroll":                  true,
 	"mcp__computer__move_cursor":             true,
@@ -35,6 +34,47 @@ var readOnlyLocalTools = map[string]bool{
 	"mcp__computer__set_window_frame":        true,
 	"mcp__computer__check_permissions":       true,
 	"mcp__computer__report_blocker":          true,
+}
+
+// appAgnosticComputerReadTools are computer tools that inspect no specific
+// application's window contents and always run without per-app approval.
+var appAgnosticComputerReadTools = map[string]bool{
+	"mcp__computer__list_windows":      true,
+	"mcp__computer__check_permissions": true,
+	"mcp__computer__report_blocker":    true,
+}
+
+// AppAgnosticComputerReadTool reports whether tool is an app-agnostic desktop
+// read that needs no per-app grant.
+func AppAgnosticComputerReadTool(tool string) bool {
+	return appAgnosticComputerReadTools[tool]
+}
+
+// ProtectedMacAppBundleIDs are macOS privacy/security system applications that
+// Agents are never permitted to inspect or control.
+var ProtectedMacAppBundleIDs = map[string]bool{
+	"com.apple.systempreferences":      true,
+	"com.apple.keychainaccess":         true,
+	"com.apple.SecurityAgent":          true,
+	"com.apple.UserNotificationCenter": true,
+}
+
+// IsProtectedMacApp reports whether bundleID belongs to a hard-denied macOS
+// privacy or security system app (matched case-insensitively).
+func IsProtectedMacApp(bundleID string) bool {
+	bundleID = strings.TrimSpace(bundleID)
+	if bundleID == "" {
+		return false
+	}
+	if ProtectedMacAppBundleIDs[bundleID] {
+		return true
+	}
+	for protected := range ProtectedMacAppBundleIDs {
+		if strings.EqualFold(protected, bundleID) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadOnlyLocalToolNames lists the names in readOnlyLocalTools, for adapters

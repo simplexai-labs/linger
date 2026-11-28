@@ -815,4 +815,99 @@ describe("DecisionCard", () => {
       screen.queryByRole("button", { name: "Always allow Linear" }),
     ).not.toBeInTheDocument();
   });
+
+  it("renders a 3-button per-app desktop approval card with Window-only capture badge", () => {
+    const appCard = (
+      overrides: Partial<DecisionMessageCard> = {},
+      canRemember = true,
+    ): DecisionMessageCard => ({
+      card_type: "personal_notice",
+      decision_id: "decision_app_1",
+      decision_owner: {
+        display_name: "Leo",
+        id: "actor_leo",
+        kind: "human",
+      },
+      intent: "decision_requested",
+      kind: "runtime_permission",
+      requester: {
+        display_name: "Nova",
+        id: "actor_nova",
+        kind: "agent",
+      },
+      runtime_permission: {
+        computer_app: {
+          app_name: "Safari",
+          bundle_id: "com.apple.Safari",
+          can_remember: canRemember,
+          computer_id: "computer_1",
+        },
+        input: '{"pid":42}',
+        kind: "gui",
+        rationale:
+          "Window-only capture. Approving lets Nova read and interact with windows belonging to Safari.",
+        title: "Allow Nova to control Safari",
+        tool: "mcp__computer__get_window_state",
+      },
+      status: "pending",
+      title: "Allow Nova to control Safari",
+      version: 1,
+      ...overrides,
+    });
+
+    const { onDecision, unmount } = renderCard(appCard());
+    expect(screen.getByText("Window-only capture")).toBeVisible();
+    const taskButton = screen.getByRole("button", {
+      name: "Allow for this task",
+    });
+    const alwaysButton = screen.getByRole("button", {
+      name: "Always allow Safari",
+    });
+    const denyButton = screen.getByRole("button", { name: "Don't allow" });
+    expect(taskButton).toBeVisible();
+    expect(alwaysButton).toBeVisible();
+    expect(denyButton).toBeVisible();
+
+    fireEvent.click(taskButton);
+    expect(onDecision).toHaveBeenCalledWith({
+      approvalScope: "task",
+      decision: "approve",
+      expectedVersion: 1,
+      feedback: undefined,
+      messageId: "message_1",
+      remember: undefined,
+      requestId: "decision_app_1",
+    });
+    unmount();
+
+    const { onDecision: onAlwaysDecision, unmount: unmountAlways } =
+      renderCard(appCard());
+    fireEvent.click(
+      screen.getByRole("button", { name: "Always allow Safari" }),
+    );
+    expect(onAlwaysDecision).toHaveBeenCalledWith({
+      approvalScope: "always",
+      decision: "approve",
+      expectedVersion: 1,
+      feedback: undefined,
+      messageId: "message_1",
+      remember: undefined,
+      requestId: "decision_app_1",
+    });
+    unmountAlways();
+
+    const { unmount: unmountSettled } = renderCard(
+      appCard({
+        answer: { approval_scope: "always", decision: "approve" },
+        status: "approved",
+      }),
+    );
+    expect(screen.getByText("Always allowed")).toBeVisible();
+    unmountSettled();
+
+    renderCard(appCard({}, false));
+    expect(
+      screen.queryByRole("button", { name: "Always allow Safari" }),
+    ).not.toBeInTheDocument();
+  });
 });

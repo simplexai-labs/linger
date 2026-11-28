@@ -1789,6 +1789,7 @@ export interface components {
       /** @description The window a desktop action targets and the elements its element tokens name in the Agent's latest read of that window. */
       desktop?: {
         app?: string;
+        bundle_id?: string;
         window_title?: string;
         targets?: {
           token: string;

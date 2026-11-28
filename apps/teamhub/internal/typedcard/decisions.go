@@ -394,6 +394,7 @@ type DecisionAnswerCommand struct {
 	Comment             string
 	ConnectionID        string
 	Remember            bool
+	ApprovalScope       string
 	Answers             map[string]any
 	Links               []string
 	AttachmentUploadIDs []string
@@ -406,6 +407,7 @@ type decisionAnswer struct {
 	Comment             string         `json:"comment,omitempty"`
 	ConnectionID        string         `json:"connection_id,omitempty"`
 	Remember            bool           `json:"remember,omitempty"`
+	ApprovalScope       string         `json:"approval_scope,omitempty"`
 	Backend             string         `json:"backend,omitempty"`
 	Answers             map[string]any `json:"answers,omitempty"`
 	Links               []string       `json:"links,omitempty"`
@@ -420,6 +422,7 @@ func normalizeDecisionAnswer(kind string, view []byte, command DecisionAnswerCom
 		kind != DecisionKindQuestion && len(command.Answers) > 0 ||
 		kind != DecisionKindConnectionAuth && command.ConnectionID != "" ||
 		kind != DecisionKindConnectorWrite && command.Remember ||
+		kind != DecisionKindRuntimePermission && command.ApprovalScope != "" ||
 		kind != DecisionKindProfileSetupSources && (len(command.Links) > 0 || len(command.AttachmentUploadIDs) > 0) {
 		return decisionAnswer{}, "", ErrInvalid
 	}
@@ -484,11 +487,29 @@ func normalizeDecisionAnswer(kind string, view []byte, command DecisionAnswerCom
 				return decisionAnswer{}, "", ErrInvalid
 			}
 		}
+		if command.ApprovalScope != "" {
+			if kind != DecisionKindRuntimePermission || command.Decision != "approve" {
+				return decisionAnswer{}, "", ErrInvalid
+			}
+			switch command.ApprovalScope {
+			case "once":
+			case "task", "always":
+				var stored RuntimePermissionCard
+				if err := json.Unmarshal(view, &stored); err != nil || stored.ComputerApp == nil || strings.TrimSpace(stored.ComputerApp.BundleID) == "" {
+					return decisionAnswer{}, "", ErrInvalid
+				}
+				if command.ApprovalScope == "always" && (!stored.ComputerApp.CanRemember || strings.TrimSpace(stored.ComputerApp.ComputerID) == "") {
+					return decisionAnswer{}, "", ErrInvalid
+				}
+			default:
+				return decisionAnswer{}, "", ErrInvalid
+			}
+		}
 		status := "denied"
 		if command.Decision == "approve" {
 			status = "approved"
 		}
-		return decisionAnswer{Decision: command.Decision, Comment: command.Comment, Remember: command.Remember}, status, nil
+		return decisionAnswer{Decision: command.Decision, Comment: command.Comment, Remember: command.Remember, ApprovalScope: command.ApprovalScope}, status, nil
 	}
 }
 
@@ -573,6 +594,26 @@ func (d *decisionAnswerStep) apply(ctx context.Context, tx pgx.Tx, queries *stor
 	switch {
 	case authority.Kind == DecisionKindRuntimePermission && status == "approved":
 		lifetime = runtimePermissionApprovalTTL.Seconds()
+		if answer.ApprovalScope == "always" {
+			var stored RuntimePermissionCard
+			if err := json.Unmarshal(authority.View, &stored); err != nil || stored.ComputerApp == nil ||
+				strings.TrimSpace(stored.ComputerApp.BundleID) == "" || strings.TrimSpace(stored.ComputerApp.ComputerID) == "" {
+				return decisionOutcome{}, ErrInvalid
+			}
+			appName := strings.TrimSpace(stored.ComputerApp.AppName)
+			if appName == "" {
+				appName = strings.TrimSpace(stored.ComputerApp.BundleID)
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO local_computer_app_grants(
+				id, tenant_id, computer_id, owner_actor_id, agent_actor_id, bundle_id, app_name, status
+			) VALUES($1,$2,$3,$4,$5,$6,$7,'active')
+			ON CONFLICT (tenant_id, computer_id, agent_actor_id, bundle_id) WHERE status='active'
+			DO UPDATE SET app_name=EXCLUDED.app_name, updated_at=clock_timestamp()`,
+				idgen.New("local_computer_app_grant"), authority.TenantID, strings.TrimSpace(stored.ComputerApp.ComputerID),
+				authority.DeciderActorID, authority.RequestedByActorID, strings.TrimSpace(stored.ComputerApp.BundleID), appName); err != nil {
+				return decisionOutcome{}, err
+			}
+		}
 	case authority.Kind == DecisionKindConnectorWrite && answer.Decision == "approve" && answer.Remember:
 		var writeRequest ConnectorWriteRequest
 		if err := json.Unmarshal(authority.Request, &writeRequest); err != nil || writeRequest.ConnectionID == "" {

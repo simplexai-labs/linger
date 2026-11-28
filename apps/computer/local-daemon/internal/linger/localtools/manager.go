@@ -38,7 +38,10 @@ type Options struct {
 	// The ordinary signed-app installation never enables this option.
 	CuaEmbedded bool
 	CuaSocket   string
-	Environment map[string]string
+	// WindowShareHelperPath optionally points to the macOS ScreenCaptureKit
+	// window-share watcher helper; empty auto-discovers next to the daemon.
+	WindowShareHelperPath string
+	Environment           map[string]string
 }
 
 type Manager struct {
@@ -161,6 +164,7 @@ func retireAgentChromeProfile(state string) {
 
 type operation struct {
 	manager              *Manager
+	set                  *mcpproxy.Set
 	spec                 provider.OperationSpec
 	identity             mcpproxy.OperationIdentity
 	directory            string
@@ -263,7 +267,7 @@ func (m *Manager) Bind(ctx context.Context, spec provider.OperationSpec, identit
 		return err
 	}
 	opCtx, cancel := context.WithCancel(ctx)
-	op := &operation{manager: m, spec: spec, identity: identity, directory: directory, ctx: opCtx, cancel: cancel, label: "linger-" + rand.Text()}
+	op := &operation{manager: m, set: set, spec: spec, identity: identity, directory: directory, ctx: opCtx, cancel: cancel, label: "linger-" + rand.Text()}
 	var err error
 	// The owner's saved connection, read now, applies to this whole task.
 	// Operation input never supplies a browser credential.
@@ -286,14 +290,20 @@ func (m *Manager) Bind(ctx context.Context, spec provider.OperationSpec, identit
 	// The cached list is shared; the browser mode belongs to this owner.
 	browserTools := describeBrowserMode(slices.Clone(catalog.browser), op.userChrome != nil, op.chromeRequired, m.userChromeSupported())
 	computerCall, browserCall := op.computerCall, op.browserCall
+	var computerResolveTarget func(context.Context, string, json.RawMessage) *permission.Desktop
+	if runtime.GOOS == "darwin" && !m.localLinux() {
+		computerResolveTarget = op.guardTarget(op.resolveAppTarget)
+	}
 	for _, binding := range []struct {
-		name     string
-		tools    []tool
-		call     func(context.Context, string, json.RawMessage) (json.RawMessage, error)
-		evidence func(context.Context, string, json.RawMessage) *permission.Evidence
-		allowed  func(string, json.RawMessage) bool
+		name          string
+		tools         []tool
+		call          func(context.Context, string, json.RawMessage) (json.RawMessage, error)
+		evidence      func(context.Context, string, json.RawMessage) *permission.Evidence
+		allowed       func(string, json.RawMessage) bool
+		resolveTarget func(context.Context, string, json.RawMessage) *permission.Desktop
 	}{
-		{"computer", computerTools, computerCall, op.computerEvidence, nil}, {"browser", browserTools, browserCall, op.browserEvidence, op.browserAllowed},
+		{"computer", computerTools, computerCall, op.computerEvidence, nil, computerResolveTarget},
+		{"browser", browserTools, browserCall, op.browserEvidence, op.browserAllowed, nil},
 	} {
 		server, err := openToolServer(opCtx, identity, binding.tools, op.wrap(binding.call), mcpproxy.LocalToolTimeout)
 		if err != nil {
@@ -304,7 +314,7 @@ func (m *Manager) Bind(ctx context.Context, spec provider.OperationSpec, identit
 		for _, tool := range binding.tools {
 			names = append(names, tool.Name)
 		}
-		if err := set.AddLocal(mcpproxy.LocalBinding{Name: binding.name, URL: server.url, ToolNames: names, WaitReady: server.waitReady, Close: op.close, Evidence: op.guard(binding.evidence), Allowed: binding.allowed}); err != nil {
+		if err := set.AddLocal(mcpproxy.LocalBinding{Name: binding.name, URL: server.url, ToolNames: names, WaitReady: server.waitReady, Close: op.close, Evidence: op.guard(binding.evidence), Allowed: binding.allowed, ResolveTarget: binding.resolveTarget}); err != nil {
 			return errors.Join(err, op.close())
 		}
 	}

@@ -55,6 +55,9 @@ type cuaSession struct {
 	input map[int]time.Time
 	// snapshots carries the Agent's tokens over the Computer's own reads.
 	snapshots *snapshotRows
+	// windowShare keeps macOS's per-window ScreenCaptureKit indicator active
+	// and cancels the Operation immediately if the user clicks "Stop Sharing".
+	windowShare *windowShareWatcher
 }
 
 func (c *cuaSession) checkDesktop() error {
@@ -118,7 +121,15 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 	client, err := startClientWith(ctx, run, m.options.CuaPath, arguments, op.spec.WorkingDirectory, environment)
 	var session *cuaSession
 	if client != nil {
-		session = &cuaSession{op: op, client: client, label: "linger-" + rand.Text(), servicePID: servicePID, snapshots: newSnapshotRows(&m.cuaInputGeneration)}
+		var watcher *windowShareWatcher
+		if runtime.GOOS == "darwin" && op != nil {
+			watcher = newWindowShareWatcher(m.options.WindowShareHelperPath, func(uint32) {
+				if op.cancel != nil {
+					op.cancel()
+				}
+			})
+		}
+		session = &cuaSession{op: op, client: client, label: "linger-" + rand.Text(), servicePID: servicePID, snapshots: newSnapshotRows(&m.cuaInputGeneration), windowShare: watcher}
 		client.observe = session.snapshots.observe
 	}
 	if err != nil {
@@ -131,6 +142,9 @@ func (m *Manager) openCua(ctx context.Context, op *operation) (*cuaSession, []to
 	var tools []tool
 	for _, item := range catalog {
 		if !cuaTools[item.Name] && (item.Name != "run_script" || runtime.GOOS != "darwin") {
+			continue
+		}
+		if runtime.GOOS == "darwin" && item.Name == "get_desktop_state" {
 			continue
 		}
 		if runtime.GOOS == "windows" && windowsHiddenTools[item.Name] {
@@ -445,7 +459,7 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 		if err != nil {
 			return nil, err
 		}
-		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, chrome); err != nil {
+		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, chrome, c.op.buildScriptAppAllowlist(ctx)); err != nil {
 			return nil, err
 		}
 	}
@@ -514,6 +528,11 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 	if err != nil {
 		confirmed = pickConfirmed
 		return nil, err
+	}
+	if runtime.GOOS == "darwin" && c.windowShare != nil {
+		if windowID, ok := arguments["window_id"].(float64); ok && windowID > 0 {
+			c.windowShare.watch(uint32(windowID))
+		}
 	}
 	if name == "launch_app" && runtime.GOOS == "darwin" {
 		if c.snapshots != nil {
@@ -1062,7 +1081,11 @@ func (c *cuaSession) startSession(ctx context.Context, scope string) error {
 	if started {
 		return nil
 	}
-	result, err := c.client.request(ctx, "tools/call", map[string]any{"name": "start_session", "arguments": map[string]any{"session": label, "capture_scope": scope}})
+	captureScope := scope
+	if runtime.GOOS == "darwin" && scope == "auto" {
+		captureScope = "window"
+	}
+	result, err := c.client.request(ctx, "tools/call", map[string]any{"name": "start_session", "arguments": map[string]any{"session": label, "capture_scope": captureScope}})
 	if err != nil {
 		return err
 	}
@@ -1975,6 +1998,9 @@ func (c *cuaSession) endSession(ctx context.Context, label string) error {
 }
 
 func (c *cuaSession) close() error {
+	if c.windowShare != nil {
+		c.windowShare.close()
+	}
 	err := c.drain()
 	if err == nil {
 		err = c.client.close()

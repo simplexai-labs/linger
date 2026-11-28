@@ -4403,8 +4403,9 @@ type RuntimePermissionEvidence struct {
 
 	// Desktop The window a desktop action targets and the elements its element tokens name in the Agent's latest read of that window.
 	Desktop *struct {
-		App     *string `json:"app,omitempty"`
-		Targets *[]struct {
+		App      *string `json:"app,omitempty"`
+		BundleId *string `json:"bundle_id,omitempty"`
+		Targets  *[]struct {
 			Name  *string `json:"name,omitempty"`
 			Role  string  `json:"role"`
 			Token string  `json:"token"`
