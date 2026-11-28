@@ -237,6 +237,9 @@ components:
           type: boolean
         write_policy:
           $ref: "#/components/schemas/ExternalConnectionWritePolicy"
+        require_active:
+          type: boolean
+          description: When true with granted=true, requires an existing active grant and returns 409 instead of activating a missing or revoked grant.
     SlackConversation:
       type: object
       additionalProperties: false

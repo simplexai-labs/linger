@@ -102,18 +102,20 @@ func (s *Service) SetAgentConnectionAccess(
 	accountID, connectionID, agentActorID string,
 	granted bool,
 ) (AgentConnectionAccess, error) {
-	return s.SetAgentConnectionAccessWithPolicy(ctx, accountID, connectionID, agentActorID, granted, "")
+	return s.SetAgentConnectionAccessWithPolicy(ctx, accountID, connectionID, agentActorID, granted, "", false)
 }
 
 // SetAgentConnectionAccessWithPolicy grants or revokes an Agent's access to a
 // Connection and optionally sets its write policy. An empty writePolicy keeps
 // the current policy when active or defaults to "auto"; revoking always resets
-// write_policy to "auto".
+// write_policy to "auto". When requireActive is true with granted=true, an
+// absent or revoked grant fails with ErrNotActive instead of re-granting.
 func (s *Service) SetAgentConnectionAccessWithPolicy(
 	ctx context.Context,
 	accountID, connectionID, agentActorID string,
 	granted bool,
 	writePolicy string,
+	requireActive bool,
 ) (AgentConnectionAccess, error) {
 	if accountID == "" || connectionID == "" || agentActorID == "" {
 		return AgentConnectionAccess{}, ErrInvalid
@@ -127,7 +129,7 @@ func (s *Service) SetAgentConnectionAccessWithPolicy(
 	}
 	defer tx.Rollback(ctx)
 
-	access, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, granted, writePolicy)
+	access, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, granted, writePolicy, requireActive)
 	if err != nil {
 		return AgentConnectionAccess{}, err
 	}
@@ -195,7 +197,7 @@ func (s *Service) SupportsAgentTools(appKey string) bool {
 }
 
 func (s *Service) GrantAgentConnectionInTx(ctx context.Context, tx pgx.Tx, accountID, connectionID, agentActorID string) error {
-	_, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true, "")
+	_, err := s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true, "", false)
 	return err
 }
 
@@ -248,7 +250,7 @@ func (s *Service) connectionActivatedTx(ctx context.Context, tx pgx.Tx, accountI
 				return err
 			}
 			for _, agentActorID := range agents {
-				if _, err = s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true, ""); err != nil {
+				if _, err = s.setAgentConnectionAccessInTx(ctx, tx, accountID, connectionID, agentActorID, true, "", false); err != nil {
 					return err
 				}
 			}
@@ -283,7 +285,7 @@ func (ProfileSetupReminderArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: jobs.QueueDefault, MaxAttempts: 5, UniqueOpts: jobs.UniqueUnfinished}
 }
 
-func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, accountID, connectionID, agentActorID string, granted bool, writePolicy string) (AgentConnectionAccess, error) {
+func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, accountID, connectionID, agentActorID string, granted bool, writePolicy string, requireActive bool) (AgentConnectionAccess, error) {
 	// Serialize the initially absent grant as well as updates to an existing grant.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "connection-grant:"+connectionID+":"+agentActorID); err != nil {
 		return AgentConnectionAccess{}, err
@@ -351,6 +353,9 @@ func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, a
 			access.WritePolicy = WritePolicyAuto
 			return access, nil
 		}
+		if requireActive {
+			return AgentConnectionAccess{}, ErrNotActive
+		}
 		targetPolicy := WritePolicyAuto
 		if writePolicy != "" {
 			targetPolicy = writePolicy
@@ -366,6 +371,9 @@ func (s *Service) setAgentConnectionAccessInTx(ctx context.Context, tx pgx.Tx, a
 		)
 	} else if err == nil {
 		access.Granted = status == "active"
+		if requireActive && granted && !access.Granted {
+			return AgentConnectionAccess{}, ErrNotActive
+		}
 		targetPolicy := currentPolicy
 		if !granted {
 			targetPolicy = WritePolicyAuto

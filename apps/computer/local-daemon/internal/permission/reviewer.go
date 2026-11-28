@@ -124,6 +124,10 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 		if AppAgnosticComputerReadTool(request.Action.Tool) {
 			return Verdict{Decision: Allow}
 		}
+		if (request.Action.Tool == "mcp__computer__ui_exec" || request.Action.Tool == "mcp__computer__ui_reset") &&
+			r.LocalAllowed != nil && r.LocalAllowed(request.Action.Tool, request.Action.Input) {
+			return Verdict{Decision: Allow}
+		}
 		if r.ResolveComputerTarget != nil {
 			perAppComputerGate = true
 			computerTarget = r.ResolveComputerTarget(ctx, request.Action.Tool, request.Action.Input)
@@ -142,6 +146,18 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 					}
 				}
 				if r.ComputerAppApproved(computerTarget.BundleID) {
+					if strings.HasSuffix(request.Action.Tool, "run_script") {
+						if request.Evidence == nil {
+							var input map[string]any
+							if json.Unmarshal([]byte(request.Action.Input), &input) == nil {
+								request.Evidence = RunScriptEvidence(request.Action.Tool, input)
+							}
+						}
+						if request.Evidence != nil && len(request.Evidence.Missing) > 0 {
+							return Verdict{Decision: Deny, Message: strings.Join(request.Evidence.Missing, "; ")}
+						}
+						recordApprovedScript(r.ScriptScope, request, r.now())
+					}
 					return Verdict{Decision: Allow}
 				}
 			}
@@ -191,16 +207,15 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 		if request.Evidence == nil {
 			request.Evidence = &Evidence{}
 		}
-		if request.Evidence.Desktop == nil {
+		if request.Evidence.Desktop == nil ||
+			(request.Evidence.Desktop.BundleID != "" && !strings.EqualFold(request.Evidence.Desktop.BundleID, computerTarget.BundleID)) {
 			request.Evidence.Desktop = &Desktop{}
 		}
-		if request.Evidence.Desktop.BundleID == "" {
-			request.Evidence.Desktop.BundleID = computerTarget.BundleID
-		}
-		if request.Evidence.Desktop.App == "" {
+		request.Evidence.Desktop.BundleID = computerTarget.BundleID
+		if computerTarget.App != "" {
 			request.Evidence.Desktop.App = computerTarget.App
 		}
-		if request.Evidence.Desktop.WindowTitle == "" {
+		if computerTarget.WindowTitle != "" {
 			request.Evidence.Desktop.WindowTitle = computerTarget.WindowTitle
 		}
 	}
@@ -247,8 +262,9 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 			r.remember(reuseKey, verdict.Decision)
 		}
 		if verdict.Decision == Allow {
-			if computerTarget != nil && computerTarget.BundleID != "" &&
-				(verdict.ApprovalScope == "task" || verdict.ApprovalScope == "always") {
+			// Cache only task-scoped approvals locally; persistent "always"
+			// grants re-check TeamHub so revocations take effect immediately.
+			if computerTarget != nil && computerTarget.BundleID != "" && verdict.ApprovalScope == "task" {
 				r.ApproveComputerApp(computerTarget.BundleID)
 			}
 			recordApprovedScript(r.ScriptScope, request, r.now())

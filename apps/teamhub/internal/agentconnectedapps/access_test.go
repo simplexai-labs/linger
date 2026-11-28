@@ -352,6 +352,49 @@ func TestClassifyToolAnnotationsVerbsAndWritePolicies(t *testing.T) {
 		}
 	}
 
+	// Paid async generation and visible reactions require workspace-write
+	// confirmation rather than directWriteTools bypass.
+	for _, tc := range []struct {
+		slug, toolkit string
+	}{
+		{"FAL_AI_SUBMIT_ASYNC_JOB", "falai"},
+		{"HIGGSFIELD_MCP_GENERATE_IMAGE", "higgsfield"},
+		{"HIGGSFIELD_MCP_GENERATE_VIDEO", "higgsfield"},
+		{"SLACK_ADD_REACTION_TO_AN_ITEM", "slack"},
+	} {
+		if got := classifyTool(tool(tc.slug, tc.toolkit), nil); got != tierWorkspaceWrite {
+			t.Errorf("classifyTool(%s) = %v, want tierWorkspaceWrite", tc.slug, got)
+		}
+	}
+
+	// GOOGLECALENDAR_BATCH_EVENTS fails closed to tierConfirmStrict whenever
+	// operations are missing, empty, malformed, or include any DELETE.
+	batchTool := tool("GOOGLECALENDAR_BATCH_EVENTS", "googlecalendar")
+	for name, args := range map[string]map[string]any{
+		"nil args":     nil,
+		"empty ops":    {"operations": []any{}},
+		"malformed op": {"operations": []any{"bad"}},
+		"missing verb": {"operations": []any{map[string]any{"path": "/events"}}},
+		"with delete": {
+			"operations": []any{
+				map[string]any{"method": "POST"},
+				map[string]any{"method": "delete"},
+			},
+		},
+	} {
+		if got := classifyTool(batchTool, args); got != tierConfirmStrict {
+			t.Errorf("GOOGLECALENDAR_BATCH_EVENTS (%s) = %v, want tierConfirmStrict", name, got)
+		}
+	}
+	if got := classifyTool(batchTool, map[string]any{
+		"operations": []any{
+			map[string]any{"method": "POST"},
+			map[string]any{"method": "PATCH"},
+		},
+	}); got != tierWorkspaceWrite {
+		t.Errorf("GOOGLECALENDAR_BATCH_EVENTS (non-delete) = %v, want tierWorkspaceWrite", got)
+	}
+
 	// Composio annotations: readOnlyHint promotes an unknown verb to read-only,
 	// while destructiveHint=true always overrides readOnlyHint=true.
 	annotatedRead := tool("LINEAR_INTROSPECT_SCHEMA", "linear")

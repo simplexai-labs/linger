@@ -9949,6 +9949,9 @@ type SetDocumentLinkShareRole string
 type SetExternalConnectionAgentAccessRequest struct {
 	Granted bool `json:"granted"`
 
+	// RequireActive When true with granted=true, requires an existing active grant and returns 409 instead of activating a missing or revoked grant.
+	RequireActive *bool `json:"require_active,omitempty"`
+
 	// WritePolicy Controls whether non-destructive workspace writes on this delegated connection ask on a card, run automatically, or always prompt.
 	WritePolicy *ExternalConnectionWritePolicy `json:"write_policy,omitempty"`
 }

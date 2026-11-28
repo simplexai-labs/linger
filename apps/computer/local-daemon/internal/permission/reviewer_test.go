@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -356,7 +358,19 @@ func TestReviewerPerAppComputerGate(t *testing.T) {
 		t.Fatal("legacy empty-scope allow must not cache TextEdit as task-approved")
 	}
 
-	// Explicit task/always approval caches bundle_id for subsequent calls.
+	// Persistent "always" approvals allow this call without caching locally,
+	// so revoking the grant in TeamHub takes effect on the very next call.
+	alwaysCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":4}`}})
+	alwaysID := <-requester.sent
+	requester.answer(t, alwaysID, `{"decision":"allow","approval_scope":"always"}`)
+	if got := <-alwaysCh; got.Decision != Allow {
+		t.Fatalf("always allow verdict = %+v", got)
+	}
+	if reviewer.ComputerAppApproved("com.apple.TextEdit") {
+		t.Fatal("always approval must not cache TextEdit locally so revocation is immediate")
+	}
+
+	// Explicit task approval caches bundle_id for subsequent calls.
 	verdictCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__get_window_state", Input: `{"pid":3}`}})
 	id := <-requester.sent
 	payload := requester.requests[id]
@@ -376,7 +390,90 @@ func TestReviewerPerAppComputerGate(t *testing.T) {
 	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":3}`}}); verdict.Decision != Allow {
 		t.Fatalf("cached safari verdict = %+v", verdict)
 	}
-	if len(requester.requests) != 4 {
-		t.Fatalf("expected 4 total review requests, got %d", len(requester.requests))
+	if len(requester.requests) != 5 {
+		t.Fatalf("expected 5 total review requests, got %d", len(requester.requests))
+	}
+}
+
+func TestReviewerPerAppOrchestrationBatchEvidenceAndScriptBinding(t *testing.T) {
+	requester := newFakeRequester()
+	skillDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(skillDir, "read.js")
+	scriptBody := "return 42;"
+	if err := os.WriteFile(scriptPath, []byte(scriptBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scope := ScriptScope("agent-1", "ctx-1")
+	now := time.Unix(1_700_000_000, 0)
+	reviewer := &Reviewer{
+		Requester:            requester,
+		ScriptScope:          scope,
+		Now:                  func() time.Time { return now },
+		ApprovedComputerApps: map[string]bool{"com.apple.notes": true},
+		LocalAllowed: func(tool, _ string) bool {
+			return tool == "mcp__computer__ui_exec" || tool == "mcp__computer__ui_reset"
+		},
+		LocalEvidence: func(_ context.Context, _ string, _ string) *Evidence {
+			return &Evidence{
+				Desktop: &Desktop{
+					BundleID:    "com.apple.Notes",
+					App:         "Notes",
+					WindowTitle: "Inbox",
+					Targets:     []DesktopTarget{{Token: "s1:1", Role: "AXButton", Name: "Old"}},
+				},
+			}
+		},
+		ResolveComputerTarget: func(_ context.Context, tool, _ string) *Desktop {
+			if tool == "mcp__computer__run_script" {
+				return &Desktop{BundleID: "com.apple.Notes", App: "Notes"}
+			}
+			return &Desktop{BundleID: "com.apple.Safari", App: "Safari", WindowTitle: "Checkout"}
+		},
+	}
+
+	// Orchestration wrappers stay locally allowed even under per-app gating.
+	for _, tool := range []string{"mcp__computer__ui_exec", "mcp__computer__ui_reset"} {
+		if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: tool, Input: `{}`}}); verdict.Decision != Allow {
+			t.Fatalf("%s verdict = %+v, want Allow", tool, verdict)
+		}
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("orchestration wrappers reached TeamHub: %v", requester.requests)
+	}
+
+	// Cached app approval still binds run_script's script_file so execution
+	// passes TakeApprovedScript.
+	scriptInput, err := json.Marshal(map[string]any{"script_file": scriptPath, "args": map[string]any{"pid": 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{
+		Tool:  "mcp__computer__run_script",
+		Input: string(scriptInput),
+	}}); verdict.Decision != Allow {
+		t.Fatalf("cached run_script verdict = %+v, want Allow", verdict)
+	}
+	if err := TakeApprovedScript(scope, scriptPath, scriptBody, map[string]any{"pid": float64(2)}, now.Add(time.Second)); err != nil {
+		t.Fatalf("TakeApprovedScript after cached app allow failed: %v", err)
+	}
+
+	// Batch targeting approved Notes + unapproved Safari overwrites stale
+	// Notes desktop evidence with Safari so the approval card matches the
+	// unapproved target app.
+	batchCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__run_actions", Input: `{"actions":[{"pid":2},{"pid":3}]}`}})
+	id := <-requester.sent
+	desktop := requester.requests[id]["evidence"].(map[string]any)["desktop"].(map[string]any)
+	if desktop["bundle_id"] != "com.apple.Safari" || desktop["app"] != "Safari" || desktop["window_title"] != "Checkout" {
+		t.Fatalf("stale desktop evidence leaked into batch review: %v", desktop)
+	}
+	if _, hasTargets := desktop["targets"]; hasTargets {
+		t.Fatalf("stale targets leaked from Notes into Safari review: %v", desktop)
+	}
+	requester.answer(t, id, `{"decision":"deny","message":"denied"}`)
+	if got := <-batchCh; got.Decision != Deny {
+		t.Fatalf("batch verdict = %+v", got)
 	}
 }

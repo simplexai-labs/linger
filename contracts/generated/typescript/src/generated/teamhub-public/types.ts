@@ -7563,6 +7563,8 @@ export interface components {
     SetExternalConnectionAgentAccessRequest: {
       granted: boolean;
       write_policy?: components["schemas"]["ExternalConnectionWritePolicy"];
+      /** @description When true with granted=true, requires an existing active grant and returns 409 instead of activating a missing or revoked grant. */
+      require_active?: boolean;
     };
     DisconnectExternalConnectionRequest: {
       /** Format: int64 */

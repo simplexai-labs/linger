@@ -26,6 +26,7 @@ type windowShareWatcher struct {
 	onStopped   func(windowID uint32)
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
+	done        chan struct{}
 	current     uint32
 	closed      bool
 	startFailed bool
@@ -103,14 +104,17 @@ func (w *windowShareWatcher) close() {
 	w.closed = true
 	stdin := w.stdin
 	cmd := w.cmd
-	w.stdin, w.cmd, w.current = nil, nil, 0
+	done := w.done
+	w.stdin, w.cmd, w.done, w.current = nil, nil, nil, 0
 	w.mu.Unlock()
 	if stdin != nil {
 		_ = stdin.Close()
 	}
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+	}
+	if done != nil {
+		<-done
 	}
 }
 
@@ -133,9 +137,11 @@ func (w *windowShareWatcher) startLocked() bool {
 		slog.Debug("computer.window_share.start_skipped", "helper", w.helperPath, "error", err)
 		return false
 	}
+	done := make(chan struct{})
 	w.cmd = cmd
 	w.stdin = stdin
-	go w.readLoop(stdout, cmd)
+	w.done = done
+	go w.readLoop(stdout, cmd, done)
 	return true
 }
 
@@ -155,7 +161,8 @@ func (w *windowShareWatcher) sendLocked(msg map[string]uint32) bool {
 	return true
 }
 
-func (w *windowShareWatcher) readLoop(stdout io.Reader, cmd *exec.Cmd) {
+func (w *windowShareWatcher) readLoop(stdout io.Reader, cmd *exec.Cmd, done chan struct{}) {
+	defer close(done)
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		var event struct {
@@ -175,4 +182,9 @@ func (w *windowShareWatcher) readLoop(stdout io.Reader, cmd *exec.Cmd) {
 		}
 	}
 	_ = cmd.Wait()
+	w.mu.Lock()
+	if w.cmd == cmd {
+		w.cmd, w.stdin, w.done, w.current = nil, nil, nil, 0
+	}
+	w.mu.Unlock()
 }

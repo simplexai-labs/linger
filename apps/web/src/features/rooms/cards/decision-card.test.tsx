@@ -899,11 +899,39 @@ describe("DecisionCard", () => {
     const { unmount: unmountSettled } = renderCard(
       appCard({
         answer: { approval_scope: "always", decision: "approve" },
+        expires_at: "2026-12-01T00:00:00Z",
         status: "approved",
       }),
     );
     expect(screen.getByText("Always allowed")).toBeVisible();
     unmountSettled();
+
+    const { unmount: unmountTask } = renderCard(
+      appCard({
+        answer: { approval_scope: "task", decision: "approve" },
+        status: "approved",
+      }),
+    );
+    expect(screen.getByText("Allowed for this task")).toBeVisible();
+    unmountTask();
+
+    const { unmount: unmountOnce } = renderCard(
+      appCard({
+        answer: { approval_scope: "once", decision: "approve" },
+        status: "approved",
+      }),
+    );
+    expect(screen.getByText("Allowed once")).toBeVisible();
+    unmountOnce();
+
+    const { unmount: unmountLegacy } = renderCard(
+      appCard({
+        answer: { decision: "approve" },
+        status: "approved",
+      }),
+    );
+    expect(screen.getByText("Allowed once")).toBeVisible();
+    unmountLegacy();
 
     renderCard(appCard({}, false));
     expect(

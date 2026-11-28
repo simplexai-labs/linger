@@ -254,17 +254,28 @@ func TestScriptGuardEnforcesApprovedAppsAndBlocksReroutesInAJSEngine(t *testing.
 	}
 	dir := t.TempDir()
 	harness := filepath.Join(dir, "harness.mjs")
-	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
+	appHarness := strings.Replace(
+		guardHarness,
+		`getApp(target) { return Promise.resolve(new App("a", target && target.pid, target && target.windowId)); },`,
+		`getApp(target) { if (target === "Google Chrome") return Promise.resolve(new App("Google Chrome", 10, 1)); if (target === "MissingPID") return Promise.resolve(new App("MissingPID")); return Promise.resolve(new App("a", target && target.pid, target && target.windowId)); },
+  listWindows(a) { log.push("listWindows:" + JSON.stringify(a)); return Promise.resolve([]); },`,
+		1,
+	)
+	if err := os.WriteFile(harness, []byte(appHarness), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	allow := &scriptAppAllowlist{
 		PIDs:    []int{10, 11},
 		Bundles: []string{"com.google.chrome"},
-		Names:   []string{"google chrome"},
+		Names:   []string{"google chrome", "missingpid"},
 	}
 	for _, tc := range []struct{ name, body, want, notLogged string }{
 		{"approved by name", `const app = await cua.getApp("Google Chrome"); return await app.getState({query: "Search"});`, `"state:{\"include_screenshot\":false,\"query\":\"Search\"}"`, ""},
 		{"approved secondary pid", `const app = await cua.getApp({pid: 11}); return app.click({role: "AXButton", name: "Save"});`, `"clicked"`, ""},
+		{"listWindows allowed", `await cua.listWindows({pid: 10}); return "ok";`, `listWindows:{\"pid\":10}`, ""},
+		{"listApps blocked", `const apps = await cua.listApps(); return apps[0].click({});`, "threw:COMPUTER_APP_NOT_APPROVED", "raw:"},
+		{"unknown cua helper blocked", `const b = await cua.box(); return b.inner.app.click({});`, "threw:COMPUTER_APP_NOT_APPROVED", "raw:"},
+		{"getApp missing pid fails closed", `return await cua.getApp("MissingPID");`, "threw:COMPUTER_APP_NOT_APPROVED", "raw:"},
 		{"unapproved getApp name", `return await cua.getApp("Terminal");`, "threw:COMPUTER_APP_NOT_APPROVED", "raw:"},
 		{"reroute typeText via pid", `const app = await cua.getApp({pid: 10}); return app.typeText("ls", {pid: 999});`, "threw:COMPUTER_APP_NOT_APPROVED", "type:"},
 		{"reroute typeText via app", `const app = await cua.getApp({pid: 10}); return app.typeText("ls", {app: "Terminal"});`, "threw:COMPUTER_APP_NOT_APPROVED", "type:"},

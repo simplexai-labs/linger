@@ -34,6 +34,10 @@ const (
 // alone cannot say whether a call reads or writes.
 const linearGraphQLTool = "LINEAR_RUN_QUERY_OR_MUTATION"
 
+// googleCalendarBatchTool runs arbitrary batched HTTP operations, including
+// DELETE requests, so its arguments determine whether confirmation is strict.
+const googleCalendarBatchTool = "GOOGLECALENDAR_BATCH_EVENTS"
+
 // classifyTool assigns a provider tool call to its risk tier using explicit
 // lists, Composio annotations/tags, and whole-token action-verb rules. Unknown
 // mutating tools fail closed to tierConfirmStrict so always_allow never
@@ -50,6 +54,11 @@ func classifyTool(tool composio.Tool, arguments map[string]any) toolTier {
 	case slug == linearGraphQLTool:
 		if onlyQueries(arguments["query_or_mutation"]) {
 			return tierReadOnly
+		}
+		return tierConfirmStrict
+	case slug == googleCalendarBatchTool:
+		if calendarBatchHasOnlyNonDeleteOps(arguments) {
+			return tierWorkspaceWrite
 		}
 		return tierConfirmStrict
 	case tool.IsDestructiveHint() || hasDestructiveVerb(tool):
@@ -245,6 +254,39 @@ var mutationActionVerbs = map[string]bool{
 	"WRITE":     true,
 }
 
+// calendarBatchHasOnlyNonDeleteOps reports whether GOOGLECALENDAR_BATCH_EVENTS
+// explicitly lists non-empty operations where none uses HTTP DELETE. Missing,
+// empty, or malformed operation lists fail closed to strict confirmation.
+func calendarBatchHasOnlyNonDeleteOps(arguments map[string]any) bool {
+	if len(arguments) == 0 {
+		return false
+	}
+	var rawOps any
+	if ops, ok := arguments["operations"]; ok {
+		rawOps = ops
+	} else if reqs, ok := arguments["requests"]; ok {
+		rawOps = reqs
+	} else {
+		return false
+	}
+	entries, ok := rawOps.([]any)
+	if !ok || len(entries) == 0 {
+		return false
+	}
+	for _, entry := range entries {
+		item, ok := entry.(map[string]any)
+		if !ok {
+			return false
+		}
+		method, ok := item["method"].(string)
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if !ok || method == "" || method == "DELETE" {
+			return false
+		}
+	}
+	return true
+}
+
 // onlyQueries reports whether document is a GraphQL document whose operations
 // are all queries. A document that does not parse, declares no operation, or
 // declares a mutation or subscription is held like any other write.
@@ -381,6 +423,7 @@ var readTools = map[string]bool{
 // workspaceWriteTools are known non-destructive workspace mutations where
 // "auto" asks with "Always allow <App>" and "always_allow" runs directly.
 var workspaceWriteTools = map[string]bool{
+	"FAL_AI_SUBMIT_ASYNC_JOB":                           true,
 	"FIGMA_ADD_A_COMMENT_TO_A_FILE":                     true,
 	"GITHUB_ADD_LABELS_TO_AN_ISSUE":                     true,
 	"GITHUB_CREATE_A_PULL_REQUEST":                      true,
@@ -391,9 +434,10 @@ var workspaceWriteTools = map[string]bool{
 	"GITHUB_UPDATE_A_PULL_REQUEST":                      true,
 	"GITHUB_UPDATE_AN_ISSUE":                            true,
 	"GITHUB_UPDATE_AN_ISSUE_COMMENT":                    true,
-	"GOOGLECALENDAR_BATCH_EVENTS":                       true,
 	"GOOGLECALENDAR_CREATE_EVENT":                       true,
 	"GOOGLECALENDAR_PATCH_EVENT":                        true,
+	"HIGGSFIELD_MCP_GENERATE_IMAGE":                     true,
+	"HIGGSFIELD_MCP_GENERATE_VIDEO":                     true,
 	"LINEAR_ADD_LABEL_TO_ISSUE":                         true,
 	"LINEAR_CREATE_COMMENT":                             true,
 	"LINEAR_CREATE_ISSUE":                               true,
@@ -417,13 +461,13 @@ var workspaceWriteTools = map[string]bool{
 	"OUTLOOK_UPDATE_CALENDAR_EVENT":                     true,
 	"OUTLOOK_UPDATE_CALENDAR_EVENT_IN_CALENDAR":         true,
 	"OUTLOOK_UPDATE_EMAIL":                              true,
+	"SLACK_ADD_REACTION_TO_AN_ITEM":                     true,
 }
 
 // directWriteTools are genuinely safe, non-destructive, non-outbound
 // preparatory writes (private drafts, draft attachments, empty folders,
-// additive Notion pages with history, emoji reactions, opening a DM).
+// additive Notion pages with history, opening a DM).
 var directWriteTools = map[string]bool{
-	"FAL_AI_SUBMIT_ASYNC_JOB":                  true,
 	"FAL_AI_UPLOAD_FILE":                       true,
 	"FEISHU_MAIL_ARCHIVE":                      true,
 	"FEISHU_MAIL_CREATE_DRAFT":                 true,
@@ -431,8 +475,6 @@ var directWriteTools = map[string]bool{
 	"GMAIL_CREATE_EMAIL_DRAFT":                 true,
 	"GMAIL_UPDATE_DRAFT":                       true,
 	"GOOGLEDRIVE_CREATE_FOLDER":                true,
-	"HIGGSFIELD_MCP_GENERATE_IMAGE":            true,
-	"HIGGSFIELD_MCP_GENERATE_VIDEO":            true,
 	"HIGGSFIELD_MCP_MEDIA_CONFIRM":             true,
 	"HIGGSFIELD_MCP_MEDIA_UPLOAD":              true,
 	"NOTION_ADD_MULTIPLE_PAGE_CONTENT":         true,
@@ -442,7 +484,6 @@ var directWriteTools = map[string]bool{
 	"OUTLOOK_CREATE_DRAFT":                     true,
 	"OUTLOOK_CREATE_DRAFT_REPLY":               true,
 	"OUTLOOK_CREATE_REPLY_ALL_DRAFT":           true,
-	"SLACK_ADD_REACTION_TO_AN_ITEM":            true,
 	"SLACK_OPEN_DM":                            true,
 	"SLACK_REMOVE_REACTION_FROM_ITEM":          true,
 }

@@ -77,6 +77,7 @@ export interface TeamHubExternalSourceClient {
     agentActorId: string,
     granted: boolean,
     writePolicy?: TeamHubExternalConnectionWritePolicy,
+    options?: { requireActive?: boolean },
   ): Promise<TeamHubExternalConnectionAgentAccess>;
   setExternalConnectionAutoReminders(
     connectionId: string,
@@ -216,15 +217,18 @@ export function createHttpTeamHubExternalSourceClient(
       agentActorId,
       granted,
       writePolicy,
+      options,
     ) =>
       data(
         api.PUT(
           "/v0/external-connections/{externalConnectionId}/agent-grants/{agentActorId}",
           {
             params: { path: { externalConnectionId, agentActorId } },
-            body: writePolicy
-              ? { granted, write_policy: writePolicy }
-              : { granted },
+            body: {
+              granted,
+              ...(writePolicy ? { write_policy: writePolicy } : {}),
+              ...(options?.requireActive ? { require_active: true } : {}),
+            },
           },
         ),
       ),

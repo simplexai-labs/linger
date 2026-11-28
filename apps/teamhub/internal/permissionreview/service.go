@@ -87,9 +87,17 @@ func (s *Service) Review(ctx context.Context, input ReviewInput) (Outcome, error
 		if err != nil {
 			return Outcome{}, err
 		}
-		digest := ActionDigest(input.Action, input.Evidence)
+		digest := ComputerActionDigest(input.Action, input.Evidence, authority.computerID)
 		input.Action.Digest = digest
 		return s.reviewComputerApp(ctx, input, authority, digest)
+	}
+	if input.Action.Surface == "computer" && strings.EqualFold(input.Environment.Platform, "darwin") &&
+		(input.Evidence.Desktop == nil || strings.TrimSpace(input.Evidence.Desktop.BundleID) == "") &&
+		s.Judge == nil {
+		return Outcome{
+			Decision: DecisionDeny,
+			Message:  "COMPUTER_TARGET_REQUIRED: could not identify the target macOS application for this action; pass pid or element_token from a window read.",
+		}, nil
 	}
 	if s.Judge == nil {
 		// No judge model is configured: the review is off and the Runtime's
@@ -195,6 +203,19 @@ func ActionDigest(action Action, evidence Evidence) string {
 	}
 	encoded, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// ComputerActionDigest binds a computer-app action digest to its target
+// computer and normalized macOS bundle identifier so PID reuse cannot spend a
+// single-use approval on a different application.
+func ComputerActionDigest(action Action, evidence Evidence, computerID string) string {
+	base := ActionDigest(action, evidence)
+	bundleID := ""
+	if evidence.Desktop != nil {
+		bundleID = strings.ToLower(strings.TrimSpace(evidence.Desktop.BundleID))
+	}
+	sum := sha256.Sum256([]byte(base + "\x00" + strings.TrimSpace(computerID) + "\x00" + bundleID))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
@@ -421,16 +442,33 @@ func (s *Service) reviewComputerApp(ctx context.Context, input ReviewInput, a au
 		}
 	}
 	var taskApproved bool
-	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
-		SELECT 1 FROM decisions
-		WHERE kind='runtime_permission'
-		  AND request->>'context_key'=$1
-		  AND lower(view->'computer_app'->>'bundle_id')=lower($2)
-		  AND status IN ('approved','consumed')
-		  AND answer->>'approval_scope' = 'task'
-		  AND (expires_at IS NULL OR expires_at>clock_timestamp())
-	)`, input.ContextKey, bundleID).Scan(&taskApproved); err != nil {
-		return Outcome{}, err
+	if a.kind == "alter_ego" {
+		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM decisions
+			WHERE kind='runtime_permission'
+			  AND request->>'context_key'=$1
+			  AND lower(view->'computer_app'->>'bundle_id')=lower($2)
+			  AND status IN ('approved','consumed')
+			  AND answer->>'approval_scope' = 'task'
+			  AND (expires_at IS NULL OR expires_at>clock_timestamp())
+		)`, input.ContextKey, bundleID).Scan(&taskApproved); err != nil {
+			return Outcome{}, err
+		}
+	} else if strings.TrimSpace(input.RunID) != "" {
+		// Meta Room contexts span unrelated runs, so bind "task" approvals to
+		// the originating run rather than leaking them across future runs.
+		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM decisions
+			WHERE kind='runtime_permission'
+			  AND request->>'context_key'=$1
+			  AND request->'runtime'->>'execution_run_ref'=$3
+			  AND lower(view->'computer_app'->>'bundle_id')=lower($2)
+			  AND status IN ('approved','consumed')
+			  AND answer->>'approval_scope' = 'task'
+			  AND (expires_at IS NULL OR expires_at>clock_timestamp())
+		)`, input.ContextKey, bundleID, input.RunID).Scan(&taskApproved); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if taskApproved {
 		return Outcome{Decision: DecisionAllow, ApprovalScope: "task"}, nil

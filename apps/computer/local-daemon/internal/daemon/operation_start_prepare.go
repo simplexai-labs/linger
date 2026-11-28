@@ -152,7 +152,9 @@ func (d *Daemon) startAcceptedOperation(ctx context.Context, command protocol.Co
 			spec.TrustedLocalMCPTools = proxies.LocalToolNames()
 			spec.LocalEvidence = proxies.LocalEvidence
 			spec.LocalAllowed = proxies.LocalAllowed
-			spec.ResolveComputerTarget = proxies.ResolveComputerTarget
+			if proxies.HasComputerTargetResolver() {
+				spec.ResolveComputerTarget = proxies.ResolveComputerTarget
+			}
 			spec.RegisterToolReviewer = proxies.RegisterToolReviewer
 			spec.SupportsBackgroundWait = operationBackgroundWait
 			startedAt := time.Now()

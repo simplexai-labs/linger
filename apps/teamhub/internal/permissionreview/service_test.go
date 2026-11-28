@@ -43,3 +43,36 @@ func TestActionDigestIgnoresJSONLayoutButNotContent(t *testing.T) {
 		t.Fatalf("digest %q does not match the stored format", before)
 	}
 }
+
+func TestComputerActionDigestBindsComputerAndBundleID(t *testing.T) {
+	t.Parallel()
+	action := Action{Surface: "computer", Tool: "mcp__computer__click", Input: `{"pid":42}`}
+	safari := Evidence{Desktop: &DesktopEvidence{BundleID: "com.apple.Safari"}}
+	safariLower := Evidence{Desktop: &DesktopEvidence{BundleID: "com.apple.safari"}}
+	terminal := Evidence{Desktop: &DesktopEvidence{BundleID: "com.apple.Terminal"}}
+
+	d1 := ComputerActionDigest(action, safari, "comp-1")
+	if d1 != ComputerActionDigest(action, safariLower, "comp-1") {
+		t.Fatal("ComputerActionDigest must normalize bundle_id casing")
+	}
+	if d1 == ComputerActionDigest(action, terminal, "comp-1") {
+		t.Fatal("different bundle_id for the same pid must produce a different digest")
+	}
+	if d1 == ComputerActionDigest(action, safari, "comp-2") {
+		t.Fatal("different computer_id must produce a different digest")
+	}
+}
+
+func TestReviewDeniesUnresolvedDarwinComputerActionWithoutJudge(t *testing.T) {
+	t.Parallel()
+	outcome, err := (&Service{}).Review(context.Background(), ReviewInput{
+		Environment: Environment{Platform: "darwin"},
+		Action:      Action{Surface: "computer", Tool: "mcp__computer__get_window_state", Input: `{"pid":999}`},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outcome.Decision != DecisionDeny || !strings.Contains(outcome.Message, "COMPUTER_TARGET_REQUIRED") {
+		t.Fatalf("outcome = %+v, want DecisionDeny with COMPUTER_TARGET_REQUIRED", outcome)
+	}
+}

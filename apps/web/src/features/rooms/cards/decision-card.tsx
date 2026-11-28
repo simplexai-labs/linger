@@ -629,9 +629,17 @@ function doneLine(
   translation: Translation,
 ): { icon: IconSvgElement; text: string; tone: ReceiptTone } | null {
   const { t } = translation;
-  const approved =
+  const isComputerApp =
     card.kind === "runtime_permission" &&
-    card.answer?.approval_scope === "always"
+    Boolean(card.runtime_permission?.computer_app);
+  const scope = card.answer?.approval_scope;
+  const approved = isComputerApp
+    ? scope === "always"
+      ? t(cardsMessages.alwaysAllowed)
+      : scope === "task"
+        ? t(cardsMessages.allowedForThisTask)
+        : t(cardsMessages.allowedOnce)
+    : card.kind === "runtime_permission" && scope === "always"
       ? t(cardsMessages.alwaysAllowed)
       : t(words.approved);
   const outcome = card.outcome?.trim();
@@ -640,7 +648,7 @@ function doneLine(
       return {
         icon: Tick02Icon,
         text:
-          card.answer?.approval_scope === "always"
+          scope === "always"
             ? approved
             : card.expires_at
               ? t(cardsMessages.approvedUntil, {

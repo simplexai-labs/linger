@@ -353,8 +353,9 @@ function ConnectionWritePolicies({
         agentActorId,
         true,
         writePolicy,
+        { requireActive: true },
       ),
-    onSuccess: async () => {
+    onSettled: async () => {
       await queryClient.invalidateQueries({
         queryKey: externalConnectionAgentAccessQueryKey(connection.id),
       });

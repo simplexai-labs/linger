@@ -174,9 +174,10 @@ func (a *App) setExternalConnectionAgentAccess(c *gin.Context) {
 	if request.WritePolicy != nil {
 		writePolicy = string(*request.WritePolicy)
 	}
+	requireActive := request.RequireActive != nil && *request.RequireActive
 	access, err := a.externalSources.SetAgentConnectionAccessWithPolicy(
 		c.Request.Context(), currentPrincipal(c).Session.AccountID,
-		c.Param("externalConnectionId"), c.Param("agentActorId"), request.Granted, writePolicy,
+		c.Param("externalConnectionId"), c.Param("agentActorId"), request.Granted, writePolicy, requireActive,
 	)
 	if a.writeExternalSourceError(c, "set external connection Agent grant", err) {
 		return

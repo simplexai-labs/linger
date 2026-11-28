@@ -137,10 +137,10 @@ type TeamHubCommand struct {
 // without review: the manifest's "allow" commands (reads, TeamHub's own
 // collaboration writes, and connector writes nobody else sees) and its
 // "confirm" commands, whose write waits for the sponsor's TeamHub
-// confirmation card when it needs approval (connector writes; Agent creation
-// and changes). "judge" commands, including the generic app
-// tool, are reviewed. A missing or invalid manifest returns no commands, so
-// every TeamHub command is judged instead of guessed.
+// confirmation card when it needs approval (connector writes, including the
+// generic app execute tool, and Agent creation and changes). Any remaining
+// "judge" commands are reviewed. A missing or invalid manifest returns no
+// commands, so every TeamHub command is judged instead of guessed.
 func TeamHubAllowedCommands(cliDirectory string) ([]TeamHubCommand, error) {
 	if cliDirectory == "" {
 		return nil, nil

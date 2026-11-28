@@ -1082,7 +1082,7 @@ func (c *cuaSession) startSession(ctx context.Context, scope string) error {
 		return nil
 	}
 	captureScope := scope
-	if runtime.GOOS == "darwin" && scope == "auto" {
+	if runtime.GOOS == "darwin" {
 		captureScope = "window"
 	}
 	result, err := c.client.request(ctx, "tools/call", map[string]any{"name": "start_session", "arguments": map[string]any{"session": label, "capture_scope": captureScope}})

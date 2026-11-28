@@ -146,6 +146,7 @@ describe("Agent sidebar connectors", () => {
       "actor-anotherme-jenny",
       true,
       "always_allow",
+      { requireActive: true },
     );
   });
 });

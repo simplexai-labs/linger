@@ -128,6 +128,20 @@ func (s *Set) LocalEvidence(ctx context.Context, tool, input string) *permission
 	return nil
 }
 
+// HasComputerTargetResolver reports whether any installed local MCP binding
+// provides a desktop app target resolver (bound on macOS).
+func (s *Set) HasComputerTargetResolver() bool {
+	if s == nil {
+		return false
+	}
+	for _, binding := range s.local {
+		if binding.ResolveTarget != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveComputerTarget resolves the macOS app target (bundle_id, app) for a
 // computer tool call, or returns nil when no target resolver is bound.
 func (s *Set) ResolveComputerTarget(ctx context.Context, tool, input string) *permission.Desktop {
