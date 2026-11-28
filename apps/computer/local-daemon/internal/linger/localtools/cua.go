@@ -459,7 +459,7 @@ func (c *cuaSession) call(ctx context.Context, name string, args json.RawMessage
 		if err != nil {
 			return nil, err
 		}
-		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, chrome, c.op.buildScriptAppAllowlist(ctx)); err != nil {
+		if err := scriptArguments(ctx, arguments, c.reviewScope(), scriptInputs, chrome, c.op.buildScriptAppAllowlist(ctx, args)); err != nil {
 			return nil, err
 		}
 	}

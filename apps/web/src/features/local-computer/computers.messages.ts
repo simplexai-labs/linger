@@ -54,6 +54,7 @@ export const computersMessages = defineMessages("computers", {
   allowedDesktopApps: "Allowed Desktop Apps",
   noAllowedDesktopApps:
     "No desktop apps have permanent access yet. Approve an app with Always allow to list it here.",
+  loadAppGrantsError: "Could not load allowed desktop apps.",
   allowedForAgent: "{agent} · {bundleId}",
   revoke: "Revoke",
   revoking: "Revoking…",

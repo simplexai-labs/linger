@@ -2003,6 +2003,10 @@ components:
           type: string
           enum: [allow, needs_approval, deny, unavailable]
           description: unavailable means the judge failed; the Runtime must not run the call.
+        approval_scope:
+          type: string
+          enum: [once, task, always]
+          description: Scope of an allow decision for per-app desktop approvals. Absent or once allows only this call.
         message:
           type: string
           description: Text shown to the Runtime model when the call does not run. Empty for allow.

@@ -67,6 +67,7 @@ type ReviewInput struct {
 // Outcome is the verdict the Runtime acts on.
 type Outcome struct {
 	Decision      Decision
+	ApprovalScope string
 	Message       string
 	InteractionID string
 }
@@ -400,10 +401,12 @@ func isComputerAppReview(input ReviewInput) bool {
 }
 
 // reviewComputerApp enforces per-app desktop grants without invoking the LLM
-// judge: a persistent grant or an active task approval allows immediately;
-// otherwise one per-app approval card is opened (or reused while pending).
+// judge: a live persistent grant or an active task approval allows with an
+// explicit scope so the daemon can cache it; a single-use approval ("once" or
+// legacy omitted scope) allows only this call; otherwise one per-app card is
+// opened or reused while pending.
 func (s *Service) reviewComputerApp(ctx context.Context, input ReviewInput, a authority, digest string) (Outcome, error) {
-	bundleID := strings.TrimSpace(input.Evidence.Desktop.BundleID)
+	bundleID := strings.ToLower(strings.TrimSpace(input.Evidence.Desktop.BundleID))
 	if a.computerID != "" {
 		var granted bool
 		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
@@ -414,7 +417,7 @@ func (s *Service) reviewComputerApp(ctx context.Context, input ReviewInput, a au
 			return Outcome{}, err
 		}
 		if granted {
-			return Outcome{Decision: DecisionAllow}, nil
+			return Outcome{Decision: DecisionAllow, ApprovalScope: "always"}, nil
 		}
 	}
 	var taskApproved bool
@@ -424,16 +427,25 @@ func (s *Service) reviewComputerApp(ctx context.Context, input ReviewInput, a au
 		  AND request->>'context_key'=$1
 		  AND lower(view->'computer_app'->>'bundle_id')=lower($2)
 		  AND status IN ('approved','consumed')
-		  AND answer->>'approval_scope' IN ('task','always')
+		  AND answer->>'approval_scope' = 'task'
 		  AND (expires_at IS NULL OR expires_at>clock_timestamp())
 	)`, input.ContextKey, bundleID).Scan(&taskApproved); err != nil {
 		return Outcome{}, err
 	}
 	if taskApproved {
-		return Outcome{Decision: DecisionAllow}, nil
+		return Outcome{Decision: DecisionAllow, ApprovalScope: "task"}, nil
+	}
+	// Single-use ("once") or legacy approvals without approval_scope allow
+	// only this exact retried action and do not promote to task-wide approval.
+	consumed, err := s.Cards.ConsumeRuntimePermission(ctx, input.ContextKey, digest)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if consumed != "" {
+		return Outcome{Decision: DecisionAllow, ApprovalScope: "once", InteractionID: consumed}, nil
 	}
 	var pending string
-	err := s.Pool.QueryRow(ctx, `SELECT decision.id FROM decisions decision
+	err = s.Pool.QueryRow(ctx, `SELECT decision.id FROM decisions decision
  JOIN rooms room ON room.id=decision.room_id AND room.deletion_started_at IS NULL
  JOIN active_room_members approver ON approver.room_id=decision.room_id AND approver.actor_id=decision.decider_actor_id
  WHERE decision.kind='runtime_permission'

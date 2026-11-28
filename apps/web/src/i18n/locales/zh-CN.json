@@ -961,6 +961,7 @@
     "accessDescription": "浏览器、桌面应用与文件夹",
     "allowedDesktopApps": "已授权的桌面应用",
     "noAllowedDesktopApps": "暂无永久授权的桌面应用。在审批卡片中选择「始终允许」后会显示在此处。",
+    "loadAppGrantsError": "无法加载已授权的桌面应用。",
     "allowedForAgent": "{agent} · {bundleId}",
     "revoke": "撤销",
     "revoking": "正在撤销…",

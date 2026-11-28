@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { useTeamHubRuntime } from "@/features/teamhub/teamhub-runtime";
+import { commonMessages } from "@/i18n/common.messages";
 import { useT } from "@/i18n/use-translation";
 
 import {
@@ -52,7 +53,21 @@ export function ComputerAppGrants({
         <h4 className="text-xs font-medium text-muted-foreground">
           {t(computersMessages.allowedDesktopApps)}
         </h4>
-        {items.length === 0 && !grants.isPending ? (
+        {grants.isError ? (
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <p className="text-xs text-app-danger" role="alert">
+              {t(computersMessages.loadAppGrantsError)}
+            </p>
+            <Button
+              disabled={grants.isFetching}
+              onClick={() => void grants.refetch()}
+              size="compact"
+              tone="ghost"
+            >
+              {t(commonMessages.retry)}
+            </Button>
+          </div>
+        ) : items.length === 0 && !grants.isPending ? (
           <p className="mt-1 text-xs text-muted-foreground">
             {t(computersMessages.noAllowedDesktopApps)}
           </p>

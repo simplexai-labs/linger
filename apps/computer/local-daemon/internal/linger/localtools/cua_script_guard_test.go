@@ -246,3 +246,46 @@ func TestScriptGuardRefusesKeysForTheEverydayChrome(t *testing.T) {
 		}
 	}
 }
+
+func TestScriptGuardEnforcesApprovedAppsAndBlocksReroutesInAJSEngine(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	dir := t.TempDir()
+	harness := filepath.Join(dir, "harness.mjs")
+	if err := os.WriteFile(harness, []byte(guardHarness), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	allow := &scriptAppAllowlist{
+		PIDs:    []int{10, 11},
+		Bundles: []string{"com.google.chrome"},
+		Names:   []string{"google chrome"},
+	}
+	for _, tc := range []struct{ name, body, want, notLogged string }{
+		{"approved by name", `const app = await cua.getApp("Google Chrome"); return await app.getState({query: "Search"});`, `"state:{\"include_screenshot\":false,\"query\":\"Search\"}"`, ""},
+		{"approved secondary pid", `const app = await cua.getApp({pid: 11}); return app.click({role: "AXButton", name: "Save"});`, `"clicked"`, ""},
+		{"unapproved getApp name", `return await cua.getApp("Terminal");`, "threw:COMPUTER_APP_NOT_APPROVED", "raw:"},
+		{"reroute typeText via pid", `const app = await cua.getApp({pid: 10}); return app.typeText("ls", {pid: 999});`, "threw:COMPUTER_APP_NOT_APPROVED", "type:"},
+		{"reroute typeText via app", `const app = await cua.getApp({pid: 10}); return app.typeText("ls", {app: "Terminal"});`, "threw:COMPUTER_APP_NOT_APPROVED", "type:"},
+		{"reroute getState via pid", `const app = await cua.getApp({pid: 10}); return await app.getState({pid: 999});`, "threw:COMPUTER_APP_NOT_APPROVED", "state:"},
+		{"reroute click via window_id", `const app = await cua.getApp({pid: 10}); return app.click({window_id: 999});`, "threw:COMPUTER_APP_NOT_APPROVED", "raw:"},
+		{"cua.call unapproved pid", `return await cua.call("click", {pid: 999});`, "threw:COMPUTER_APP_NOT_APPROVED", "call:"},
+		{"cua.call approved pid", `return await cua.call("click", {pid: 10});`, `call:click:{\"pid\":10}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script := filepath.Join(dir, "script.js")
+			if err := os.WriteFile(script, []byte(guardedScript(`{}`, tc.body, 42, 0, 0, allow)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command(node, harness, script).CombinedOutput()
+			if err != nil {
+				t.Fatalf("node: %v\n%s", err, out)
+			}
+			got := string(out)
+			if !strings.Contains(got, tc.want) || tc.notLogged != "" && strings.Contains(got, `"`+tc.notLogged) {
+				t.Fatalf("got %s, want %q without %q", got, tc.want, tc.notLogged)
+			}
+		})
+	}
+}

@@ -35,7 +35,9 @@ const (
 const linearGraphQLTool = "LINEAR_RUN_QUERY_OR_MUTATION"
 
 // classifyTool assigns a provider tool call to its risk tier using explicit
-// lists, Composio annotations/tags, and whole-token action-verb rules.
+// lists, Composio annotations/tags, and whole-token action-verb rules. Unknown
+// mutating tools fail closed to tierConfirmStrict so always_allow never
+// bypasses confirmation for unreviewed external mutations.
 func classifyTool(tool composio.Tool, arguments map[string]any) toolTier {
 	slug := tool.Slug
 	switch {
@@ -49,15 +51,17 @@ func classifyTool(tool composio.Tool, arguments map[string]any) toolTier {
 		if onlyQueries(arguments["query_or_mutation"]) {
 			return tierReadOnly
 		}
-		return tierWorkspaceWrite
+		return tierConfirmStrict
 	case tool.IsDestructiveHint() || hasDestructiveVerb(tool):
 		return tierConfirmStrict
+	case workspaceWriteTools[slug]:
+		return tierWorkspaceWrite
 	case tool.IsReadOnlyHint():
 		return tierReadOnly
 	case hasSafeReadOnlyVerb(tool):
 		return tierReadOnly
 	default:
-		return tierWorkspaceWrite
+		return tierConfirmStrict
 	}
 }
 
@@ -119,23 +123,33 @@ func hasSafeReadOnlyVerb(tool composio.Tool) bool {
 	return true
 }
 
-// strictConfirmTools are outbound messaging and file-sharing actions that
-// always wait for explicit sponsor confirmation and never offer "Always allow".
+// strictConfirmTools are outbound messaging, file-sharing, destructive, and
+// external-notification actions that always wait for explicit sponsor
+// confirmation and never offer "Always allow".
 var strictConfirmTools = map[string]bool{
-	"DISCORDBOT_CREATE_MESSAGE":              true,
-	"FEISHU_MAIL_SEND_DRAFT":                 true,
-	"GMAIL_REPLY_TO_THREAD":                  true,
-	"GMAIL_SEND_DRAFT":                       true,
-	"GMAIL_SEND_EMAIL":                       true,
-	"OUTLOOK_REPLY_EMAIL":                    true,
-	"OUTLOOK_SEND_DRAFT":                     true,
-	"OUTLOOK_SEND_EMAIL":                     true,
-	"SLACK_SEND_MESSAGE":                     true,
-	"SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK": true,
+	"DISCORDBOT_CREATE_MESSAGE":                            true,
+	"FEISHU_MAIL_SEND_DRAFT":                               true,
+	"GMAIL_BATCH_MODIFY_MESSAGES":                          true,
+	"GMAIL_REPLY_TO_THREAD":                                true,
+	"GMAIL_SEND_DRAFT":                                     true,
+	"GMAIL_SEND_EMAIL":                                     true,
+	"GOOGLECALENDAR_DELETE_EVENT":                          true,
+	"GOOGLEDRIVE_RESUMABLE_UPLOAD":                         true,
+	"OUTLOOK_CANCEL_CALENDAR_EVENT":                        true,
+	"OUTLOOK_CANCEL_EVENT":                                 true,
+	"OUTLOOK_DELETE_CALENDAR_EVENT":                        true,
+	"OUTLOOK_DELETE_CALENDAR_EVENT_FROM_SPECIFIC_CALENDAR": true,
+	"OUTLOOK_MOVE_MESSAGE":                                 true,
+	"OUTLOOK_REPLY_EMAIL":                                  true,
+	"OUTLOOK_SEND_DRAFT":                                   true,
+	"OUTLOOK_SEND_EMAIL":                                   true,
+	"SLACK_SEND_MESSAGE":                                   true,
+	"SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK":               true,
 }
 
 var destructiveActionVerbs = map[string]bool{
 	"BROADCAST": true,
+	"CANCEL":    true,
 	"CHARGE":    true,
 	"DELETE":    true,
 	"DESTROY":   true,
@@ -144,13 +158,18 @@ var destructiveActionVerbs = map[string]bool{
 	"INVITE":    true,
 	"MERGE":     true,
 	"PAY":       true,
+	"POST":      true,
 	"PUBLISH":   true,
 	"PURCHASE":  true,
 	"PURGE":     true,
+	"REMOVE":    true,
 	"REPLY":     true,
 	"REVOKE":    true,
 	"SEND":      true,
 	"SHARE":     true,
+	"TRASH":     true,
+	"TWEET":     true,
+	"UPLOAD":    true,
 }
 
 var readOnlyLeadingVerbs = map[string]bool{
@@ -359,49 +378,71 @@ var readTools = map[string]bool{
 	"SLACK_TEST_AUTH":                                     true,
 }
 
-// directWriteTools are the wrapped commands' writes that run at once: the
-// preparatory writes before a confirmed send (drafts, chats, attachments),
-// archives, new folders, and the writes hosts send to their
-// permission reviewer ("judge" in the CLI's connectorWriteApproval), which
-// include paid media generation and Notion pages created or appended to,
-// which page history can undo. Notion edits replace content and stay held.
+// workspaceWriteTools are known non-destructive workspace mutations where
+// "auto" asks with "Always allow <App>" and "always_allow" runs directly.
+var workspaceWriteTools = map[string]bool{
+	"FIGMA_ADD_A_COMMENT_TO_A_FILE":                     true,
+	"GITHUB_ADD_LABELS_TO_AN_ISSUE":                     true,
+	"GITHUB_CREATE_A_PULL_REQUEST":                      true,
+	"GITHUB_CREATE_A_REVIEW_COMMENT_FOR_A_PULL_REQUEST": true,
+	"GITHUB_CREATE_AN_ISSUE":                            true,
+	"GITHUB_CREATE_AN_ISSUE_COMMENT":                    true,
+	"GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS":             true,
+	"GITHUB_UPDATE_A_PULL_REQUEST":                      true,
+	"GITHUB_UPDATE_AN_ISSUE":                            true,
+	"GITHUB_UPDATE_AN_ISSUE_COMMENT":                    true,
+	"GOOGLECALENDAR_BATCH_EVENTS":                       true,
+	"GOOGLECALENDAR_CREATE_EVENT":                       true,
+	"GOOGLECALENDAR_PATCH_EVENT":                        true,
+	"LINEAR_ADD_LABEL_TO_ISSUE":                         true,
+	"LINEAR_CREATE_COMMENT":                             true,
+	"LINEAR_CREATE_ISSUE":                               true,
+	"LINEAR_CREATE_ISSUE_LABEL":                         true,
+	"LINEAR_CREATE_LINEAR_COMMENT":                      true,
+	"LINEAR_CREATE_LINEAR_ISSUE":                        true,
+	"LINEAR_CREATE_LINEAR_PROJECT":                      true,
+	"LINEAR_CREATE_PROJECT_UPDATE":                      true,
+	"LINEAR_FIND_OR_CREATE_ISSUE":                       true,
+	"LINEAR_UPDATE_COMMENT":                             true,
+	"LINEAR_UPDATE_ISSUE":                               true,
+	"LINEAR_UPDATE_LINEAR_ISSUE":                        true,
+	"LINEAR_UPDATE_LINEAR_PROJECT":                      true,
+	"NOTION_APPEND_BLOCK_CHILDREN":                      true,
+	"NOTION_INSERT_ROW_DATABASE":                        true,
+	"NOTION_UPDATE_BLOCK":                               true,
+	"NOTION_UPDATE_PAGE":                                true,
+	"NOTION_UPDATE_PAGE_MARKDOWN":                       true,
+	"NOTION_UPDATE_ROW_DATABASE":                        true,
+	"OUTLOOK_CALENDAR_CREATE_EVENT":                     true,
+	"OUTLOOK_UPDATE_CALENDAR_EVENT":                     true,
+	"OUTLOOK_UPDATE_CALENDAR_EVENT_IN_CALENDAR":         true,
+	"OUTLOOK_UPDATE_EMAIL":                              true,
+}
+
+// directWriteTools are genuinely safe, non-destructive, non-outbound
+// preparatory writes (private drafts, draft attachments, empty folders,
+// additive Notion pages with history, emoji reactions, opening a DM).
 var directWriteTools = map[string]bool{
-	"FAL_AI_SUBMIT_ASYNC_JOB":                              true,
-	"FAL_AI_UPLOAD_FILE":                                   true,
-	"FEISHU_MAIL_ARCHIVE":                                  true,
-	"FEISHU_MAIL_CREATE_DRAFT":                             true,
-	"FEISHU_MAIL_UPDATE_DRAFT":                             true,
-	"FIGMA_ADD_A_COMMENT_TO_A_FILE":                        true,
-	"GMAIL_BATCH_MODIFY_MESSAGES":                          true,
-	"GMAIL_CREATE_EMAIL_DRAFT":                             true,
-	"GMAIL_UPDATE_DRAFT":                                   true,
-	"GOOGLECALENDAR_BATCH_EVENTS":                          true,
-	"GOOGLECALENDAR_CREATE_EVENT":                          true,
-	"GOOGLECALENDAR_DELETE_EVENT":                          true,
-	"GOOGLECALENDAR_PATCH_EVENT":                           true,
-	"GOOGLEDRIVE_CREATE_FOLDER":                            true,
-	"GOOGLEDRIVE_RESUMABLE_UPLOAD":                         true,
-	"HIGGSFIELD_MCP_GENERATE_IMAGE":                        true,
-	"HIGGSFIELD_MCP_GENERATE_VIDEO":                        true,
-	"HIGGSFIELD_MCP_MEDIA_CONFIRM":                         true,
-	"HIGGSFIELD_MCP_MEDIA_UPLOAD":                          true,
-	"NOTION_ADD_MULTIPLE_PAGE_CONTENT":                     true,
-	"NOTION_CREATE_NOTION_PAGE":                            true,
-	"OUTLOOK_ADD_MAIL_ATTACHMENT":                          true,
-	"OUTLOOK_CALENDAR_CREATE_EVENT":                        true,
-	"OUTLOOK_CANCEL_CALENDAR_EVENT":                        true,
-	"OUTLOOK_CANCEL_EVENT":                                 true,
-	"OUTLOOK_CREATE_ATTACHMENT_UPLOAD_SESSION":             true,
-	"OUTLOOK_CREATE_DRAFT":                                 true,
-	"OUTLOOK_CREATE_DRAFT_REPLY":                           true,
-	"OUTLOOK_CREATE_REPLY_ALL_DRAFT":                       true,
-	"OUTLOOK_DELETE_CALENDAR_EVENT":                        true,
-	"OUTLOOK_DELETE_CALENDAR_EVENT_FROM_SPECIFIC_CALENDAR": true,
-	"OUTLOOK_MOVE_MESSAGE":                                 true,
-	"OUTLOOK_UPDATE_CALENDAR_EVENT":                        true,
-	"OUTLOOK_UPDATE_CALENDAR_EVENT_IN_CALENDAR":            true,
-	"OUTLOOK_UPDATE_EMAIL":                                 true,
-	"SLACK_ADD_REACTION_TO_AN_ITEM":                        true,
-	"SLACK_OPEN_DM":                                        true,
-	"SLACK_REMOVE_REACTION_FROM_ITEM":                      true,
+	"FAL_AI_SUBMIT_ASYNC_JOB":                  true,
+	"FAL_AI_UPLOAD_FILE":                       true,
+	"FEISHU_MAIL_ARCHIVE":                      true,
+	"FEISHU_MAIL_CREATE_DRAFT":                 true,
+	"FEISHU_MAIL_UPDATE_DRAFT":                 true,
+	"GMAIL_CREATE_EMAIL_DRAFT":                 true,
+	"GMAIL_UPDATE_DRAFT":                       true,
+	"GOOGLEDRIVE_CREATE_FOLDER":                true,
+	"HIGGSFIELD_MCP_GENERATE_IMAGE":            true,
+	"HIGGSFIELD_MCP_GENERATE_VIDEO":            true,
+	"HIGGSFIELD_MCP_MEDIA_CONFIRM":             true,
+	"HIGGSFIELD_MCP_MEDIA_UPLOAD":              true,
+	"NOTION_ADD_MULTIPLE_PAGE_CONTENT":         true,
+	"NOTION_CREATE_NOTION_PAGE":                true,
+	"OUTLOOK_ADD_MAIL_ATTACHMENT":              true,
+	"OUTLOOK_CREATE_ATTACHMENT_UPLOAD_SESSION": true,
+	"OUTLOOK_CREATE_DRAFT":                     true,
+	"OUTLOOK_CREATE_DRAFT_REPLY":               true,
+	"OUTLOOK_CREATE_REPLY_ALL_DRAFT":           true,
+	"SLACK_ADD_REACTION_TO_AN_ITEM":            true,
+	"SLACK_OPEN_DM":                            true,
+	"SLACK_REMOVE_REACTION_FROM_ITEM":          true,
 }

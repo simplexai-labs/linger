@@ -15,6 +15,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentcredential"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/agentruntimestate"
+	"github.com/simplexai-labs/linger/apps/teamhub/internal/externalsource"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/idempotency"
 	idgen "github.com/simplexai-labs/linger/apps/teamhub/internal/ids"
 	"github.com/simplexai-labs/linger/apps/teamhub/internal/jobs"
@@ -600,6 +601,21 @@ func (d *decisionAnswerStep) apply(ctx context.Context, tx pgx.Tx, queries *stor
 				strings.TrimSpace(stored.ComputerApp.BundleID) == "" || strings.TrimSpace(stored.ComputerApp.ComputerID) == "" {
 				return decisionOutcome{}, ErrInvalid
 			}
+			computerID := strings.TrimSpace(stored.ComputerApp.ComputerID)
+			var computerOwnerActorID string
+			err := tx.QueryRow(ctx, `SELECT owner_actor_id FROM local_computers
+				WHERE computer_id=$1 AND owner_tenant_id=$2 AND status <> 'removed' FOR SHARE`,
+				computerID, authority.TenantID).Scan(&computerOwnerActorID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return decisionOutcome{}, ErrNotFound
+			}
+			if err != nil {
+				return decisionOutcome{}, err
+			}
+			if computerOwnerActorID != authority.CallerActorID {
+				return decisionOutcome{}, ErrForbidden
+			}
+			bundleID := strings.ToLower(strings.TrimSpace(stored.ComputerApp.BundleID))
 			appName := strings.TrimSpace(stored.ComputerApp.AppName)
 			if appName == "" {
 				appName = strings.TrimSpace(stored.ComputerApp.BundleID)
@@ -607,10 +623,10 @@ func (d *decisionAnswerStep) apply(ctx context.Context, tx pgx.Tx, queries *stor
 			if _, err := tx.Exec(ctx, `INSERT INTO local_computer_app_grants(
 				id, tenant_id, computer_id, owner_actor_id, agent_actor_id, bundle_id, app_name, status
 			) VALUES($1,$2,$3,$4,$5,$6,$7,'active')
-			ON CONFLICT (tenant_id, computer_id, agent_actor_id, bundle_id) WHERE status='active'
+			ON CONFLICT (tenant_id, computer_id, agent_actor_id, lower(bundle_id)) WHERE status='active'
 			DO UPDATE SET app_name=EXCLUDED.app_name, updated_at=clock_timestamp()`,
-				idgen.New("local_computer_app_grant"), authority.TenantID, strings.TrimSpace(stored.ComputerApp.ComputerID),
-				authority.DeciderActorID, authority.RequestedByActorID, strings.TrimSpace(stored.ComputerApp.BundleID), appName); err != nil {
+				idgen.New("local_computer_app_grant"), authority.TenantID, computerID,
+				computerOwnerActorID, authority.RequestedByActorID, bundleID, appName); err != nil {
 				return decisionOutcome{}, err
 			}
 		}
@@ -623,7 +639,16 @@ func (d *decisionAnswerStep) apply(ctx context.Context, tx pgx.Tx, queries *stor
 			return decisionOutcome{}, errors.New("connection authorizer is not configured")
 		}
 		if err := d.service.connections.SetAgentConnectionWritePolicyInTx(ctx, tx, d.accountID, writeRequest.ConnectionID, authority.RequestedByActorID, "always_allow"); err != nil {
-			return decisionOutcome{}, err
+			switch {
+			case errors.Is(err, externalsource.ErrNotFound):
+				return decisionOutcome{}, ErrForbidden
+			case errors.Is(err, externalsource.ErrNotActive):
+				return decisionOutcome{}, ErrConflict
+			case errors.Is(err, externalsource.ErrInvalid):
+				return decisionOutcome{}, ErrInvalid
+			default:
+				return decisionOutcome{}, err
+			}
 		}
 	case authority.Kind == DecisionKindConnectionAuth && answer.Decision == "approve":
 		if status, err = d.service.beginConnectionAuthorization(ctx, tx, authority, answer.ConnectionID, d.accountID); err != nil {

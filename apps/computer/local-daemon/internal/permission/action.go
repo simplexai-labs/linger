@@ -69,6 +69,9 @@ type Desktop struct {
 	BundleID    string          `json:"bundle_id,omitempty"`
 	WindowTitle string          `json:"window_title,omitempty"`
 	Targets     []DesktopTarget `json:"targets,omitempty"`
+	// DenyReason is a host-local refusal (for example a mixed-app batch) that
+	// Reviewer returns directly without sending to TeamHub.
+	DenyReason string `json:"-"`
 }
 
 // DesktopTarget is the element one element token names.
@@ -105,6 +108,7 @@ const (
 // Runtime model whenever the call does not run.
 type Verdict struct {
 	Decision      Decision `json:"decision"`
+	ApprovalScope string   `json:"approval_scope,omitempty"`
 	Message       string   `json:"message"`
 	InteractionID string   `json:"interaction_id,omitempty"`
 }

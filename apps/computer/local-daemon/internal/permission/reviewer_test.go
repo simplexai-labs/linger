@@ -289,6 +289,8 @@ func TestReviewerPerAppComputerGate(t *testing.T) {
 		`{"pid":1}`: {BundleID: "com.apple.systempreferences", App: "System Settings"},
 		`{"pid":2}`: {BundleID: "com.apple.Notes", App: "Notes", WindowTitle: "Inbox"},
 		`{"pid":3}`: {BundleID: "com.apple.Safari", App: "Safari", WindowTitle: "Docs"},
+		`{"pid":4}`: {BundleID: "com.apple.TextEdit", App: "TextEdit", WindowTitle: "Draft"},
+		`{"pid":5}`: {DenyReason: "COMPUTER_MULTI_APP_BATCH: split batch"},
 	}
 	reviewer := &Reviewer{
 		Requester:            requester,
@@ -310,6 +312,11 @@ func TestReviewerPerAppComputerGate(t *testing.T) {
 		t.Fatalf("protected app verdict = %+v", verdict)
 	}
 
+	// Host-local DenyReason (for example mixed-app batch) is denied immediately.
+	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__run_actions", Input: `{"pid":5}`}}); verdict.Decision != Deny || !strings.Contains(verdict.Message, "COMPUTER_MULTI_APP_BATCH") {
+		t.Fatalf("deny reason verdict = %+v", verdict)
+	}
+
 	// Already-approved bundle allows immediately without calling TeamHub.
 	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":2}`}}); verdict.Decision != Allow {
 		t.Fatalf("approved app verdict = %+v", verdict)
@@ -318,7 +325,38 @@ func TestReviewerPerAppComputerGate(t *testing.T) {
 		t.Fatalf("unexpected review requests: %v", requester.requests)
 	}
 
-	// Unapproved bundle triggers TeamHub review carrying bundle_id, app, and window_title.
+	// Unresolved app targets on darwin fail closed to TeamHub review even for
+	// tools that would otherwise be read-only (get_window_state, scroll, clipboard_read).
+	unresolvedCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__get_window_state", Input: `{"pid":999}`}})
+	unresolvedID := <-requester.sent
+	requester.answer(t, unresolvedID, `{"decision":"needs_approval","message":"approval required"}`)
+	if got := <-unresolvedCh; got.Decision != NeedsApproval {
+		t.Fatalf("unresolved target verdict = %+v, want NeedsApproval", got)
+	}
+
+	// Single-use ("once") or legacy empty approval_scope allows this call only
+	// and must NOT cache the app in ApprovedComputerApps.
+	onceCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":4}`}})
+	onceID := <-requester.sent
+	requester.answer(t, onceID, `{"decision":"allow","approval_scope":"once"}`)
+	if got := <-onceCh; got.Decision != Allow {
+		t.Fatalf("once allow verdict = %+v", got)
+	}
+	if reviewer.ComputerAppApproved("com.apple.TextEdit") {
+		t.Fatal("once approval must not cache TextEdit as task-approved")
+	}
+
+	legacyCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":4}`}})
+	legacyID := <-requester.sent
+	requester.answer(t, legacyID, `{"decision":"allow"}`)
+	if got := <-legacyCh; got.Decision != Allow {
+		t.Fatalf("legacy allow verdict = %+v", got)
+	}
+	if reviewer.ComputerAppApproved("com.apple.TextEdit") {
+		t.Fatal("legacy empty-scope allow must not cache TextEdit as task-approved")
+	}
+
+	// Explicit task/always approval caches bundle_id for subsequent calls.
 	verdictCh := review(reviewer, Request{Action: Action{Tool: "mcp__computer__get_window_state", Input: `{"pid":3}`}})
 	id := <-requester.sent
 	payload := requester.requests[id]
@@ -327,19 +365,18 @@ func TestReviewerPerAppComputerGate(t *testing.T) {
 	if desktop["bundle_id"] != "com.apple.Safari" || desktop["app"] != "Safari" || desktop["window_title"] != "Docs" {
 		t.Fatalf("desktop evidence = %v", desktop)
 	}
-	requester.answer(t, id, `{"decision":"allow"}`)
+	requester.answer(t, id, `{"decision":"allow","approval_scope":"task"}`)
 	if got := <-verdictCh; got.Decision != Allow {
 		t.Fatalf("safari allow verdict = %+v", got)
 	}
 
-	// Subsequent calls against Safari are cached in ApprovedComputerApps.
 	if !reviewer.ComputerAppApproved("com.apple.Safari") {
 		t.Fatal("expected Safari to be cached as approved")
 	}
 	if verdict := reviewer.Review(context.Background(), Request{Action: Action{Tool: "mcp__computer__click", Input: `{"pid":3}`}}); verdict.Decision != Allow {
 		t.Fatalf("cached safari verdict = %+v", verdict)
 	}
-	if len(requester.requests) != 1 {
-		t.Fatalf("expected 1 total review request, got %d", len(requester.requests))
+	if len(requester.requests) != 4 {
+		t.Fatalf("expected 4 total review requests, got %d", len(requester.requests))
 	}
 }

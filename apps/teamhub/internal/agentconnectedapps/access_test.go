@@ -279,22 +279,38 @@ func TestExecuteRunsOutlookCalendarReadsAndDirectWritesAtOnce(t *testing.T) {
 			t.Fatalf("%s: result=%+v err=%v executed=%v", slug, ran, err, provider.executed)
 		}
 	}
-	writeSlugs := []string{
+	workspaceWriteSlugs := []string{
 		"OUTLOOK_CALENDAR_CREATE_EVENT",
 		"OUTLOOK_UPDATE_CALENDAR_EVENT",
 		"OUTLOOK_UPDATE_CALENDAR_EVENT_IN_CALENDAR",
+	}
+	for _, slug := range workspaceWriteSlugs {
+		if classifyTool(tool(slug, "outlook"), nil) != tierWorkspaceWrite {
+			t.Errorf("%s must be classified as tierWorkspaceWrite", slug)
+		}
+		provider, held, err := executeForTest(t, slug, "outlook", map[string]any{})
+		if err != nil || held.Confirmation == nil || !held.Confirmation.Card.CanRemember || len(provider.executed) != 0 {
+			t.Fatalf("%s on auto: result=%+v err=%v executed=%v", slug, held, err, provider.executed)
+		}
+		providerAllow, ran, err := executeForTestWithPolicy(t, tool(slug, "outlook"), externalsource.WritePolicyAlwaysAllow, map[string]any{})
+		if err != nil || ran.Confirmation != nil || len(providerAllow.executed) != 1 {
+			t.Fatalf("%s on always_allow: result=%+v err=%v executed=%v", slug, ran, err, providerAllow.executed)
+		}
+	}
+	strictSlugs := []string{
 		"OUTLOOK_CANCEL_EVENT",
 		"OUTLOOK_CANCEL_CALENDAR_EVENT",
 		"OUTLOOK_DELETE_CALENDAR_EVENT",
 		"OUTLOOK_DELETE_CALENDAR_EVENT_FROM_SPECIFIC_CALENDAR",
+		"OUTLOOK_MOVE_MESSAGE",
 	}
-	for _, slug := range writeSlugs {
-		if classifyTool(tool(slug, "outlook"), nil) != tierDirectWrite {
-			t.Errorf("%s must be classified as tierDirectWrite", slug)
+	for _, slug := range strictSlugs {
+		if classifyTool(tool(slug, "outlook"), nil) != tierConfirmStrict {
+			t.Errorf("%s must be classified as tierConfirmStrict", slug)
 		}
-		provider, ran, err := executeForTest(t, slug, "outlook", map[string]any{})
-		if err != nil || ran.Confirmation != nil || len(provider.executed) != 1 {
-			t.Fatalf("%s: result=%+v err=%v executed=%v", slug, ran, err, provider.executed)
+		provider, held, err := executeForTestWithPolicy(t, tool(slug, "outlook"), externalsource.WritePolicyAlwaysAllow, map[string]any{})
+		if err != nil || held.Confirmation == nil || held.Confirmation.Card.CanRemember || len(provider.executed) != 0 {
+			t.Fatalf("%s on always_allow must stay strictly confirmed: result=%+v err=%v executed=%v", slug, held, err, provider.executed)
 		}
 	}
 }
@@ -317,8 +333,19 @@ func TestClassifyToolAnnotationsVerbsAndWritePolicies(t *testing.T) {
 		{"GITHUB_MERGE_A_PULL_REQUEST", "github", tierConfirmStrict},
 		{"GITHUB_FORCE_PUSH_BRANCH", "github", tierConfirmStrict},
 		{"GMAIL_SEND_EMAIL", "gmail", tierConfirmStrict},
+		{"GMAIL_BATCH_MODIFY_MESSAGES", "gmail", tierConfirmStrict},
+		{"GOOGLECALENDAR_DELETE_EVENT", "googlecalendar", tierConfirmStrict},
+		{"GOOGLEDRIVE_RESUMABLE_UPLOAD", "googledrive", tierConfirmStrict},
+		{"OUTLOOK_CANCEL_EVENT", "outlook", tierConfirmStrict},
+		{"OUTLOOK_MOVE_MESSAGE", "outlook", tierConfirmStrict},
 		{"SLACK_SEND_MESSAGE", "slack", tierConfirmStrict},
+		{"SLACK_CHAT_POST_MESSAGE", "slack", tierConfirmStrict},
 		{"SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK", "slack", tierConfirmStrict},
+		{"TWITTER_CREATE_TWEET", "twitter", tierConfirmStrict},
+		{"CUSTOM_SEND_WEBHOOK", "custom", tierConfirmStrict},
+		{"CUSTOM_PUBLISH_RELEASE", "custom", tierConfirmStrict},
+		{"GITHUB_STAR_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER", "github", tierConfirmStrict},
+		{"STRIPE_CREATE_REFUND", "stripe", tierConfirmStrict},
 	} {
 		if got := classifyTool(tool(tc.slug, tc.toolkit), nil); got != tc.want {
 			t.Errorf("classifyTool(%s) = %v, want %v", tc.slug, got, tc.want)

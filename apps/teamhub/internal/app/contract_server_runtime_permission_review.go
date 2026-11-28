@@ -59,6 +59,10 @@ func (a *App) createRuntimePermissionReview(c *gin.Context) {
 		Decision: teamhubinternal.RuntimePermissionReviewResultDecision(outcome.Decision),
 		Message:  outcome.Message, PolicyVersion: permissionreview.PolicyVersion,
 	}
+	if outcome.ApprovalScope != "" {
+		scope := teamhubinternal.RuntimePermissionReviewResultApprovalScope(outcome.ApprovalScope)
+		result.ApprovalScope = &scope
+	}
 	if outcome.InteractionID != "" {
 		result.InteractionId = &outcome.InteractionID
 	}

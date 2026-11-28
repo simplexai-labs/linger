@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -19,7 +20,7 @@ func TestLocalWriteToolJudgesEveryNonReadOnlyLocalAction(t *testing.T) {
 		{"mcp__browser__browser_tabs", `{"action":"list"}`, false},
 		{"mcp__browser__browser_snapshot", `{}`, false},
 		{"mcp__computer__click", `{"x":1,"y":2}`, true},
-		{"mcp__computer__get_desktop_state", `{}`, true},
+		{"mcp__computer__get_desktop_state", `{}`, runtime.GOOS == "darwin"},
 		{"mcp__computer__type_text", `{"text":"hi"}`, true},
 		{"mcp__computer__scroll", `{}`, false},
 		{"mcp__linger__send_message", `{}`, false},

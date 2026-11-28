@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -81,9 +82,12 @@ func IsProtectedMacApp(bundleID string) bool {
 // that declare them to their Runtime and for tests that keep the list in step
 // with the local tool catalog.
 func ReadOnlyLocalToolNames() []string {
-	names := make([]string, 0, len(readOnlyLocalTools))
+	names := make([]string, 0, len(readOnlyLocalTools)+1)
 	for name := range readOnlyLocalTools {
 		names = append(names, name)
+	}
+	if runtime.GOOS != "darwin" {
+		names = append(names, "mcp__computer__get_desktop_state")
 	}
 	return names
 }
@@ -93,6 +97,9 @@ func ReadOnlyLocalToolNames() []string {
 func ReadOnlyLocalTool(tool, input string) bool {
 	if readOnlyLocalTools[tool] {
 		return true
+	}
+	if tool == "mcp__computer__get_desktop_state" {
+		return runtime.GOOS != "darwin"
 	}
 	if tool == "mcp__browser__browser_tabs" {
 		// Listing tabs and switching to an open one change nothing; opening

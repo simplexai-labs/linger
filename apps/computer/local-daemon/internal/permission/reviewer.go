@@ -119,12 +119,17 @@ func (r *Reviewer) ApprovedComputerAppList() []string {
 // run a call nobody judged.
 func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 	var computerTarget *Desktop
+	perAppComputerGate := false
 	if strings.HasPrefix(request.Action.Tool, "mcp__computer__") {
 		if AppAgnosticComputerReadTool(request.Action.Tool) {
 			return Verdict{Decision: Allow}
 		}
 		if r.ResolveComputerTarget != nil {
+			perAppComputerGate = true
 			computerTarget = r.ResolveComputerTarget(ctx, request.Action.Tool, request.Action.Input)
+			if computerTarget != nil && computerTarget.DenyReason != "" {
+				return Verdict{Decision: Deny, Message: computerTarget.DenyReason}
+			}
 			if computerTarget != nil && strings.TrimSpace(computerTarget.BundleID) != "" {
 				if IsProtectedMacApp(computerTarget.BundleID) {
 					name := computerTarget.App
@@ -142,7 +147,9 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 			}
 		}
 	}
-	if computerTarget == nil || strings.TrimSpace(computerTarget.BundleID) == "" {
+	// When per-app macOS gating is active, an unresolved app target must fail
+	// closed to TeamHub review rather than falling through to read-only allows.
+	if !perAppComputerGate {
 		if ReadOnlyLocalTool(request.Action.Tool, request.Action.Input) ||
 			r.LocalAllowed != nil && r.LocalAllowed(request.Action.Tool, request.Action.Input) {
 			return Verdict{Decision: Allow}
@@ -174,10 +181,10 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 		}
 	}
 	reuseKey, reusable := GUIReuseKey(request.Action.Tool, request.Action.Input)
-	if computerTarget == nil && reusable && r.reused(reuseKey) {
+	if !perAppComputerGate && reusable && r.reused(reuseKey) {
 		return Verdict{Decision: Allow}
 	}
-	if r.LocalEvidence != nil && request.Evidence == nil && (LocalWriteTool(request.Action.Tool, request.Action.Input) || (computerTarget != nil && computerTarget.BundleID != "")) {
+	if r.LocalEvidence != nil && request.Evidence == nil && (LocalWriteTool(request.Action.Tool, request.Action.Input) || perAppComputerGate) {
 		request.Evidence = r.LocalEvidence(ctx, request.Action.Tool, request.Action.Input)
 	}
 	if computerTarget != nil && computerTarget.BundleID != "" {
@@ -240,7 +247,8 @@ func (r *Reviewer) Review(ctx context.Context, request Request) Verdict {
 			r.remember(reuseKey, verdict.Decision)
 		}
 		if verdict.Decision == Allow {
-			if computerTarget != nil && computerTarget.BundleID != "" {
+			if computerTarget != nil && computerTarget.BundleID != "" &&
+				(verdict.ApprovalScope == "task" || verdict.ApprovalScope == "always") {
 				r.ApproveComputerApp(computerTarget.BundleID)
 			}
 			recordApprovedScript(r.ScriptScope, request, r.now())

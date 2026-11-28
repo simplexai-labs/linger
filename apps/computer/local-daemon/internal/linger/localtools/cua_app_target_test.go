@@ -15,6 +15,10 @@ func TestParseLSAppInfoExtractsBundleAndName(t *testing.T) {
 	if bundle != "com.apple.Safari" || name != "Safari" {
 		t.Fatalf("got (%q, %q), want (com.apple.Safari, Safari)", bundle, name)
 	}
+	pid, displayName := parseLSAppPIDAndName("pid = 512\n\"LSDisplayName\"=\"Google Chrome\"\n")
+	if pid != 512 || displayName != "Google Chrome" {
+		t.Fatalf("parseLSAppPIDAndName = (%d, %q)", pid, displayName)
+	}
 }
 
 func TestPIDAppIdentityCachesAndHandlesPIDReuse(t *testing.T) {
@@ -44,12 +48,10 @@ func TestPIDAppIdentityCachesAndHandlesPIDReuse(t *testing.T) {
 	if !ok || b != "com.apple.Safari" || n != "Safari" || infoCalls != 1 {
 		t.Fatalf("first lookup: (%q, %q, %v) calls=%d", b, n, ok, infoCalls)
 	}
-	// Second lookup with same (pid, lstart) hits cache.
 	b, n, ok = pidAppIdentity(context.Background(), 4242)
 	if !ok || b != "com.apple.Safari" || n != "Safari" || infoCalls != 1 {
 		t.Fatalf("cached lookup: (%q, %q, %v) calls=%d", b, n, ok, infoCalls)
 	}
-	// PID reuse changes lstart and misses cache.
 	startTime = "Mon Nov 28 10:05:00 2026"
 	appBundle = "com.apple.Notes"
 	appName = "Notes"
@@ -77,6 +79,8 @@ func TestResolveAppTargetCoversAllCuaToolShapes(t *testing.T) {
 		switch pid {
 		case 10:
 			return "com.apple.Safari", "Safari", true
+		case 15:
+			return "com.apple.Notes", "Notes", true
 		case 20:
 			return "com.apple.systempreferences", "System Settings", true
 		default:
@@ -111,7 +115,19 @@ func TestResolveAppTargetCoversAllCuaToolShapes(t *testing.T) {
 	}
 	// run_actions prioritizes protected app over benign step
 	if got := op.resolveAppTarget(context.Background(), "run_actions", json.RawMessage(`{"actions":[{"tool":"click","pid":10},{"tool":"click","pid":20}]}`)); got == nil || got.BundleID != "com.apple.systempreferences" {
-		t.Fatalf("run_actions = %+v", got)
+		t.Fatalf("run_actions protected = %+v", got)
+	}
+	// run_actions rejects mixed unapproved apps so only one app cannot hide another
+	if got := op.resolveAppTarget(context.Background(), "run_actions", json.RawMessage(`{"actions":[{"tool":"click","pid":10},{"tool":"click","pid":15}]}`)); got == nil || !strings.Contains(got.DenyReason, "COMPUTER_MULTI_APP_BATCH") {
+		t.Fatalf("run_actions multi-app = %+v", got)
+	}
+	// run_actions rejects mixed resolved + unresolved step (fail closed)
+	if got := op.resolveAppTarget(context.Background(), "run_actions", json.RawMessage(`{"actions":[{"tool":"click","pid":10},{"tool":"click","pid":999}]}`)); got == nil || !strings.Contains(got.DenyReason, "COMPUTER_TARGET_REQUIRED") {
+		t.Fatalf("run_actions unresolved mix = %+v", got)
+	}
+	// run_actions with single unapproved app across multiple steps returns that app
+	if got := op.resolveAppTarget(context.Background(), "run_actions", json.RawMessage(`{"actions":[{"tool":"click","pid":10},{"tool":"type_text","pid":10}]}`)); got == nil || got.BundleID != "com.apple.Safari" || got.DenyReason != "" {
+		t.Fatalf("run_actions single app = %+v", got)
 	}
 	// run_script args.bundle_id
 	if got := op.resolveAppTarget(context.Background(), "run_script", json.RawMessage(`{"args":{"bundle_id":"com.apple.Notes","app":"Notes"},"script":"return 1"}`)); got == nil || got.BundleID != "com.apple.Notes" {
@@ -121,18 +137,29 @@ func TestResolveAppTargetCoversAllCuaToolShapes(t *testing.T) {
 	if got := op.resolveAppTarget(context.Background(), "run_script", json.RawMessage(`{"script":"const app = cua.getApp('com.apple.Notes');"}`)); got == nil || got.BundleID != "com.apple.Notes" {
 		t.Fatalf("run_script literal = %+v", got)
 	}
+	// run_script referencing multiple unapproved apps is rejected
+	if got := op.resolveAppTarget(context.Background(), "run_script", json.RawMessage(`{"script":"cua.getApp('com.apple.Safari'); cua.getApp('com.apple.Notes');"}`)); got == nil || !strings.Contains(got.DenyReason, "COMPUTER_MULTI_APP_SCRIPT") {
+		t.Fatalf("run_script multi-app = %+v", got)
+	}
+	// run_script with no target and no approved apps refuses upfront rather than empty allowlist
+	if got := op.resolveAppTarget(context.Background(), "run_script", json.RawMessage(`{"script":"return 1;"}`)); got == nil || !strings.Contains(got.DenyReason, "COMPUTER_TARGET_REQUIRED") {
+		t.Fatalf("run_script targetless = %+v", got)
+	}
 }
 
-func TestGuardedScriptEnforcesApprovedApps(t *testing.T) {
-	script := guardedScript("{}", "return cua.getApp('com.apple.Notes');", 0, 10, 10, &scriptAppAllowlist{
-		PIDs:    []int{10},
-		Bundles: []string{"com.apple.safari"},
+func TestGuardedScriptEnforcesApprovedAppsNamesAndReroutes(t *testing.T) {
+	script := guardedScript("{}", "return cua.getApp('Google Chrome');", 0, 10, 10, &scriptAppAllowlist{
+		PIDs:    []int{10, 11},
+		Bundles: []string{"com.google.chrome"},
+		Names:   []string{"google chrome"},
 	})
 	for _, want := range []string{
 		"COMPUTER_APP_NOT_APPROVED",
-		`{"10":true}`,
-		`{"com.apple.safari":true}`,
-		"checkAppCall",
+		`{"10":true,"11":true}`,
+		`{"com.google.chrome":true}`,
+		`{"google chrome":true}`,
+		"checkReroute",
+		"checkAppCall(k, c, o)",
 		"checkAppResult",
 	} {
 		if !strings.Contains(script, want) {

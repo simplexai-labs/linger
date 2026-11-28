@@ -150,20 +150,29 @@ func (s *Service) SetAgentConnectionWritePolicyInTx(
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "connection-grant:"+connectionID+":"+agentActorID); err != nil {
 		return err
 	}
+	var connectionOwnerAccountID string
+	if err := tx.QueryRow(ctx, `
+		SELECT account_id FROM external_connections
+		WHERE id=$1 FOR SHARE`, connectionID).Scan(&connectionOwnerAccountID); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if connectionOwnerAccountID != accountID {
+		return ErrNotFound
+	}
 	var currentPolicy string
 	err := tx.QueryRow(ctx, `
 		SELECT grant_row.write_policy
 		FROM external_connection_agent_grants grant_row
-		JOIN external_connections connection ON connection.id=grant_row.connection_id
 		WHERE grant_row.connection_id=$1
 		  AND grant_row.agent_actor_id=$2
 		  AND grant_row.status='active'
-		  AND connection.account_id=$3
 		FOR UPDATE OF grant_row`,
-		connectionID, agentActorID, accountID,
+		connectionID, agentActorID,
 	).Scan(&currentPolicy)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return ErrNotActive
 	}
 	if err != nil {
 		return err

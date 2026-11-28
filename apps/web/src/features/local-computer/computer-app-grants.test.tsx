@@ -80,3 +80,68 @@ it("lists Allowed Desktop Apps and revokes a grant", async () => {
     ),
   ).toBeVisible();
 });
+
+it("renders an error state with Retry on load failure instead of empty state", async () => {
+  let attempt = 0;
+  const client = {
+    api: {
+      GET: vi.fn(async () => {
+        attempt++;
+        if (attempt === 1) {
+          return {
+            error: {
+              error: {
+                code: "DEPENDENCY_UNAVAILABLE",
+                message: "unavailable",
+                request_id: "req_1",
+              },
+            },
+            response: new Response(null, { status: 503 }),
+          };
+        }
+        return {
+          data: {
+            items: [
+              {
+                agent_actor_id: "actor_nova",
+                agent_display_name: "Nova",
+                app_name: "Notes",
+                bundle_id: "com.apple.Notes",
+                computer_id: "computer_1",
+                created_at: "2026-11-28T03:00:00Z",
+                id: "grant_2",
+              },
+            ],
+          },
+          response: new Response(null, { status: 200 }),
+        };
+      }),
+      DELETE: vi.fn(),
+    },
+  };
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <TeamHubRuntimeProvider runtime={{ client } as never}>
+        <ComputerAppGrants computerId="computer_1" tenantId="tenant_1" />
+      </TeamHubRuntimeProvider>
+    </QueryClientProvider>,
+  );
+
+  expect(
+    await screen.findByText("Could not load allowed desktop apps."),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(
+      "No desktop apps have permanent access yet. Approve an app with Always allow to list it here.",
+    ),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect(await screen.findByText("Notes")).toBeVisible();
+  expect(screen.getByText("Nova · com.apple.Notes")).toBeVisible();
+});

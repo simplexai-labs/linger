@@ -93,6 +93,7 @@ func guardedScript(args, body string, deadline int64, inputLimit int, chrome int
 	enforceApps := false
 	allowedPIDsJSON := "{}"
 	allowedBundlesJSON := "{}"
+	allowedNamesJSON := "{}"
 	if len(allowedApps) > 0 && allowedApps[0] != nil {
 		enforceApps = true
 		pidMap := make(map[string]bool, len(allowedApps[0].PIDs))
@@ -103,11 +104,18 @@ func guardedScript(args, body string, deadline int64, inputLimit int, chrome int
 		for _, bundle := range allowedApps[0].Bundles {
 			bundleMap[strings.ToLower(bundle)] = true
 		}
+		nameMap := make(map[string]bool, len(allowedApps[0].Names))
+		for _, name := range allowedApps[0].Names {
+			nameMap[strings.ToLower(name)] = true
+		}
 		if b, err := json.Marshal(pidMap); err == nil {
 			allowedPIDsJSON = string(b)
 		}
 		if b, err := json.Marshal(bundleMap); err == nil {
 			allowedBundlesJSON = string(b)
+		}
+		if b, err := json.Marshal(nameMap); err == nil {
+			allowedNamesJSON = string(b)
 		}
 	}
 	source, _ := json.Marshal(`"use strict"; ` + body + "\n")
@@ -117,12 +125,16 @@ const apply = Reflect.apply, stringify = JSON.stringify, parse = JSON.parse, tes
 const plainProtos = [Object.prototype, Array.prototype, null], real = globalThis.cua;
 const bad = /`+strings.Join(pattern, "|")+`/;
 const limit = `+strconv.Itoa(inputLimit)+`, chrome = `+strconv.Itoa(chrome)+`, rest = real.sleep, random = Math.random, floor = Math.floor; let sent = 0, reads = [], readChars = 0, inputs = 0;
-const enforceApps = `+strconv.FormatBool(enforceApps)+`, allowedPIDs = Object.assign(Object.create(null), `+allowedPIDsJSON+`), allowedBundles = Object.assign(Object.create(null), `+allowedBundlesJSON+`);
+const enforceApps = `+strconv.FormatBool(enforceApps)+`, allowedPIDs = Object.assign(Object.create(null), `+allowedPIDsJSON+`), allowedBundles = Object.assign(Object.create(null), `+allowedBundlesJSON+`), allowedNames = Object.assign(Object.create(null), `+allowedNamesJSON+`);
 const appAgnosticOps = {__proto__: null, list_windows: true, check_permissions: true, report_blocker: true};
+const appErr = "COMPUTER_APP_NOT_APPROVED: script may only target approved apps";
 const pidAllowed = p => typeof p === "number" && allowedPIDs[String(p)] === true;
 const bundleAllowed = s => typeof s === "string" && allowedBundles[s.toLowerCase()] === true;
-const checkAppCall = (k, c) => { if (!enforceApps) return; if (k === "getApp") { const t = c[0]; if (typeof t === "string") { if (!bundleAllowed(t)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } else if (t !== null && typeof t === "object") { if (typeof t.pid === "number") { if (!pidAllowed(t.pid)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } else if (typeof t.bundle_id === "string") { if (!bundleAllowed(t.bundle_id)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } else { throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } } else { throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } } else if (k === "call") { const opName = c[0], opArgs = c[1]; if (typeof opName === "string" && appAgnosticOps[opName] === true) return; if (opArgs === null || typeof opArgs !== "object" || !pidAllowed(opArgs.pid) || opArgs.app !== undefined || opArgs.target !== undefined) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); } };
-const checkAppResult = (k, x) => { if (!enforceApps || k !== "getApp") return; if (x !== null && typeof x === "object" && typeof x.pid === "number" && !pidAllowed(x.pid)) throw new Error("COMPUTER_APP_NOT_APPROVED: script may only target approved apps"); };
+const nameAllowed = s => typeof s === "string" && allowedNames[s.toLowerCase()] === true;
+const appStringAllowed = s => bundleAllowed(s) || nameAllowed(s);
+const checkReroute = v => { if (v === null || typeof v !== "object") return; if (v.app !== undefined || v.target !== undefined || v.bundle_id !== undefined || v.window_id !== undefined || v.windowId !== undefined) throw new Error(appErr); if (v.pid !== undefined && !pidAllowed(v.pid)) throw new Error(appErr); const ks = keys(v); for (let i = 0; i < ks.length; i++) checkReroute(v[ks[i]]); };
+const checkAppCall = (k, c, o) => { if (!enforceApps) return; if (k === "getApp") { const t = c[0]; if (typeof t === "string") { if (!appStringAllowed(t)) throw new Error(appErr); } else if (t !== null && typeof t === "object") { let matched = false; if (t.pid !== undefined) { if (!pidAllowed(t.pid)) throw new Error(appErr); matched = true; } if (t.bundle_id !== undefined) { if (!bundleAllowed(t.bundle_id)) throw new Error(appErr); matched = true; } if (t.name !== undefined) { if (!appStringAllowed(t.name)) throw new Error(appErr); matched = true; } if (t.app !== undefined) { if (!appStringAllowed(t.app)) throw new Error(appErr); matched = true; } if (!matched) throw new Error(appErr); } else { throw new Error(appErr); } } else if (k === "call") { const opName = c[0], opArgs = c[1]; if (typeof opName === "string" && appAgnosticOps[opName] === true) return; if (opArgs === null || typeof opArgs !== "object" || !pidAllowed(opArgs.pid) || opArgs.app !== undefined || opArgs.target !== undefined || opArgs.bundle_id !== undefined) throw new Error(appErr); } else if (o !== real) { if (typeof o.pid === "number" && !pidAllowed(o.pid)) throw new Error(appErr); for (let i = 0; i < c.length; i++) checkReroute(c[i]); } };
+const checkAppResult = (k, x) => { if (!enforceApps || k !== "getApp") return; if (x !== null && typeof x === "object" && typeof x.pid === "number" && !pidAllowed(x.pid)) throw new Error(appErr); };
 const reading = (k, c) => k === "getState" || k === "call" && c[0] === "get_window_state";
 const keep = r => { if (r === null || typeof r !== "object" || typeof r.snapshot_id !== "string" || typeof r.pid !== "number" || typeof r.window_id !== "number") return; const read = {snapshot_id: r.snapshot_id, pid: r.pid, window_id: r.window_id}; for (const f of ["tree_markdown", "tree_diff", "since", "since_status"]) if (typeof r[f] === "string") read[f] = r[f]; const size = (read.tree_markdown || "").length + (read.tree_diff || "").length; reads[reads.length] = read; readChars += size; while (reads.length > `+strconv.Itoa(scriptReadsKept)+` || readChars > `+strconv.Itoa(scriptReadCharacters)+` && reads.length > 0) { const first = reads[0]; readChars -= (first.tree_markdown || "").length + (first.tree_diff || "").length; reads = apply(slice, reads, [1]); } };
 const keyOps = {__proto__: null, hotkey: true, type_text: true, press_key: true}, keyMethods = {__proto__: null, hotkey: true, typeText: true, pressKey: true};
@@ -148,7 +160,7 @@ if (limit > 0 && k === "sleep" && o === real && typeof c[0] === "number" && c[0]
 const sends = input(k, c), fence = () => { reads = []; readChars = 0; inputs++; };
 const run = () => { if (sends) fence(); const at = inputs, r = apply(v, o, c); const seen = x => { checkAppResult(k, x); if (sends) fence(); else if (reading(k, c) && at === inputs) keep(x); return out(x); }; const missed = e => { if (sends) fence(); throw e; }; return r !== null && typeof r === "object" && typeof r.then === "function" ? apply(then, r, [seen, missed]) : seen(r); };
 if (launches(k, c)) throw new Error("COMPUTER_SCRIPT_REFUSED: a script opens no app or URL, so the site checks of launch_app hold and the key rule knows every app the script reaches; call launch_app as its own tool");
-checkAppCall(k, c);
+checkAppCall(k, c, o);
 if (keyed(k, c, o)) throw new Error(`+strconv.Quote(everydayChromeKeysRefused)+`);
 if (limit <= 0 || !sends) return run();
 if (++sent > limit) throw new Error("COMPUTER_SCRIPT_INPUT_LIMIT: a script sends at most " + limit + " inputs to the Computer's own browser; return what you have, look at the window, then continue in a new script");

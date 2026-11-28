@@ -18,7 +18,7 @@ CREATE TABLE public.local_computer_app_grants (
 );
 
 CREATE UNIQUE INDEX local_computer_app_grants_active_unique_idx
-    ON public.local_computer_app_grants (tenant_id, computer_id, agent_actor_id, bundle_id)
+    ON public.local_computer_app_grants (tenant_id, computer_id, agent_actor_id, lower(bundle_id))
     WHERE status = 'active';
 
 CREATE INDEX local_computer_app_grants_computer_owner_idx

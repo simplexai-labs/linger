@@ -145,7 +145,7 @@ func (s *Service) ConsumeRuntimePermission(ctx context.Context, contextKey, dige
 	err = tx.QueryRow(ctx, `UPDATE decisions SET status='consumed', finished_at=clock_timestamp()
  WHERE id=(SELECT id FROM decisions
    WHERE kind='runtime_permission' AND request->>'context_key'=$1 AND request->>'action_digest'=$2
-     AND status='approved' AND expires_at>clock_timestamp()
+     AND status='approved' AND coalesce(answer->>'approval_scope','') IN ('','once') AND expires_at>clock_timestamp()
    ORDER BY decided_at LIMIT 1 FOR UPDATE SKIP LOCKED)
  RETURNING id, tenant_id, requested_by_actor_id, message_id`, contextKey, digest).Scan(&decisionID, &tenantID, &agentID, &messageID)
 	if errors.Is(err, pgx.ErrNoRows) {

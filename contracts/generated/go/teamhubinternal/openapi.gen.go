@@ -1763,6 +1763,27 @@ func (e RuntimePermissionEvidenceScreenshotMediaType) Valid() bool {
 	}
 }
 
+// Defines values for RuntimePermissionReviewResultApprovalScope.
+const (
+	RuntimePermissionReviewResultApprovalScopeAlways RuntimePermissionReviewResultApprovalScope = "always"
+	RuntimePermissionReviewResultApprovalScopeOnce   RuntimePermissionReviewResultApprovalScope = "once"
+	RuntimePermissionReviewResultApprovalScopeTask   RuntimePermissionReviewResultApprovalScope = "task"
+)
+
+// Valid indicates whether the value is a known member of the RuntimePermissionReviewResultApprovalScope enum.
+func (e RuntimePermissionReviewResultApprovalScope) Valid() bool {
+	switch e {
+	case RuntimePermissionReviewResultApprovalScopeAlways:
+		return true
+	case RuntimePermissionReviewResultApprovalScopeOnce:
+		return true
+	case RuntimePermissionReviewResultApprovalScopeTask:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimePermissionReviewResultDecision.
 const (
 	Allow         RuntimePermissionReviewResultDecision = "allow"
@@ -2377,16 +2398,16 @@ func (e VoiceRecordingReportState) Valid() bool {
 
 // Defines values for WorkItemKind.
 const (
-	Issue WorkItemKind = "issue"
-	Task  WorkItemKind = "task"
+	WorkItemKindIssue WorkItemKind = "issue"
+	WorkItemKindTask  WorkItemKind = "task"
 )
 
 // Valid indicates whether the value is a known member of the WorkItemKind enum.
 func (e WorkItemKind) Valid() bool {
 	switch e {
-	case Issue:
+	case WorkItemKindIssue:
 		return true
-	case Task:
+	case WorkItemKindTask:
 		return true
 	default:
 		return false
@@ -4437,6 +4458,9 @@ type RuntimePermissionEvidenceScreenshotMediaType string
 
 // RuntimePermissionReviewResult defines model for RuntimePermissionReviewResult.
 type RuntimePermissionReviewResult struct {
+	// ApprovalScope Scope of an allow decision for per-app desktop approvals. Absent or once allows only this call.
+	ApprovalScope *RuntimePermissionReviewResultApprovalScope `json:"approval_scope,omitempty"`
+
 	// Decision unavailable means the judge failed; the Runtime must not run the call.
 	Decision RuntimePermissionReviewResultDecision `json:"decision"`
 
@@ -4447,6 +4471,9 @@ type RuntimePermissionReviewResult struct {
 	Message       string `json:"message"`
 	PolicyVersion string `json:"policy_version"`
 }
+
+// RuntimePermissionReviewResultApprovalScope Scope of an allow decision for per-app desktop approvals. Absent or once allows only this call.
+type RuntimePermissionReviewResultApprovalScope string
 
 // RuntimePermissionReviewResultDecision unavailable means the judge failed; the Runtime must not run the call.
 type RuntimePermissionReviewResultDecision string

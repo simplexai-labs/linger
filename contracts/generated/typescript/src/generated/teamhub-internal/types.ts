@@ -1826,6 +1826,11 @@ export interface components {
        * @enum {string}
        */
       decision: "allow" | "needs_approval" | "deny" | "unavailable";
+      /**
+       * @description Scope of an allow decision for per-app desktop approvals. Absent or once allows only this call.
+       * @enum {string}
+       */
+      approval_scope?: "once" | "task" | "always";
       /** @description Text shown to the Runtime model when the call does not run. Empty for allow. */
       message: string;
       /** @description The approval card, for needs_approval. */

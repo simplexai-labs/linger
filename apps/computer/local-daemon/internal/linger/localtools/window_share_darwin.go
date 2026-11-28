@@ -15,17 +15,18 @@ import (
 )
 
 // windowShareWatcher runs the optional macOS ScreenCaptureKit helper binary
-// (`linger-window-share`) so each captured window displays macOS's native
+// (`linger-window-share`) so the active captured window displays macOS's native
 // purple menu-bar indicator and clicking "Stop Sharing" cancels the active
-// desktop operation immediately. When the helper binary is not installed, all
-// operations gracefully no-op.
+// desktop operation immediately. At most one window stream is held at a time;
+// switching to a new window stops the previous stream first. When the helper
+// binary is not installed, all operations gracefully no-op.
 type windowShareWatcher struct {
 	mu          sync.Mutex
 	helperPath  string
 	onStopped   func(windowID uint32)
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
-	watched     map[uint32]bool
+	current     uint32
 	closed      bool
 	startFailed bool
 }
@@ -37,7 +38,6 @@ func newWindowShareWatcher(helperPath string, onStopped func(windowID uint32)) *
 	return &windowShareWatcher{
 		helperPath: helperPath,
 		onStopped:  onStopped,
-		watched:    map[uint32]bool{},
 	}
 }
 
@@ -59,7 +59,7 @@ func (w *windowShareWatcher) watch(windowID uint32) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.closed || w.startFailed || w.helperPath == "" || w.watched[windowID] {
+	if w.closed || w.startFailed || w.helperPath == "" || w.current == windowID {
 		return
 	}
 	if w.cmd == nil {
@@ -67,8 +67,12 @@ func (w *windowShareWatcher) watch(windowID uint32) {
 			return
 		}
 	}
+	if w.current != 0 {
+		_ = w.sendLocked(map[string]uint32{"stop": w.current})
+		w.current = 0
+	}
 	if w.sendLocked(map[string]uint32{"watch": windowID}) {
-		w.watched[windowID] = true
+		w.current = windowID
 	}
 }
 
@@ -78,10 +82,10 @@ func (w *windowShareWatcher) stop(windowID uint32) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.closed || !w.watched[windowID] {
+	if w.closed || w.current != windowID {
 		return
 	}
-	delete(w.watched, windowID)
+	w.current = 0
 	if w.stdin != nil {
 		w.sendLocked(map[string]uint32{"stop": windowID})
 	}
@@ -99,8 +103,7 @@ func (w *windowShareWatcher) close() {
 	w.closed = true
 	stdin := w.stdin
 	cmd := w.cmd
-	w.stdin, w.cmd = nil, nil
-	w.watched = nil
+	w.stdin, w.cmd, w.current = nil, nil, 0
 	w.mu.Unlock()
 	if stdin != nil {
 		_ = stdin.Close()
@@ -161,7 +164,9 @@ func (w *windowShareWatcher) readLoop(stdout io.Reader, cmd *exec.Cmd) {
 		if json.Unmarshal(scanner.Bytes(), &event) == nil && event.StoppedByUser != 0 {
 			slog.Info("computer.window_share.stopped_by_user", "window_id", event.StoppedByUser)
 			w.mu.Lock()
-			delete(w.watched, event.StoppedByUser)
+			if w.current == event.StoppedByUser {
+				w.current = 0
+			}
 			cb := w.onStopped
 			w.mu.Unlock()
 			if cb != nil {

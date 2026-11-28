@@ -25,7 +25,7 @@ private func emitJSON(_ payload: [String: Any]) {
 }
 
 @available(macOS 14.0, *)
-private final class WindowStreamDelegate: NSObject, SCStreamDelegate {
+private final class WindowStreamDelegate: NSObject, SCStreamDelegate, SCStreamOutput {
     let windowID: UInt32
     let onStopped: (UInt32, Bool) -> Void
 
@@ -39,20 +39,38 @@ private final class WindowStreamDelegate: NSObject, SCStreamDelegate {
         let stoppedByUser = nsError.code == userStoppedCode
         onStopped(windowID, stoppedByUser)
     }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of type: SCStreamOutputType
+    ) {
+        // No-op consumer prevents ScreenCaptureKit dropped-frame warnings while
+        // keeping the per-window menu-bar sharing indicator alive.
+    }
 }
 
 @available(macOS 14.0, *)
 private final class WindowShareManager: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.linger.window-share")
-    private var streams: [UInt32: (SCStream, WindowStreamDelegate)] = [:]
+    private let sampleQueue = DispatchQueue(label: "com.linger.window-share.samples", qos: .utility)
+    private var currentWindowID: UInt32?
+    private var activeStream: (SCStream, WindowStreamDelegate)?
 
     func watch(windowID: UInt32) {
         queue.async { [weak self] in
             guard let self else { return }
-            if self.streams[windowID] != nil {
+            if self.currentWindowID == windowID {
                 return
             }
+            let previous = self.activeStream
+            self.activeStream = nil
+            self.currentWindowID = windowID
+
             Task { [weak self] in
+                if let previous {
+                    try? await previous.0.stopCapture()
+                }
                 guard let self else { return }
                 do {
                     let content = try await SCShareableContent.excludingDesktopWindows(
@@ -60,6 +78,7 @@ private final class WindowShareManager: @unchecked Sendable {
                         onScreenWindowsOnly: false
                     )
                     guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+                        self.clearIfCurrent(windowID: windowID)
                         return
                     }
                     let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -73,14 +92,21 @@ private final class WindowShareManager: @unchecked Sendable {
                         self?.handleStopped(windowID: id, byUser: byUser)
                     }
                     let stream = SCStream(filter: filter, configuration: config, delegate: delegate)
-                    self.queue.sync {
-                        self.streams[windowID] = (stream, delegate)
+                    try stream.addStreamOutput(delegate, type: .screen, sampleHandlerQueue: self.sampleQueue)
+
+                    let shouldStart: Bool = self.queue.sync {
+                        guard self.currentWindowID == windowID else {
+                            return false
+                        }
+                        self.activeStream = (stream, delegate)
+                        return true
+                    }
+                    guard shouldStart else {
+                        return
                     }
                     try await stream.startCapture()
                 } catch {
-                    self.queue.async {
-                        self.streams.removeValue(forKey: windowID)
-                    }
+                    self.clearIfCurrent(windowID: windowID)
                 }
             }
         }
@@ -88,35 +114,51 @@ private final class WindowShareManager: @unchecked Sendable {
 
     func stop(windowID: UInt32) {
         queue.async { [weak self] in
-            guard let self, let entry = self.streams.removeValue(forKey: windowID) else {
+            guard let self, self.currentWindowID == windowID else {
                 return
             }
-            Task {
-                try? await entry.0.stopCapture()
+            let previous = self.activeStream
+            self.activeStream = nil
+            self.currentWindowID = nil
+            if let previous {
+                Task {
+                    try? await previous.0.stopCapture()
+                }
             }
         }
     }
 
     func stopAll() {
-        let active: [SCStream] = queue.sync {
-            let values = streams.values.map(\.0)
-            streams.removeAll()
-            return values
+        let previous: SCStream? = queue.sync {
+            let stream = activeStream?.0
+            activeStream = nil
+            currentWindowID = nil
+            return stream
         }
+        guard let previous else { return }
         let group = DispatchGroup()
-        for stream in active {
-            group.enter()
-            Task {
-                try? await stream.stopCapture()
-                group.leave()
-            }
+        group.enter()
+        Task {
+            try? await previous.stopCapture()
+            group.leave()
         }
         _ = group.wait(timeout: .now() + .seconds(2))
     }
 
+    private func clearIfCurrent(windowID: UInt32) {
+        queue.async { [weak self] in
+            guard let self, self.currentWindowID == windowID else { return }
+            self.activeStream = nil
+            self.currentWindowID = nil
+        }
+    }
+
     private func handleStopped(windowID: UInt32, byUser: Bool) {
         queue.async { [weak self] in
-            self?.streams.removeValue(forKey: windowID)
+            if self?.currentWindowID == windowID {
+                self?.activeStream = nil
+                self?.currentWindowID = nil
+            }
             if byUser {
                 emitJSON(["stopped_by_user": windowID])
             }
