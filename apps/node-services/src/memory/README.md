@@ -29,6 +29,11 @@ and aliases.
 
 ## File layout
 
+A Daily/Weekly detail read identifies the requested entry from its relative path
+before reading Markdown or file timestamps. It reads only that report's body;
+directory enumeration still locates the opaque entry ID. Listing reports retains
+the full metadata scan needed for ordering, filtering and pagination.
+
 ```text
 <AGENT_HOME>/agent-manager/workspaces/context-host/<agent_management_id>/
   memory/

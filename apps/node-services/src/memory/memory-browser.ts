@@ -83,6 +83,7 @@ export async function getMemoryEntry(input: {
   const files = await collectMemoryFiles(
     input.dataRoot,
     subject.agentManagementId,
+    input.entryId,
   );
   const file = files.find((candidate) => candidate.id === input.entryId);
   if (!file) throw new MemoryBrowserNotFoundError("Memory entry was not found");
@@ -106,6 +107,7 @@ async function resolveSubject(input: BrowserRequest) {
 async function collectMemoryFiles(
   dataRoot: string,
   agentId: string,
+  onlyEntryId?: string,
 ): Promise<MemoryFile[]> {
   const root = agentMemoryRoot(dataRoot, agentId);
   const files: MemoryFile[] = [];
@@ -117,12 +119,14 @@ async function collectMemoryFiles(
         .join("/");
       const category = classifyPath(relativePath);
       if (!category) continue;
+      const id = entryId(agentId, relativePath);
+      if (onlyEntryId !== undefined && id !== onlyEntryId) continue;
       const content = await fs.readFile(absolutePath, "utf8");
       const parsed = parseMemoryMarkdown(content);
       const stat = await fs.stat(absolutePath);
       const date = metadataDate(parsed.metadata.date) ?? pathDate(relativePath);
       files.push({
-        id: entryId(agentId, relativePath),
+        id,
         kind: category,
         relativePath,
         absolutePath,
