@@ -607,6 +607,10 @@ function Combobox({
         focusOption.current = true;
         onOpenChange(true);
       } else if (event.key === "Enter") {
+        // Enter while an input method is composing picks a candidate;
+        // browsers report it either as isComposing or as the 229 key code,
+        // and committing then would keep a half-composed value.
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         event.preventDefault();
         onCommit();
         onOpenChange(false);
