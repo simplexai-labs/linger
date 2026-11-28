@@ -260,6 +260,14 @@ export async function downloadVerified(
         await response.body.cancel();
         throw new Error("Download size exceeds limit.");
       }
+      // The slow check compares transfer throughput, so its window starts
+      // when the response arrives. Time to first byte is not throughput,
+      // and the first host tried would otherwise be charged for cold-start
+      // latency that later hosts never pay.
+      clearTimeout(slowTimer);
+      windowBytes = 0;
+      windowStartedAt = performance.now();
+      scheduleSlowCheck();
       const reader = response.body.getReader();
       // Some bodies ignore the fetch signal; either abort still ends the read.
       let abortRead: (() => void) | undefined;
@@ -343,6 +351,10 @@ export async function downloadVerified(
         let slowLimit: SlowLimit | undefined;
         if (!slowCompared && slowEnabled && active.length > 1) {
           if (bestSlowRate === undefined) {
+            // With nothing measured yet the last host runs without a
+            // limit: no faster host has been proven, so a limit here
+            // could only send the download back to a host that already
+            // yielded without delivering a byte.
             if (remainingHosts > 0) {
               slowLimit = {
                 afterMs: slowAfterMs,
@@ -389,12 +401,18 @@ export async function downloadVerified(
           continue;
         }
         if (outcome.status === "slow") {
-          measured.set(url, outcome.bytesPerSecond);
-          if (outcome.bytes > 0) anySlowProgress = true;
-          bestSlowRate =
-            bestSlowRate === undefined
-              ? outcome.bytesPerSecond
-              : Math.max(bestSlowRate, outcome.bytesPerSecond);
+          // A yield before the first byte carries no transfer rate: the
+          // host may only be slow to start. Recording it as a measured 0
+          // would disarm the speed check for every later host and let any
+          // of them displace the primary unproven.
+          if (outcome.bytes > 0) {
+            measured.set(url, outcome.bytesPerSecond);
+            anySlowProgress = true;
+            bestSlowRate =
+              bestSlowRate === undefined
+                ? outcome.bytesPerSecond
+                : Math.max(bestSlowRate, outcome.bytesPerSecond);
+          }
           if (nextUrl) {
             options.onDiagnostic?.({
               kind: "slow_switch",

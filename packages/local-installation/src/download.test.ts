@@ -1055,3 +1055,306 @@ it("emits hostname-only diagnostic events on slow and failure mirror switches", 
     vi.useRealTimers();
   }
 });
+
+it("restarts the slow check window when the response arrives late", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
+  roots.push(root);
+  const bytes = Buffer.alloc(128 * 1024, 0x7a);
+  const hosts: string[] = [];
+  const output = path.join(root, "late.tgz");
+  const served = await downloadVerified(
+    {
+      url: "https://primary.example/late.tgz",
+      mirrors: ["https://mirror.example/late.tgz"],
+      output,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      algorithm: "sha256",
+      maxBytes: bytes.length,
+      signal: new AbortController().signal,
+    },
+    async (url) => {
+      const host = new URL(url as URL).host;
+      hosts.push(host);
+      if (host === "primary.example") {
+        await new Promise((resolve) => setTimeout(resolve, 1_200));
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            async start(controller) {
+              for (let offset = 0; offset < bytes.length; offset += 16384) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                try {
+                  controller.enqueue(bytes.subarray(offset, offset + 16384));
+                } catch {
+                  return;
+                }
+              }
+              try {
+                controller.close();
+              } catch {
+                // Cancelled when switching to the mirror.
+              }
+            },
+          }),
+          { headers: { "content-length": String(bytes.length) } },
+        );
+      }
+      return new Response(bytes, {
+        headers: { "content-length": String(bytes.length) },
+      });
+    },
+    {
+      attempts: 2,
+      retryDelayMs: 0,
+      idleTimeoutMs: 5_000,
+      slowCheckAfterMs: 1_500,
+      minBytesPerSecond: 60_000,
+      minRemainingMs: 100,
+    },
+  );
+  expect(served).toBe("https://primary.example/late.tgz");
+  expect(hosts).toEqual(["primary.example"]);
+  expect(await readFile(output)).toEqual(bytes);
+}, 10_000);
+
+it("finishes on a slow mirror below the floor when the primary hangs", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
+  roots.push(root);
+  const bytes = Buffer.alloc(16 * 1024, 0x79);
+  const hosts: string[] = [];
+  const output = path.join(root, "slow-mirror.tgz");
+  const startedAt = Date.now();
+  const served = await downloadVerified(
+    {
+      url: "https://primary.example/slow-mirror.tgz",
+      mirrors: ["https://mirror.example/slow-mirror.tgz"],
+      output,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      algorithm: "sha256",
+      maxBytes: bytes.length,
+      signal: new AbortController().signal,
+    },
+    async (url, init) => {
+      const host = new URL(url as URL).host;
+      hosts.push(host);
+      if (host === "primary.example") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        });
+      }
+      const range = new Headers(init?.headers).get("range");
+      const start = range ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0) : 0;
+      const slice = bytes.subarray(start);
+      const headers: Record<string, string> = {
+        "content-length": String(slice.length),
+        ...(start > 0
+          ? {
+              "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
+            }
+          : {}),
+      };
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            for (let offset = 0; offset < slice.length; offset += 1024) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              try {
+                controller.enqueue(slice.subarray(offset, offset + 1024));
+              } catch {
+                return;
+              }
+            }
+            try {
+              controller.close();
+            } catch {
+              // Cancelled during round 0 comparison.
+            }
+          },
+        }),
+        { status: start > 0 ? 206 : 200, headers },
+      );
+    },
+    {
+      attempts: 2,
+      retryDelayMs: 0,
+      idleTimeoutMs: 2_000,
+      slowCheckAfterMs: 80,
+      minBytesPerSecond: 300_000,
+      minRemainingMs: 100,
+    },
+  );
+  expect(served).toBe("https://mirror.example/slow-mirror.tgz");
+  expect(hosts).toEqual(["primary.example", "mirror.example"]);
+  expect(Date.now() - startedAt).toBeLessThan(1_500);
+  expect(await readFile(output)).toEqual(bytes);
+}, 10_000);
+
+it("promotes the only measured mirror when the primary hangs", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
+  roots.push(root);
+  const bytes = Buffer.alloc(16 * 1024, 0x78);
+  const hosts: string[] = [];
+  const output = path.join(root, "lone-mirror.tgz");
+  const startedAt = Date.now();
+  const served = await downloadVerified(
+    {
+      url: "https://primary.example/lone-mirror.tgz",
+      mirrors: [
+        "https://mirror.example/lone-mirror.tgz",
+        "https://slow.example/lone-mirror.tgz",
+      ],
+      output,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      algorithm: "sha256",
+      maxBytes: bytes.length,
+      signal: new AbortController().signal,
+    },
+    async (url, init) => {
+      const host = new URL(url as URL).host;
+      hosts.push(host);
+      if (host !== "mirror.example") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        });
+      }
+      const range = new Headers(init?.headers).get("range");
+      const start = range ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0) : 0;
+      const slice = bytes.subarray(start);
+      const headers: Record<string, string> = {
+        "content-length": String(slice.length),
+        ...(start > 0
+          ? {
+              "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
+            }
+          : {}),
+      };
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            for (let offset = 0; offset < slice.length; offset += 1024) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              try {
+                controller.enqueue(slice.subarray(offset, offset + 1024));
+              } catch {
+                return;
+              }
+            }
+            try {
+              controller.close();
+            } catch {
+              // Cancelled during round 0 comparison.
+            }
+          },
+        }),
+        { status: start > 0 ? 206 : 200, headers },
+      );
+    },
+    {
+      attempts: 2,
+      retryDelayMs: 0,
+      idleTimeoutMs: 2_000,
+      slowCheckAfterMs: 80,
+      minBytesPerSecond: 300_000,
+      minRemainingMs: 100,
+    },
+  );
+  expect(served).toBe("https://mirror.example/lone-mirror.tgz");
+  expect(hosts).toEqual([
+    "primary.example",
+    "mirror.example",
+    "slow.example",
+    "mirror.example",
+  ]);
+  expect(Date.now() - startedAt).toBeLessThan(1_500);
+  expect(await readFile(output)).toEqual(bytes);
+}, 10_000);
+
+it("promotes the fastest mirror when the primary hangs and two mirrors run at similar speeds", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "linger-download-"));
+  roots.push(root);
+  const bytes = Buffer.alloc(16 * 1024, 0x76);
+  const hosts: string[] = [];
+  const output = path.join(root, "two-mirrors.tgz");
+  const startedAt = Date.now();
+  const served = await downloadVerified(
+    {
+      url: "https://primary.example/two-mirrors.tgz",
+      mirrors: [
+        "https://m1.example/two-mirrors.tgz",
+        "https://m2.example/two-mirrors.tgz",
+      ],
+      output,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      algorithm: "sha256",
+      maxBytes: bytes.length,
+      signal: new AbortController().signal,
+    },
+    async (url, init) => {
+      const host = new URL(url as URL).host;
+      hosts.push(host);
+      if (host === "primary.example") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        });
+      }
+      const range = new Headers(init?.headers).get("range");
+      const start = range ? Number(/^bytes=(\d+)-$/.exec(range)?.[1] ?? 0) : 0;
+      const slice = bytes.subarray(start);
+      const headers: Record<string, string> = {
+        "content-length": String(slice.length),
+        ...(start > 0
+          ? {
+              "content-range": `bytes ${start}-${bytes.length - 1}/${bytes.length}`,
+            }
+          : {}),
+      };
+      // m1 is faster than m2 by less than the switch ratio; the fastest
+      // measured mirror must still displace the unmeasured primary.
+      const intervalMs = host === "m1.example" ? 10 : 14;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            for (let offset = 0; offset < slice.length; offset += 1024) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, intervalMs),
+              );
+              try {
+                controller.enqueue(slice.subarray(offset, offset + 1024));
+              } catch {
+                return;
+              }
+            }
+            try {
+              controller.close();
+            } catch {
+              // Cancelled during round 0 comparison.
+            }
+          },
+        }),
+        { status: start > 0 ? 206 : 200, headers },
+      );
+    },
+    {
+      attempts: 2,
+      retryDelayMs: 0,
+      idleTimeoutMs: 2_000,
+      slowCheckAfterMs: 80,
+      minBytesPerSecond: 300_000,
+      minRemainingMs: 100,
+    },
+  );
+  expect(served).toBe("https://m1.example/two-mirrors.tgz");
+  expect(hosts).toEqual([
+    "primary.example",
+    "m1.example",
+    "m2.example",
+    "m1.example",
+  ]);
+  expect(Date.now() - startedAt).toBeLessThan(1_500);
+  expect(await readFile(output)).toEqual(bytes);
+}, 10_000);
