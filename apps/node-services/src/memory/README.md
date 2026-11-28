@@ -79,6 +79,10 @@ top-level `status` still holds a lifecycle value (such as `summarized`, `in_prog
 records the missing `session_status` in memory and treats the document `status` as `stable`; it neither rewrites the
 source file nor relaxes new writes.
 
+Memory's Markdown reader accepts LF and CRLF line endings for YAML metadata
+and fallback headings. Browsing reports and naming projected Wiki files use the
+same metadata under either convention; reading does not rewrite source bytes.
+
 Before writing a batch to disk, Memory checks OKF and the required fields of each content type; the content
 validator owns these checks and loads no graph schema. If any file fails, nothing in the batch is written.
 

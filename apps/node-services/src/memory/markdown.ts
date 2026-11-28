@@ -38,11 +38,11 @@ export function arrayValue(value: unknown): unknown[] {
 }
 
 function parseMetadataBlock(content: string): Record<string, unknown> {
-  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (frontmatter?.[1]) {
     return parseYamlRecord(frontmatter[1]);
   }
-  const yamlFence = content.match(/```yaml\n([\s\S]*?)\n```/);
+  const yamlFence = content.match(/```yaml\r?\n([\s\S]*?)\r?\n```/);
   if (yamlFence?.[1]) {
     return parseYamlRecord(yamlFence[1]);
   }
@@ -57,7 +57,7 @@ function parseYamlRecord(raw: string): Record<string, unknown> {
     // Generated memories sometimes leave colon-bearing YAML scalars unquoted,
     // including list mappings such as `- title: Session: ...`.
     const repaired = raw
-      .split("\n")
+      .split(/\r?\n/u)
       .map((line) => {
         const match = line.match(/^(\s*(?:-\s+)?)([A-Za-z_][\w-]*):\s+(.+)$/u);
         if (!match || !match[3]?.includes(":")) return line;
@@ -77,7 +77,7 @@ function parseYamlRecord(raw: string): Record<string, unknown> {
 
 function firstMarkdownHeading(content: string): string | undefined {
   return content
-    .split("\n")
+    .split(/\r?\n/u)
     .map((line) => line.match(/^#\s+(.+)$/)?.[1]?.trim())
     .find((heading): heading is string => Boolean(heading));
 }
