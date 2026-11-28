@@ -264,8 +264,16 @@ exit /b 1
 	if err := os.MkdirAll(tool.StateDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	var environment map[string]string
+	if runtime.GOOS == "windows" {
+		environment = map[string]string{
+			"ComSpec":    os.Getenv("ComSpec"),
+			"SystemRoot": os.Getenv("SystemRoot"),
+			"PATH":       os.Getenv("PATH"),
+		}
+	}
 	secret := "hf_SuperSecretReadOnlyToken987654321"
-	searchRes, err := tool.runCustomSearch(context.Background(), nil, dir, wire.LocalModelCustomSearchInput{
+	searchRes, err := tool.runCustomSearch(context.Background(), environment, dir, wire.LocalModelCustomSearchInput{
 		Hub: "huggingface", Query: "qwen", Token: secret,
 	})
 	if err != nil {
@@ -283,7 +291,7 @@ exit /b 1
 		t.Fatalf("expected token on stdin, got: %s", stdinBytes)
 	}
 
-	probeRes, err := tool.runCustomProbe(context.Background(), nil, dir, wire.LocalModelCustomProbeInput{
+	probeRes, err := tool.runCustomProbe(context.Background(), environment, dir, wire.LocalModelCustomProbeInput{
 		Target: "meta-llama/Llama-3.1-8B-GGUF", Hub: "huggingface", Token: secret,
 	})
 	if err != nil {
@@ -295,6 +303,7 @@ exit /b 1
 
 	lib := New(Options{
 		Tool:             &tool,
+		Environment:      environment,
 		JobDirectory:     filepath.Join(dir, "jobs"),
 		ProgressInterval: 10 * time.Millisecond,
 		ActionTimeout:    5 * time.Second,
