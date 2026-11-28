@@ -40,6 +40,9 @@ describe("startHttpHost", () => {
     );
     expect(await body("/v1/model-calls")).toBe("agent");
     expect((await fetch(`${host.url}/v0/unknown`)).status).toBe(404);
+    // A prefix matches at a path boundary only.
+    expect(await body("/runs")).toBe("memory");
+    expect((await fetch(`${host.url}/runshouse`)).status).toBe(404);
   });
 
   it("answers 503 for unmounted paths and probes until startup ends", async () => {

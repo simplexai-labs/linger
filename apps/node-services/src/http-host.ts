@@ -50,9 +50,13 @@ export async function startHttpHost(options: {
   const routeFor = (path: string): HttpRoute | undefined => {
     let match: { prefix: string; route: HttpRoute } | undefined;
     for (const candidate of routes) {
+      const { prefix } = candidate;
+      // A prefix matches only at a path boundary: the whole path, or the
+      // next character is a slash — "/runs" must not swallow "/runshouse".
       if (
-        path.startsWith(candidate.prefix) &&
-        candidate.prefix.length > (match?.prefix.length ?? -1)
+        (path === prefix ||
+          path.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)) &&
+        prefix.length > (match?.prefix.length ?? -1)
       ) {
         match = candidate;
       }
