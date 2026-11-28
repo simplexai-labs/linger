@@ -2628,6 +2628,25 @@ describe("GitHub commands", () => {
     ]);
     expect(mismatched.error.error.code).toBe("cursor_mismatch");
   });
+  it("marks a GitHub search incomplete when its results exceed the provider cap", async () => {
+    let total = 1000;
+    const f = await fixture("github", (slug) => {
+      expect(slug).toBe("GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS");
+      return { total_count: total, incomplete_results: false, items: [] };
+    });
+    const command = ["github", "search", "is:issue", "--limit", "100"];
+    const exact = await f.run(command);
+    expect(exact.code).toBe(0);
+    expect(exact.result).not.toHaveProperty("incomplete");
+
+    total = 1001;
+    const above = await f.run(command);
+    expect(above).toMatchObject({
+      code: 0,
+      result: { totalCount: 1001, incomplete: true, hasMore: true },
+    });
+  });
+
   it("reads a repository whose README GitHub does not find", async () => {
     const f = await fixture("github", (slug) => {
       expect(slug).toBe("GITHUB_GET_A_REPOSITORY");

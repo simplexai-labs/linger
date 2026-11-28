@@ -455,11 +455,14 @@ async function executeGitHub(
         "incomplete_response",
         "The search result is incomplete.",
       );
-    const hasMore = Number(page) * limit < Math.min(raw.total_count, 1000);
+    const resultCap = 1000;
+    const hasMore = Number(page) * limit < Math.min(raw.total_count, resultCap);
     return optionalFields({
       totalCount: raw.total_count,
-      // GitHub stops a slow search early and says so.
-      incomplete: raw.incomplete_results === true || undefined,
+      incomplete:
+        raw.incomplete_results === true ||
+        raw.total_count > resultCap ||
+        undefined,
       items: rows(raw, "items").map(githubIssue),
       hasMore,
       ...(hasMore
