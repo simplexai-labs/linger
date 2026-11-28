@@ -344,6 +344,42 @@ describe("reviewed Connector command boundaries", () => {
     expect((await f.run(command)).code).toBe(0);
     expect(f.calls.filter((x) => x.url.endsWith("/execute"))).toHaveLength(1);
   });
+  it("reads Gmail addresses with quoted display names containing escaped punctuation", async () => {
+    const f = await fixture("gmail", (slug) => {
+      expect(slug).toBe("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID");
+      return {
+        id: "message_one",
+        messageText: "Hello",
+        payload: {
+          headers: [
+            {
+              name: "From",
+              value: '"Doe, \\"CJ, Jr.\\"" <sender@example.test>',
+            },
+            {
+              name: "To",
+              value:
+                '"Team \\\\ East" <team@example.test>, "Jones, Jo" <jo@example.test>',
+            },
+          ],
+        },
+      };
+    });
+    expect(await f.run(["gmail", "read", "message_one"])).toMatchObject({
+      code: 0,
+      result: {
+        mail: {
+          from: { email: "sender@example.test", name: 'Doe, "CJ, Jr."' },
+          to: [
+            { email: "team@example.test", name: "Team \\ East" },
+            { email: "jo@example.test", name: "Jones, Jo" },
+          ],
+          bodyText: "Hello",
+        },
+      },
+    });
+  });
+
   it("retains unconsumed Gmail thread messages and binds the next page to its account", async () => {
     const f = await fixture("gmail", (slug) =>
       slug === "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"

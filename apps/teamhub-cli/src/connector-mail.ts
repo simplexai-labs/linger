@@ -1255,7 +1255,7 @@ function header(raw: Json, name: string): string | undefined {
 }
 export function parseAddresses(raw: unknown): Json[] {
   if (typeof raw !== "string") return [];
-  return (raw.match(/(?:[^,"]|"[^"]*")+/gu) ?? []).map((item) => {
+  return (raw.match(/(?:[^,"]|"(?:[^"\\]|\\.)*")+/gu) ?? []).map((item) => {
     const match = /^(.*?)<([^<>]+)>\s*$/u.exec(item.trim());
     const email = (match?.[2] ?? item).trim();
     if (!/^[^\s@<>]+@[^\s@<>]+$/u.test(email))
@@ -1263,10 +1263,12 @@ export function parseAddresses(raw: unknown): Json[] {
         "incomplete_response",
         "An email address in the original message cannot be decoded safely.",
       );
-    return optionalFields({
-      email,
-      name: match?.[1]?.trim().replace(/^"|"$/gu, "") || undefined,
-    });
+    const name = match?.[1]
+      ?.trim()
+      .replace(/^"((?:[^"\\]|\\.)*)"$/u, (_match, quoted: string) =>
+        quoted.replace(/\\(.)/gu, "$1"),
+      );
+    return optionalFields({ email, name: name || undefined });
   });
 }
 export function decodeMail(
