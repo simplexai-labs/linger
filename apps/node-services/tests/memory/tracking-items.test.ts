@@ -42,6 +42,24 @@ const input = {
   sessions: [{ path: source, content: "Next week pricing" }],
 };
 describe("nightly tracking reconciliation", () => {
+  it("counts a due_text in characters, not UTF-16 code units", async () => {
+    const { store, apply } = setup();
+    // 300 astral characters are 600 UTF-16 code units: past a 500-unit
+    // check, within the 500-character one the content limit documents.
+    const dueText = "\u{1f4c6}".repeat(300);
+    await updateTrackingItems(input, store, async ({ user }) =>
+      JSON.parse(user).phase === "extract"
+        ? { create: [{ ...fields, due_text: dueText }] }
+        : { matched: [], update: [] },
+    );
+    expect(apply).toHaveBeenCalledWith(
+      owner,
+      expect.objectContaining({
+        create: [expect.objectContaining({ due_text: dueText })],
+      }),
+    );
+  });
+
   it("updates in place at the observed revision and retains vague time", async () => {
     const { store, apply } = setup([item(1)]);
     await updateTrackingItems(input, store, async ({ user }) =>

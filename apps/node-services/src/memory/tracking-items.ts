@@ -78,7 +78,8 @@ function evidence(
     value.due_text !== null &&
     (typeof value.due_text !== "string" ||
       !value.due_text.trim() ||
-      value.due_text.length > 500)
+      // Counted in characters like content, not UTF-16 code units.
+      [...value.due_text].length > 500)
   )
     throw new Error("Invalid due_text");
   let due = value.due_at;
