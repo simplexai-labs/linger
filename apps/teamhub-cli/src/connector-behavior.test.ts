@@ -427,6 +427,113 @@ describe("reviewed Connector command boundaries", () => {
       ).code,
     ).toBe(0);
   });
+
+  it.each(["history", "replies"] as const)(
+    "continues Slack %s from a timestamp when a page has no native cursor",
+    async (mode) => {
+      const thread = mode === "replies";
+      const id = (index: number) =>
+        `1792039200.${String(index).padStart(6, "0")}`;
+      const boundary = id(200);
+      const bounds = thread ? { oldest: boundary } : { latest: boundary };
+      const request = thread
+        ? { channel: "C123", ts: id(100), limit: 2 }
+        : { channel: "C123", limit: 2 };
+      let calls = 0;
+      const f = await fixture("slack", (slug, args) => {
+        if (thread && slug === "SLACK_FETCH_ITEM_REACTIONS") {
+          expect(args).toEqual({
+            channel: "C123",
+            timestamp: id(100),
+            full: true,
+          });
+          return { message: { ts: id(100) } };
+        }
+        expect(slug).toBe(
+          thread
+            ? "SLACK_FETCH_MESSAGE_THREAD_FROM_A_CONVERSATION"
+            : "SLACK_FETCH_CONVERSATION_HISTORY",
+        );
+        calls++;
+        switch (calls) {
+          case 1:
+            expect(args).toEqual(request);
+            return {
+              messages: [{ ts: id(thread ? 100 : 300) }, { ts: boundary }],
+              has_more: true,
+              response_metadata: { next_cursor: "" },
+            };
+          case 2:
+            expect(args).toEqual({ ...request, ...bounds, inclusive: false });
+            return {
+              messages: [{ ts: id(thread ? 300 : 150) }],
+              has_more: true,
+              response_metadata: { next_cursor: "native-token" },
+            };
+          case 3:
+            expect(args).toEqual({
+              ...request,
+              ...bounds,
+              inclusive: false,
+              cursor: "native-token",
+            });
+            return {
+              messages: [{ ts: id(thread ? 400 : 100) }],
+              has_more: false,
+            };
+          default:
+            throw new Error("Unexpected Slack request");
+        }
+      });
+      const args = ["slack", "read", "--channel-id", "C123", "--limit", "2"];
+      if (thread) args.push("--thread", id(100));
+      const first = await f.run(args);
+      expect(first).toMatchObject({
+        code: 0,
+        result: { hasMore: true, nextCursor: expect.any(String) },
+      });
+      const second = await f.run([
+        ...args,
+        "--cursor",
+        first.result.nextCursor,
+      ]);
+      expect(second).toMatchObject({
+        code: 0,
+        result: {
+          hasMore: true,
+          nextCursor: expect.any(String),
+          messages: [{ messageId: id(thread ? 300 : 150) }],
+        },
+      });
+      const third = await f.run([
+        ...args,
+        "--cursor",
+        second.result.nextCursor,
+      ]);
+      expect(third).toMatchObject({
+        code: 0,
+        result: {
+          hasMore: false,
+          messages: [{ messageId: id(thread ? 400 : 100) }],
+        },
+      });
+      expect(third.result).not.toHaveProperty("nextCursor");
+      expect(calls).toBe(3);
+    },
+  );
+
+  it("reports a Slack history page whose timestamp boundary cannot advance", async () => {
+    const f = await fixture("slack", () => ({
+      messages: [{ ts: "1792039200.000200" }],
+      has_more: true,
+    }));
+    const args = ["slack", "read", "--channel-id", "C123"];
+    const first = await f.run(args);
+    expect(first.code).toBe(0);
+    const next = await f.run([...args, "--cursor", first.result.nextCursor]);
+    expect(next.error.error.code).toBe("incomplete_response");
+  });
+
   it("preserves existing attendee state with one Google Calendar PATCH batch", async () => {
     const existing = {
       id: "event_one",

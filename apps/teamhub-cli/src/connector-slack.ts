@@ -279,8 +279,9 @@ function slackId(value: string, prefix: string): string {
     usage("Provide a Slack ID using the matching explicit ID option.");
   return value;
 }
+const SLACK_TIMESTAMP = /^\d{10}\.\d{6}$/u;
 function timestamp(value: string): string {
-  if (!/^\d{10}\.\d{6}$/u.test(value))
+  if (!SLACK_TIMESTAMP.test(value))
     usage("Message IDs must retain their original timestamp precision.");
   return value;
 }
@@ -359,7 +360,10 @@ function slackBindings(action: Action, input: Json): string[] {
     );
   return tools;
 }
-function continuation(raw: Json): string | undefined {
+function continuation(
+  raw: Json,
+  allowTimePagination = false,
+): string | undefined {
   const meta = raw.response_metadata ? record(raw.response_metadata) : {};
   const token = meta.next_cursor;
   if (token !== undefined && typeof token !== "string")
@@ -367,12 +371,13 @@ function continuation(raw: Json): string | undefined {
       "incomplete_response",
       "Slack returned an invalid cursor.",
     );
-  if (raw.has_more === true && !token)
+  const cursor = typeof token === "string" && token.trim() ? token : undefined;
+  if (raw.has_more === true && !cursor && !allowTimePagination)
     throw new CliError(
       "incomplete_response",
       "Slack reported more data without a usable cursor.",
     );
-  return typeof token === "string" && token.trim() ? token : undefined;
+  return cursor;
 }
 async function all(
   runtime: ConnectorRuntime,
@@ -701,8 +706,18 @@ async function executeSlack(
   const target = await resolveTarget(action, input, runtime, state);
   const channelId = target.channelId;
   if (action === "read") {
+    const thread = Boolean(target.threadId);
+    const timeBoundary = state.timeBoundary;
+    if (
+      timeBoundary !== undefined &&
+      (typeof timeBoundary !== "string" || !SLACK_TIMESTAMP.test(timeBoundary))
+    )
+      throw new CliError(
+        "cursor_mismatch",
+        "Use the returned cursor with the same account and filters.",
+      );
     const raw = await runtime.call(
-      target.threadId
+      thread
         ? "SLACK_FETCH_MESSAGE_THREAD_FROM_A_CONVERSATION"
         : "SLACK_FETCH_CONVERSATION_HISTORY",
       optionalFields({
@@ -710,6 +725,9 @@ async function executeSlack(
         ts: target.threadId,
         limit: input.limit,
         cursor: state.token,
+        oldest: thread ? timeBoundary : undefined,
+        latest: thread ? undefined : timeBoundary,
+        inclusive: timeBoundary === undefined ? undefined : false,
       }),
     );
     if (!Array.isArray(raw.messages))
@@ -717,13 +735,38 @@ async function executeSlack(
         "incomplete_response",
         "The message page is unavailable.",
       );
-    const token = continuation(raw);
+    const messages = raw.messages.map((x) =>
+      slackMessage(x, String(channelId)),
+    );
+    const token = continuation(raw, true);
+    const hasMore = Boolean(token) || raw.has_more === true;
+    let nextBoundary = timeBoundary;
+    if (!token && hasMore) {
+      // History arrives newest first, while thread replies arrive oldest first.
+      const last = messages.at(-1)?.messageId;
+      if (
+        typeof last !== "string" ||
+        !SLACK_TIMESTAMP.test(last) ||
+        (timeBoundary !== undefined &&
+          (thread ? last <= timeBoundary : last >= timeBoundary))
+      )
+        throw new CliError(
+          "incomplete_response",
+          "Slack reported more messages without an advancing timestamp.",
+        );
+      nextBoundary = last;
+    }
     return {
       ...target,
-      messages: raw.messages.map((x) => slackMessage(x, String(channelId))),
-      hasMore: Boolean(token),
-      ...(token
-        ? { nextCursor: nextCursor({ token, target }, fingerprint) }
+      messages,
+      hasMore,
+      ...(hasMore
+        ? {
+            nextCursor: nextCursor(
+              { token, target, timeBoundary: nextBoundary },
+              fingerprint,
+            ),
+          }
         : {}),
     };
   }
